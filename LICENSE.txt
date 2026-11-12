@@ -1,0 +1,57 @@
+TABLESCAPE - FREEWARE LICENSE
+Copyright (c) 2026 glinnbo. All rights reserved.
+
+Tablescape is free to use. It is not open source. By installing or using
+Tablescape you agree to these terms.
+
+1. WHAT YOU MAY DO
+   - Download, install and use Tablescape free of charge, at home, at your
+     club or game store, and in games you run for pay.
+   - Show it on any screen, stream it and record it.
+   - Give the unchanged installer to other people for free. Linking to the
+     official download page is better: it always has the newest version.
+
+2. WHAT YOU MAY NOT DO
+   - Sell, rent or license Tablescape, or charge for access to it.
+   - Change it, or publish or share changed versions.
+   - Copy its code, pictures, sounds, effects, table styles or other parts
+     into other software, games, assets or products.
+   - Decompile, unpack or reverse engineer it, except where the law
+     allows this even without permission.
+   - Remove or change copyright and license notices.
+   - Bundle it with other software or offer it from a download site under
+     a different name.
+
+3. YOUR OWN CONTENT
+   Maps, pictures, music, campaigns and notes you load into Tablescape stay
+   yours. Tablescape claims no rights to them. You are responsible for
+   having the right to use them.
+
+4. PARTS FROM OTHERS
+   Tablescape contains open-source software (among others Electron and
+   Chromium) and other material under its own licenses: Tabler Icons (MIT),
+   the Alegreya font (SIL Open Font License) and spell names and areas from
+   the D&D 5e System Reference Document 5.1 (CC BY 4.0). Those licenses
+   apply to those parts. The licenses of Electron and Chromium are in the
+   installation folder.
+
+5. OTHER SERVICES AND TRADEMARKS
+   Spotify, IKEA and Govee features use your own accounts and are subject
+   to those services' terms. Tablescape is an unofficial fan product. It
+   is not made, endorsed or supported by Spotify, IKEA, Govee or Wizards of
+   the Coast. Dungeons & Dragons and D&D are trademarks of Wizards of the
+   Coast.
+
+6. NO WARRANTY
+   Tablescape is provided "as is", without any warranty. To the extent the
+   law allows, the author is not liable for any damage or loss of data
+   arising from its use.
+
+7. CHANGES AND END
+   Future versions may come with different terms. These terms end
+   automatically if you break them; you must then delete your copy.
+
+8. LAW
+   These terms are governed by Swiss law.
+
+Support Tablescape: https://ko-fi.com/tablescape
