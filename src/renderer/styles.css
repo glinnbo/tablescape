@@ -1279,15 +1279,12 @@ body.gm .sv-measure-label { transform: translate(10px, -100%) scale(var(--inv, 1
 @keyframes npc-out-ember { 0% { opacity: 1; translate: 0 0; filter: brightness(1) sepia(0) saturate(1) hue-rotate(0deg) drop-shadow(0 0 1.6vh rgba(255, 120, 40, 0.45)); } 50% { opacity: 1; translate: 0 0; filter: brightness(0.5) sepia(1) saturate(4) hue-rotate(-18deg) drop-shadow(0 0 2vh rgba(255, 120, 40, 0.9)); } 100% { opacity: 0; translate: 0 10%; filter: brightness(0) sepia(0) saturate(1) hue-rotate(0deg) drop-shadow(0 0 0 transparent); } }
 @keyframes ink-out { from { clip-path: inset(-60% 0 0 0); } to { clip-path: inset(-60% 0 0 100%); } }
 /* handout: large, once per long side */
-.ho-face { position: absolute; left: 0; right: 0; top: 50%; height: 50%; display: flex; align-items: center; justify-content: center; }
-.ho-face.far { top: 0; transform: rotate(180deg); }
-#table-overlays.one-side .ho-face.near { top: 0; height: 100%; }
-.ho-face { box-sizing: border-box; }
-/* Prototype 26: several handouts, each in its own layer; one copy placed freely (.ho-one) or a copy for each side */
+/* Beta 3.6: up to ten handouts, one copy each, placed, sized and turned freely; they burn in and away (table-overlays.js) */
 .ho-item { position: absolute; inset: 0; pointer-events: none; }
-.ho-face img, .ho-one img { display: block; max-width: 76vw; max-height: 90%; object-fit: contain; filter: drop-shadow(0 1.2vh 3vh rgba(0, 0, 0, 0.75)); }
 .ho-one { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
-.ho-item img { animation: ho-in 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.ho-one img { display: block; filter: drop-shadow(0 1.2vh 3vh rgba(0, 0, 0, 0.75)); transition: filter 0.5s ease; }
+.ho-one.burning img { filter: drop-shadow(0 1.2vh 3vh rgba(0, 0, 0, 0)); }
+.ho-burn { position: absolute; pointer-events: none; }
 @keyframes ho-in { from { opacity: 0; scale: 0.92; translate: 0 2vh; } to { opacity: 1; scale: 1; translate: 0 0; } }
 /* break screen */
 .brk-veil { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.6)); }
@@ -3262,19 +3259,43 @@ body.gm .sv-assets-over { opacity: 0.5; }
 
 /* Prototype 25: the Handouts panel */
 /* Prototype 26: the Handouts panel draws the TV; the handouts on it are dragged to where they should lie */
-.ho-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #14161a; border: 1px solid var(--line-2); box-shadow: inset 0 0 0 3px rgba(0, 0, 0, 0.35); touch-action: none; }
-.ho-thumb { position: absolute; cursor: grab; user-select: none; }
-.ho-thumb:active { cursor: grabbing; }
-.ho-thumb img { display: block; object-fit: contain; pointer-events: none; border-radius: 2px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6); }
-.ho-thumb.one { left: 50%; top: 50%; transform: translate(-50%, -50%); }
-.ho-thumb.pair { top: 0; height: 100%; transform: translateX(-50%); display: grid; grid-template-rows: 1fr 1fr; justify-items: center; }
-.ho-thumb.pair span { display: flex; align-items: center; justify-content: center; min-height: 0; }
-.ho-thumb.pair .far { transform: rotate(180deg); }
-.ho-thumb.sel img { outline: 2px solid var(--torch); outline-offset: 1px; }
+/* Beta 3.6: the Handout table: a big picture of the TV; handouts are dragged, sized and turned on it */
+.fp[data-id="hotable"] { width: auto; max-width: calc(100vw - 24px); }
+.hot { position: relative; }
+.hot-top { display: flex; align-items: center; gap: 8px; }
+.hot-count { font-size: 12px; font-variant-numeric: tabular-nums; }
+.hot-stage { position: relative; width: 720px; max-width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; overflow: clip; overflow-clip-margin: 40px; outline: none; touch-action: none;
+  background: radial-gradient(ellipse at 50% 50%, #1d2026 0%, #121418 100%); border: 1px solid var(--line-2); box-shadow: inset 0 0 0 3px rgba(0, 0, 0, 0.35); }
+.hot-stage.drop-ok { border-color: var(--torch); }
+.hot-none { position: absolute; inset: 0; margin: 0; padding: 0 18%; display: flex; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
+.hot-none[hidden] { display: none; }
+.hot-item { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); cursor: grab; user-select: none; touch-action: none; }
+.hot-item.dragging { cursor: grabbing; }
+.hot-item img { display: block; pointer-events: none; border-radius: 2px; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.6); }
+.hot-item.sel img { outline: 2px solid var(--torch); outline-offset: 2px; }
+.hot-h, .hot-turn, .hot-x { position: absolute; display: none; }
+.hot-item.sel .hot-h { display: block; }
+.hot-item.sel .hot-turn, .hot-item.sel .hot-x { display: flex; }
+.hot-h { width: 14px; height: 14px; border-radius: 50%; background: var(--torch); border: 2px solid #14161a; box-sizing: border-box; }
+.hot-h.nw { left: -9px; top: -9px; cursor: nwse-resize; }
+.hot-h.se { right: -9px; bottom: -9px; cursor: nwse-resize; }
+.hot-h.ne { right: -9px; top: -9px; cursor: nesw-resize; }
+.hot-h.sw { left: -9px; bottom: -9px; cursor: nesw-resize; }
+.hot-turn { left: 50%; top: -36px; translate: -50% 0; width: 24px; height: 24px; border-radius: 50%; align-items: center; justify-content: center; cursor: grab;
+  background: var(--panel); border: 1px solid var(--torch); color: var(--torch); }
+.hot-turn::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 11px; background: var(--torch); }
+.hot-turn .i { width: 14px; height: 14px; }
+.hot-x { right: -34px; top: -11px; width: 22px; height: 22px; padding: 0; border-radius: 50%; align-items: center; justify-content: center; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line-2); color: var(--text); }
+.hot-x:hover { border-color: var(--danger, #d0534a); color: var(--danger, #d0534a); }
+.hot-x .i { width: 13px; height: 13px; }
+.hot-bar { display: flex; align-items: center; gap: 8px; min-height: 30px; min-width: 0; padding-right: 14px; }
+.hot-bar:empty { display: none; }
+.hot-num { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+.hot-grip { position: absolute; right: -8px; bottom: -8px; width: 18px; height: 18px; display: flex; cursor: nwse-resize; color: var(--muted); opacity: 0.7; }
+.hot-grip:hover { opacity: 1; color: var(--torch); }
+.hot-grip .i { width: 14px; height: 14px; rotate: 90deg; }
 .ho-none { margin: 0; }
-.ho-ctl:empty { display: none; }
-.ho-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ho-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ho-phone.on { color: var(--torch); }
 .talk-pick .ho-add, .talk-pick .ho-phone { position: absolute; bottom: 20px; width: 22px; height: 22px; padding: 2px; border-radius: 6px; background: rgba(16, 18, 22, 0.82); opacity: 0; }
 .talk-pick .ho-add { left: 3px; }

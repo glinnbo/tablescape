@@ -393,6 +393,7 @@ const Table = (() => {
   }
   // ---- one-off events: lightning on demand (its thunder comes from the sound window) ----
   function onEvent(e) {
+    if (e.kind === 'handout') { if (overlays) overlays.moveHandout(e); return; } // Beta 3.6: a handout dragged in the Handout table
     if (e.kind === 'lookTry') { tryLook(e); return; }
     if (e.kind === 'prepMove') { prepMove = !!e.on; for (const x of views.values()) x.view.prepareMove(prepMove); return; } // 4.8
     if (e.kind === 'lookPeek') { // 4.5: the map without its colours while the GM holds the button (never stuck: 15 s at most)

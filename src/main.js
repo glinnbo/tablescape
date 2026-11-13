@@ -218,22 +218,36 @@ function handoutPrefs() {
 }
 const hoKey = (p) => { const r = library.toRef(p) || {}; return r.rel || String(p || ''); };
 const unit = (v, d) => (Number.isFinite(Number(v)) ? Math.min(1, Math.max(0, Number(v))) : d);
-// how a handout lies: { both, x, y, size, rot }; placed: the DM gave it a place (otherwise the ones shown lie side by side)
+// Beta 3.6: how a handout lies on the table: { x, y, size, rot }. x, y: its middle, from the TV's top left (0 to 1);
+// size: its longer side as a part of the TV's short side (so turning it never changes its size); rot: any angle.
+// One copy each (the copy for the other long side is gone: turn it to whoever should read it). A handout shown for
+// the first time is tossed into the middle, a little off and tilted, like a paper thrown on a table; from then on it
+// remembers how it lay (settings.handoutLayout, by its place in the library; v: 2 marks this kind of layout, older
+// ones are tossed anew). Up to HO_MAX lie there at once; the one touched last lies on top (the list's order).
+const HO_MAX = 10; const HO_SIZE = [0.12, 1.8]; const HO_SIZE_NEW = 0.7;
+const hoSize = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.min(HO_SIZE[1], Math.max(HO_SIZE[0], Number(v))) : d);
+const hoRot = (v) => (Number.isFinite(Number(v)) ? Math.round(((((Number(v) % 360) + 360) % 360)) * 10) / 10 % 360 : 0);
+function hoStored(p) { const L = (settings.handoutLayout || {})[hoKey(p)]; return L && L.v === 2 && Number.isFinite(Number(L.x)) ? L : null; }
+function hoToss() {
+  const j = (by) => (Math.random() * 2 - 1) * by;
+  return { v: 2, x: unit(0.5 + j(0.06), 0.5), y: unit(0.5 + j(0.07), 0.5), size: HO_SIZE_NEW, rot: hoRot(j(7)) };
+}
 function hoLayout(p) {
-  const L = (settings.handoutLayout || {})[hoKey(p)] || {};
-  const pr = handoutPrefs();
-  return {
-    both: L.both !== false, x: unit(L.x, pr.pos), y: unit(L.y, 0.5), placed: Number.isFinite(Number(L.x)),
-    size: Math.min(1, Math.max(0.2, Number(L.size) || pr.size)), rot: ((Math.round((Number(L.rot) || 0) / 90) * 90) % 360 + 360) % 360,
-  };
+  const L = hoStored(p) || { x: 0.5, y: 0.5, size: HO_SIZE_NEW, rot: 0 };
+  return { x: unit(L.x, 0.5), y: unit(L.y, 0.5), size: hoSize(L.size, HO_SIZE_NEW), rot: hoRot(L.rot) };
 }
-function handoutsInfo() {
-  const list = (state.handouts || []).map((h) => ({ ...h, ...hoLayout(h.path) }));
-  // the ones without a place of their own share the TV's length, side by side
-  const loose = list.filter((h) => !h.placed);
-  if (list.length > 1) loose.forEach((h, i) => { h.x = (i + 0.5) / loose.length; h.y = 0.5; h.share = loose.length; });
-  return list;
+function hoKeep(p, lay, save = true) {
+  const all = settings.handoutLayout || {};
+  all[hoKey(p)] = { v: 2, x: unit(lay.x, 0.5), y: unit(lay.y, 0.5), size: hoSize(lay.size, HO_SIZE_NEW), rot: hoRot(lay.rot) };
+  const keys = Object.keys(all);
+  if (keys.length > 400) for (const old of keys.slice(0, keys.length - 400)) delete all[old];
+  settings.handoutLayout = all;
+  if (save) saveSettings();
 }
+const handoutsInfo = () => (state.handouts || []).map((h) => ({ ...h, ...hoLayout(h.path) }));
+// saved arrangements of several handouts (meta.handoutSpreads: [{ id, name, items: [{ key, x, y, size, rot }] }])
+const hoSpreads = () => (store.cur ? (store.cur.meta.handoutSpreads || []) : []);
+const hoPathOf = (key) => (path.isAbsolute(key) ? key : path.join(library.root, ...String(key).split('/')));
 // (the newest one alone, as before Prototype 26: for what still reads one handout)
 function handoutInfo() { const l = handoutsInfo(); return l.length ? { ...handoutPrefs(), ...l[l.length - 1] } : null; }
 const hoShown = (p) => (state.handouts || []).some((h) => h.path === p);
@@ -1448,6 +1462,8 @@ function gmState() {
     handout: handoutInfo(),
     handouts: handoutsInfo(), // Prototype 26: everything that lies on the table, with how each lies
     handoutShare: hoShareList(), // marked for the players' phones
+    handoutSpreads: hoSpreads().map((x) => ({ id: x.id, name: x.name, count: x.items.length })), // Beta 3.6
+    handoutMax: HO_MAX,
     handoutSeen: state.handoutSeen || [], // Prototype 25: shown so far this session, newest first
     brk: state.brk,
     init: initInfo(true),
@@ -1569,6 +1585,7 @@ function tableState() {
     show: state.show, // Beta 3.2
     handout: handoutInfo(),
     handouts: handoutsInfo(),
+    handoutStyle: TABLE_STYLES[settings.tableStyle] ? settings.tableStyle : 'ink', // Beta 3.6: they burn in and out in the table style's colour
     join: state.join, // Prototype 1
     calib: state.calib, // Prototype 2
     trails: Players ? Players.trails() : [], // Prototype 6
@@ -2954,12 +2971,16 @@ function handle(type, p = {}) {
     }
 
     // ----- handouts, break screen -----
-    case 'handout.show': { // a click shows it alone (or puts it away); add: beside what lies there
+    case 'handout.show': { // a click shows it alone (or puts it away); add: with what lies there; at: { x, y } dropped there
       if (!p.path) return { ok: false };
       if (hoShown(p.path)) { state.handouts = state.handouts.filter((h) => h.path !== p.path); broadcast(); return { ok: true, shown: false }; }
+      if (p.add && state.handouts.length >= HO_MAX) return { ok: false, error: `${HO_MAX} handouts lie on the table: put one away first` };
       const m = library.media(p.path);
       const it = { path: m.path, url: m.url, name: m.name, t: Date.now() };
-      state.handouts = p.add ? [...state.handouts, it].slice(-6) : [it];
+      // (Beta 3.6) the first time, or dropped at a place: it gets its place now and remembers it
+      if (p.at && Number.isFinite(Number(p.at.x))) hoKeep(m.path, { ...(hoStored(m.path) || hoToss()), x: p.at.x, y: p.at.y });
+      else if (!hoStored(m.path)) hoKeep(m.path, hoToss());
+      state.handouts = p.add ? [...state.handouts, it] : [it];
       handoutShown(m);
       if (!player) openPlayer();
       broadcast();
@@ -2970,22 +2991,64 @@ function handle(type, p = {}) {
       broadcast();
       return { ok: true };
     case 'handout.layout': { // how this handout lies: remembered for the next time it is shown
+      // live: while it is dragged (the TV follows through a small message, nothing is saved or sent round yet)
       if (!p.path) return { ok: false };
-      const k = hoKey(p.path);
-      const all = settings.handoutLayout || {};
-      const next = { ...(all[k] || {}), ...(p.patch || {}) };
-      const clean = {};
-      if ('both' in next) clean.both = !!next.both;
-      for (const f of ['x', 'y']) if (Number.isFinite(Number(next[f])) && next[f] !== null) clean[f] = unit(next[f], 0.5);
-      if (Number.isFinite(Number(next.size)) && next.size) clean.size = Math.min(1, Math.max(0.2, Number(next.size)));
-      if (Number.isFinite(Number(next.rot))) clean.rot = ((Math.round(Number(next.rot) / 90) * 90) % 360 + 360) % 360;
-      if (p.patch && p.patch.reset) delete all[k]; else all[k] = clean;
-      const keys = Object.keys(all);
-      if (keys.length > 400) for (const old of keys.slice(0, keys.length - 400)) delete all[old];
-      settings.handoutLayout = all;
-      saveSettings();
-      broadcast();
+      const patch = p.patch || {};
+      if (patch.reset) { const all = settings.handoutLayout || {}; delete all[hoKey(p.path)]; settings.handoutLayout = all; if (hoShown(p.path)) hoKeep(p.path, hoToss()); else saveSettings(); broadcast(); return { ok: true, layout: hoLayout(p.path) }; }
+      const cur = hoLayout(p.path);
+      const next = { ...cur };
+      for (const f of ['x', 'y']) if (Number.isFinite(Number(patch[f])) && patch[f] !== null) next[f] = unit(patch[f], cur[f]);
+      if ('size' in patch) next.size = hoSize(patch.size, cur.size);
+      if ('rot' in patch) next.rot = hoRot(patch.rot);
+      hoKeep(p.path, next, !p.live);
+      if (p.live) { if (player && !player.isDestroyed()) player.webContents.send('event', { kind: 'handout', path: p.path, lay: hoLayout(p.path) }); previewChanged('event'); } else broadcast();
       return { ok: true, layout: hoLayout(p.path) };
+    }
+    case 'handout.front': { // the one touched lies on top
+      const i = state.handouts.findIndex((h) => h.path === p.path);
+      if (i < 0) return { ok: false };
+      if (i < state.handouts.length - 1) { state.handouts = [...state.handouts.filter((h, k) => k !== i), state.handouts[i]]; broadcast(); }
+      return { ok: true };
+    }
+    // ----- Beta 3.6: spreads: what lies on the table, each in its place, kept under a name (in the campaign) -----
+    case 'handout.spread.save': {
+      const name = String(p.name || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      if (!store.cur || !name) return { ok: false };
+      if (!state.handouts.length) return { ok: false, error: 'Nothing lies on the table' };
+      const items = state.handouts.map((h) => ({ key: hoKey(h.path), name: h.name, ...hoLayout(h.path) }));
+      const all = hoSpreads().filter((x) => x.name.toLowerCase() !== name.toLowerCase());
+      const old = hoSpreads().find((x) => x.name.toLowerCase() === name.toLowerCase());
+      const sp = { id: old ? old.id : `sp${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, name, items };
+      store.cur.meta.handoutSpreads = [...all, sp].slice(-40).sort((x, y) => x.name.localeCompare(y.name));
+      store.touch();
+      broadcast();
+      return { ok: true, id: sp.id, label: `${name} saved: ${items.length} handout${items.length === 1 ? '' : 's'}` };
+    }
+    case 'handout.spread.show': {
+      const sp = hoSpreads().find((x) => x.id === p.id);
+      if (!sp) return { ok: false };
+      const list = []; let missing = 0;
+      for (const it of sp.items.slice(0, HO_MAX)) {
+        const file = hoPathOf(it.key);
+        if (!fs.existsSync(file)) { missing++; continue; }
+        const m = library.media(file);
+        hoKeep(m.path, it, false);
+        list.push({ path: m.path, url: m.url, name: m.name, t: Date.now() });
+      }
+      if (!list.length) return { ok: false, error: 'Its handouts are no longer in the library' };
+      saveSettings();
+      state.handouts = list;
+      for (const h of list) handoutShown(h);
+      if (!player) openPlayer();
+      broadcast();
+      return { ok: true, shown: list.length, missing, label: `${sp.name} is on the table${missing ? ` (${missing} missing)` : ''}` };
+    }
+    case 'handout.spread.remove': {
+      if (!store.cur) return { ok: false };
+      store.cur.meta.handoutSpreads = hoSpreads().filter((x) => x.id !== p.id);
+      store.touch();
+      broadcast();
+      return { ok: true };
     }
     case 'handout.share': { // to: 'all', [player names] or nothing (taken back); send: at once, not only when it is shown
       if (!store.cur || !p.path) return { ok: false };

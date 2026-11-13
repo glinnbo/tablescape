@@ -23,6 +23,13 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.6', [
+      'Handout table: Toolbox → Handouts → Handout table opens a big picture of the TV. Drag a handout to where it should lie, pull a corner to size it, turn it with the knob above it to any angle (it catches when upright or a quarter round). The TV follows while you drag',
+      'Up to 10 handouts at once. A new one lands in the middle, a little off and tilted, like a paper tossed on the table; the one you touch lies on top. Each handout remembers how it lay',
+      'Handouts burn in and burn away, in the colour of your table style: green for Jungle, blue for Witchfire, and so on',
+      'Spreads: save everything that lies on the table, each in its place, under a name (Handout table → Spreads) and bring it back with one click',
+      'One copy per handout: the second copy for the other long side is gone. Turn a handout to whoever should read it. Places set before this version are tossed anew',
+    ]],
     ['Beta 3.5', [
       'Safer imports: a campaign file from someone else can only put its files into your library and its own campaign folder. Before, a specially prepared file could have written a file somewhere else on the PC. If you got a .tablescape file from a stranger, update before opening it',
     ]],

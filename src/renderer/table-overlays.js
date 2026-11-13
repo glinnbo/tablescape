@@ -327,58 +327,194 @@ const TableOverlays = (() => {
     }
 
     // ---------- handouts ----------
-    // Prototype 26: a list. Each one lies as its layout says: a copy for each long side (both), or one copy placed
-    // freely (x, y from the TV's top left, turned in quarter steps). Shown or taken away one by one.
+    // Beta 3.6: up to ten at once, each one copy lying as its layout says: x, y (its middle, from the TV's top left),
+    // size (its longer side as a part of the TV's short side) and rot (any angle). The last in the list lies on top.
+    // A handout burns in out of glowing embers and burns away from its edges inward, in the table style's colour
+    // (burnHandout). While the GM drags one in the Handout table, its place comes as a small message (moveHandout).
     function setHandouts(list) {
       list = list || [];
       const keep = new Set(list.map((h) => h.path));
-      for (const [p, it] of hItems) if (!keep.has(p)) { it.el.remove(); hItems.delete(p); }
-      for (const hd of list) {
+      for (const [p, it] of hItems) if (!keep.has(p) && !it.leaving) burnAway(it);
+      list.forEach((hd, i) => {
         let it = hItems.get(hd.path);
-        const one = !hd.both;
-        if (it && it.one !== one) { it.el.remove(); hItems.delete(hd.path); it = null; }
+        if (it && it.leaving) { dropHandout(it); it = null; } // (shown again while it still burnt away)
         if (!it) {
-          const box = el('div', `ho-item ${one ? 'one' : 'pair'}`);
-          const faces = (one ? ['single'] : ['near', 'far']).map((side) => {
-            const f = el('div', one ? 'ho-one' : `ho-face ${side}`); const img = el('img'); img.alt = '';
-            img.onload = placeHandouts; img.src = hd.url; f.append(img); box.append(f);
-            return { f, img };
-          });
-          it = { el: box, faces, one };
+          const box = el('div', 'ho-item');
+          const f = el('div', 'ho-one'); const img = el('img'); img.alt = ''; img.draggable = false;
+          f.append(img); box.append(f);
+          it = { path: hd.path, el: box, f, img, faces: [{ f, img }], data: hd, shown: false };
           hItems.set(hd.path, it);
           handoutEl.append(box);
+          const born = it;
+          img.onload = () => { placeOne(born); if (!born.shown && !born.leaving) { born.shown = true; burnHandout(born, true); } };
+          img.src = hd.url;
         }
         it.data = hd;
-      }
+        it.el.style.zIndex = String(i + 1);
+      });
       handout = list.length ? list[list.length - 1] : null;
-      handoutEl.classList.toggle('on', list.length > 0);
+      handoutEl.classList.toggle('on', hItems.size > 0);
       placeHandouts();
     }
-    function placeHandouts() {
+    function dropHandout(it) {
+      if (it.stop) it.stop();
+      it.el.remove();
+      if (hItems.get(it.path) === it) hItems.delete(it.path);
+      handoutEl.classList.toggle('on', hItems.size > 0);
+    }
+    function burnAway(it) {
+      it.leaving = true;
+      if (!it.shown || !it.img.naturalWidth) { dropHandout(it); return; } // (never seen: nothing to burn)
+      burnHandout(it, false, () => dropHandout(it));
+    }
+    function placeOne(it) {
+      const d = it.data;
+      if (!d) return;
       const W = handoutEl.clientWidth || window.innerWidth; const H = handoutEl.clientHeight || window.innerHeight;
-      for (const it of hItems.values()) {
-        const d = it.data;
-        if (!d) continue;
-        const size = d.size || 1;
-        if (it.one) {
-          const f = it.faces[0]; const side = d.rot === 90 || d.rot === 270; // (lying lengthwise: its width runs along the TV's height)
-          f.img.style.maxWidth = `${(side ? H : W) * 0.94 * size}px`; f.img.style.maxHeight = `${(side ? W : H) * 0.94 * size}px`;
-          f.f.style.left = `${(d.x ?? 0.5) * 100}%`; f.f.style.top = `${(d.y ?? 0.5) * 100}%`;
-          f.f.style.transform = `translate(-50%, -50%) rotate(${d.rot || 0}deg)`;
-          continue;
-        }
-        // a copy for each long side: x is where its middle lies along the TV (0 = the left end, 1 = the right end). The
-        // far side's copy is turned round, so its padding is on the other side: both copies lie at the same end.
-        for (const f of it.faces) {
-          f.img.style.maxWidth = `${(W * 0.76 * size) / (d.share || 1)}px`; f.img.style.maxHeight = `${H * (seats === 'one' ? 0.9 : 0.45) * size}px`;
-          f.f.style.paddingLeft = '0px'; f.f.style.paddingRight = '0px';
-          const room = Math.max(0, (W - (f.img.offsetWidth || 0)) / 2 - W * 0.02);
-          const shift = Math.round(Math.max(-room, Math.min(room, ((d.x ?? 0.5) - 0.5) * W))) * (f.f.classList.contains('far') ? -1 : 1);
-          if (shift > 0) f.f.style.paddingLeft = `${shift * 2}px`; else if (shift < 0) f.f.style.paddingRight = `${-shift * 2}px`;
-        }
-      }
+      const L = (d.size || 0.7) * Math.min(W, H);
+      const a = it.img.naturalWidth && it.img.naturalHeight ? it.img.naturalWidth / it.img.naturalHeight : 1;
+      const w = a >= 1 ? L : L * a; const h = a >= 1 ? L / a : L;
+      it.w = w; it.h = h;
+      it.img.style.width = `${w}px`; it.img.style.height = `${h}px`;
+      it.f.style.left = `${(d.x ?? 0.5) * 100}%`; it.f.style.top = `${(d.y ?? 0.5) * 100}%`;
+      it.f.style.transform = `translate(-50%, -50%) rotate(${d.rot || 0}deg)`;
+      if (it.fit) it.fit();
+    }
+    function placeHandouts() { for (const it of hItems.values()) placeOne(it); }
+    function moveHandout(e) {
+      const it = hItems.get(e.path);
+      if (!it || it.leaving || !e.lay) return;
+      it.data = { ...it.data, ...e.lay };
+      placeOne(it);
     }
     window.addEventListener('resize', placeHandouts);
+
+    // the fire's colours for each table style: [the hot front, the glow behind it]
+    const BURN = {
+      ink: ['#f2f2ff', '#8d8da6'], blood: ['#ffb0a0', '#d0202a'], smoke: ['#ffffff', '#b9bcc4'], arcane: ['#ecd8ff', '#9a5cf0'],
+      parchment: ['#fff0c8', '#e8a84a'], old: ['#f6dca0', '#b98236'], embers: ['#ffe696', '#ff7a1e'], witchfire: ['#dff2ff', '#46a8ff'],
+      stone: ['#fff1d8', '#c9a878'], ice: ['#f2fcff', '#7fd4ff'], meadow: ['#f0ffc0', '#9fd84a'], autumn: ['#ffe0a0', '#f0822a'],
+      city: ['#fff0b0', '#e0a830'], slums: ['#ffd9a8', '#b8763a'], winter: ['#ffffff', '#bfe0ff'], christmas: ['#fff2c0', '#ff5a3c'],
+      sand: ['#fff2c0', '#f0b850'], ash: ['#ffd9b0', '#ff5a22'], dungeon: ['#ffe2b0', '#ff9c40'], necro: ['#e2ffd8', '#58f06a'],
+      bloodcrypt: ['#ffc0b0', '#ff3030'], forest: ['#e8ffc0', '#7fd04a'], jungle: ['#d8ffd0', '#2fe86a'],
+    };
+    const rgb = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+    let burnStyle = 'ink';
+    const BURN_MS = 1000; const BURN_TAIL = 380; // the fire, then the last sparks
+
+    // A handout burning in (it forms from its middle out of glowing embers) or away (from its edges inward).
+    // A low burn map says when the fire reaches each spot (the edges first, with noise so the front is ragged); every
+    // frame the picture is drawn, cut where it is burnt, charred just ahead of the front, and the front glows.
+    function burnHandout(it, into, done) {
+      if (it.stop) it.stop();
+      const [hot, glow] = (BURN[burnStyle] || BURN.ink).map(rgb);
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const cv = el('canvas', 'ho-burn');
+      const g = cv.getContext('2d');
+      let w = 0; let h = 0; let pad = 0; let k = 1;
+      it.fit = () => { // (its size may change while it burns: dragged, or the window resized)
+        w = Math.max(8, it.w || 8); h = Math.max(8, it.h || 8); pad = Math.round(Math.max(w, h) * 0.09);
+        k = Math.min(dpr, 1200 / Math.max(w, h));
+        cv.width = Math.round((w + pad * 2) * k); cv.height = Math.round((h + pad * 2) * k);
+        Object.assign(cv.style, { width: `${w + pad * 2}px`, height: `${h + pad * 2}px`, left: `${-pad}px`, top: `${-pad}px` });
+      };
+      it.fit();
+      // the burn map
+      const mw = w >= h ? 112 : Math.max(24, Math.round((112 * w) / h)); const mh = w >= h ? Math.max(24, Math.round((112 * h) / w)) : 112;
+      let seed = 1 + Math.floor(Math.random() * 1e6);
+      const R = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+      const grids = [5, 11, 23].map((n) => { const a = new Float32Array((n + 1) * (n + 1)); for (let i = 0; i < a.length; i++) a[i] = R(); return { n, a }; });
+      const noise = (x, y) => {
+        let v = 0; let ws = 0; let wt = 1;
+        for (const { n, a } of grids) {
+          const fx = x * n; const fy = y * n; const ix = Math.floor(fx); const iy = Math.floor(fy); const tx = fx - ix; const ty = fy - iy;
+          const at = (i, j) => a[Math.min(n, j) * (n + 1) + Math.min(n, i)];
+          const sx = tx * tx * (3 - 2 * tx); const sy = ty * ty * (3 - 2 * ty);
+          const top = at(ix, iy) + (at(ix + 1, iy) - at(ix, iy)) * sx; const bot = at(ix, iy + 1) + (at(ix + 1, iy + 1) - at(ix, iy + 1)) * sx;
+          v += (top + (bot - top) * sy) * wt; ws += wt; wt *= 0.5;
+        }
+        return v / ws;
+      };
+      const T = new Float32Array(mw * mh);
+      const half = Math.min(mw, mh) / 2;
+      for (let j = 0; j < mh; j++) for (let i = 0; i < mw; i++) {
+        const edge = Math.min(1, Math.min(i + 0.5, mw - i - 0.5, j + 0.5, mh - j - 0.5) / half); // 0 at the edge, 1 in the middle
+        T[j * mw + i] = Math.min(1, Math.max(0, edge * 0.7 + noise(i / mw, j / mh) * 0.42 - 0.08));
+      }
+      const layer = () => { const c = document.createElement('canvas'); c.width = mw; c.height = mh; const x = c.getContext('2d'); return { c, x, d: x.createImageData(mw, mh) }; };
+      const cut = layer(); const fire = layer();
+      const EDGE = 0.05; const COOL = 0.2; const CHAR = 0.1;
+      const sparks = [];
+      const t0 = performance.now(); let last = t0; let raf = 0; let over = false; let swapped = false;
+      it.img.style.visibility = 'hidden';
+      it.f.append(cv);
+      it.f.classList.add('burning');
+      const end = () => {
+        if (over) return;
+        over = true;
+        cancelAnimationFrame(raf);
+        cv.remove();
+        it.f.classList.remove('burning');
+        it.stop = null; it.fit = null;
+        if (into) it.img.style.visibility = '';
+      };
+      it.stop = end;
+      const frame = (now) => {
+        if (over) return;
+        const dt = Math.min(0.05, (now - last) / 1000); last = now;
+        const t = (now - t0) / BURN_MS;
+        const p = Math.min(1, t);
+        // burning away: the front runs from the edges (T small) inward; burning in is the same film backwards
+        const P = (into ? 1 - p : p) * (1 + COOL + 0.02) - 0.01;
+        const C = cut.d.data; const F = fire.d.data;
+        for (let q = 0, i = 0; i < T.length; i++, q += 4) {
+          const e = P - T[i]; // how long ago the fire reached this spot (below 0: not yet)
+          let a = 0; let r = 0; let gg = 0; let b = 0; let fa = 0;
+          if (e < 0) {
+            a = 255;
+            if (e > -CHAR) { const c = 1 + e / CHAR; r = 12; gg = 8; b = 6; fa = c * c * 215; } // charred just ahead of the fire
+          } else if (e < EDGE) {
+            const c = e / EDGE; r = hot[0] + (glow[0] - hot[0]) * c; gg = hot[1] + (glow[1] - hot[1]) * c; b = hot[2] + (glow[2] - hot[2]) * c; fa = 255;
+            if (p < 1 && sparks.length < 90 && R() < 0.02) {
+              const x = pad + ((i % mw) + R()) / mw * w; const y = pad + (Math.floor(i / mw) + R()) / mh * h;
+              const ox = x - (pad + w / 2); const oy = y - (pad + h / 2); const ol = Math.hypot(ox, oy) || 1; const out = into ? -0.4 : 1;
+              sparks.push({ x, y, vx: (ox / ol) * out * (20 + R() * 70) + (R() - 0.5) * 50, vy: (oy / ol) * out * (20 + R() * 70) + (R() - 0.5) * 50, life: 0.25 + R() * 0.5, age: 0, r: 0.8 + R() * 1.8 });
+            }
+          } else if (e < COOL) {
+            const c = (e - EDGE) / (COOL - EDGE); r = glow[0] * (1 - c * 0.7); gg = glow[1] * (1 - c * 0.7); b = glow[2] * (1 - c * 0.7); fa = 255 * (1 - c) * (1 - c);
+          }
+          C[q] = 0; C[q + 1] = 0; C[q + 2] = 0; C[q + 3] = a;
+          F[q] = r; F[q + 1] = gg; F[q + 2] = b; F[q + 3] = fa;
+        }
+        cut.x.putImageData(cut.d, 0, 0); fire.x.putImageData(fire.d, 0, 0);
+        g.setTransform(k, 0, 0, k, 0, 0);
+        g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.filter = 'none';
+        g.clearRect(0, 0, w + pad * 2, h + pad * 2);
+        g.imageSmoothingEnabled = true;
+        if (!swapped) {
+          g.drawImage(it.img, pad, pad, w, h);
+          g.globalCompositeOperation = 'destination-in'; g.drawImage(cut.c, pad, pad, w, h); // what has not burnt yet
+          g.globalCompositeOperation = 'source-atop'; g.drawImage(fire.c, pad, pad, w, h); // charred ahead of the front
+          g.globalCompositeOperation = 'lighter';
+          g.drawImage(fire.c, pad, pad, w, h);
+          g.filter = `blur(${Math.max(3, Math.round(Math.max(w, h) * 0.018))}px)`; g.globalAlpha = 0.8; g.drawImage(fire.c, pad, pad, w, h); // the glow
+          g.filter = 'none'; g.globalAlpha = 1;
+        }
+        g.globalCompositeOperation = 'lighter';
+        for (let i = sparks.length - 1; i >= 0; i--) {
+          const s = sparks[i]; s.age += dt;
+          if (s.age >= s.life) { sparks.splice(i, 1); continue; }
+          s.x += s.vx * dt; s.y += s.vy * dt; s.vx *= 0.97; s.vy *= 0.97;
+          const c = 1 - s.age / s.life;
+          g.fillStyle = `rgba(${hot[0]}, ${hot[1]}, ${hot[2]}, ${(c * 0.95).toFixed(3)})`;
+          g.beginPath(); g.arc(s.x, s.y, s.r * (0.5 + c * 0.5) * Math.max(1, w / 420), 0, 6.283); g.fill();
+        }
+        if (p >= 1 && !swapped) { swapped = true; if (into) it.img.style.visibility = ''; }
+        if (t >= 1 + BURN_TAIL / BURN_MS || (p >= 1 && !sparks.length)) { end(); if (done) done(); return; }
+        raf = requestAnimationFrame(frame);
+      };
+      raf = requestAnimationFrame(frame);
+    }
 
     // ---------- break ----------
     function setBreak(b) {
@@ -475,6 +611,7 @@ const TableOverlays = (() => {
       document.body.classList.toggle('hud-sampling', !!s.hudSample);
       for (const b of sRounds) b.style.fontSize = `${Math.round(geom.tin * 0.55 * (s.hud || 1) * 100) / 100}px`;
       if (!(trying && !s.talk)) { if (s.talk) trying = 0; setTalk(s.talk || null); }
+      burnStyle = s.handoutStyle || 'ink';
       setHandouts(s.handouts || (s.handout ? [s.handout] : []));
       setJoin(s.join || null);
       calibEl.classList.toggle('on', !!s.calib);
@@ -506,7 +643,7 @@ const TableOverlays = (() => {
           ink: !!sides[0].ink.querySelector('.ink'), drops: sides[0].ink.querySelectorAll('.drop').length, opaque: sides[0].cast.querySelectorAll('.talk-npc.opaque').length,
           mirrored: sides[0].cast.querySelectorAll('.talk-npc img[style*="scaleX(-1)"]').length,
         } : null,
-        handout: handout ? (() => { const all = [...hItems.values()].flatMap((it) => it.faces); return { name: handout.name, count: hItems.size, faces: all.filter((f) => vis(f.f)).length, loaded: all[0].img.complete && all[0].img.naturalWidth > 0 }; })() : null,
+        handout: handout ? (() => { const all = [...hItems.values()].filter((it) => !it.leaving); return { name: handout.name, count: all.length, faces: all.filter((it) => vis(it.f)).length, loaded: !!all.length && all[0].img.complete && all[0].img.naturalWidth > 0, burning: [...hItems.values()].filter((it) => it.stop).length, style: burnStyle }; })() : null,
         brk: brk ? { text: dial.el.querySelector('.tt-time').textContent, faces: [...dial.el.querySelectorAll('.tt-face')].filter(vis).length,
           label: dial.el.querySelector('.tt-label').textContent, note: brkNotes[0].textContent, bg: breakEl.dataset.bg, pic: !!brkPic.firstChild } : null,
         title: title ? { title: ttlFaces[0].name.textContent, sub: ttlFaces[0].sub.textContent, faces: ttlFaces.filter((f) => vis(f.f)).length, pic: !!ttlBg.firstChild, shown: vis(titleEl) } : null,
@@ -516,7 +653,7 @@ const TableOverlays = (() => {
         ...stats,
       };
     }
-    return { set, debug, tryTalk, tryInit };
+    return { set, debug, tryTalk, tryInit, moveHandout };
   }
 
   return { mount, inkBand };

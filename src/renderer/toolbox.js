@@ -319,9 +319,10 @@ const Toolbox = (() => {
         'A mood plays its songs, or one of its playlists or albums.', 'Smooth changes between songs: turn on Crossfade in the Spotify app (Settings → Playback).'],
       dice: ['Dice: click a die to add it, right-click to take one out.', 'Wheel: more weight puts an entry on the reel more often.',
         'Death save: 10 or more is a success, below 10 a failure.'],
-      handouts: ['Click a handout to show it on the table; click it again (or Put it away) to take it off. + adds it to what lies there.',
-        'The picture of the TV: drag a handout to where it should lie. Both sides, One direction and Lengthwise set it up with one click; each handout remembers its layout.',
-        'The phone button: Everyone or single players can look at it on their phones, once it was shown or at once with Send to the phones now.',
+      handouts: ['Click a handout to show it on the table; click it again (or Put it away) to take it off. + adds it to what lies there. Up to 10 at once.',
+        'Handout table opens a big picture of the TV: drag a handout to where it should lie, pull a corner to size it, turn it with the knob. Each handout remembers how it lay.',
+        'A handout burns in and away in the colour of your table style (Options → Table → Style).',
+        'The phone on a handout sends it to the players\' phones: everyone, or only some.',
         'List … has every handout: tick one to keep it ready here for this chapter.',
         'Shown so far keeps what the players have seen this session, to bring it back with one click.', 'Drag a handout onto the hotbar to show it with a number key.'],
       break: ['The map blurs and a dial counts down on the table.', 'At zero a soft chime plays and the map comes back.', '+5 min adds time while it runs.'],
@@ -465,7 +466,8 @@ const Toolbox = (() => {
     const handLay = (path) => handList().find((x) => x.path === path) || null;
     const shareOf = (path) => (S().handoutShare || []).find((x) => x.path === path) || null;
     const layout = (path, patch) => cmd('handout.layout', { path, patch });
-    const handToggle = async (it, add) => { const r = await cmd('handout.show', { path: it.path, add: !!add }); if (r && r.error) toast(r.error, { kind: 'error' }); };
+    // (Beta 3.6: while the Handout table is open, a click adds to what lies there: you are laying things out)
+    const handToggle = async (it, add) => { const r = await cmd('handout.show', { path: it.path, add: !!add || !!ctx.panelOpen('hotable') }); if (r && r.error) toast(r.error, { kind: 'error' }); };
     // who may look at it on their phone
     function shareMenu(e, it) {
       const sh = shareOf(it.path);
@@ -485,6 +487,212 @@ const Toolbox = (() => {
       return h('button', { class: `icon-btn ho-phone ${sh ? 'on' : ''}`, 'aria-label': label, 'data-tip': sh ? `${sh.to === 'all' ? 'Everyone' : sh.to.join(', ')} can look at it on the phone${sh.sent ? '' : ' once it is shown'}` : 'Let players look at it on their phones',
         onclick: (e) => { e.stopPropagation(); shareMenu(e, it); } }, iconEl('device-mobile'));
     };
+    // ---------- Beta 3.6: the Handout table: a big picture of the TV to lay the handouts out on ----------
+    // Drag a handout to move it, pull a corner to make it bigger, turn it with the knob (it catches gently when
+    // upright or a quarter round; Alt: freely). The wheel sizes it, Shift + wheel turns it. The TV follows while you
+    // drag. The one you touch lies on top. Spreads keep what lies there, each in its place, under a name.
+    const hotDef = () => ({
+      id: 'hotable', title: 'Handout table', icon: 'layout-board',
+      tips: ['A picture of the TV: drag a handout to where it should lie; the TV follows as you drag.',
+        'Pull a corner to make it bigger or smaller. Turn it with the knob above it: it catches when upright or a quarter round (hold Alt to turn freely).',
+        'Mouse wheel: size. Shift + wheel: turn. Delete: put it away.',
+        'The handout you touch lies on top. Up to 10 at once.',
+        'Spreads keeps everything that lies there, each in its place, under a name: one click brings it back.',
+        'Drag the corner of this window to make the picture bigger.'],
+      // it opens beside the Handouts panel (to its left), not over it
+      place: (r, el) => { const hp = document.querySelector('.fp[data-id="handouts"]'); if (!hp) return { x: Math.max(12, Math.round((r.width - el.offsetWidth) / 2)), y: 20 }; const b = hp.getBoundingClientRect(); return { x: Math.max(12, b.left - r.left - el.offsetWidth - 12), y: Math.max(12, b.top - r.top) }; },
+      build: buildHotable,
+    });
+    function buildHotable() {
+      loadLib();
+      const stage = h('div', { class: 'hot-stage', tabindex: '0' });
+      const empty = h('p', { class: 'hint hot-none' }, 'Nothing on the table. Click a handout in the Handouts panel, or drag one here.');
+      stage.append(empty);
+      const world = () => (S().view && S().view.world) || { w: 16, h: 9 };
+      let width = 720;
+      try { width = Number(localStorage.getItem('hotableW')) || 720; } catch {}
+      // (as wide as you made it, but at first it fits between the rail and the Handouts panel)
+      const room = () => { const hp = document.querySelector('.fp[data-id="handouts"]'); const lay = document.querySelector('.fp-layer'); return hp && lay ? hp.getBoundingClientRect().left - lay.getBoundingClientRect().left - 12 - 12 - 30 : window.innerWidth - 140; };
+      let sized = false;
+      try { sized = !!localStorage.getItem('hotableW'); } catch {}
+      const fitW = () => clamp(sized ? width : Math.min(width, room()), 380, Math.max(380, window.innerWidth - 140));
+      const items = new Map(); // path → { el, img, d }
+      let act = null; // what the pointer does right now: { kind: 'move' | 'size' | 'turn', it }
+      // while dragging the TV follows through small messages (one a frame); letting go saves the layout
+      let sendT = 0; let pending = null;
+      const live = (path, patch) => { pending = { path, patch }; if (!sendT) sendT = requestAnimationFrame(() => { sendT = 0; const q = pending; pending = null; if (q) cmd('handout.layout', { path: q.path, patch: q.patch, live: true }); }); };
+      const commit = (path, patch) => { if (sendT) { cancelAnimationFrame(sendT); sendT = 0; } pending = null; return layout(path, patch); };
+      const lay = (d) => ({ x: d.x, y: d.y, size: d.size, rot: d.rot });
+      function placeItem(it) {
+        const W = stage.clientWidth; const H = stage.clientHeight;
+        if (!W || !H) return;
+        const d = it.d;
+        const L = d.size * Math.min(W, H);
+        const a = it.img.naturalWidth && it.img.naturalHeight ? it.img.naturalWidth / it.img.naturalHeight : 1;
+        it.img.style.width = `${a >= 1 ? L : L * a}px`; it.img.style.height = `${a >= 1 ? L / a : L}px`;
+        it.el.style.left = `${d.x * 100}%`; it.el.style.top = `${d.y * 100}%`;
+        it.el.style.transform = `translate(-50%, -50%) rotate(${d.rot || 0}deg)`;
+      }
+      const centre = (it) => { const r = stage.getBoundingClientRect(); return { x: r.left + it.d.x * r.width, y: r.top + it.d.y * r.height, r }; };
+      const select = (path) => { ui.hoSel = path; for (const [p, it] of items) it.el.classList.toggle('sel', p === path); drawBar(); };
+      function make(d) {
+        const img = h('img', { src: d.url, alt: '', draggable: 'false' });
+        const grip = (cls) => h('span', { class: `hot-h ${cls}`, dataset: { grip: 'size' } });
+        const el = h('div', { class: 'hot-item', dataset: { path: d.path }, 'data-tip': d.name },
+          img, grip('nw'), grip('ne'), grip('sw'), grip('se'),
+          h('span', { class: 'hot-turn', dataset: { grip: 'turn' }, 'aria-label': 'Turn it' }, iconEl('rotate-clockwise')),
+          h('button', { class: 'hot-x', 'aria-label': `Put ${d.name} away`, 'data-tip': 'Put it away', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); cmd('handout.hide', { path: d.path }); } }, iconEl('x')));
+        const it = { el, img, d: { ...d } };
+        img.addEventListener('load', () => placeItem(it));
+        el.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          stage.focus({ preventScroll: true });
+          select(d.path);
+          const list = handList();
+          if (list.length && list[list.length - 1].path !== d.path) cmd('handout.front', { path: d.path });
+          const c = centre(it);
+          const gr = e.target.closest('[data-grip]');
+          const kind = gr ? gr.dataset.grip : 'move';
+          act = { kind, it, moved: false, dx: e.clientX - c.x, dy: e.clientY - c.y, d0: Math.hypot(e.clientX - c.x, e.clientY - c.y) || 1, s0: it.d.size,
+            a0: Math.atan2(e.clientY - c.y, e.clientX - c.x), r0: it.d.rot || 0 };
+          el.setPointerCapture(e.pointerId);
+          el.classList.add('dragging');
+        });
+        el.addEventListener('pointermove', (e) => {
+          const g = act;
+          if (!g || g.it !== it) return;
+          const c = centre(it);
+          if (g.kind === 'move') {
+            it.d.x = clamp((e.clientX - g.dx - c.r.left) / c.r.width, 0, 1); it.d.y = clamp((e.clientY - g.dy - c.r.top) / c.r.height, 0, 1);
+          } else if (g.kind === 'size') {
+            it.d.size = clamp(g.s0 * (Math.hypot(e.clientX - c.x, e.clientY - c.y) / g.d0), 0.12, 1.8);
+          } else {
+            let r = g.r0 + ((Math.atan2(e.clientY - c.y, e.clientX - c.x) - g.a0) * 180) / Math.PI;
+            r = ((r % 360) + 360) % 360;
+            const q = Math.round(r / 90) * 90; // (it catches when upright or a quarter round)
+            if (!e.altKey && Math.abs(r - q) < 6) r = q % 360;
+            it.d.rot = Math.round(r * 10) / 10;
+          }
+          g.moved = true;
+          placeItem(it); drawBar();
+          live(d.path, lay(it.d));
+        });
+        const done = () => {
+          const g = act;
+          if (!g || g.it !== it) return;
+          act = null;
+          el.classList.remove('dragging');
+          if (g.moved) commit(d.path, lay(it.d));
+        };
+        el.addEventListener('pointerup', done);
+        el.addEventListener('pointercancel', done);
+        // the wheel: size; with Shift: turn
+        let wheelT = 0;
+        el.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          const up = e.deltaY < 0 || e.deltaX < 0;
+          if (e.shiftKey) it.d.rot = (((it.d.rot || 0) + (up ? -5 : 5)) % 360 + 360) % 360; else it.d.size = clamp(it.d.size * (up ? 1.06 : 1 / 1.06), 0.12, 1.8);
+          select(d.path);
+          it.wheel = true;
+          placeItem(it); drawBar();
+          live(d.path, lay(it.d));
+          clearTimeout(wheelT);
+          wheelT = setTimeout(() => { it.wheel = false; commit(d.path, lay(it.d)); }, 260);
+        }, { passive: false });
+        return it;
+      }
+      function draw() {
+        const list = handList();
+        const wd = world();
+        stage.style.aspectRatio = `${wd.w} / ${wd.h}`;
+        stage.style.width = `${fitW()}px`;
+        const keep = new Set(list.map((d) => d.path));
+        for (const [p, it] of items) if (!keep.has(p)) { it.el.remove(); items.delete(p); }
+        list.forEach((d, i) => {
+          let it = items.get(d.path);
+          if (!it) { it = make(d); items.set(d.path, it); stage.append(it.el); }
+          if (!(act && act.it === it) && !it.wheel) it.d = { ...d }; // (the one in the hand keeps what the hand says)
+          it.el.style.zIndex = String(i + 1);
+          placeItem(it);
+        });
+        if (!list.some((d) => d.path === ui.hoSel)) ui.hoSel = list.length ? list[list.length - 1].path : null;
+        for (const [p, it] of items) it.el.classList.toggle('sel', p === ui.hoSel);
+        empty.hidden = list.length > 0;
+      }
+      // a handout dragged here from a list lands where it is dropped
+      stage.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('application/x-ts-asset')) { e.preventDefault(); e.stopPropagation(); stage.classList.add('drop-ok'); } });
+      stage.addEventListener('dragleave', () => stage.classList.remove('drop-ok'));
+      stage.addEventListener('drop', async (e) => {
+        stage.classList.remove('drop-ok');
+        let a = null;
+        try { a = JSON.parse(e.dataTransfer.getData('application/x-ts-asset') || 'null'); } catch {}
+        if (!a || !a.path) return;
+        e.preventDefault(); e.stopPropagation();
+        const r = stage.getBoundingClientRect();
+        const at = { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) };
+        const x = handOn(a.path) ? await layout(a.path, at) : await cmd('handout.show', { path: a.path, add: true, at });
+        if (x && x.error) toast(x.error, { kind: 'error' });
+        ui.hoSel = a.path;
+      });
+      stage.addEventListener('keydown', (e) => { if ((e.key === 'Delete' || e.key === 'Backspace') && ui.hoSel && handOn(ui.hoSel)) { e.preventDefault(); e.stopPropagation(); cmd('handout.hide', { path: ui.hoSel }); } });
+      // ---------- the bar above: spreads, how many, clear ----------
+      const count = h('span', { class: 'hot-count muted' });
+      const spreads = () => S().handoutSpreads || [];
+      const say = (r) => { if (r && r.error) toast(r.error, { kind: 'error' }); else if (r && r.label) toast(r.label); };
+      const saveSpread = async () => {
+        const name = await askText('Save this spread', '', { ok: 'Save', placeholder: 'The murder evidence, Maps of the coast …' });
+        if (name) say(await cmd('handout.spread.save', { name }));
+      };
+      const spreadBtn = c().btn('Spreads', 'stack-2', (e) => {
+        const r = (e && e.currentTarget ? e.currentTarget : spreadBtn).getBoundingClientRect();
+        const all = spreads();
+        openMenu(r.left, r.bottom + 4, [{ header: 'Spreads' },
+          ...(all.length ? all.map((x) => ({ icon: 'stack-2', label: `${x.name} (${x.count})`, action: async () => say(await cmd('handout.spread.show', { id: x.id })) })) : [{ icon: 'stack-2', label: 'None saved yet', disabled: true }]),
+          '-', { icon: 'device-floppy', label: 'Save what lies here …', disabled: !handList().length, action: saveSpread },
+          ...(all.length ? ['-', { header: 'Delete' }, ...all.map((x) => ({ icon: 'trash', label: x.name, danger: true, action: () => cmd('handout.spread.remove', { id: x.id }) }))] : [])]);
+      }, { kind: 'small', tip: 'What lies on the table, each in its place, kept under a name' });
+      const clear = c().btn('Clear the table', 'player-stop', () => cmd('handout.hide', {}), { kind: 'small ghost' });
+      // ---------- the bar below: the picked handout ----------
+      const bar = h('div', { class: 'hot-bar' });
+      function drawBar() {
+        const it = ui.hoSel ? items.get(ui.hoSel) : null;
+        const sh = it ? shareOf(it.d.path) : null;
+        const sig = it ? JSON.stringify([it.d.path, Math.round(it.d.size * 100), Math.round(it.d.rot || 0), sh && [sh.to, sh.sent]]) : '';
+        if (bar.dataset.sig === sig) return;
+        bar.dataset.sig = sig;
+        if (!it) { bar.replaceChildren(); return; }
+        const d = it.d;
+        const turn = (by, icon, tip) => h('button', { class: 'icon-btn', 'aria-label': tip, 'data-tip': tip, onclick: () => layout(d.path, { rot: Math.round(((d.rot || 0) + by) / 90) * 90 }) }, iconEl(icon));
+        bar.replaceChildren(
+          h('b', { class: 'grow ellipsis' }, d.name),
+          h('span', { class: 'muted hot-num' }, `${Math.round(d.size * 100)}%`), h('span', { class: 'muted hot-num' }, `${Math.round(d.rot || 0)}°`),
+          turn(-90, 'rotate', 'Turn it a quarter to the left'), turn(90, 'rotate-clockwise', 'Turn it a quarter to the right'),
+          phoneBtn(d, 'On the phones'),
+          c().btn('Put it away', 'player-stop', () => cmd('handout.hide', { path: d.path }), { kind: 'danger small' }));
+      }
+      // ---------- the corner that sizes the window ----------
+      const grip = h('span', { class: 'hot-grip', 'data-tip': 'Drag to make the picture bigger or smaller' }, iconEl('arrows-diagonal'));
+      grip.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const x0 = e.clientX; const w0 = fitW();
+        grip.setPointerCapture(e.pointerId);
+        const move = (ev) => { width = clamp(w0 + (ev.clientX - x0), 380, Math.max(380, window.innerWidth - 60)); stage.style.width = `${fitW()}px`; for (const it of items.values()) placeItem(it); };
+        sized = true;
+        const up = () => { grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.removeEventListener('pointercancel', up); try { localStorage.setItem('hotableW', String(Math.round(width))); } catch {} };
+        grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up); grip.addEventListener('pointercancel', up);
+      });
+      c().bind(() => {
+        draw(); drawBar();
+        const n = handList().length;
+        count.textContent = `${n} of ${S().handoutMax || 10}`;
+        clear.hidden = !n;
+      });
+      return h('div', { class: 'hot stack' },
+        h('div', { class: 'hot-top' }, spreadBtn, h('span', { class: 'grow' }), count, clear),
+        stage, bar, grip);
+    }
     const handListDef = () => ({
       id: 'handlist', title: 'All handouts', icon: 'script',
       // it opens beside the Handouts panel, not over it
@@ -509,103 +717,16 @@ const Toolbox = (() => {
     });
     function buildHandouts() {
       loadLib();
-      // ---------- the picture of the TV ----------
-      const stage = h('div', { class: 'ho-stage' });
-      const empty = h('p', { class: 'hint ho-none' }, 'Nothing on the table. Click a handout to show it.');
-      const ctl = h('div', { class: 'ho-ctl stack' });
-      const sel = () => { const l = handList(); return l.find((x) => x.path === ui.hoSel) || l[l.length - 1] || null; };
-      const world = () => (S().view && S().view.world) || { w: 16, h: 9 };
-      let dragging = null;
-      // a thumbnail lies and is sized as the handout on the TV (table-overlays.js: placeHandouts)
-      function placeThumb(el, d) {
-        const W = stage.clientWidth || 280; const H = stage.clientHeight || 158;
-        const size = d.size || 1;
-        if (!d.both) {
-          const side = d.rot === 90 || d.rot === 270;
-          const img = el.firstChild;
-          img.style.maxWidth = `${(side ? H : W) * 0.94 * size}px`; img.style.maxHeight = `${(side ? W : H) * 0.94 * size}px`;
-          el.style.left = `${d.x * 100}%`; el.style.top = `${d.y * 100}%`;
-          el.style.transform = `translate(-50%, -50%) rotate(${d.rot || 0}deg)`;
-          return;
-        }
-        let w = 0;
-        for (const img of el.querySelectorAll('img')) { img.style.maxWidth = `${(W * 0.76 * size) / (d.share || 1)}px`; img.style.maxHeight = `${H * 0.45 * size}px`; w = Math.max(w, img.offsetWidth || 0); }
-        const room = Math.max(0, (W - w) / 2 - W * 0.02);
-        el.style.left = `${W / 2 + Math.max(-room, Math.min(room, (d.x - 0.5) * W))}px`;
-      }
-      function drawStage() {
-        const list = handList();
-        const wd = world();
-        stage.style.aspectRatio = `${wd.w} / ${wd.h}`;
-        const cur = sel();
-        const sig = JSON.stringify([list.map((d) => [d.path, d.both, d.x, d.y, d.size, d.rot, d.share]), cur && cur.path, wd.w, wd.h]);
-        if (stage.dataset.sig === sig || dragging) return;
-        stage.dataset.sig = sig;
-        stage.replaceChildren(...list.map((d) => {
-          const img = () => { const i = h('img', { src: d.url, alt: '', draggable: 'false' }); i.addEventListener('load', () => placeThumb(el, d)); return i; };
-          const el = h('div', { class: `ho-thumb ${d.both ? 'pair' : 'one'} ${cur && cur.path === d.path ? 'sel' : ''}`, 'data-tip': `${d.name}: drag it to where it should lie`, dataset: { path: d.path } },
-            ...(d.both ? [h('span', { class: 'far' }, img()), h('span', { class: 'near' }, img())] : [img()]));
-          el.addEventListener('pointerdown', (e) => {
-            if (e.button !== 0) return;
-            e.preventDefault();
-            ui.hoSel = d.path;
-            const r = stage.getBoundingClientRect(); const b = el.getBoundingClientRect();
-            // (where the thumbnail was grabbed, measured from its middle)
-            dragging = { el, d: { ...d }, dx: e.clientX - (b.left + b.width / 2), dy: e.clientY - (b.top + b.height / 2), r, moved: false };
-            el.setPointerCapture(e.pointerId);
-            for (const x of stage.children) x.classList.toggle('sel', x === el);
-          });
-          el.addEventListener('pointermove', (e) => {
-            const g = dragging;
-            if (!g || g.el !== el) return;
-            g.moved = true;
-            g.d.x = Math.min(1, Math.max(0, (e.clientX - g.dx - g.r.left) / g.r.width));
-            if (!g.d.both) g.d.y = Math.min(1, Math.max(0, (e.clientY - g.dy - g.r.top) / g.r.height));
-            placeThumb(el, g.d);
-          });
-          const done = () => {
-            const g = dragging;
-            if (!g || g.el !== el) return;
-            dragging = null;
-            if (g.moved) layout(d.path, g.d.both ? { x: g.d.x } : { x: g.d.x, y: g.d.y }); else { stage.dataset.sig = ''; drawStage(); drawCtl(); }
-          };
-          el.addEventListener('pointerup', done);
-          el.addEventListener('pointercancel', done);
-          requestAnimationFrame(() => placeThumb(el, d));
-          return el;
-        }));
-        empty.hidden = list.length > 0;
-        stage.hidden = !list.length;
-      }
-      // ---------- how the picked handout lies ----------
-      function drawCtl() {
-        const d = sel();
-        const sh = d ? shareOf(d.path) : null;
-        const sig = d ? JSON.stringify([d.path, d.both, d.rot, d.size, handList().length, sh && [sh.to, sh.sent]]) : '';
-        if (ctl.dataset.sig === sig) return;
-        ctl.dataset.sig = sig;
-        if (!d) { ctl.replaceChildren(); return; }
-        const chip = (label, tip, on, patch) => h('button', { class: `chip ${on ? 'on' : ''}`, 'data-tip': tip, onclick: () => layout(d.path, patch) }, label);
-        const side = d.rot === 90 || d.rot === 270;
-        const turn = (by, icon, tip) => h('button', { class: 'icon-btn', 'aria-label': tip, 'data-tip': tip, disabled: d.both || null, onclick: () => layout(d.path, { rot: (d.rot || 0) + by }) }, iconEl(icon));
-        const size = h('input', { type: 'range', min: 0.2, max: 1, step: 0.02, 'aria-label': 'Size' });
-        size.value = d.size;
-        const out = h('output', {}, `${Math.round(d.size * 100)}%`);
-        size.addEventListener('input', () => { out.textContent = `${Math.round(Number(size.value) * 100)}%`; });
-        size.addEventListener('change', () => layout(d.path, { size: Number(size.value) }));
-        ctl.replaceChildren(
-          h('div', { class: 'ho-name' }, h('b', { class: 'grow ellipsis' }, d.name), phoneBtn(d, 'On the phones'),
-            c().btn('Put it away', 'player-stop', () => cmd('handout.hide', { path: d.path }), { kind: 'danger small' })),
-          h('div', { class: 'ho-chips' },
-            chip('Both sides', 'A copy for each long side of the table', d.both, { both: true }),
-            chip('One direction', 'One big copy, upright for one side', !d.both && !side, { both: false, rot: 0 }),
-            chip('Lengthwise', 'One copy along the TV: a scroll, a stone tablet, a long map', !d.both && side, { both: false, rot: 90 }),
-            h('span', { class: 'grow' }),
-            turn(-90, 'rotate', 'Turn it a quarter to the left'), turn(90, 'rotate-clockwise', 'Turn it a quarter to the right')),
-          h('label', { class: 'ctl ctl-slider' }, h('span', { class: 'ctl-label' }, 'Size'), size, out));
-      }
+      // (Beta 3.6: the picture of the TV is the Handout table now, a window of its own)
+      const tableBtn = c().btn('Handout table', 'layout-board', () => ctx.togglePanel(hotDef()), { kind: 'wide', tip: 'A big picture of the TV: drag, size and turn what lies there' });
       const awayAll = c().btn('Put everything away', 'player-stop', () => cmd('handout.hide', {}), { kind: 'small ghost' });
-      c().bind(() => { drawStage(); drawCtl(); awayAll.hidden = handList().length < 2; });
+      const onNow = h('p', { class: 'hint ho-none' });
+      c().bind(() => {
+        const n = handList().length;
+        awayAll.hidden = !n;
+        onNow.textContent = n ? `${n} on the table: ${handList().map((x) => x.name).join(', ')}` : 'Nothing on the table. Click a handout to show it.';
+        tableBtn.classList.toggle('on', !!ctx.panelOpen('hotable'));
+      });
 
       // ---------- what is at hand: the chapter's Ready list, and what was shown so far ----------
       const strip = h('div', { class: 'talk-strip' });
@@ -650,7 +771,7 @@ const Toolbox = (() => {
       const listBtn = c().btn('List …', 'layout-grid', () => ctx.togglePanel(handListDef()), { kind: 'wide', tip: 'All handouts: click one to show it, tick it to have it ready here' });
       c().bind(() => listBtn.classList.toggle('on', !!ctx.panelOpen('handlist')));
       return h('div', { class: 'stack' },
-        stage, empty, ctl, awayAll, strip, listBtn,
+        tableBtn, onNow, awayAll, strip, listBtn,
         c().sep(),
         c().toggle({ label: 'Write "Handout shown" into the session log', get: () => prefs().log !== false, set: (v) => ts.settings({ handout: { log: v } }) }));
     }
