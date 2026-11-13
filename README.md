@@ -28,7 +28,7 @@ You need a laptop and a TV or projector. Send a map to the table with one key, u
 | --- | --- |
 | Campaigns, chapters and maps | 49 D&amp;D spell areas, effects, light and weather |
 | A map on the TV with one key | Walls, doors and line of sight |
-| Reveal and cover the fog | NPCs who step onto the table to talk |
+| Reveal and cover the fog | NPCs who step onto the table to talk, monsters shown in a spotlight |
 | NPC tokens and a party marker | 23 table styles, from Deep dungeon to Jungle |
 | A grid at real inch scale | Initiative with a round banner, character cards |
 | Ambience per chapter | Handouts, also on the players' phones |
