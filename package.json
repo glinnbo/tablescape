@@ -1,0 +1,136 @@
+{
+  "name": "tablescape",
+  "productName": "Tablescape",
+  "version": "3.4.0",
+  "releaseLabel": "Beta 3.4",
+  "description": "Local tabletop player for TV and projector tables",
+  "main": "src/main.js",
+  "author": "glinnbo",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node scripts/run-tests.js",
+    "test:deep": "node scripts/run-tests.js --deep",
+    "test:old": "node scripts/run-selftest.js",
+    "demo": "python3 scripts/make_demo_assets.py demo && python3 scripts/make_extras.py demo && python3 scripts/make_crypt.py demo && python3 scripts/make_orb.py demo",
+    "dist:win": "node scripts/build-win.js --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "icons": "node scripts/build-icons.js"
+  },
+  "build": {
+    "appId": "app.tablescape",
+    "productName": "Tablescape",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "LICENSE.txt",
+      "NOTICE.txt",
+      "package.json",
+      "!**/node_modules/node-aead-crypto*/**"
+    ],
+    "extraResources": [
+      {
+        "from": "demo",
+        "to": "demo",
+        "filter": [
+          "Demo.tablescape",
+          "*.ogg",
+          "*-alpha.webm"
+        ]
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "tablescape",
+        "name": "Tablescape campaign",
+        "description": "A Tablescape campaign",
+        "icon": "icon",
+        "role": "Editor"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "Tablescape-${version}-portable.exe"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.role-playing-games",
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Game",
+      "icon": "build/icon.png"
+    },
+    "afterPack": "scripts/after-pack.js",
+    "nsis": {
+      "oneClick": false,
+      "license": "LICENSE.txt",
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Tablescape",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "uninstallDisplayName": "Tablescape",
+      "artifactName": "Tablescape-Setup-${version}.exe"
+    },
+    "detectUpdateChannel": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "glinnbo",
+        "repo": "tablescape",
+        "private": false,
+        "releaseType": "release"
+      }
+    ]
+  },
+  "devDependencies": {
+    "@fontsource/alegreya": "^5.3.0",
+    "@tabler/icons": "^3.49.0",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.0.0",
+    "resedit": "^3.1.0",
+    "simple-icons": "^16.37.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11",
+    "node-tradfri-client": "^3.2.0",
+    "qrcode-generator": "^2.0.4"
+  }
+}

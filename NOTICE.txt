@@ -1,0 +1,46 @@
+TABLESCAPE
+Copyright (C) 2026 glinnbo
+
+Tablescape is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License, version 3, as published by the
+Free Software Foundation (GPL-3.0-only). The full text is in LICENSE.txt.
+
+Tablescape is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The code of every released version: https://github.com/glinnbo/tablescape
+
+THE NAME AND THE LOGO
+   The license covers Tablescape's code and content, not its name or logo.
+   "Tablescape" and the Tablescape logo stay with glinnbo. If you publish
+   your own version, give it its own name and logo, so nobody mistakes it
+   for the original. Saying that it is based on Tablescape is welcome.
+
+YOUR OWN CONTENT
+   Maps, pictures, music, campaigns and notes you load into Tablescape stay
+   yours. The license does not cover them, and Tablescape claims no rights
+   to them. You are responsible for having the right to use them.
+
+PARTS FROM OTHERS (under their own licenses)
+   - Tabler Icons: MIT License
+   - Alegreya font: SIL Open Font License 1.1 (src/renderer/fonts)
+   - Discord and Ko-fi logos: from Simple Icons (CC0); the logos are
+     trademarks of their owners
+   - Material taken from the System Reference Document 5.1 ("SRD 5.1") by
+     Wizards of the Coast LLC, available at
+     https://dnd.wizards.com/resources/systems-reference-document. The
+     SRD 5.1 is licensed under the Creative Commons Attribution 4.0
+     International License, available at
+     https://creativecommons.org/licenses/by/4.0/legalcode.
+   - Electron and Chromium, electron-updater, node-tradfri-client and
+     qrcode-generator: their licenses are in the installation folder and in
+     their packages.
+
+OTHER SERVICES AND TRADEMARKS
+   Spotify, IKEA and Govee features use your own accounts and are subject
+   to those services' terms. Tablescape is an unofficial fan product. It is
+   not made, endorsed or supported by Spotify, IKEA, Govee or Wizards of the
+   Coast. Dungeons & Dragons and D&D are trademarks of Wizards of the Coast.
+
+Support Tablescape: https://ko-fi.com/tablescape

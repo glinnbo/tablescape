@@ -1,0 +1,8 @@
+{
+  "name": "Tablescape remote",
+  "short_name": "Tablescape",
+  "display": "standalone",
+  "background_color": "#121316",
+  "theme_color": "#121316",
+  "icons": [{ "src": "/icon.png", "sizes": "512x512", "type": "image/png" }]
+}

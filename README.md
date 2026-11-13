@@ -7,7 +7,7 @@
 
 <p align="center">
   Animated battle maps, fog of war, spell effects, lights and weather for D&amp;D,<br>
-  on a TV lying flat, a projector, or a TV on its stand. Free for Windows.
+  on a TV lying flat, a projector, or a TV on its stand. Free and open source, for Windows.
 </p>
 
 <p align="center">
@@ -66,9 +66,26 @@ Join the [Tablescape Discord](https://discord.gg/T99DRNKaSM): **#help** for ques
 
 Tablescape is free and made by a forever DM. If it makes your table a little more magical, [toss a coin on Ko-fi](https://ko-fi.com/tablescape).
 
-## License and credits
+## Open source
 
-Tablescape is freeware: free to use, and to share unchanged. It is not open source. See [LICENSE.txt](LICENSE.txt).
+Tablescape is open source under the [GNU General Public License, version 3](LICENSE.txt): use it at any table, share it, change it. A changed version you pass on stays open source under the same license. The code of every version is right here, next to its download.
+
+**Your own version:** the license covers the code, not the name. Please give your version its own name and logo, so nobody mistakes it for the original (saying it's based on Tablescape is welcome). Details in [NOTICE.txt](NOTICE.txt).
+
+**Ideas and bug reports:** on [Discord](https://discord.gg/T99DRNKaSM). For now Tablescape takes ideas, not code from others.
+
+### Build it yourself
+
+You need Windows 10 or 11, [Node.js](https://nodejs.org) 22 and git.
+
+```
+npm ci
+npm start          # run it
+npm test           # the self-test, about 4 minutes
+npm run dist:win   # the installer, in release/
+```
+
+## Credits
 
 Icons: Tabler Icons (MIT). Display font: Alegreya (SIL Open Font License). Table-style pictures: made with Midjourney and Grok. Built with Electron.
 
