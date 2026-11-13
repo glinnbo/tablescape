@@ -23,6 +23,9 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.5', [
+      'Safer imports: a campaign file from someone else can only put its files into your library and its own campaign folder. Before, a specially prepared file could have written a file somewhere else on the PC. If you got a .tablescape file from a stranger, update before opening it',
+    ]],
     ['Beta 3.4', [
       'Tablescape is open source now, under the GNU General Public License (version 3): the code of every version is on GitHub, next to its download. Guide → About has the details',
     ]],

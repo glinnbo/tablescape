@@ -114,4 +114,45 @@ module.exports = (area) => {
     }
     t.eq(library.root, keep, 'the test library is back');
   });
+
+  // Beta 3.5 (security): a campaign file from someone else can't write outside the library and its own folder
+  area.quick('a crafted campaign file cannot write outside its folders', async (t) => {
+    const fs = require('fs'); const path = require('path'); const os = require('os');
+    const library = require('../../library'); const Transfer = require('../../transfer'); const { zip } = require('../../zip');
+    const root = path.join(os.tmpdir(), 'ts-root');
+    for (const bad of ['..', 'a/../b', 'Tokens/..\\..\\x.bat', '..\\x', 'C:/x', 'C:\\x', 'a/./b', 'a/b.', 'a/ok /b', 'a\\b', '\\\\server\\share', '']) t.eq(Transfer.below(root, bad), null, `refused: ${JSON.stringify(bad)}`);
+    t.eq(Transfer.below(root, 'Tokens/Goblin 1.png'), path.join(root, 'Tokens', 'Goblin 1.png'), 'a plain name is fine');
+    // a whole package with such names (made with our own zip, then the names swapped byte for byte)
+    const map = { id: 'm1', name: 'Trap', grid: { size: 70 }, layers: [{ id: 'l1', role: 'token', rel: 'Tokens/..\\..\\evil.png', path: 'C:\\Windows\\win.ini', x: 70, y: 70 }], fx: [], walls: [] };
+    const camp = { id: 'ctrap', name: 'Trap', chapters: [{ id: 'c1', name: 'One', maps: [{ id: 'm1', name: 'Trap' }] }] };
+    let buf = zip([
+      { name: 'tablescape.json', data: JSON.stringify({ format: 1, app: 'tablescape', version: 'x', kind: 'full', name: 'Trap', chapter: null, maps: 1, files: 1, bytes: 4, created: 1 }) },
+      { name: 'campaign/campaign.json', data: JSON.stringify(camp) },
+      { name: 'campaign/maps/m1.json', data: JSON.stringify(map) },
+      { name: 'campaign/aa/bb/note.txt', data: 'note' },
+      { name: 'library/Tokens/aa/bb/evil.png', data: 'evil' },
+    ]);
+    const swap = (from, to) => { const a = Buffer.from(from); const b = Buffer.from(to); let n = 0; for (let i = buf.indexOf(a); i >= 0; i = buf.indexOf(a, i + 1)) { b.copy(buf, i); n++; } return n; };
+    t.eq(swap('campaign/aa/bb/note.txt', 'campaign/..\\..\\note.txt'), 2, 'the note\'s name swapped');
+    t.eq(swap('library/Tokens/aa/bb/evil.png', 'library/Tokens/..\\..\\evil.png'), 2, 'the picture\'s name swapped');
+    const keep = library.root;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-trap-'));
+    try {
+      const pkg = path.join(tmp, 'Trap.tablescape');
+      fs.writeFileSync(pkg, buf);
+      library.ensureLibrary(path.join(tmp, 'in', 'library'));
+      const camps = path.join(tmp, 'in', 'library', 'Campaigns');
+      const out = await Transfer.importFrom(pkg, camps);
+      t.ok(out && out.ok, 'the rest of it still imports', out);
+      const all = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else all.push(path.relative(tmp, f)); } }; walk(tmp);
+      t.eq(all.filter((f) => /evil|note\.txt/.test(f)), [], 'nothing with those names was written anywhere', all);
+      const dir = fs.readdirSync(camps).map((d) => path.join(camps, d)).find((d) => fs.existsSync(path.join(d, 'campaign.json')));
+      const m = JSON.parse(fs.readFileSync(path.join(dir, 'maps', fs.readdirSync(path.join(dir, 'maps'))[0]), 'utf8'));
+      t.ok(!m.layers[0].rel && !m.layers[0].path, 'its token points nowhere (not at a file of this PC)', m.layers[0]);
+    } finally {
+      library.ensureLibrary(keep);
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+    t.eq(library.root, keep, 'the test library is back');
+  });
 };

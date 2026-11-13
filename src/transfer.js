@@ -349,12 +349,24 @@ async function inspect(file) {
     return { ok: true, file, name: info.name, kind: info.kind, chapter: info.chapter || null, maps: info.maps, files: libs.length, bytes: Z.size, have, version: info.version };
   } finally { await Z.close(); }
 }
-// where a library path from the file goes (null: not a safe path)
-function target(rel) {
+// Beta 3.5 (security): a name from a campaign file is only ever a path below the folder it belongs in. A part with a
+// backslash, a colon or dots only is refused: on Windows "..\\..\\x" inside one part walked out of the folder (a
+// crafted .tablescape could then write a file anywhere, for example into the Startup folder). The result is checked
+// once more against the folder itself.
+function safeParts(rel) {
   const parts = String(rel).split('/').filter(Boolean);
-  if (!parts.length || parts.some((p) => p === '..' || p === '.' || /[<>:"|?*\x00-\x1f]/.test(p))) return null;
-  return path.join(library.root, ...parts);
+  if (!parts.length || parts.some((p) => /^\.+$/.test(p) || /[\\<>:"|?*\x00-\x1f]/.test(p) || /[. ]$/.test(p))) return null;
+  return parts;
 }
+function below(root, rel) {
+  const parts = safeParts(rel);
+  if (!parts) return null;
+  const to = path.join(root, ...parts);
+  const back = path.relative(root, to);
+  return back && !back.startsWith('..') && !path.isAbsolute(back) ? to : null;
+}
+// where a library path from the file goes (null: not a safe path)
+const target = (rel) => below(library.root, rel);
 function freeRel(rel) {
   const parts = rel.split('/'); const base = parts.pop(); const p = path.parse(base);
   for (let i = 2; ; i++) { const r = [...parts, `${p.name} (${i})${p.ext}`].join('/'); if (!fs.existsSync(target(r))) return r; }
@@ -401,7 +413,7 @@ async function importFrom(file, campaignsDir, { progress = () => {}, cancelled =
     const swap = (s) => { for (const [a, b] of ids) s = s.split(`"${a}"`).join(`"${b}"`); return s; };
     metaText = swap(metaText);
     mapTexts = mapTexts.map((x) => ({ id: ids.get(x.id), text: swap(x.text) }));
-    const point = (o) => eachRef(o, (ref) => { if (typeof ref.rel !== 'string') return; if (renames.has(ref.rel)) ref.rel = renames.get(ref.rel); const t = target(ref.rel); if (t) ref.path = t; });
+    const point = (o) => eachRef(o, (ref) => { if (typeof ref.rel !== 'string') return; if (renames.has(ref.rel)) ref.rel = renames.get(ref.rel); const t = target(ref.rel); if (t) ref.path = t; else { delete ref.rel; delete ref.path; } }); // (an unsafe name points nowhere)
     const meta = JSON.parse(metaText);
     point(meta);
     meta.id = newId('c');
@@ -418,9 +430,9 @@ async function importFrom(file, campaignsDir, { progress = () => {}, cancelled =
     await fsp.mkdir(path.join(dir, 'maps'), { recursive: true });
     made.push(dir);
     for (const e of extras) {
-      const parts = e.name.slice(9).split('/');
-      if (parts.some((p) => p === '..' || !p)) continue;
-      await extract(Z, e, path.join(dir, ...parts), (n) => { bytes += n; tick(e.name.slice(9)); }, cancelled);
+      const to = below(dir, e.name.slice(9));
+      if (!to) continue; // (not a safe name: left out)
+      await extract(Z, e, to, (n) => { bytes += n; tick(e.name.slice(9)); }, cancelled);
       done++;
     }
     for (const x of mapTexts) { const m = JSON.parse(x.text); point(m); await fsp.writeFile(path.join(dir, 'maps', `${x.id}.json`), JSON.stringify(m, null, 1)); }
@@ -434,4 +446,4 @@ async function importFrom(file, campaignsDir, { progress = () => {}, cancelled =
   } finally { await Z.close(); }
 }
 
-module.exports = { plan, exportTo, inspect, importFrom, EXT, openZip, readEntry };
+module.exports = { plan, exportTo, inspect, importFrom, EXT, openZip, readEntry, below };
