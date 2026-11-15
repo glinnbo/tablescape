@@ -563,6 +563,6 @@ const Table = (() => {
 
   // self-test: whether the TV shows an effect or light of the live map
   function fxShown(id) { const lv = views.get(liveId); const f = lv && lv.view.map && lv.view.map.fx.find((x) => x.id === id); return f ? lv.view.shown(f) : null; }
-  return { start, debug, probe, probeMap, coverage, sees, fogAt, fxShown };
+  return { start, debug, probe, probeMap, coverage, sees, fogAt, fxShown, burn: (on) => overlays && overlays.burn(on) };
 })();
-window.__table = { debug: () => Table.debug(), probe: (l, x, y) => Table.probe(l, x, y), probeMap: (l, x, y) => Table.probeMap(l, x, y), coverage: (l) => Table.coverage(l), sees: (x, y) => Table.sees(x, y), fogAt: (x, y) => Table.fogAt(x, y), fxShown: (id) => Table.fxShown(id) };
+window.__table = { burn: (on) => Table.burn(on), debug: () => Table.debug(), probe: (l, x, y) => Table.probe(l, x, y), probeMap: (l, x, y) => Table.probeMap(l, x, y), coverage: (l) => Table.coverage(l), sees: (x, y) => Table.sees(x, y), fogAt: (x, y) => Table.fogAt(x, y), fxShown: (id) => Table.fxShown(id) };

@@ -23,6 +23,15 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.7', [
+      'Handout table: the picture of the TV now cuts a handout off where the TV ends, so you see exactly what the players see. The corners, the knob and the ✕ stay inside the picture, also for a handout bigger than the TV',
+      'Handouts can be far bigger than the TV (up to six times its short side), to look closely at a part of a map or a letter: the mouse wheel sizes around the pointer, then drag the part you want into view',
+      'Turning with the knob no longer catches at quarter turns; the two quarter buttons below make a handout straight',
+      'The burn of a handout is drawn by the graphics card now: sharp at any size and smooth',
+      'On the phones: a handout marked for everyone or only for some players is on their phones at once, whether it lies on the table or not',
+      'Players pick who they are on their phone also when moving by phone is off and no token is on the map (a table with miniatures): handouts only for one player find the right phone',
+      'On the phone a handout is handled like a photo: pinch to zoom, drag to move, double tap to zoom in and out',
+    ]],
     ['Beta 3.6', [
       'Handout table: Toolbox → Handouts → Handout table opens a big picture of the TV. Drag a handout to where it should lie, pull a corner to size it, turn it with the knob above it to any angle (it catches when upright or a quarter round). The TV follows while you drag',
       'Up to 10 handouts at once. A new one lands in the middle, a little off and tilted, like a paper tossed on the table; the one you touch lies on top. Each handout remembers how it lay',

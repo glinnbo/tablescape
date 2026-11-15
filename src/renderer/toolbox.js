@@ -473,29 +473,29 @@ const Toolbox = (() => {
       const sh = shareOf(it.path);
       const to = sh ? sh.to : null;
       const names = ((S().campaign && S().campaign.party) || []);
-      const set = (next, send) => cmd('handout.share', { path: it.path, to: next, send: !!send });
+      const set = (next) => cmd('handout.share', { path: it.path, to: next }); // (Beta 3.7: on their phones at once, on the table or not)
       const r = e.currentTarget.getBoundingClientRect();
       openMenu(r.left, r.bottom + 4, [{ header: `${it.name} on the phones` },
         { icon: 'users', label: 'Everyone', checked: to === 'all', action: () => set(to === 'all' ? null : 'all') },
         ...names.map((n) => ({ icon: 'user', label: `Only for ${n}`, checked: Array.isArray(to) && to.includes(n),
           action: () => { const cur = Array.isArray(to) ? to : []; const next = cur.includes(n) ? cur.filter((x) => x !== n) : [...cur, n]; set(next.length ? next : null); } })),
-        ...(sh ? ['-', ...(sh.sent ? [] : [{ icon: 'send', label: 'Send to the phones now', action: () => set(to, true) }]),
-          { icon: 'arrow-back-up', label: 'Take it back', action: () => set(null) }] : [])]);
+        ...(sh ? ['-', { icon: 'arrow-back-up', label: 'Take it back', action: () => set(null) }] : [])]);
     }
     const phoneBtn = (it, label) => {
       const sh = shareOf(it.path);
-      return h('button', { class: `icon-btn ho-phone ${sh ? 'on' : ''}`, 'aria-label': label, 'data-tip': sh ? `${sh.to === 'all' ? 'Everyone' : sh.to.join(', ')} can look at it on the phone${sh.sent ? '' : ' once it is shown'}` : 'Let players look at it on their phones',
+      return h('button', { class: `icon-btn ho-phone ${sh ? 'on' : ''}`, 'aria-label': label, 'data-tip': sh ? `${sh.to === 'all' ? 'Everyone' : sh.to.join(', ')} can look at it on the phone` : 'Let players look at it on their phones',
         onclick: (e) => { e.stopPropagation(); shareMenu(e, it); } }, iconEl('device-mobile'));
     };
     // ---------- Beta 3.6: the Handout table: a big picture of the TV to lay the handouts out on ----------
-    // Drag a handout to move it, pull a corner to make it bigger, turn it with the knob (it catches gently when
-    // upright or a quarter round; Alt: freely). The wheel sizes it, Shift + wheel turns it. The TV follows while you
-    // drag. The one you touch lies on top. Spreads keep what lies there, each in its place, under a name.
+    // Drag a handout to move it, pull a corner to make it bigger, turn it with the knob (to any angle; the quarter
+    // buttons below make it straight). The wheel sizes it around the pointer, Shift + wheel turns it. The TV follows
+    // while you drag. The one you touch lies on top. Spreads keep what lies there, each in its place, under a name.
     const hotDef = () => ({
       id: 'hotable', title: 'Handout table', icon: 'layout-board',
       tips: ['A picture of the TV: drag a handout to where it should lie; the TV follows as you drag.',
-        'Pull a corner to make it bigger or smaller. Turn it with the knob above it: it catches when upright or a quarter round (hold Alt to turn freely).',
-        'Mouse wheel: size. Shift + wheel: turn. Delete: put it away.',
+        'Pull a corner to make it bigger or smaller, far bigger than the TV if you like: drag it so the part you want shows. The picture here is cut off where the TV ends.',
+        'Turn it with the knob to any angle; the two buttons below turn it a clean quarter.',
+        'Mouse wheel: bigger or smaller around the pointer. Shift + wheel: turn. Delete: put it away.',
         'The handout you touch lies on top. Up to 10 at once.',
         'Spreads keeps everything that lies there, each in its place, under a name: one click brings it back.',
         'Drag the corner of this window to make the picture bigger.'],
@@ -516,6 +516,13 @@ const Toolbox = (() => {
       let sized = false;
       try { sized = !!localStorage.getItem('hotableW'); } catch {}
       const fitW = () => clamp(sized ? width : Math.min(width, room()), 380, Math.max(380, window.innerWidth - 140));
+      // Beta 3.7: the pictures are cut off at the TV's edge (what you see here is what the players see); the handles
+      // of the picked handout lie on a layer of their own and stay inside the picture of the TV, so a handout far
+      // bigger than the TV can still be sized and turned.
+      const clip = h('div', { class: 'hot-clip' });
+      const tools = h('div', { class: 'hot-tools', hidden: true });
+      stage.append(clip, tools);
+      const SIZE = [0.12, 6]; // (as in main.js)
       const items = new Map(); // path → { el, img, d }
       let act = null; // what the pointer does right now: { kind: 'move' | 'size' | 'turn', it }
       // while dragging the TV follows through small messages (one a frame); letting go saves the layout
@@ -523,76 +530,122 @@ const Toolbox = (() => {
       const live = (path, patch) => { pending = { path, patch }; if (!sendT) sendT = requestAnimationFrame(() => { sendT = 0; const q = pending; pending = null; if (q) cmd('handout.layout', { path: q.path, patch: q.patch, live: true }); }); };
       const commit = (path, patch) => { if (sendT) { cancelAnimationFrame(sendT); sendT = 0; } pending = null; return layout(path, patch); };
       const lay = (d) => ({ x: d.x, y: d.y, size: d.size, rot: d.rot });
-      function placeItem(it) {
+      // a handout's size in the picture of the TV, and half of the box it takes up when turned
+      function dims(it) {
         const W = stage.clientWidth; const H = stage.clientHeight;
-        if (!W || !H) return;
-        const d = it.d;
-        const L = d.size * Math.min(W, H);
+        const L = it.d.size * Math.min(W, H);
         const a = it.img.naturalWidth && it.img.naturalHeight ? it.img.naturalWidth / it.img.naturalHeight : 1;
-        it.img.style.width = `${a >= 1 ? L : L * a}px`; it.img.style.height = `${a >= 1 ? L / a : L}px`;
+        const w = a >= 1 ? L : L * a; const hh = a >= 1 ? L / a : L;
+        const r = ((it.d.rot || 0) * Math.PI) / 180; const co = Math.cos(r); const si = Math.sin(r);
+        return { W, H, w, h: hh, co, si, bx: (Math.abs(w * co) + Math.abs(hh * si)) / 2, by: (Math.abs(w * si) + Math.abs(hh * co)) / 2 };
+      }
+      // its middle may leave the TV, but a piece of it always stays in sight
+      function keepIn(it) {
+        const m = dims(it);
+        if (!m.W || !m.H) return;
+        const sx = Math.min(40, m.bx); const sy = Math.min(40, m.by);
+        it.d.x = clamp(it.d.x, (sx - m.bx) / m.W, (m.W + m.bx - sx) / m.W); it.d.y = clamp(it.d.y, (sy - m.by) / m.H, (m.H + m.by - sy) / m.H);
+      }
+      function placeItem(it) {
+        const m = dims(it);
+        if (!m.W || !m.H) return;
+        const d = it.d;
+        it.img.style.width = `${m.w}px`; it.img.style.height = `${m.h}px`;
         it.el.style.left = `${d.x * 100}%`; it.el.style.top = `${d.y * 100}%`;
         it.el.style.transform = `translate(-50%, -50%) rotate(${d.rot || 0}deg)`;
+        if (d.path === ui.hoSel) placeTools();
+      }
+      // the picked handout's corners, knob and ✕: where they are on the handout, but never outside the picture of the TV
+      const grips = ['nw', 'ne', 'se', 'sw'].map((c) => h('span', { class: `hot-h ${c}`, dataset: { grip: 'size' } }));
+      const knob = h('span', { class: 'hot-turn', dataset: { grip: 'turn' }, 'aria-label': 'Turn it', 'data-tip': 'Drag to turn it' }, iconEl('rotate-clockwise'));
+      const xBtn = h('button', { class: 'hot-x', 'aria-label': 'Put it away', 'data-tip': 'Put it away', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); if (ui.hoSel) cmd('handout.hide', { path: ui.hoSel }); } }, iconEl('x'));
+      tools.append(...grips, knob, xBtn);
+      function placeTools() {
+        const it = ui.hoSel ? items.get(ui.hoSel) : null;
+        tools.hidden = !it;
+        if (!it) return;
+        const m = dims(it);
+        if (!m.W || !m.H) return;
+        const cx = it.d.x * m.W; const cy = it.d.y * m.H;
+        const at = (el, ox, oy, pad) => { // (ox, oy: from the handout's middle, in its own turned directions)
+          const x = clamp(cx + ox * m.co - oy * m.si, pad, m.W - pad); const y = clamp(cy + ox * m.si + oy * m.co, pad, m.H - pad);
+          el.style.left = `${x}px`; el.style.top = `${y}px`;
+        };
+        const hw = m.w / 2; const hh = m.h / 2;
+        at(grips[0], -hw, -hh, 9); at(grips[1], hw, -hh, 9); at(grips[2], hw, hh, 9); at(grips[3], -hw, hh, 9);
+        at(knob, 0, -hh - 26, 16);
+        at(xBtn, hw + 26, -hh, 15);
       }
       const centre = (it) => { const r = stage.getBoundingClientRect(); return { x: r.left + it.d.x * r.width, y: r.top + it.d.y * r.height, r }; };
-      const select = (path) => { ui.hoSel = path; for (const [p, it] of items) it.el.classList.toggle('sel', p === path); drawBar(); };
+      const select = (path) => { ui.hoSel = path; for (const [p, it] of items) it.el.classList.toggle('sel', p === path); placeTools(); drawBar(); };
+      // one drag: of the handout itself (move), a corner (size) or the knob (turn, to any angle)
+      function begin(e, it, kind, holder) {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        stage.focus({ preventScroll: true });
+        const c = centre(it);
+        act = { kind, it, holder, moved: false, dx: e.clientX - c.x, dy: e.clientY - c.y, d0: Math.hypot(e.clientX - c.x, e.clientY - c.y) || 1, s0: it.d.size,
+          a0: Math.atan2(e.clientY - c.y, e.clientX - c.x), r0: it.d.rot || 0 };
+        holder.setPointerCapture(e.pointerId);
+        it.el.classList.add('dragging');
+      }
+      function drag(e) {
+        const g = act;
+        if (!g) return;
+        const it = g.it; const c = centre(it);
+        if (g.kind === 'move') {
+          it.d.x = (e.clientX - g.dx - c.r.left) / c.r.width; it.d.y = (e.clientY - g.dy - c.r.top) / c.r.height;
+        } else if (g.kind === 'size') {
+          it.d.size = clamp(g.s0 * (Math.hypot(e.clientX - c.x, e.clientY - c.y) / g.d0), SIZE[0], SIZE[1]);
+        } else {
+          const r = g.r0 + ((Math.atan2(e.clientY - c.y, e.clientX - c.x) - g.a0) * 180) / Math.PI;
+          it.d.rot = Math.round((((r % 360) + 360) % 360) * 10) / 10; // (freely: the quarter buttons below make it straight)
+        }
+        keepIn(it);
+        g.moved = true;
+        placeItem(it); drawBar();
+        live(it.d.path, lay(it.d));
+      }
+      function finish() {
+        const g = act;
+        if (!g) return;
+        act = null;
+        g.it.el.classList.remove('dragging');
+        if (g.moved) commit(g.it.d.path, lay(g.it.d));
+      }
+      for (const t of [...grips, knob]) {
+        t.addEventListener('pointerdown', (e) => { const it = ui.hoSel ? items.get(ui.hoSel) : null; if (it) begin(e, it, t.dataset.grip, t); });
+        t.addEventListener('pointermove', drag);
+        t.addEventListener('pointerup', finish);
+        t.addEventListener('pointercancel', finish);
+      }
       function make(d) {
         const img = h('img', { src: d.url, alt: '', draggable: 'false' });
-        const grip = (cls) => h('span', { class: `hot-h ${cls}`, dataset: { grip: 'size' } });
-        const el = h('div', { class: 'hot-item', dataset: { path: d.path }, 'data-tip': d.name },
-          img, grip('nw'), grip('ne'), grip('sw'), grip('se'),
-          h('span', { class: 'hot-turn', dataset: { grip: 'turn' }, 'aria-label': 'Turn it' }, iconEl('rotate-clockwise')),
-          h('button', { class: 'hot-x', 'aria-label': `Put ${d.name} away`, 'data-tip': 'Put it away', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); cmd('handout.hide', { path: d.path }); } }, iconEl('x')));
+        const el = h('div', { class: 'hot-item', dataset: { path: d.path }, 'data-tip': d.name }, img);
         const it = { el, img, d: { ...d } };
         img.addEventListener('load', () => placeItem(it));
         el.addEventListener('pointerdown', (e) => {
           if (e.button !== 0) return;
-          e.preventDefault();
-          stage.focus({ preventScroll: true });
           select(d.path);
           const list = handList();
           if (list.length && list[list.length - 1].path !== d.path) cmd('handout.front', { path: d.path });
-          const c = centre(it);
-          const gr = e.target.closest('[data-grip]');
-          const kind = gr ? gr.dataset.grip : 'move';
-          act = { kind, it, moved: false, dx: e.clientX - c.x, dy: e.clientY - c.y, d0: Math.hypot(e.clientX - c.x, e.clientY - c.y) || 1, s0: it.d.size,
-            a0: Math.atan2(e.clientY - c.y, e.clientX - c.x), r0: it.d.rot || 0 };
-          el.setPointerCapture(e.pointerId);
-          el.classList.add('dragging');
+          begin(e, it, 'move', el);
         });
-        el.addEventListener('pointermove', (e) => {
-          const g = act;
-          if (!g || g.it !== it) return;
-          const c = centre(it);
-          if (g.kind === 'move') {
-            it.d.x = clamp((e.clientX - g.dx - c.r.left) / c.r.width, 0, 1); it.d.y = clamp((e.clientY - g.dy - c.r.top) / c.r.height, 0, 1);
-          } else if (g.kind === 'size') {
-            it.d.size = clamp(g.s0 * (Math.hypot(e.clientX - c.x, e.clientY - c.y) / g.d0), 0.12, 1.8);
-          } else {
-            let r = g.r0 + ((Math.atan2(e.clientY - c.y, e.clientX - c.x) - g.a0) * 180) / Math.PI;
-            r = ((r % 360) + 360) % 360;
-            const q = Math.round(r / 90) * 90; // (it catches when upright or a quarter round)
-            if (!e.altKey && Math.abs(r - q) < 6) r = q % 360;
-            it.d.rot = Math.round(r * 10) / 10;
-          }
-          g.moved = true;
-          placeItem(it); drawBar();
-          live(d.path, lay(it.d));
-        });
-        const done = () => {
-          const g = act;
-          if (!g || g.it !== it) return;
-          act = null;
-          el.classList.remove('dragging');
-          if (g.moved) commit(d.path, lay(it.d));
-        };
-        el.addEventListener('pointerup', done);
-        el.addEventListener('pointercancel', done);
-        // the wheel: size; with Shift: turn
+        el.addEventListener('pointermove', (e) => { if (act && act.it === it && act.holder === el) drag(e); });
+        el.addEventListener('pointerup', finish);
+        el.addEventListener('pointercancel', finish);
+        // the wheel: bigger or smaller, around the spot under the pointer (to look closely at a part); with Shift: turn
         let wheelT = 0;
         el.addEventListener('wheel', (e) => {
           e.preventDefault();
           const up = e.deltaY < 0 || e.deltaX < 0;
-          if (e.shiftKey) it.d.rot = (((it.d.rot || 0) + (up ? -5 : 5)) % 360 + 360) % 360; else it.d.size = clamp(it.d.size * (up ? 1.06 : 1 / 1.06), 0.12, 1.8);
+          if (e.shiftKey) it.d.rot = (((it.d.rot || 0) + (up ? -5 : 5)) % 360 + 360) % 360;
+          else {
+            const next = clamp(it.d.size * (up ? 1.08 : 1 / 1.08), SIZE[0], SIZE[1]); const k = next / it.d.size;
+            const r = stage.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width; const py = (e.clientY - r.top) / r.height;
+            it.d.x = px + (it.d.x - px) * k; it.d.y = py + (it.d.y - py) * k; it.d.size = next;
+          }
+          keepIn(it);
           select(d.path);
           it.wheel = true;
           placeItem(it); drawBar();
@@ -611,13 +664,14 @@ const Toolbox = (() => {
         for (const [p, it] of items) if (!keep.has(p)) { it.el.remove(); items.delete(p); }
         list.forEach((d, i) => {
           let it = items.get(d.path);
-          if (!it) { it = make(d); items.set(d.path, it); stage.append(it.el); }
+          if (!it) { it = make(d); items.set(d.path, it); clip.append(it.el); }
           if (!(act && act.it === it) && !it.wheel) it.d = { ...d }; // (the one in the hand keeps what the hand says)
           it.el.style.zIndex = String(i + 1);
           placeItem(it);
         });
         if (!list.some((d) => d.path === ui.hoSel)) ui.hoSel = list.length ? list[list.length - 1].path : null;
         for (const [p, it] of items) it.el.classList.toggle('sel', p === ui.hoSel);
+        placeTools();
         empty.hidden = list.length > 0;
       }
       // a handout dragged here from a list lands where it is dropped
@@ -678,7 +732,7 @@ const Toolbox = (() => {
         e.preventDefault(); e.stopPropagation();
         const x0 = e.clientX; const w0 = fitW();
         grip.setPointerCapture(e.pointerId);
-        const move = (ev) => { width = clamp(w0 + (ev.clientX - x0), 380, Math.max(380, window.innerWidth - 60)); stage.style.width = `${fitW()}px`; for (const it of items.values()) placeItem(it); };
+        const move = (ev) => { width = clamp(w0 + (ev.clientX - x0), 380, Math.max(380, window.innerWidth - 60)); stage.style.width = `${fitW()}px`; for (const it of items.values()) placeItem(it); placeTools(); };
         sized = true;
         const up = () => { grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.removeEventListener('pointercancel', up); try { localStorage.setItem('hotableW', String(Math.round(width))); } catch {} };
         grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up); grip.addEventListener('pointercancel', up);

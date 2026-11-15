@@ -141,10 +141,10 @@ body[data-conn="wait"] #app::after { content: ""; position: fixed; top: 8px; lef
 .pl-ho svg { width: 22px; height: 22px; }
 .pl-ho b:empty { display: none; }
 .pl-ho b { font: 600 15px var(--ui); }
-.ho-view { position: fixed; inset: 0; z-index: 60; background: rgba(8, 9, 11, 0.96); display: flex; align-items: center; justify-content: center; overflow: auto; -webkit-overflow-scrolling: touch; }
-.ho-view img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.ho-view.zoom { align-items: flex-start; justify-content: flex-start; }
-.ho-view.zoom img { max-width: none; max-height: none; width: 220vw; }
+.ho-view { position: fixed; inset: 0; z-index: 60; background: rgba(8, 9, 11, 0.96); overflow: hidden; }
+/* Beta 3.7: handled like a photo in a gallery (app.js showHandout): the picture is moved and zoomed by a transform */
+.ho-stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.ho-stage img { flex: none; max-width: none; max-height: none; transform-origin: 50% 50%; will-change: transform; pointer-events: none; -webkit-user-drag: none; }
 .ho-cap { position: fixed; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 10px; padding: max(10px, env(safe-area-inset-top)) 12px 10px 16px; background: linear-gradient(rgba(8, 9, 11, 0.85), transparent); color: #f1e6cf; font: 500 17px var(--display); pointer-events: none; }
 .ho-cap span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ho-x { pointer-events: auto; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line-2); background: rgba(23, 25, 30, 0.85); color: var(--text, #e8e2d6); display: grid; place-items: center; padding: 0; }
@@ -282,6 +282,8 @@ body[data-conn="wait"] #app::after { content: ""; position: fixed; top: 8px; lef
 .ctl { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; align-content: start; gap: clamp(6px, 1.6vh, 14px); padding: clamp(8px, 2vh, 20px) clamp(12px, 4vw, 40px) calc(10px + env(safe-area-inset-bottom)); min-height: 0; overflow: hidden; }
 .ctl.wait { display: grid; place-items: center; }
 .ctl.wait .msg h2 { font-size: 26px; }
+.ctl.idle .msg { display: grid; justify-items: center; gap: 10px; text-align: center; padding: 0 24px; }
+.ctl.idle .idle-face { width: clamp(96px, 22vh, 150px); height: clamp(96px, 22vh, 150px); }
 /* who are you? */
 .ctl.pick { display: block; overflow-y: auto; text-align: center; }
 .ctl.pick h2, .ctl.calib h2 { margin: 10px 0 4px; font: 500 clamp(26px, 5vh, 40px) var(--display); color: #f1e6cf; }

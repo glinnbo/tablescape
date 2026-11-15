@@ -421,14 +421,119 @@
     // Prototype 26: handouts the DM lets this player look at: a button with their number, a tap shows one big
     const hoBtn = h('button', { class: 'pl-ho', hidden: true, 'aria-label': 'Handouts', onclick: () => openHandouts() }, ic('script'), h('b', {}, ''));
     let hos = []; let hoKnown = null;
+    // Beta 3.7: one handout big, handled like a photo in a gallery: pinch to zoom (where the fingers are), drag to
+    // move, a double tap zooms in at that spot and out again; it glides on a little when let go and never leaves the
+    // screen. (z: 1 = the whole of it fits the screen.)
     function showHandout(x) {
       const img = h('img', { src: faceSrc(x.url), alt: x.name, draggable: false });
+      const stage = h('div', { class: 'ho-stage' }, img);
       const view = h('div', { class: 'ho-view', role: 'dialog', 'aria-label': x.name },
-        img, h('div', { class: 'ho-cap' }, h('span', {}, x.name), h('button', { class: 'ho-x', 'aria-label': 'Close', onclick: (e) => { e.stopPropagation(); view.remove(); } }, ic('x'))));
-      img.addEventListener('click', () => view.classList.toggle('zoom')); // a tap: full size to read it, another: the whole of it again
+        stage, h('div', { class: 'ho-cap' }, h('span', {}, x.name), h('button', { class: 'ho-x', 'aria-label': 'Close', onclick: (e) => { e.stopPropagation(); cancelAnimationFrame(glide); view.remove(); } }, ic('x'))));
+      let z = 1; let tx = 0; let ty = 0; // zoom and shift of the picture (from the middle of the screen)
+      let glide = 0;
+      const pts = new Map(); // the fingers down: id → { x, y }
+      let grab = null; // what the fingers hold: { z, tx, ty, cx, cy, d }
+      let vel = { x: 0, y: 0, t: 0 }; let lastTap = { t: 0, x: 0, y: 0 }; let moved = false;
+      const base = () => { // the picture's size when the whole of it fits
+        const W = stage.clientWidth || 1; const H = stage.clientHeight || 1;
+        const a = img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1;
+        return W / H > a ? { w: H * a, h: H, W, H } : { w: W, h: W / a, W, H };
+      };
+      const maxZ = () => { const b = base(); return Math.max(4, ((img.naturalWidth || b.w) / b.w) * 2.5); }; // (well past its own pixels)
+      const clampPos = () => {
+        const b = base();
+        const mx = Math.max(0, (b.w * z - b.W) / 2); const my = Math.max(0, (b.h * z - b.H) / 2);
+        tx = Math.min(mx, Math.max(-mx, tx)); ty = Math.min(my, Math.max(-my, ty));
+      };
+      const paint = () => {
+        const b = base();
+        img.style.width = `${b.w}px`; img.style.height = `${b.h}px`;
+        img.style.transform = `translate(${tx}px, ${ty}px) scale(${z})`;
+        view.classList.toggle('zoom', z > 1.01);
+      };
+      const set = (nz, ntx, nty) => { z = Math.min(maxZ(), Math.max(1, nz)); tx = ntx; ty = nty; clampPos(); paint(); };
+      // zoom so that the spot under (px, py) stays under it
+      const zoomAt = (nz, px, py) => {
+        const b = base(); const cx = px - b.W / 2; const cy = py - b.H / 2;
+        nz = Math.min(maxZ(), Math.max(1, nz));
+        const k = nz / z;
+        set(nz, cx - (cx - tx) * k, cy - (cy - ty) * k);
+      };
+      const ease = (to, px, py) => { // (a double tap glides to its zoom)
+        cancelAnimationFrame(glide);
+        const from = z; const t0 = performance.now();
+        const step = (now) => { const p = Math.min(1, (now - t0) / 220); const e = 1 - (1 - p) * (1 - p) * (1 - p); zoomAt(from + (to - from) * e, px, py); if (p < 1) glide = requestAnimationFrame(step); };
+        glide = requestAnimationFrame(step);
+      };
+      const hold = () => {
+        const a = [...pts.values()];
+        const r = stage.getBoundingClientRect();
+        if (a.length >= 2) grab = { z, tx, ty, cx: (a[0].x + a[1].x) / 2 - r.left, cy: (a[0].y + a[1].y) / 2 - r.top, d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1 };
+        else if (a.length === 1) grab = { z, tx, ty, cx: a[0].x - r.left, cy: a[0].y - r.top, d: 0 };
+        else grab = null;
+      };
+      stage.addEventListener('pointerdown', (e) => {
+        cancelAnimationFrame(glide);
+        try { stage.setPointerCapture(e.pointerId); } catch {}
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        moved = false; vel = { x: 0, y: 0, t: performance.now() };
+        hold();
+      });
+      stage.addEventListener('pointermove', (e) => {
+        const p = pts.get(e.pointerId);
+        if (!p || !grab) return;
+        const dx = e.clientX - p.x; const dy = e.clientY - p.y;
+        p.x = e.clientX; p.y = e.clientY;
+        const a = [...pts.values()];
+        const r = stage.getBoundingClientRect(); const b = base();
+        if (a.length >= 2) {
+          const cx = (a[0].x + a[1].x) / 2 - r.left; const cy = (a[0].y + a[1].y) / 2 - r.top;
+          const d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1;
+          const nz = Math.min(maxZ(), Math.max(1, grab.z * (d / grab.d)));
+          const k = nz / grab.z;
+          // the spot between the fingers stays between them, also while they wander
+          const gx = grab.cx - b.W / 2; const gy = grab.cy - b.H / 2;
+          set(nz, (cx - b.W / 2) - (gx - grab.tx) * k, (cy - b.H / 2) - (gy - grab.ty) * k);
+          moved = true;
+        } else {
+          if (Math.abs(e.clientX - (grab.cx + r.left)) + Math.abs(e.clientY - (grab.cy + r.top)) > 6) moved = true;
+          if (z > 1.01) {
+            set(z, tx + dx, ty + dy);
+            const now = performance.now(); const dt = Math.max(1, now - vel.t);
+            vel = { x: vel.x * 0.5 + (dx / dt) * 0.5, y: vel.y * 0.5 + (dy / dt) * 0.5, t: now };
+          }
+        }
+      });
+      const up = (e) => {
+        if (!pts.has(e.pointerId)) return;
+        const was = pts.size;
+        pts.delete(e.pointerId);
+        hold();
+        if (pts.size) return;
+        const r = stage.getBoundingClientRect(); const now = performance.now();
+        if (was === 1 && !moved) { // a tap; two close together: zoom in there, or back out
+          const px = e.clientX - r.left; const py = e.clientY - r.top;
+          if (now - lastTap.t < 320 && Math.hypot(px - lastTap.x, py - lastTap.y) < 40) { lastTap.t = 0; ease(z > 1.01 ? 1 : Math.min(maxZ(), 2.5), px, py); } else lastTap = { t: now, x: px, y: py };
+          return;
+        }
+        // let go while moving: it glides on and slows down
+        if (z > 1.01 && now - vel.t < 80 && Math.hypot(vel.x, vel.y) > 0.25) {
+          let vx = vel.x; let vy = vel.y; let t = now;
+          const step = (n) => { const dt = Math.min(40, n - t); t = n; const bx = tx; const by = ty; set(z, tx + vx * dt, ty + vy * dt); if (tx === bx && ty === by) return; vx *= 0.94; vy *= 0.94; if (Math.hypot(vx, vy) > 0.02) glide = requestAnimationFrame(step); };
+          glide = requestAnimationFrame(step);
+        }
+      };
+      stage.addEventListener('pointerup', up);
+      stage.addEventListener('pointercancel', up);
+      stage.addEventListener('wheel', (e) => { e.preventDefault(); const r = stage.getBoundingClientRect(); zoomAt(z * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - r.left, e.clientY - r.top); }, { passive: false }); // (a mouse)
+      img.addEventListener('load', () => set(1, 0, 0));
       img.addEventListener('error', () => { view.remove(); toast('The handout could not be loaded'); });
+      const onSize = () => { if (!view.isConnected) { window.removeEventListener('resize', onSize); return; } set(z, tx, ty); };
+      window.addEventListener('resize', onSize);
+      view.debug = () => ({ z, tx, ty, max: maxZ() });
       for (const old of document.querySelectorAll('.ho-view')) old.remove();
       document.body.append(view);
+      paint();
     }
     function openHandouts() {
       if (!hos.length) return;
@@ -571,7 +676,7 @@
     function pick(chars) {
       root.className = 'ctl pick';
       put(root, h('h2', {}, 'Who are you?'),
-        h('p', { class: 'muted' }, chars.length ? 'Your token on the table follows this phone.' : 'The party shows here once the DM has players on the campaign page.'),
+        h('p', { class: 'muted' }, !chars.length ? 'The party shows here once the DM has players on the campaign page.' : C && C.on ? 'Your token on the table follows this phone.' : 'Handouts the DM sends you show up on this phone.'),
         h('div', { class: 'pick-grid' }, ...chars.map((c) => h('button', { class: `pick-card ${c.taken ? 'taken' : ''}`, style: c.color ? `--pcc:${c.color}` : '', onclick: async () => {
           if (c.taken) { toast(`${c.name} is already on ${c.taken}`); return; }
           const r = await act('pick', { name: c.name }).catch(() => null); if (!r || r.ok === false) fail(r);
@@ -648,8 +753,16 @@
     const ab = (icn, label, on, cls = '') => h('button', { class: `abtn ${cls}`, onclick: async () => { const r = await on(); if (r && r.ok === false) fail(r); } }, ic(icn), h('span', {}, label));
     function draw(ctl, force) {
       C = ctl;
-      if (!C.on && !C.me) { root.className = 'ctl wait'; put(root, h('div', { class: 'msg' }, h('h2', {}, 'Tablescape'), h('p', {}, 'Waiting for the DM to switch on moving by phone …'))); return; }
+      // (Beta 3.7) who you are comes first, also at a table with miniatures (moving by phone off): the DM's handouts
+      // for single players find the right phone. Then the phone just says who it is.
       if (!C.me) { me = null; pick(C.chars || []); return; }
+      if (!C.on) {
+        me = C.me;
+        root.className = 'ctl wait idle';
+        root.style.setProperty('--pcc', me.color || '#e3963e');
+        put(root, h('div', { class: 'msg' }, h('div', { class: 'ctl-face idle-face', style: me.color ? `--pcc:${me.color}` : '' }, face(me, 'pic')), h('h2', {}, me.name), h('p', { class: 'muted' }, 'Handouts the DM sends you show up on this phone.')));
+        return;
+      }
       if (calibrating && !force) return;
       if (seat == null) { calibrate(); return; }
       if (!stick) build();

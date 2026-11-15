@@ -189,7 +189,8 @@ function create(o) {
     if (!OPS.includes(op)) return { ok: false, error: 'Tablescape doesn\'t know that (an older version?)' };
     const P = opt();
     // Prototype 3: switched off means off for everything a phone does on the table (leaving and letting go still work)
-    if (!P.on && op !== 'unpick' && !(op === 'calib' && !a.on) && !(op === 'aim' && !a.dir)) return { ok: false, why: 'off', error: 'The DM has not switched on moving by phone' };
+    // (Beta 3.7: saying who you are works without it too: a table with miniatures still sends handouts to single players)
+    if (!P.on && op !== 'pick' && op !== 'unpick' && !(op === 'calib' && !a.on) && !(op === 'aim' && !a.dir)) return { ok: false, why: 'off', error: 'The DM has not switched on moving by phone' };
     if (op === 'pick') {
       const name = String(a.name || '');
       if (!party().includes(name)) return { ok: false, error: 'That character is not in the party' };

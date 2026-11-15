@@ -23,6 +23,10 @@ if (!areas.length) { console.error('No such area. There are: ' + AREAS.join(', '
 // TS_APP=path/to/packaged/app tests a packaged build instead of the source
 const app = process.env.TS_APP || require('electron');
 const base = process.env.TS_APP ? [] : ['.'];
+// (Beta 3.7: on a machine without a graphics card, as most test machines are, WebGL runs in software for the area
+// "burn", so the handout burn is really drawn and checked, not only its plain fallback. Only there: it slows everything.)
+const SOFT_GL = process.platform === 'linux' ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'] : [];
+const argsFor = (name) => (name === 'burn' ? [...base, ...SOFT_GL] : base);
 const linux = process.platform === 'linux';
 if (linux && (process.getuid?.() === 0 || process.env.CI)) base.push('--no-sandbox');
 // Linux without a screen (or several at once): each app gets a screen of its own
@@ -44,7 +48,7 @@ function runArea(name, i) {
     if (match) env.TS_TEST_MATCH = String(match);
     delete env.TS_SCRIPT;
     const cmd = ownScreen ? 'xvfb-run' : app;
-    const args = ownScreen ? ['-a', '-s', '-screen 0 1920x1080x24', app, ...base] : base;
+    const args = ownScreen ? ['-a', '-s', '-screen 0 1920x1080x24', app, ...argsFor(name)] : argsFor(name);
     const t0 = Date.now();
     const p = spawn(cmd, args, { cwd: root, env, stdio: 'ignore', detached: linux });
     const kill = () => { try { if (linux) process.kill(-p.pid, 'SIGKILL'); else p.kill('SIGKILL'); } catch {} };

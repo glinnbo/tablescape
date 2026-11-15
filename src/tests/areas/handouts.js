@@ -13,6 +13,7 @@ module.exports = (area) => {
     B = path.join(path.dirname(A), `Old map${path.extname(A)}`);
     if (!fs.existsSync(B)) fs.copyFileSync(A, B);
     await K.sleep(300);
+    await K.t('window.__table.burn(false)'); // (the fire has its own area: burn.js)
   });
 
   // what lies on the TV: each handout's box (as drawn, turned), its picture's own size, its turn, and whether it still burns
@@ -22,13 +23,11 @@ module.exports = (area) => {
   const forget = (t) => { delete t.settings.handoutLayout; };
   const lay = (t, p) => { const all = t.settings.handoutLayout || {}; const k = Object.keys(all).find((x) => p.endsWith(x) || x.endsWith(path.basename(p))); return k ? all[k] : null; };
   const win = (t) => t.t('({ w: innerWidth, h: innerHeight })');
+  // (here handouts come and go with the plain fade: the fire itself has its own area, burn.js)
 
-  area.quick('a handout burns in on the TV, one copy near the middle and a little tilted, and burns away again', async (t) => {
+  area.quick('a handout comes onto the TV, one copy near the middle and a little tilted, and leaves again', async (t) => {
     forget(t); await away(t);
     t.handle('handout.show', { path: A });
-    await t.until(async () => { const x = await onTv(t); return x.length === 1 && x[0].burning; }, 4000, 'the handout to burn in');
-    const dbg = await t.t('window.__table.debug().over.handout');
-    t.ok(dbg && dbg.burning === 1 && dbg.style === (t.settings.tableStyle || 'ink'), 'it burns in the table style\'s colour', dbg);
     const tv = await settled(t, 1);
     const w = await win(t);
     t.eq(t.state.handouts.length, 1, 'handouts on the table');
@@ -38,9 +37,8 @@ module.exports = (area) => {
     t.ok(l && l.v === 2 && l.size === 0.7 && (l.rot <= 7 || l.rot >= 353), 'its place is remembered: tossed, a little tilted', l);
     t.near(Math.max(tv[0].w, tv[0].h), 0.7 * Math.min(w.w, w.h), 3, 'its longer side: 70% of the TV\'s short side');
     t.handle('handout.hide', {});
-    await t.until(async () => { const x = await onTv(t); return x.length === 1 && x[0].burning; }, 3000, 'the handout to burn away');
     t.eq(t.state.handouts.length, 0, 'handouts on the table afterwards');
-    await t.until(async () => (await onTv(t)).length === 0, 4000, 'the handout to leave the TV');
+    await t.until(async () => (await onTv(t)).length === 0, 6000, 'the handout to leave the TV');
   });
 
   area.quick('a second handout can lie with the first; each goes away on its own', async (t) => {
@@ -132,30 +130,64 @@ module.exports = (area) => {
     await away(t); await closeTable(t);
   });
 
-  area.quick('in the Handout table a corner sizes a handout and the knob turns it, catching when a quarter round', async (t) => {
+  area.quick('in the Handout table a corner sizes a handout and the knob turns it to any angle; the quarter buttons make it straight', async (t) => {
     forget(t); await away(t); await table(t);
     t.handle('handout.show', { path: A });
     t.handle('handout.layout', { path: A, patch: { x: 0.5, y: 0.5, rot: 0, size: 0.3 } });
     await settled(t, 1);
     await t.until(() => t.rect(`${HT} .hot-item`), 4000, 'the handout in the picture of the TV');
     await t.clickSel(`${HT} .hot-item img`);
-    await t.until(() => t.rect(`${HT} .hot-item.sel .hot-h.se`), 3000, 'its corners once it is picked');
+    await t.until(() => t.rect(`${HT} .hot-tools .hot-h.se`), 3000, 'its corners once it is picked');
     const it = await t.rect(`${HT} .hot-item`);
-    const se = await t.rect(`${HT} .hot-item.sel .hot-h.se`);
+    const se = await t.rect(`${HT} .hot-tools .hot-h.se`);
     // twice as far from its middle: twice as big
     await t.drag({ x: se.cx, y: se.cy }, { x: it.cx + (se.cx - it.cx) * 2, y: it.cy + (se.cy - it.cy) * 2 }, 6);
     await t.until(() => { const l = lay(t, A); return l && Math.abs(l.size - 0.6) < 0.05; }, 3000, 'twice the size', lay(t, A));
     await t.sleep(200);
     const now = await t.rect(`${HT} .hot-item`);
-    const knob = await t.rect(`${HT} .hot-item.sel .hot-turn`);
-    // the knob is above it: pulled round to its right side (and a little off) it catches at a quarter turn
+    const knob = await t.rect(`${HT} .hot-tools .hot-turn`);
+    // the knob is above it: pulled round to its right side and a little further it turns just that far (it does not catch at a quarter)
     const r = now.cy - knob.cy;
     await t.drag({ x: knob.cx, y: knob.cy }, { x: now.cx + r, y: now.cy + r * 0.06 }, 8);
-    await t.until(() => { const l = lay(t, A); return l && l.rot === 90; }, 3000, 'a quarter turn, caught', lay(t, A));
+    await t.until(() => { const l = lay(t, A); return l && l.rot > 91 && l.rot < 97; }, 3000, 'a little more than a quarter turn, as dragged', lay(t, A));
     const tv = (await settled(t, 1))[0];
-    t.eq(tv.rot, 90, 'turned on the TV too');
-    await t.clickSel(`${HT} .hot-item.sel .hot-x`);
+    t.ok(tv.rot > 91 && tv.rot < 97, 'turned on the TV too', tv.rot);
+    await t.clickSel(`${HT} [data-tip="Turn it a quarter to the left"]`);
+    await t.until(() => lay(t, A).rot === 0, 3000, 'the quarter button to make it straight', lay(t, A));
+    await t.clickSel(`${HT} .hot-tools .hot-x`);
     await t.until(() => t.state.handouts.length === 0, 3000, 'the ✕ to put it away');
+    await away(t); await closeTable(t);
+  });
+
+  // Beta 3.7
+  area.quick('a handout can be far bigger than the TV: the picture of the TV cuts it off at the edge and its handles stay inside', async (t) => {
+    forget(t); await away(t); await table(t);
+    t.handle('handout.show', { path: A });
+    t.handle('handout.layout', { path: A, patch: { x: 0.5, y: 0.5, rot: 20, size: 3 } });
+    t.eq(lay(t, A).size, 3, 'three times the TV\'s short side is allowed');
+    const tv = (await settled(t, 1))[0];
+    const w = await win(t);
+    t.near(Math.max(tv.w, tv.h), 3 * Math.min(w.w, w.h), 6, 'that big on the TV');
+    await t.until(() => t.rect(`${HT} .hot-item`), 4000, 'the handout in the picture of the TV');
+    await t.sleep(200);
+    const st = await t.rect(`${HT} .hot-stage`);
+    const it = await t.rect(`${HT} .hot-item`);
+    t.ok(it.w > st.w * 1.2, 'it is bigger than the picture of the TV', [it.w, st.w]);
+    t.eq(await t.g(`getComputedStyle(document.querySelector('${HT} .hot-clip')).overflow`), 'hidden', 'what lies outside is cut off');
+    // what is seen of it at a spot just outside the picture of the TV: not the handout
+    const outside = await t.g(`(() => { const r = document.querySelector('${HT} .hot-stage').getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top - 8); return !!e && !!e.closest('.hot-item'); })()`);
+    t.ok(!outside, 'above the picture of the TV the handout is not in the way');
+    for (const sel of ['.hot-h.nw', '.hot-h.ne', '.hot-h.se', '.hot-h.sw', '.hot-turn', '.hot-x']) {
+      const r = await t.rect(`${HT} .hot-tools ${sel}`);
+      t.ok(r && r.x >= st.x - 1 && r.y >= st.y - 1 && r.x + r.w <= st.x + st.w + 1 && r.y + r.h <= st.y + st.h + 1, `${sel} stays inside`, [r, st]);
+    }
+    // a corner still sizes it, from where it is
+    const se = await t.rect(`${HT} .hot-tools .hot-h.se`);
+    await t.drag({ x: se.cx, y: se.cy }, { x: st.x + st.w / 2 + (se.cx - st.x - st.w / 2) * 0.5, y: st.y + st.h / 2 + (se.cy - st.y - st.h / 2) * 0.5 }, 6);
+    await t.until(() => { const l = lay(t, A); return l && Math.abs(l.size - 1.5) < 0.15; }, 3000, 'half as far from the middle: half the size', lay(t, A));
+    // its middle may leave the TV, but not all of it
+    t.handle('handout.layout', { path: A, patch: { x: -0.4, y: 0.5 } });
+    t.eq(lay(t, A).x, -0.4, 'its middle left of the TV');
     await away(t); await closeTable(t);
   });
 
@@ -207,15 +239,13 @@ module.exports = (area) => {
     await away(t);
   });
 
-  area.quick('marked for everyone, a handout is ready for the phones once it has been shown', async (t) => {
+  area.quick('marked for everyone, a handout is ready for the phones at once, shown on the table or not', async (t) => {
     forget(t); await away(t);
     t.handle('handout.share', { path: A, to: 'all' });
     const share = () => Object.values(t.store.cur.meta.handoutShare || {})[0];
     t.eq(share() && share().to, 'all', 'who may see it');
-    t.ok(!share().sent, 'not sent before it is shown');
-    t.handle('handout.show', { path: A });
-    await t.sleep(300);
-    t.ok(!!share().sent, 'sent once it is shown', share());
+    t.ok(!!share().sent, 'sent at once (Beta 3.7)', share());
+    t.eq(t.state.handouts.length, 0, 'nothing on the table for it');
     t.handle('handout.share', { path: A, to: null });
     t.ok(!Object.keys(t.store.cur.meta.handoutShare || {}).length, 'taken back', t.store.cur.meta.handoutShare);
     await away(t);
@@ -263,23 +293,6 @@ module.exports = (area) => {
     t.handle('handout.show', { path: B });
     t.eq(lay(t, B), first, 'shown again it lies as before');
     await away(t); await closeTable(t);
-  });
-
-  area.deep('a handout burns in the colour of the table style: green for Jungle', async (t) => {
-    forget(t); await away(t);
-    const was = t.settings.tableStyle;
-    await t.g(`window.ts.settings({ tableStyle: 'jungle' })`);
-    await t.until(() => t.settings.tableStyle === 'jungle', 3000, 'the Jungle style');
-    t.handle('handout.show', { path: A });
-    t.handle('handout.layout', { path: A, patch: { x: 0.5, y: 0.5, rot: 0, size: 0.8 } });
-    await t.until(async () => { const x = await onTv(t); return x.length === 1 && x[0].burning; }, 4000, 'the handout to burn in');
-    // the fire's own light, in the middle of the burn: more green than red or blue
-    await t.sleep(350);
-    const px = await t.t(`(() => { const c = document.querySelector('.tv-handout .ho-burn'); if (!c) return null; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let r = 0, g = 0, b = 0, n = 0; for (let i = 0; i < d.length; i += 16) { if (d[i + 3] > 200 && d[i + 1] > 150 && d[i + 1] > d[i] + 40 && d[i + 1] > d[i + 2] + 40) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } } return { n, r: n ? r / n : 0, g: n ? g / n : 0, b: n ? b / n : 0 }; })()`);
-    t.ok(px && px.n > 20, 'green fire on the handout', px);
-    await settled(t, 1);
-    await t.g(`window.ts.settings({ tableStyle: ${JSON.stringify(was || 'ink')} })`);
-    await away(t);
   });
 
   area.deep('the phone button offers Everyone, single players and Take it back; List … opens beside the panel', async (t) => {

@@ -70,13 +70,11 @@ module.exports = (area) => {
     t.eq(at(t), [p0[0] + 1, p0[1] - 1], 'where the token stands in front of the wall');
   });
 
-  area.quick('a handout marked for everyone reaches every player\'s phone once it is shown, with its picture', async (t) => {
+  area.quick('a handout marked for everyone reaches every player\'s phone at once, with its picture, without lying on the table', async (t) => {
     t.handle('handout.hide', {});
     t.handle('handout.share', { path: HO, to: 'all' });
-    await t.sleep(400);
-    t.eq((sa.last.handouts || []).length, 0, 'handouts on a phone before it is shown');
-    t.handle('handout.show', { path: HO });
     await t.until(() => (sa.last.handouts || []).length === 1 && (sb.last.handouts || []).length === 1, 4000, 'the handout on both phones');
+    t.eq(t.state.handouts.length, 0, 'handouts on the table');
     const h = sa.last.handouts[0];
     t.ok(h.name && h.url, 'it has a name and a picture', h);
     const pic = await ph.get(`${h.url}${h.url.includes('?') ? '&' : '?'}t=${encodeURIComponent(A.token)}`);
@@ -84,9 +82,6 @@ module.exports = (area) => {
     t.ok(/image|video/.test(pic.type) && pic.bytes > 1000, 'it is a picture', [pic.type, pic.bytes]);
     const none = await ph.get(h.url);
     t.ok(none.status >= 400, 'without a pass the picture is not given out', none.status);
-    t.handle('handout.hide', {});
-    await t.sleep(300);
-    t.eq((sa.last.handouts || []).length, 1, 'the phone keeps it after it left the table');
     t.handle('handout.share', { path: HO, to: null });
     await t.until(() => !(sa.last.handouts || []).length && !(sb.last.handouts || []).length, 4000, 'Take it back to remove it from the phones');
   });
@@ -94,12 +89,38 @@ module.exports = (area) => {
   area.quick('a handout only for one player reaches only that player\'s phone', async (t) => {
     await ph.run(A.token, 'pick', { name: 'Mira' });
     await ph.run(B.token, 'pick', { name: 'Thorin' });
-    t.handle('handout.share', { path: HO, to: ['Mira'], send: true });
+    t.handle('handout.share', { path: HO, to: ['Mira'] });
     await t.until(() => (sa.last.handouts || []).length === 1, 4000, 'the handout on Mira\'s phone');
     await t.sleep(300);
     t.eq((sb.last.handouts || []).length, 0, 'handouts on Thorin\'s phone');
     t.handle('handout.share', { path: HO, to: null });
     await t.until(() => !(sa.last.handouts || []).length, 4000, 'the handout to leave Mira\'s phone');
+  });
+
+  // Beta 3.7: a table with miniatures: no tokens on the map, moving by phone off
+  area.quick('with moving by phone off and no token on the map, a phone still says who it is and gets the handout only for that player', async (t) => {
+    await ph.run(A.token, 'unpick', {}); await ph.run(B.token, 'unpick', {});
+    await t.g(`window.ts.players('set', { on: false })`);
+    const bare = await t.newMap('Miniatures (test)', { tv: true });
+    await t.until(() => sa.last && sa.last.ctl && sa.last.ctl.on === false && !sa.last.ctl.me, 4000, 'the phone to know that moving is off');
+    t.ok((sa.last.ctl.chars || []).some((c) => c.name === 'Thorin'), 'it still offers the party to pick from', sa.last.ctl.chars);
+    const r = await ph.run(B.token, 'pick', { name: 'Thorin' });
+    t.ok(r.ok, 'picking a character is allowed', r);
+    await t.until(() => sb.last.ctl && sb.last.ctl.me && sb.last.ctl.me.name === 'Thorin', 4000, 'the phone to be Thorin');
+    t.ok(!sb.last.ctl.me.token, 'Thorin has no token on this map', sb.last.ctl.me);
+    const no = await ph.run(B.token, 'move', { dir: 'e' });
+    t.ok(!no.ok, 'moving stays off', no);
+    t.handle('handout.share', { path: HO, to: ['Thorin'] });
+    await t.until(() => (sb.last.handouts || []).length === 1, 4000, 'the handout on Thorin\'s phone');
+    await t.sleep(300);
+    t.eq((sa.last.handouts || []).length, 0, 'handouts on the other phone');
+    t.eq(t.state.handouts.length, 0, 'handouts on the table');
+    t.handle('handout.share', { path: HO, to: null });
+    await ph.run(B.token, 'unpick', {});
+    await t.g(`window.ts.players('set', { on: true })`);
+    t.handle('edit.open', { id: mapId }); t.handle('table.send', { id: mapId });
+    t.handle('map.remove', { id: bare });
+    await t.until(() => sa.last && sa.last.ctl && sa.last.ctl.on === true, 4000, 'moving by phone on again');
   });
 
   area.deep('the real phone app shows a Handouts button; a tap shows the handout big', async (t) => {
@@ -118,6 +139,30 @@ module.exports = (area) => {
       await js(`document.querySelector('.pl-ho').click()`);
       await t.until(() => js(`!!document.querySelector('.ho-view img, .ho-view video')`), 4000, 'the handout big on the phone');
       await t.until(() => js(`(() => { const i = document.querySelector('.ho-view img'); return !i || (i.complete && i.naturalWidth > 0); })()`), 5000, 'its picture to load');
+      // Beta 3.7: handled like a photo in a gallery
+      const box = () => js(`(() => { const r = document.querySelector('.ho-view img').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, z: document.querySelector('.ho-view').debug().z, W: innerWidth, H: innerHeight }; })()`);
+      const fit = await box();
+      t.ok(fit.z === 1 && fit.w <= fit.W + 1 && fit.h <= fit.H + 1, 'at first the whole of it fits the screen', fit);
+      const touch = (type, id, x, y) => js(`document.querySelector('.ho-stage').dispatchEvent(new PointerEvent(${JSON.stringify(type)}, { pointerId: ${id}, clientX: ${x}, clientY: ${y}, bubbles: true, pointerType: 'touch', isPrimary: ${id === 1} }))`);
+      const cx = fit.W / 2; const cy = fit.H / 2;
+      // two fingers moving apart: bigger, around the spot between them
+      await touch('pointerdown', 1, cx - 40, cy); await touch('pointerdown', 2, cx + 40, cy);
+      for (let i = 1; i <= 5; i++) { await touch('pointermove', 1, cx - 40 - i * 16, cy); await touch('pointermove', 2, cx + 40 + i * 16, cy); }
+      await touch('pointerup', 1, cx - 120, cy); await touch('pointerup', 2, cx + 120, cy);
+      const big = await box();
+      t.near(big.z, 3, 0.2, 'three times as far apart: three times as big');
+      t.near(big.x + big.w / 2, cx, 3, 'the spot between the fingers stayed there');
+      // one finger drags it; it never leaves the screen
+      await touch('pointerdown', 1, cx, cy);
+      for (let i = 1; i <= 6; i++) await touch('pointermove', 1, cx + i * 300, cy);
+      await touch('pointerup', 1, cx + 1800, cy);
+      await t.sleep(400);
+      const moved = await box();
+      t.ok(moved.x > big.x + 20, 'a finger moves it', [big.x, moved.x]);
+      t.ok(moved.x <= 1, 'but its edge stops at the edge of the screen', moved);
+      // a double tap: back to the whole of it
+      for (let i = 0; i < 2; i++) { await touch('pointerdown', 1, cx, cy); await touch('pointerup', 1, cx, cy); await t.sleep(60); }
+      await t.until(async () => (await box()).z === 1, 2000, 'a double tap to show the whole of it again');
       t.eq(errs, [], 'errors in the phone app');
     } finally {
       t.handle('handout.share', { path: HO, to: null });

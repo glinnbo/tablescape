@@ -400,120 +400,179 @@ const TableOverlays = (() => {
     };
     const rgb = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
     let burnStyle = 'ink';
-    const BURN_MS = 1000; const BURN_TAIL = 380; // the fire, then the last sparks
-
-    // A handout burning in (it forms from its middle out of glowing embers) or away (from its edges inward).
-    // A low burn map says when the fire reaches each spot (the edges first, with noise so the front is ragged); every
-    // frame the picture is drawn, cut where it is burnt, charred just ahead of the front, and the front glows.
+    // Beta 3.7: the burn is drawn by the graphics card (WebGL), at the handout's full sharpness and without a stutter
+    // (before, a small burn map was worked out in JavaScript every frame and the picture was drawn at reduced size).
+    // A handout burning in forms from its middle out of glowing embers; burning away, the fire eats it from its edges
+    // inward. For every spot a burn time T: the distance from the edge plus noise, so the front is ragged; uP runs
+    // over T. Ahead of the front the paper chars, the front glows in the table style's colours, embers glint behind it.
+    const BURN_MS = 1300; // (the paper is gone after about a second; the last embers fade in the rest)
+    const BURN_VS = `#version 300 es
+in vec2 aPos; uniform vec2 uSize; out vec2 vPx;
+void main() { vPx = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5) * uSize; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+    const BURN_FS = `#version 300 es
+precision highp float;
+in vec2 vPx; out vec4 o;
+uniform sampler2D uTex; uniform vec2 uSize; uniform float uPad; uniform float uP; uniform float uTime; uniform float uSeed;
+uniform vec3 uHot; uniform vec3 uGlow;
+float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21) + uSeed); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y); }
+float fbm(vec2 p) { return vnoise(p) * 0.5 + vnoise(p * 2.1 + 7.3) * 0.3 + vnoise(p * 4.3 + 1.7) * 0.2; }
+void main() {
+  vec2 pic = uSize - 2.0 * uPad;        // the picture, in pixels
+  vec2 m = vPx - uPad;                  // from its top left
+  vec2 q = m / pic;
+  float S = min(pic.x, pic.y);
+  float edge = min(min(m.x, pic.x - m.x), min(m.y, pic.y - m.y)) / (S * 0.5); // 0 at the edge, 1 in the middle, below 0 outside
+  float T = clamp(edge, -0.3, 1.0) * 0.7 + fbm(m / S * 5.0) * 0.42 - 0.08;
+  float e = uP - T;                     // how long ago the fire came by here (below 0: not yet)
+  bool inside = q.x >= 0.0 && q.x <= 1.0 && q.y >= 0.0 && q.y <= 1.0;
+  vec4 tex = inside ? texture(uTex, q) : vec4(0.0);
+  float aa = max(fwidth(e) * 1.2, 0.0012);
+  float paper = 1.0 - smoothstep(-aa, aa, e);
+  float charred = smoothstep(-0.1, 0.0, e);
+  vec3 rgb = tex.rgb * mix(1.0, 0.05, charred * charred) * paper;
+  float a = tex.a * paper;
+  // the fire shows where there is (or was) paper, with a little halo round the picture
+  float there = texture(uTex, clamp(q, 0.0, 1.0)).a * exp(-max(0.0, -edge) * S * 0.5 / (0.012 * S));
+  float heat = e < 0.0 ? exp(e / 0.018) * 0.85 : (e < 0.045 ? 1.0 : pow(1.0 - clamp((e - 0.045) / 0.17, 0.0, 1.0), 2.0));
+  vec3 fire = mix(uGlow, uHot, clamp(heat * 1.5 - 0.5, 0.0, 1.0)) * heat;
+  // embers left behind: small glints that flicker and die
+  vec2 g = m / (S * 0.011);
+  float h1 = hash(floor(g));
+  float life = 1.0 - clamp(e / 0.4, 0.0, 1.0);
+  float ember = step(0.9, h1) * step(0.0, e) * life * life * smoothstep(0.45, 0.08, length(fract(g) - 0.5)) * (0.65 + 0.35 * sin(uTime * 28.0 + h1 * 40.0));
+  fire += uHot * ember;
+  float fa = clamp(max(heat, ember), 0.0, 1.0) * there;
+  o = vec4(rgb + fire * there, a + (1.0 - a) * fa * 0.9);
+}`;
+    // A burn canvas with its compiled fire. Compiling the fire takes a moment (on a slow PC a noticeable one), so the
+    // canvases are kept and used again, and the first ones are made ahead of time, right after the TV has started:
+    // a handout then starts to burn at once.
+    const burnPool = []; let burnMs = 0;
+    function burnMake() {
+      const t0 = performance.now();
+      const cv = el('canvas', 'ho-burn');
+      cv.width = 16; cv.height = 16;
+      const gl = cv.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, powerPreference: 'high-performance' });
+      if (!gl) return null;
+      const sh = (type, src) => { const x = gl.createShader(type); gl.shaderSource(x, src); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x) || 'shader'); return x; };
+      const pr = gl.createProgram();
+      gl.attachShader(pr, sh(gl.VERTEX_SHADER, BURN_VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, BURN_FS));
+      gl.linkProgram(pr);
+      if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr) || 'link');
+      gl.useProgram(pr);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(pr, 'aPos');
+      gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      const u = {}; for (const n of ['uTex', 'uSize', 'uPad', 'uP', 'uTime', 'uSeed', 'uHot', 'uGlow']) u[n] = gl.getUniformLocation(pr, n);
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.uniform1i(u.uTex, 0);
+      gl.disable(gl.BLEND);
+      gl.clearColor(0, 0, 0, 0);
+      // one small frame now: the graphics driver finishes its part of the compiling here, not in the first frame of a burn
+      gl.viewport(0, 0, 16, 16);
+      gl.uniform2f(u.uSize, 16, 16); gl.uniform1f(u.uPad, 1); gl.uniform1f(u.uP, 0.5);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.finish();
+      burnMs = Math.round(performance.now() - t0);
+      return { cv, gl, u };
+    }
+    function burnTake() {
+      while (burnPool.length) { const G = burnPool.pop(); if (!G.gl.isContextLost()) return G; }
+      return burnMake();
+    }
+    function burnGive(G) {
+      G.cv.remove();
+      if (burnPool.length < 10 && !G.gl.isContextLost()) { G.cv.width = 16; G.cv.height = 16; burnPool.push(G); return; }
+      const lose = G.gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
+    }
+    let burnOn = true; // (the self-test switches the fire off where it only wants to see handouts come and go)
+    function burnWarm(n) {
+      if (burnFailed || !burnOn) return;
+      try { while (burnPool.length < n) { const G = burnMake(); if (!G) { burnFailed = true; return; } burnPool.push(G); } } catch (err) { burnFailed = true; console.warn(`handout burn: ${err && err.message ? err.message : err}`); }
+    }
+    setTimeout(() => burnWarm(2), 1500);
+    let burnFailed = false; // (once it failed on this PC, don't try every time)
+    // without WebGL (or if it fails): the handout simply fades
+    function fadeHandout(it, into, done) {
+      const a = it.f.animate([{ opacity: into ? 0 : 1 }, { opacity: into ? 1 : 0 }], { duration: 350, easing: 'ease', fill: 'forwards' });
+      it.img.style.visibility = '';
+      it.stop = () => { a.cancel(); it.stop = null; };
+      a.onfinish = () => { it.stop = null; if (into) a.cancel(); if (done) done(); };
+    }
     function burnHandout(it, into, done) {
       if (it.stop) it.stop();
-      const [hot, glow] = (BURN[burnStyle] || BURN.ink).map(rgb);
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
-      const cv = el('canvas', 'ho-burn');
-      const g = cv.getContext('2d');
-      let w = 0; let h = 0; let pad = 0; let k = 1;
-      it.fit = () => { // (its size may change while it burns: dragged, or the window resized)
-        w = Math.max(8, it.w || 8); h = Math.max(8, it.h || 8); pad = Math.round(Math.max(w, h) * 0.09);
-        k = Math.min(dpr, 1200 / Math.max(w, h));
-        cv.width = Math.round((w + pad * 2) * k); cv.height = Math.round((h + pad * 2) * k);
+      if (burnFailed || !burnOn) { fadeHandout(it, into, done); return; }
+      const [hot, glow] = (BURN[burnStyle] || BURN.ink).map((c) => rgb(c).map((v) => v / 255));
+      let G = null; let cv = null; let raf = 0; let over = false; let cw = 0; let ch = 0; let padPx = 0;
+      const size = () => { // (its size may change while it burns: dragged in the Handout table, or the window resized)
+        const w = Math.max(8, it.w || 8); const h = Math.max(8, it.h || 8); const pad = Math.round(Math.max(w, h) * 0.05);
+        const k = Math.min(window.devicePixelRatio || 1, 4096 / (Math.max(w, h) + pad * 2), Math.sqrt(9e6 / ((w + pad * 2) * (h + pad * 2))));
+        const nw = Math.max(2, Math.round((w + pad * 2) * k)); const nh = Math.max(2, Math.round((h + pad * 2) * k));
+        cw = nw; ch = nh; padPx = pad * k;
+        if (!cv) return;
+        if (cv.width !== nw || cv.height !== nh) { cv.width = nw; cv.height = nh; }
         Object.assign(cv.style, { width: `${w + pad * 2}px`, height: `${h + pad * 2}px`, left: `${-pad}px`, top: `${-pad}px` });
       };
-      it.fit();
-      // the burn map
-      const mw = w >= h ? 112 : Math.max(24, Math.round((112 * w) / h)); const mh = w >= h ? Math.max(24, Math.round((112 * h) / w)) : 112;
-      let seed = 1 + Math.floor(Math.random() * 1e6);
-      const R = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-      const grids = [5, 11, 23].map((n) => { const a = new Float32Array((n + 1) * (n + 1)); for (let i = 0; i < a.length; i++) a[i] = R(); return { n, a }; });
-      const noise = (x, y) => {
-        let v = 0; let ws = 0; let wt = 1;
-        for (const { n, a } of grids) {
-          const fx = x * n; const fy = y * n; const ix = Math.floor(fx); const iy = Math.floor(fy); const tx = fx - ix; const ty = fy - iy;
-          const at = (i, j) => a[Math.min(n, j) * (n + 1) + Math.min(n, i)];
-          const sx = tx * tx * (3 - 2 * tx); const sy = ty * ty * (3 - 2 * ty);
-          const top = at(ix, iy) + (at(ix + 1, iy) - at(ix, iy)) * sx; const bot = at(ix, iy + 1) + (at(ix + 1, iy + 1) - at(ix, iy + 1)) * sx;
-          v += (top + (bot - top) * sy) * wt; ws += wt; wt *= 0.5;
-        }
-        return v / ws;
-      };
-      const T = new Float32Array(mw * mh);
-      const half = Math.min(mw, mh) / 2;
-      for (let j = 0; j < mh; j++) for (let i = 0; i < mw; i++) {
-        const edge = Math.min(1, Math.min(i + 0.5, mw - i - 0.5, j + 0.5, mh - j - 0.5) / half); // 0 at the edge, 1 in the middle
-        T[j * mw + i] = Math.min(1, Math.max(0, edge * 0.7 + noise(i / mw, j / mh) * 0.42 - 0.08));
-      }
-      const layer = () => { const c = document.createElement('canvas'); c.width = mw; c.height = mh; const x = c.getContext('2d'); return { c, x, d: x.createImageData(mw, mh) }; };
-      const cut = layer(); const fire = layer();
-      const EDGE = 0.05; const COOL = 0.2; const CHAR = 0.1;
-      const sparks = [];
-      const t0 = performance.now(); let last = t0; let raf = 0; let over = false; let swapped = false;
-      it.img.style.visibility = 'hidden';
-      it.f.append(cv);
-      it.f.classList.add('burning');
       const end = () => {
         if (over) return;
         over = true;
         cancelAnimationFrame(raf);
-        cv.remove();
+        if (G) burnGive(G);
         it.f.classList.remove('burning');
         it.stop = null; it.fit = null;
         if (into) it.img.style.visibility = '';
       };
       it.stop = end;
-      const frame = (now) => {
-        if (over) return;
-        const dt = Math.min(0.05, (now - last) / 1000); last = now;
-        const t = (now - t0) / BURN_MS;
-        const p = Math.min(1, t);
-        // burning away: the front runs from the edges (T small) inward; burning in is the same film backwards
-        const P = (into ? 1 - p : p) * (1 + COOL + 0.02) - 0.01;
-        const C = cut.d.data; const F = fire.d.data;
-        for (let q = 0, i = 0; i < T.length; i++, q += 4) {
-          const e = P - T[i]; // how long ago the fire reached this spot (below 0: not yet)
-          let a = 0; let r = 0; let gg = 0; let b = 0; let fa = 0;
-          if (e < 0) {
-            a = 255;
-            if (e > -CHAR) { const c = 1 + e / CHAR; r = 12; gg = 8; b = 6; fa = c * c * 215; } // charred just ahead of the fire
-          } else if (e < EDGE) {
-            const c = e / EDGE; r = hot[0] + (glow[0] - hot[0]) * c; gg = hot[1] + (glow[1] - hot[1]) * c; b = hot[2] + (glow[2] - hot[2]) * c; fa = 255;
-            if (p < 1 && sparks.length < 90 && R() < 0.02) {
-              const x = pad + ((i % mw) + R()) / mw * w; const y = pad + (Math.floor(i / mw) + R()) / mh * h;
-              const ox = x - (pad + w / 2); const oy = y - (pad + h / 2); const ol = Math.hypot(ox, oy) || 1; const out = into ? -0.4 : 1;
-              sparks.push({ x, y, vx: (ox / ol) * out * (20 + R() * 70) + (R() - 0.5) * 50, vy: (oy / ol) * out * (20 + R() * 70) + (R() - 0.5) * 50, life: 0.25 + R() * 0.5, age: 0, r: 0.8 + R() * 1.8 });
-            }
-          } else if (e < COOL) {
-            const c = (e - EDGE) / (COOL - EDGE); r = glow[0] * (1 - c * 0.7); gg = glow[1] * (1 - c * 0.7); b = glow[2] * (1 - c * 0.7); fa = 255 * (1 - c) * (1 - c);
-          }
-          C[q] = 0; C[q + 1] = 0; C[q + 2] = 0; C[q + 3] = a;
-          F[q] = r; F[q + 1] = gg; F[q + 2] = b; F[q + 3] = fa;
-        }
-        cut.x.putImageData(cut.d, 0, 0); fire.x.putImageData(fire.d, 0, 0);
-        g.setTransform(k, 0, 0, k, 0, 0);
-        g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.filter = 'none';
-        g.clearRect(0, 0, w + pad * 2, h + pad * 2);
-        g.imageSmoothingEnabled = true;
-        if (!swapped) {
-          g.drawImage(it.img, pad, pad, w, h);
-          g.globalCompositeOperation = 'destination-in'; g.drawImage(cut.c, pad, pad, w, h); // what has not burnt yet
-          g.globalCompositeOperation = 'source-atop'; g.drawImage(fire.c, pad, pad, w, h); // charred ahead of the front
-          g.globalCompositeOperation = 'lighter';
-          g.drawImage(fire.c, pad, pad, w, h);
-          g.filter = `blur(${Math.max(3, Math.round(Math.max(w, h) * 0.018))}px)`; g.globalAlpha = 0.8; g.drawImage(fire.c, pad, pad, w, h); // the glow
-          g.filter = 'none'; g.globalAlpha = 1;
-        }
-        g.globalCompositeOperation = 'lighter';
-        for (let i = sparks.length - 1; i >= 0; i--) {
-          const s = sparks[i]; s.age += dt;
-          if (s.age >= s.life) { sparks.splice(i, 1); continue; }
-          s.x += s.vx * dt; s.y += s.vy * dt; s.vx *= 0.97; s.vy *= 0.97;
-          const c = 1 - s.age / s.life;
-          g.fillStyle = `rgba(${hot[0]}, ${hot[1]}, ${hot[2]}, ${(c * 0.95).toFixed(3)})`;
-          g.beginPath(); g.arc(s.x, s.y, s.r * (0.5 + c * 0.5) * Math.max(1, w / 420), 0, 6.283); g.fill();
-        }
-        if (p >= 1 && !swapped) { swapped = true; if (into) it.img.style.visibility = ''; }
-        if (t >= 1 + BURN_TAIL / BURN_MS || (p >= 1 && !sparks.length)) { end(); if (done) done(); return; }
-        raf = requestAnimationFrame(frame);
-      };
-      raf = requestAnimationFrame(frame);
+      if (into) it.img.style.visibility = 'hidden'; // (until its fire is ready)
+      it.f.classList.add('burning');
+      const fail = (err) => { burnFailed = true; console.warn(`handout burn: ${err && err.message ? err.message : err}`); end(); fadeHandout(it, into, done); };
+      size();
+      // the picture as a texture, no bigger than it is drawn
+      const nat = { w: it.img.naturalWidth, h: it.img.naturalHeight };
+      const want = Math.min(1, (Math.max(cw, ch) * 1.0) / Math.max(nat.w, nat.h), 4096 / Math.max(nat.w, nat.h));
+      const opts = { premultiplyAlpha: 'premultiply' };
+      if (want < 1) Object.assign(opts, { resizeWidth: Math.max(1, Math.round(nat.w * want)), resizeHeight: Math.max(1, Math.round(nat.h * want)), resizeQuality: 'high' });
+      createImageBitmap(it.img, opts).then((bmp) => {
+        if (over) { bmp.close(); return; }
+        try {
+          G = burnTake();
+          if (!G) throw new Error('no WebGL');
+          cv = G.cv;
+          const { gl, u } = G;
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bmp);
+          bmp.close();
+          gl.uniform3f(u.uHot, hot[0], hot[1], hot[2]); gl.uniform3f(u.uGlow, glow[0], glow[1], glow[2]);
+          gl.uniform1f(u.uSeed, Math.random() * 10);
+          size();
+          it.fit = size;
+          it.f.append(cv);
+          let t0 = 0; let first = true;
+          const frame = (now) => {
+            if (over) return;
+            if (!t0) t0 = now; // (the clock starts with the first frame drawn)
+            const hold = window.__burnHold; // (the self-test stops the fire at one moment to look at it)
+            const t = typeof hold === 'number' ? hold : Math.min(1, (now - t0) / BURN_MS);
+            size();
+            gl.viewport(0, 0, cw, ch);
+            gl.uniform2f(u.uSize, cw, ch); gl.uniform1f(u.uPad, padPx); gl.uniform1f(u.uTime, (now - t0) / 1000);
+            gl.uniform1f(u.uP, -0.2 + (into ? 1 - t : t) * 1.65); // burning away: the front runs inward; burning in: the same film backwards
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            if (first) { first = false; it.img.style.visibility = 'hidden'; } // (the fire has taken over the picture)
+            if (t >= 1 && typeof hold !== 'number') { end(); if (done) done(); return; }
+            raf = requestAnimationFrame(frame);
+          };
+          raf = requestAnimationFrame(frame);
+        } catch (err) { fail(err); }
+      }).catch(fail);
     }
 
     // ---------- break ----------
@@ -643,7 +702,7 @@ const TableOverlays = (() => {
           ink: !!sides[0].ink.querySelector('.ink'), drops: sides[0].ink.querySelectorAll('.drop').length, opaque: sides[0].cast.querySelectorAll('.talk-npc.opaque').length,
           mirrored: sides[0].cast.querySelectorAll('.talk-npc img[style*="scaleX(-1)"]').length,
         } : null,
-        handout: handout ? (() => { const all = [...hItems.values()].filter((it) => !it.leaving); return { name: handout.name, count: all.length, faces: all.filter((it) => vis(it.f)).length, loaded: !!all.length && all[0].img.complete && all[0].img.naturalWidth > 0, burning: [...hItems.values()].filter((it) => it.stop).length, style: burnStyle }; })() : null,
+        handout: handout ? (() => { const all = [...hItems.values()].filter((it) => !it.leaving); return { name: handout.name, count: all.length, faces: all.filter((it) => vis(it.f)).length, loaded: !!all.length && all[0].img.complete && all[0].img.naturalWidth > 0, burning: [...hItems.values()].filter((it) => it.stop).length, style: burnStyle, fire: BURN[burnStyle] || BURN.ink, gl: !burnFailed && burnOn, compiled: burnMs, ready: burnPool.length }; })() : null,
         brk: brk ? { text: dial.el.querySelector('.tt-time').textContent, faces: [...dial.el.querySelectorAll('.tt-face')].filter(vis).length,
           label: dial.el.querySelector('.tt-label').textContent, note: brkNotes[0].textContent, bg: breakEl.dataset.bg, pic: !!brkPic.firstChild } : null,
         title: title ? { title: ttlFaces[0].name.textContent, sub: ttlFaces[0].sub.textContent, faces: ttlFaces.filter((f) => vis(f.f)).length, pic: !!ttlBg.firstChild, shown: vis(titleEl) } : null,
@@ -653,7 +712,7 @@ const TableOverlays = (() => {
         ...stats,
       };
     }
-    return { set, debug, tryTalk, tryInit, moveHandout };
+    return { set, debug, tryTalk, tryInit, moveHandout, burn: (on) => { burnOn = !!on; if (burnOn) burnWarm(1); } };
   }
 
   return { mount, inkBand };

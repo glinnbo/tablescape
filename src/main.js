@@ -224,7 +224,9 @@ const unit = (v, d) => (Number.isFinite(Number(v)) ? Math.min(1, Math.max(0, Num
 // the first time is tossed into the middle, a little off and tilted, like a paper thrown on a table; from then on it
 // remembers how it lay (settings.handoutLayout, by its place in the library; v: 2 marks this kind of layout, older
 // ones are tossed anew). Up to HO_MAX lie there at once; the one touched last lies on top (the list's order).
-const HO_MAX = 10; const HO_SIZE = [0.12, 1.8]; const HO_SIZE_NEW = 0.7;
+const HO_MAX = 10; const HO_SIZE = [0.12, 6]; const HO_SIZE_NEW = 0.7; // (Beta 3.7: up to 6: far bigger than the TV, to look closely at a part of it)
+// its middle may lie outside the TV (a big one moved so that one corner of it shows)
+const hoPos = (v, d) => (Number.isFinite(Number(v)) ? Math.min(4, Math.max(-3, Number(v))) : d);
 const hoSize = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.min(HO_SIZE[1], Math.max(HO_SIZE[0], Number(v))) : d);
 const hoRot = (v) => (Number.isFinite(Number(v)) ? Math.round(((((Number(v) % 360) + 360) % 360)) * 10) / 10 % 360 : 0);
 function hoStored(p) { const L = (settings.handoutLayout || {})[hoKey(p)]; return L && L.v === 2 && Number.isFinite(Number(L.x)) ? L : null; }
@@ -234,11 +236,11 @@ function hoToss() {
 }
 function hoLayout(p) {
   const L = hoStored(p) || { x: 0.5, y: 0.5, size: HO_SIZE_NEW, rot: 0 };
-  return { x: unit(L.x, 0.5), y: unit(L.y, 0.5), size: hoSize(L.size, HO_SIZE_NEW), rot: hoRot(L.rot) };
+  return { x: hoPos(L.x, 0.5), y: hoPos(L.y, 0.5), size: hoSize(L.size, HO_SIZE_NEW), rot: hoRot(L.rot) };
 }
 function hoKeep(p, lay, save = true) {
   const all = settings.handoutLayout || {};
-  all[hoKey(p)] = { v: 2, x: unit(lay.x, 0.5), y: unit(lay.y, 0.5), size: hoSize(lay.size, HO_SIZE_NEW), rot: hoRot(lay.rot) };
+  all[hoKey(p)] = { v: 2, x: hoPos(lay.x, 0.5), y: hoPos(lay.y, 0.5), size: hoSize(lay.size, HO_SIZE_NEW), rot: hoRot(lay.rot) };
   const keys = Object.keys(all);
   if (keys.length > 400) for (const old of keys.slice(0, keys.length - 400)) delete all[old];
   settings.handoutLayout = all;
@@ -256,7 +258,7 @@ const hoShares = () => (store.cur ? (store.cur.meta.handoutShare || {}) : {});
 function hoShareList() {
   return Object.entries(hoShares()).map(([k, v]) => { const p = library.resolveRef({ rel: k, path: k }); return { key: k, path: p, name: p ? path.parse(p).name : k, to: v.to, sent: v.sent || 0 }; });
 }
-// what one player's phone may look at: marked for everyone or for this player's character, and shown or sent already
+// what one player's phone may look at: marked for everyone or for this player's character
 function handoutsFor(dev) {
   const me = dev && dev.char;
   return hoShareList().filter((x) => x.sent && x.path && fs.existsSync(x.path) && (x.to === 'all' || (me && Array.isArray(x.to) && x.to.includes(me))))
@@ -2997,7 +2999,7 @@ function handle(type, p = {}) {
       if (patch.reset) { const all = settings.handoutLayout || {}; delete all[hoKey(p.path)]; settings.handoutLayout = all; if (hoShown(p.path)) hoKeep(p.path, hoToss()); else saveSettings(); broadcast(); return { ok: true, layout: hoLayout(p.path) }; }
       const cur = hoLayout(p.path);
       const next = { ...cur };
-      for (const f of ['x', 'y']) if (Number.isFinite(Number(patch[f])) && patch[f] !== null) next[f] = unit(patch[f], cur[f]);
+      for (const f of ['x', 'y']) if (Number.isFinite(Number(patch[f])) && patch[f] !== null) next[f] = hoPos(patch[f], cur[f]);
       if ('size' in patch) next.size = hoSize(patch.size, cur.size);
       if ('rot' in patch) next.rot = hoRot(patch.rot);
       hoKeep(p.path, next, !p.live);
@@ -3050,13 +3052,13 @@ function handle(type, p = {}) {
       broadcast();
       return { ok: true };
     }
-    case 'handout.share': { // to: 'all', [player names] or nothing (taken back); send: at once, not only when it is shown
+    case 'handout.share': { // to: 'all', [player names] or nothing (taken back). Beta 3.7: it is on their phones at once, shown on the table or not
       if (!store.cur || !p.path) return { ok: false };
       const k = hoKey(p.path);
       const all = { ...(store.cur.meta.handoutShare || {}) };
       const to = p.to === 'all' ? 'all' : Array.isArray(p.to) ? [...new Set(p.to.map(String))].filter((n) => (store.cur.meta.party || []).includes(n)) : null;
       if (!to || (Array.isArray(to) && !to.length)) delete all[k];
-      else all[k] = { to, sent: p.send || hoShown(p.path) ? Date.now() : (all[k] && all[k].sent) || 0 };
+      else all[k] = { to, sent: (all[k] && all[k].sent) || Date.now() };
       store.cur.meta.handoutShare = all;
       store.touch();
       broadcast();
