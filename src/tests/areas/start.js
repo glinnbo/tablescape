@@ -29,6 +29,21 @@ module.exports = (area) => {
     t.state.update = u; t.broadcast();
     return t.until(async () => { const x = await t.text('.upd'); return x && want.test(x) && x; }, 3000, `the update box to say ${want}`);
   };
+  // Beta 3.9: Check for updates stays in the line whatever it says; the offer of a new version leads to GitHub too
+  const updBtns = (t) => t.g(`[...document.querySelectorAll('.upd .btn')].map((b) => ({ text: b.textContent.trim(), off: b.disabled, link: b.dataset.link || null }))`);
+  area.quick('Check for updates is always in the line; a new version can be looked at on GitHub first (Beta 3.9)', async (t) => {
+    const seen = {};
+    const states = { idle: [{ status: 'idle' }, /Check for updates/], latest: [{ status: 'latest' }, /Check for updates/], checking: [{ status: 'checking' }, /Looking/],
+      available: [{ status: 'available', version: '9.9.9', label: 'Prototype 99', notes: null }, /is available/], quiet: [{ status: 'available', version: '9.9.9', label: 'Prototype 99', notes: null, quiet: true }, /Prototype 99 available/],
+      downloading: [{ status: 'downloading', version: '9.9.9', label: 'Prototype 99', percent: 10 }, /10 %/], ready: [{ status: 'ready', version: '9.9.9', label: 'Prototype 99' }, /is ready/], error: [{ status: 'error', error: 'no network' }, /Couldn't check/] };
+    for (const [name, [u, want]] of Object.entries(states)) { await upd(t, u, want); seen[name] = await updBtns(t); }
+    const check = (name) => seen[name].find((b) => b.text === 'Check for updates');
+    t.eq(Object.keys(states).filter((n) => !check(n)), [], 'the states without Check for updates', seen);
+    t.eq(Object.keys(states).filter((n) => check(n) && check(n).off), ['checking', 'downloading', 'ready'], 'where it can\'t be pressed (nothing to look for then)');
+    t.eq(Object.keys(states).filter((n) => seen[n].some((b) => b.text === 'Check on GitHub' && b.link === 'release')), ['available', 'quiet'], 'where Check on GitHub is offered');
+    t.eq(await t.g(`window.ts.app('link.open', { to: 'release' })`), { ok: true, url: 'https://github.com/glinnbo/tablescape/releases/latest' }, 'where it leads');
+    t.state.update = { status: 'idle' }; t.broadcast();
+  });
   area.quick('a new version asks first: Install now? Yes / Not now', async (t) => {
     const text = await upd(t, { status: 'available', version: '9.9.9', label: 'Prototype 99', notes: null }, /Prototype 99 is available\. Install now\?/);
     t.ok(/Yes/.test(text) && /Not now/.test(text), 'both answers are offered', text);

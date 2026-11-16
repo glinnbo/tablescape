@@ -4614,7 +4614,7 @@ function libraryRootIn(folder) {
 // installed on Restart now or when Tablescape closes.
 const UPDATE_REPO = { owner: 'glinnbo', repo: 'tablescape' };
 let firstRun = false; // Beta 3.1: this start set Tablescape up for the first time (new settings, demo campaign)
-const LINKS = { discord: 'https://discord.gg/T99DRNKaSM', kofi: 'https://ko-fi.com/tablescape', code: 'https://github.com/glinnbo/tablescape' }; // (Beta 3.0)
+const LINKS = { discord: 'https://discord.gg/T99DRNKaSM', kofi: 'https://ko-fi.com/tablescape', code: 'https://github.com/glinnbo/tablescape', release: 'https://github.com/glinnbo/tablescape/releases/latest' }; // (Beta 3.0; 3.9: the newest version's page, from the offer of an update)
 let Updater = null;
 const updateLabel = (v) => { const m = /-proto\.(\d+)$/.exec(String(v || '')); return m ? `Prototype ${m[1]}` : String(v || ''); };
 const notesOf = (n) => (Array.isArray(n) ? n.map((x) => (x && x.note) || '').join('\n') : String(n || '')).slice(0, 4000);

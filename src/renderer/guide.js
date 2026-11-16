@@ -23,6 +23,12 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.9', [
+      'Turning the map with everything on it: painted effects (water, mist, ice, webs, magical darkness, Sway and the others) away from the middle now turn with it. Before, they kept their old outline and showed nothing, or only a slice, at their new place',
+      'Start screen: Check for updates is always there, also while a new version is on offer',
+      'A new version on offer: Check on GitHub opens its page (what\'s new, the installer, the code) before you install it',
+      'Under the hood: the engine Tablescape runs on (Electron) is up to date again, with its latest security fixes. From now on a release is checked for known security problems in what it ships before it goes out',
+    ]],
     ['Beta 3.8', [
       'Players\' phones no longer show a handout\'s file name (it could spoil things): a handout shows without any name, the list shows the pictures only, and the name is not sent to the phone at all',
       'Handout table: Ctrl + mouse wheel turns the picked handout (Shift + wheel still does too)',

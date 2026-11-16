@@ -3203,7 +3203,8 @@ button.pc-pill.cond:hover { border-color: var(--danger); }
 /* ---------- Prototype 21: updates next to the version (start screen, a campaign's page) ---------- */
 .upd-slot { display: flex; align-items: center; flex-basis: 100%; min-height: 34px; font: 400 13px/1.2 var(--ui, system-ui, sans-serif); letter-spacing: 0; }
 .upd-slot:empty { display: none; } /* (Beta 3.0: a row under the title, only while an update has something to say) */
-.upd { display: inline-flex; align-items: center; gap: 9px; color: var(--muted); white-space: nowrap; }
+.upd { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; color: var(--muted); white-space: nowrap; } /* (Beta 3.9: it may wrap: the line is longer with Check for updates always in it) */
+.upd-check.busy .i { animation: upd-spin 1s linear infinite; }
 .upd .btn { font-size: 12.5px; }
 .upd-btn .i, .upd-state .i { width: 15px; height: 15px; }
 .upd-state { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; }

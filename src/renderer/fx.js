@@ -436,7 +436,24 @@ const FX = (() => {
   // ---------- painted areas: the area itself as a mask, and textures ----------
   // The painted area (round strokes) as a canvas in device pixels, soft-edged; cached per area and view.
   const maskCache = new Map();
-  function strokeSig(fx) { let n = 0; for (const st of fx.strokes || []) n += st.pts.length; return `${(fx.strokes || []).length}:${n}`; }
+  // what an area's cached pictures depend on: how many strokes and points it has, and (Beta 3.9) where they lie.
+  // Before, only the numbers counted: a map turned with everything on it moved the points without changing their
+  // number, so an area away from the middle kept its old cut-out and showed nothing (or a slice) at its new place.
+  // The places are summed up once per list of strokes (a new list comes with every change), not every frame.
+  const strokeGeo = new WeakMap();
+  function strokeSig(fx) {
+    const S = fx.strokes || [];
+    let n = 0; for (const st of S) n += st.pts.length;
+    const base = `${S.length}:${n}`;
+    if (!n) return base;
+    let e = strokeGeo.get(S);
+    if (!e || e.base !== base) {
+      let hsh = 0;
+      for (const st of S) { const q = st.pts; hsh = (hsh * 31 + Math.round((st.r || 0) * 1000)) | 0; for (let i = 0; i < q.length; i++) hsh = (hsh * 31 + Math.round(q[i] * 1000)) | 0; }
+      e = { base, hsh }; strokeGeo.set(S, e);
+    }
+    return `${base}:${e.hsh}`;
+  }
   function drawStrokes(g, strokes, grow = 0, minR = 0) {
     for (const st of strokes) {
       const r = Math.max(minR, st.r + grow);

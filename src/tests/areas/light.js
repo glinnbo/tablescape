@@ -46,6 +46,32 @@ module.exports = (area) => {
     t.ok(Math.hypot(b.x - a.x, b.y - a.y) > 0.2 * k, 'the effect moved', [a.x, a.y, b.x, b.y, r]);
   });
 
+  // Beta 3.9: a map turned with everything on it. A painted area away from the middle kept its old cut-out (its
+  // points moved, their number did not), so it showed nothing at its new place.
+  area.quick('painted areas follow when the map is turned, also away from the middle (Beta 3.9)', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    const geo = await t.g(`(() => { const v = Play.view(); const p = v.bgPlacement(); const r = v.tableRectInMap(); return { p, r }; })()`);
+    const piv = { x: geo.r.x + geo.r.w / 2, y: geo.r.y + geo.r.h / 2 };
+    const cen = { x: geo.p.x + geo.p.w / 2, y: geo.p.y + geo.p.h / 2 };
+    const rot0 = m.bg.rotation || 0;
+    const a = { x: piv.x + 5 * k, y: piv.y };
+    const areas = { water: 'atmo', mist: 'atmo', ice: 'atmo', darkness: 'veil', sway: 'sway' };
+    for (const preset of Object.keys(areas)) t.handle('fx.stroke', { mapId: own, id: `turn-${preset}`, preset, sid: 's1', r: 1.2 * k, pts: [a.x - 0.5 * k, a.y, a.x + 0.5 * k, a.y] });
+    const drawn = (x, y) => t.t(`(() => { const o = {}; for (const [p, L] of ${JSON.stringify(Object.entries(areas))}) { const q = window.__table.probeMap(L, ${x}, ${y}); o[L] = Math.max(o[L] || 0, q ? q[3] : 0); } return o; })()`);
+    const all = (d) => d && Object.values(d).every((v) => v > 0);
+    try {
+      await t.until(async () => all(await drawn(a.x, a.y)), 6000, 'the areas on the TV');
+      t.handle('bg.turn', { mapId: own, to: rot0 + 90, mode: 'all', pivot: piv, center: cen });
+      const s = M(t).fx.find((f) => f.id === 'turn-water').strokes[0].pts;
+      const b = { x: (s[0] + s[2]) / 2, y: (s[1] + s[3]) / 2 };
+      t.near(b.x, piv.x, 0.01, 'a quarter turn round the middle of the table: the area lies below it now'); t.near(b.y, piv.y + 5 * k, 0.01, 'five squares below');
+      await t.until(async () => all(await drawn(b.x, b.y)), 6000, 'every area to be drawn at its new place').catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify(await drawn(b.x, b.y))}`); });
+      t.eq(Object.values(await drawn(a.x, a.y)).filter((v) => v > 0).length, 0, 'layers that still show something at the old place');
+    } finally {
+      t.handle('bg.turn', { mapId: own, to: rot0, mode: 'all', pivot: piv, center: cen });
+    }
+  });
+
   area.quick('Sway moves the map picture where it is painted, and nothing else (Beta 3.1)', async (t) => {
     const m = await clean(t); const k = m.grid.size;
     t.handle('fx.stroke', { mapId: own, id: 'sway-test', preset: 'sway', sid: 's1', r: 2 * k, pts: [6 * k, 6 * k, 10 * k, 6.5 * k, 14 * k, 6 * k] });

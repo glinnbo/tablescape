@@ -69,12 +69,19 @@ const App = (() => {
       clearTimeout(updTimer); updTimer = setTimeout(() => { if (updEl) updEl.dataset.sig = ''; renderUpdate(); }, 5200);
     };
     const maid = (src, cls = '') => h('img', { class: `upd-maid ${cls}`, src, alt: '' });
-    if (st === 'checking') { el.replaceChildren(h('span', { class: 'upd-state busy' }, iconEl('refresh'), 'Looking …')); return; }
-    if (okNow) { el.replaceChildren(h('span', { class: 'upd-state ok' }, iconEl('check'), 'Up to date')); return; }
+    // Beta 3.9: Check for updates is always there, whatever else the line says (before, it gave way to the offer of a
+    // new version, the download and the rest). While a check or a download runs, and with an update waiting to be
+    // installed, it can't be pressed: there is nothing to look for then.
+    const busy = st === 'checking' || st === 'downloading' || st === 'ready';
+    const checkBtn = h('button', { class: `btn small ghost upd-btn upd-check${st === 'checking' ? ' busy' : ''}`, 'data-tip': 'Look for a new version of Tablescape', onclick: check }, iconEl('refresh'), 'Check for updates');
+    checkBtn.disabled = busy;
+    const show = (...rest) => el.replaceChildren(checkBtn, ...rest);
+    if (st === 'checking') { show(h('span', { class: 'upd-state' }, 'Looking …')); return; }
+    if (okNow) { show(h('span', { class: 'upd-state ok' }, iconEl('check'), 'Up to date')); return; }
     if (st === 'downloading') {
       const k = Math.min(1, Math.max(0, (u.percent || 0) / 100));
       const track = h('span', { class: 'anim-track upd-track', style: `--k:${k.toFixed(3)}` }, h('span', { class: 'anim-fill' }), maid('maid-run.webp', 'anim-maid'));
-      el.replaceChildren(track, h('span', { class: 'upd-text' }, h('b', {}, u.label || u.version), ` · ${u.percent || 0} %`));
+      show(track, h('span', { class: 'upd-text' }, h('b', {}, u.label || u.version), ` · ${u.percent || 0} %`));
       return;
     }
     const name = h('b', {}, u.label || u.version);
@@ -82,31 +89,29 @@ const App = (() => {
     // Prototype 26: a new version asks first; "Not now" leaves a quiet button
     if (st === 'available') {
       const get = async () => { const r = await ts.app('update.download'); if (!r || !r.ok) UI.toast('The update could not be started', { kind: 'error' }); };
-      if (u.quiet) { el.replaceChildren(h('button', { class: 'btn small ghost upd-btn', 'data-tip': 'Download and install it', onclick: get }, iconEl('download'), `${u.label || u.version} available`), notes); return; }
-      el.replaceChildren(maid('maid.webp'), h('span', { class: 'upd-text' }, name, ' is available. Install now?'),
+      // Beta 3.9: the new version on GitHub (its notes, the installer, the code), to look at it before it is installed
+      const onHub = h('button', { class: 'btn small ghost upd-hub', 'data-link': 'release', 'data-tip': 'The new version on GitHub: what\'s new, the installer, the code', onclick: () => ts.app('link.open', { to: 'release' }) }, iconEl('brand-github'), 'Check on GitHub');
+      if (u.quiet) { show(h('button', { class: 'btn small ghost upd-btn', 'data-tip': 'Download and install it', onclick: get }, iconEl('download'), `${u.label || u.version} available`), onHub, notes); return; }
+      show(maid('maid.webp'), h('span', { class: 'upd-text' }, name, ' is available. Install now?'),
         h('button', { class: 'btn small primary', onclick: get }, 'Yes'),
-        h('button', { class: 'btn small ghost', onclick: () => ts.app('update.later') }, 'Not now'), notes);
+        h('button', { class: 'btn small ghost', onclick: () => ts.app('update.later') }, 'Not now'), onHub, notes);
       return;
     }
     if (st === 'ready') {
       const restart = async () => { const r = await ts.app('update.install'); if (!r || !r.ok) UI.toast('The update is not ready yet', { kind: 'error' }); };
       const tip = 'Installs the update and opens Tablescape again';
       if (u.later) {
-        el.replaceChildren(maid('maid.webp'), h('span', { class: 'upd-text' }, name, ' installs when you close Tablescape'),
+        show(maid('maid.webp'), h('span', { class: 'upd-text' }, name, ' installs when you close Tablescape'),
           h('button', { class: 'btn small ghost', 'data-tip': tip, onclick: restart }, iconEl('refresh'), 'Restart now'), notes);
         return;
       }
-      el.replaceChildren(h('span', { class: 'upd-cheer' }, maid('maid-success.webp')), h('span', { class: 'upd-text' }, name, ' is ready. Restart now?'),
+      show(h('span', { class: 'upd-cheer' }, maid('maid-success.webp')), h('span', { class: 'upd-text' }, name, ' is ready. Restart now?'),
         h('button', { class: 'btn small primary', 'data-tip': tip, onclick: restart }, iconEl('refresh'), 'Restart now'),
         h('button', { class: 'btn small ghost', 'data-tip': 'It installs when you close Tablescape', onclick: () => ts.app('update.later') }, 'Later'), notes);
       return;
     }
-    if (st === 'error') {
-      el.replaceChildren(maid('maid-worried.webp', 'worried'), h('span', { class: 'upd-text', 'data-tip': u.error || '' }, 'Couldn\'t check for updates'),
-        h('button', { class: 'btn small ghost', onclick: check }, 'Try again'));
-      return;
-    }
-    el.replaceChildren(h('button', { class: 'btn small ghost upd-btn', 'data-tip': 'Look for a new version of Tablescape', onclick: check }, iconEl('refresh'), 'Check for updates'));
+    if (st === 'error') { show(maid('maid-worried.webp', 'worried'), h('span', { class: 'upd-text', 'data-tip': u.error || '' }, 'Couldn\'t check for updates')); return; }
+    show();
   }
   // the first start after an update: the maid gives a thumbs up; the changelog if you like
   function updateDone() {
