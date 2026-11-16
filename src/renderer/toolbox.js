@@ -495,7 +495,7 @@ const Toolbox = (() => {
       tips: ['A picture of the TV: drag a handout to where it should lie; the TV follows as you drag.',
         'Pull a corner to make it bigger or smaller, far bigger than the TV if you like: drag it so the part you want shows. The picture here is cut off where the TV ends.',
         'Turn it with the knob to any angle; the two buttons below turn it a clean quarter.',
-        'Mouse wheel: bigger or smaller around the pointer. Shift + wheel: turn. Delete: put it away.',
+        'Mouse wheel: bigger or smaller around the pointer. Ctrl + wheel (or Shift + wheel): turn the picked handout. Delete: put it away.',
         'The handout you touch lies on top. Up to 10 at once.',
         'Spreads keeps everything that lies there, each in its place, under a name: one click brings it back.',
         'Drag the corner of this window to make the picture bigger.'],
@@ -619,6 +619,27 @@ const Toolbox = (() => {
         t.addEventListener('pointerup', finish);
         t.addEventListener('pointercancel', finish);
       }
+      // the wheel: bigger or smaller, around the spot under the pointer (to look closely at a part); with Ctrl or
+      // Shift: turn (Beta 3.8: Ctrl too, and with one of them held the picked handout turns wherever the pointer is)
+      function wheel(it, e) {
+        e.preventDefault(); e.stopPropagation();
+        const d = it.d;
+        const up = e.deltaY < 0 || e.deltaX < 0;
+        if (e.ctrlKey || e.shiftKey) d.rot = (((d.rot || 0) + (up ? -5 : 5)) % 360 + 360) % 360;
+        else {
+          const next = clamp(d.size * (up ? 1.08 : 1 / 1.08), SIZE[0], SIZE[1]); const k = next / d.size;
+          const r = stage.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width; const py = (e.clientY - r.top) / r.height;
+          d.x = px + (d.x - px) * k; d.y = py + (d.y - py) * k; d.size = next;
+        }
+        keepIn(it);
+        select(d.path);
+        it.wheel = true;
+        placeItem(it); drawBar();
+        live(d.path, lay(d));
+        clearTimeout(it.wheelT);
+        it.wheelT = setTimeout(() => { it.wheel = false; commit(d.path, lay(d)); }, 260);
+      }
+      stage.addEventListener('wheel', (e) => { const it = ui.hoSel ? items.get(ui.hoSel) : null; if (it && (e.ctrlKey || e.shiftKey)) wheel(it, e); }, { passive: false });
       function make(d) {
         const img = h('img', { src: d.url, alt: '', draggable: 'false' });
         const el = h('div', { class: 'hot-item', dataset: { path: d.path }, 'data-tip': d.name }, img);
@@ -634,25 +655,7 @@ const Toolbox = (() => {
         el.addEventListener('pointermove', (e) => { if (act && act.it === it && act.holder === el) drag(e); });
         el.addEventListener('pointerup', finish);
         el.addEventListener('pointercancel', finish);
-        // the wheel: bigger or smaller, around the spot under the pointer (to look closely at a part); with Shift: turn
-        let wheelT = 0;
-        el.addEventListener('wheel', (e) => {
-          e.preventDefault();
-          const up = e.deltaY < 0 || e.deltaX < 0;
-          if (e.shiftKey) it.d.rot = (((it.d.rot || 0) + (up ? -5 : 5)) % 360 + 360) % 360;
-          else {
-            const next = clamp(it.d.size * (up ? 1.08 : 1 / 1.08), SIZE[0], SIZE[1]); const k = next / it.d.size;
-            const r = stage.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width; const py = (e.clientY - r.top) / r.height;
-            it.d.x = px + (it.d.x - px) * k; it.d.y = py + (it.d.y - py) * k; it.d.size = next;
-          }
-          keepIn(it);
-          select(d.path);
-          it.wheel = true;
-          placeItem(it); drawBar();
-          live(d.path, lay(it.d));
-          clearTimeout(wheelT);
-          wheelT = setTimeout(() => { it.wheel = false; commit(d.path, lay(it.d)); }, 260);
-        }, { passive: false });
+        el.addEventListener('wheel', (e) => wheel(it, e), { passive: false });
         return it;
       }
       function draw() {

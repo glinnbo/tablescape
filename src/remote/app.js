@@ -425,10 +425,10 @@
     // move, a double tap zooms in at that spot and out again; it glides on a little when let go and never leaves the
     // screen. (z: 1 = the whole of it fits the screen.)
     function showHandout(x) {
-      const img = h('img', { src: faceSrc(x.url), alt: x.name, draggable: false });
+      const img = h('img', { src: faceSrc(x.url), alt: 'Handout', draggable: false }); // (Beta 3.8: no name: the phone never gets one)
       const stage = h('div', { class: 'ho-stage' }, img);
-      const view = h('div', { class: 'ho-view', role: 'dialog', 'aria-label': x.name },
-        stage, h('div', { class: 'ho-cap' }, h('span', {}, x.name), h('button', { class: 'ho-x', 'aria-label': 'Close', onclick: (e) => { e.stopPropagation(); cancelAnimationFrame(glide); view.remove(); } }, ic('x'))));
+      const view = h('div', { class: 'ho-view', role: 'dialog', 'aria-label': 'Handout' },
+        stage, h('div', { class: 'ho-cap' }, h('span', {}), h('button', { class: 'ho-x', 'aria-label': 'Close', onclick: (e) => { e.stopPropagation(); cancelAnimationFrame(glide); view.remove(); } }, ic('x'))));
       let z = 1; let tx = 0; let ty = 0; // zoom and shift of the picture (from the middle of the screen)
       let glide = 0;
       const pts = new Map(); // the fingers down: id → { x, y }
@@ -540,18 +540,18 @@
       if (hos.length === 1) { showHandout(hos[0]); return; }
       const sheet = h('div', { class: 'ho-list', role: 'dialog', 'aria-label': 'Handouts', onclick: (e) => { if (e.target === sheet) sheet.remove(); } },
         h('div', { class: 'ho-sheet' }, h('h2', {}, 'Handouts'),
-          ...hos.map((x) => h('button', { class: 'ho-row', onclick: () => { sheet.remove(); showHandout(x); } },
-            h('img', { src: faceSrc(x.url), alt: '', draggable: false }), h('span', {}, x.name))),
+          h('div', { class: 'ho-grid' }, ...hos.map((x, i) => h('button', { class: 'ho-tile', 'aria-label': `Handout ${i + 1}`, onclick: () => { sheet.remove(); showHandout(x); } },
+            h('img', { src: faceSrc(x.url), alt: '', draggable: false })))),
           h('button', { class: 'pbtn', onclick: () => sheet.remove() }, 'Close')));
       for (const old of document.querySelectorAll('.ho-list')) old.remove();
       document.body.append(sheet);
     }
     function drawHandouts(list) {
       list = Array.isArray(list) ? list : [];
-      const names = list.map((x) => x.name);
+      const keys = list.map((x) => x.url);
       // a new one since the last state: a word about it (not for what was there when the phone joined)
-      if (hoKnown) { const fresh = list.find((x) => !hoKnown.has(x.name)); if (fresh) toast(`New handout: ${fresh.name}`); }
-      hoKnown = new Set(names);
+      if (hoKnown) { if (list.some((x) => !hoKnown.has(x.url))) toast('A new handout from the DM'); }
+      hoKnown = new Set(keys);
       hos = list;
       hoBtn.hidden = !list.length;
       hoBtn.lastChild.textContent = list.length > 1 ? String(list.length) : '';

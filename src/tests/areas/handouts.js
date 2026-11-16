@@ -274,6 +274,18 @@ module.exports = (area) => {
     await t.until(() => lay(t, A).size > 0.38, 3000, 'the wheel to make it bigger', lay(t, A));
     for (let i = 0; i < 2; i++) { gm.sendInputEvent({ type: 'mouseWheel', x: Math.round(it.cx), y: Math.round(it.cy), deltaX: 0, deltaY: 100, modifiers: ['shift'] }); await t.sleep(30); }
     await t.until(() => lay(t, A).rot !== 90, 3000, 'Shift + wheel to turn it', lay(t, A));
+    // Beta 3.8: Ctrl + wheel turns the picked handout too, also with the pointer beside it
+    await t.sleep(400);
+    const before = lay(t, A).rot;
+    const st = await t.rect(`${HT} .hot-stage`);
+    const off = { x: Math.round(st.x + 12), y: Math.round(st.y + 12) };
+    gm.sendInputEvent({ type: 'mouseMove', x: off.x, y: off.y });
+    for (let i = 0; i < 3; i++) { gm.sendInputEvent({ type: 'mouseWheel', x: off.x, y: off.y, deltaX: 0, deltaY: -100, modifiers: ['control'] }); await t.sleep(30); }
+    await t.until(() => Math.abs((((lay(t, A).rot - before) % 360) + 540) % 360 - 180) === 15, 3000, 'Ctrl + wheel to turn it three steps of 5 degrees', [before, lay(t, A)]);
+    const size = lay(t, A).size;
+    for (let i = 0; i < 2; i++) { gm.sendInputEvent({ type: 'mouseWheel', x: off.x, y: off.y, deltaX: 0, deltaY: -100 }); await t.sleep(30); }
+    await t.sleep(400);
+    t.eq(lay(t, A).size, size, 'beside the handout the plain wheel leaves it alone');
     await away(t); await closeTable(t);
   });
 

@@ -262,7 +262,9 @@ function hoShareList() {
 function handoutsFor(dev) {
   const me = dev && dev.char;
   return hoShareList().filter((x) => x.sent && x.path && fs.existsSync(x.path) && (x.to === 'all' || (me && Array.isArray(x.to) && x.to.includes(me))))
-    .sort((a, b) => b.sent - a.sent).slice(0, 24).map((x) => ({ name: x.name, url: Remote ? Remote.faceUrl(x.path) : null }));
+    // (Beta 3.8: only the picture goes to the phone, under an address that says nothing; never the file's name, which
+    // is the DM's own label and often a spoiler)
+    .sort((a, b) => b.sent - a.sent).slice(0, 24).map((x) => ({ url: Remote ? Remote.faceUrl(x.path) : null }));
 }
 function handoutShown(m) {
   state.handoutSeen = [{ path: m.path, name: m.name, kind: library.kindOf(m.path) || 'image' }, ...(state.handoutSeen || []).filter((x) => x.path !== m.path)].slice(0, 12);

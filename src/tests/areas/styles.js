@@ -21,7 +21,7 @@ module.exports = (area) => {
   const run = async (t, id) => {
     const base = STYLES[id];
     await t.g(`window.ts.settings({ tableStyle: ${JSON.stringify(id)}, looks: { map: 'style', talk: 'style', init: 'style', round: 'style' } })`);
-    const ds = await t.until(async () => { const d = await t.t(`Object.assign({}, document.body.dataset)`); return d.lookInit === base && d; }, 5000, `the style ${id} to reach the TV`);
+    const ds = await t.until(async () => { const d = await t.t(`Object.assign({}, document.body.dataset)`); return d.lookInit === base && (d.vInit || '') === (id === base ? '' : id) && d; }, 5000, `the style ${id} to reach the TV`); // (the variant too: a variant follows its base style here, whose look is on the TV already)
     t.eq([ds.lookInit, ds.lookRound], [base, base], 'the look of the turn order and the round');
     t.eq([ds.vMap || '', ds.vTalk || '', ds.vInit || ''], id === base ? ['', '', ''] : [id, id, id], 'the variant on the TV');
     // a map change in this style: it covers the table, the new map is there, and it clears again

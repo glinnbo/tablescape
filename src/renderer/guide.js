@@ -23,6 +23,10 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.8', [
+      'Players\' phones no longer show a handout\'s file name (it could spoil things): a handout shows without any name, the list shows the pictures only, and the name is not sent to the phone at all',
+      'Handout table: Ctrl + mouse wheel turns the picked handout (Shift + wheel still does too)',
+    ]],
     ['Beta 3.7', [
       'Handout table: the picture of the TV now cuts a handout off where the TV ends, so you see exactly what the players see. The corners, the knob and the ✕ stay inside the picture, also for a handout bigger than the TV',
       'Handouts can be far bigger than the TV (up to six times its short side), to look closely at a part of a map or a letter: the mouse wheel sizes around the pointer, then drag the part you want into view',

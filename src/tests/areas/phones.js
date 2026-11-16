@@ -1,5 +1,6 @@
 // Phones: the DM's remote and the players' phones, asked over the network the way a real phone does
 'use strict';
+const path = require('path');
 
 module.exports = (area) => {
   area.title('Phones');
@@ -76,7 +77,11 @@ module.exports = (area) => {
     await t.until(() => (sa.last.handouts || []).length === 1 && (sb.last.handouts || []).length === 1, 4000, 'the handout on both phones');
     t.eq(t.state.handouts.length, 0, 'handouts on the table');
     const h = sa.last.handouts[0];
-    t.ok(h.name && h.url, 'it has a name and a picture', h);
+    t.ok(!!h.url, 'it has a picture', h);
+    // Beta 3.8: the file's name is the DM's own label, often a spoiler: nothing of it reaches the phone
+    const stem = path.parse(HO).name;
+    t.eq(Object.keys(h), ['url'], 'only the picture\'s address is sent');
+    t.ok(!JSON.stringify(sa.last).includes(stem) && !h.url.includes(encodeURIComponent(stem)) && !h.url.includes(stem), `"${stem}" is nowhere in what the phone gets`, h);
     const pic = await ph.get(`${h.url}${h.url.includes('?') ? '&' : '?'}t=${encodeURIComponent(A.token)}`);
     t.eq(pic.status, 200, 'the picture loads on the phone');
     t.ok(/image|video/.test(pic.type) && pic.bytes > 1000, 'it is a picture', [pic.type, pic.bytes]);
@@ -163,6 +168,9 @@ module.exports = (area) => {
       // a double tap: back to the whole of it
       for (let i = 0; i < 2; i++) { await touch('pointerdown', 1, cx, cy); await touch('pointerup', 1, cx, cy); await t.sleep(60); }
       await t.until(async () => (await box()).z === 1, 2000, 'a double tap to show the whole of it again');
+      // Beta 3.8: no name on the handout
+      const words = await js(`(() => { const v = document.querySelector('.ho-view'); return { text: v.querySelector('.ho-cap').textContent.trim(), alt: v.querySelector('img').alt, label: v.getAttribute('aria-label') }; })()`);
+      t.eq(words, { text: '', alt: 'Handout', label: 'Handout' }, 'the handout shows without its file name');
       t.eq(errs, [], 'errors in the phone app');
     } finally {
       t.handle('handout.share', { path: HO, to: null });
