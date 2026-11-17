@@ -3553,8 +3553,10 @@ body.gm .sv-token.on-show::before { content: ""; position: absolute; inset: calc
 .atl-words { color: #fff; }
 .atl-words b, .atl-words span { -webkit-text-stroke: 0.2em rgba(0, 0, 0, 0.82); paint-order: stroke fill; text-shadow: 0 0.08em 0.3em rgba(0, 0, 0, 0.7); }
 .atl-rule { display: block; width: 2.4em; height: 0.08em; background: var(--c); box-shadow: 0 0 0 0.04em rgba(0, 0, 0, 0.6); }
-.atl-s.kind-route .atl-s-in { padding-bottom: 0.7em; }
-.atl-s.kind-route .atl-words b { font-size: 0.92em; }
+.atl-s.kind-route .atl-s-in { padding-bottom: 0.55em; }
+.atl-s.kind-route .atl-plate { padding: 0.3em 0.65em 0.34em; gap: 0.16em; }
+.atl-s.kind-route .atl-plate b { font-size: 0.74em; }
+.atl-s.kind-route .atl-plate span { font-size: 0.5em; opacity: 1; color: color-mix(in srgb, var(--c) 55%, #fff); }
 .atl-s .pin { width: 1.5em; height: 2em; display: block; filter: drop-shadow(0 0.08em 0.12em rgba(0, 0, 0, 0.6)); }
 .atl-s .xmark { width: 1.5em; height: 1.5em; display: block; transform: translateY(50%); }
 .atl-dot { display: grid; place-items: center; min-width: 1.5em; height: 1.5em; padding: 0 0.3em; border-radius: 1em; background: var(--c); color: #14161a; font: 800 0.9em/1 var(--ui, system-ui); border: 0.1em solid rgba(0, 0, 0, 0.7); transform: translateY(50%); }
@@ -3611,6 +3613,12 @@ body.gm .sv-token.on-show::before { content: ""; position: absolute; inset: calc
 .mt-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .mt-pen { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .mt-rubber { fill: none; stroke-width: 2.5; stroke-dasharray: 1 7; stroke-linecap: round; opacity: 0.9; }
+.mt-rglow { fill: none; stroke: var(--torch); stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; opacity: 0.55; filter: blur(4px); } /* a picked route glows */
+.mt-rline { fill: none; stroke: transparent; stroke-width: 16; stroke-linecap: round; stroke-linejoin: round; pointer-events: stroke; cursor: copy; } /* (click it for one more point) */
+.mt-rh { position: absolute; translate: -50% -50%; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--torch); box-sizing: border-box; pointer-events: auto; cursor: grab; touch-action: none; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); }
+.mt-rh:hover { scale: 1.25; }
+.mt-rh[hidden], .mt-count[hidden] { display: none; }
+.mt-count { position: absolute; padding: 3px 8px; border-radius: 6px; background: rgba(15, 17, 21, 0.92); border: 1px solid var(--line-2); color: #fff; font-size: 11.5px; font-weight: 600; white-space: nowrap; pointer-events: none; }
 .mt-giz { fill: none; stroke: var(--torch); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .mt-tv { position: absolute; box-sizing: border-box; border: 2px dashed var(--torch); border-radius: 3px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.34); }
 .mt-tv[hidden], .mt-h[hidden] { display: none; }

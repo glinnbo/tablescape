@@ -39,6 +39,35 @@ const TableAtlas = (() => {
     quest: ['Quest', 'exclamation-mark'], crown: ['Crown', 'crown'], key: ['Key', 'key'], star: ['Star', 'star'], flag: ['Flag', 'flag'] };
   const STYLES = { medallion: 'Medallion', diamond: 'Diamond', pin: 'Pin' };
   const iconOf = (id) => (ICONS[id] || ICONS.flag)[1];
+  // how wide a route's line is (thin, medium, bold), as a part of the map's size
+  const routeWidth = (m, span) => span * [0.001, 0.0015, 0.0023][clamp(Math.round(m.width || 2), 1, 3) - 1];
+  // A route as a line of points: from click to click, its bends rounded with radius r (0: sharp).
+  function routeLine(pts, r) {
+    const n = pts.length / 2; const out = [pts[0], pts[1]];
+    for (let i = 1; i < n; i++) {
+      const x = pts[i * 2]; const y = pts[i * 2 + 1];
+      if (i === n - 1 || !(r > 0)) { out.push(x, y); continue; }
+      const ax = pts[i * 2 - 2]; const ay = pts[i * 2 - 1]; const bx = pts[i * 2 + 2]; const by = pts[i * 2 + 3];
+      const la = Math.hypot(x - ax, y - ay); const lb = Math.hypot(bx - x, by - y);
+      const d = Math.min(r, la / 2, lb / 2);
+      if (d < 1e-6) { out.push(x, y); continue; }
+      const sx = x + ((ax - x) * d) / la; const sy = y + ((ay - y) * d) / la; const ex = x + ((bx - x) * d) / lb; const ey = y + ((by - y) * d) / lb;
+      for (let k = 0; k <= 6; k++) { const t = k / 6; const u = 1 - t; out.push(u * u * sx + 2 * u * t * x + t * t * ex, u * u * sy + 2 * u * t * y + t * t * ey); } // (a curve from before the bend to after it)
+    }
+    return out;
+  }
+  // the middle of a route, measured along it: where its label stands
+  function routeMid(pts) {
+    let len = 0;
+    for (let i = 0; i + 3 < pts.length; i += 2) len += Math.hypot(pts[i + 2] - pts[i], pts[i + 3] - pts[i + 1]);
+    let left = len / 2;
+    for (let i = 0; i + 3 < pts.length; i += 2) {
+      const d = Math.hypot(pts[i + 2] - pts[i], pts[i + 3] - pts[i + 1]);
+      if (d > 0 && left <= d) return { x: pts[i] + ((pts[i + 2] - pts[i]) * left) / d, y: pts[i + 1] + ((pts[i + 3] - pts[i + 1]) * left) / d };
+      left -= d;
+    }
+    return { x: pts[pts.length - 2], y: pts[pts.length - 1] };
+  }
   // how light a colour is (0 black … 1 white): an icon on it is drawn dark or white
   const lightOf = (hex) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(hex)); if (!m) return 0.5; const n = parseInt(m[1], 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; };
 
@@ -179,27 +208,39 @@ void main() {
   const AFS = `${HEAD}
 uniform sampler2D uTex; uniform vec3 uLook; // opacity, darken, hue (radians)
 uniform vec4 uBox; uniform vec3 uRot;       // its middle and half its size (map inches); cos, sin, mirrored
+uniform vec3 uShadow;                       // its shadow on the map: how far it falls (across, down) and how soft it is, in map inches (soft 0: none)
 out vec4 o;
 ${NOISE}
+// where in its picture a spot of the map lies, and how solid the picture is there (nothing outside it)
+vec2 uvOf(vec2 mm) { vec2 d = mm - uBox.xy; vec2 uv = vec2(uRot.x * d.x + uRot.y * d.y, -uRot.y * d.x + uRot.x * d.y) / (2.0 * uBox.zw) + 0.5; if (uRot.z > 0.5) uv.x = 1.0 - uv.x; return uv; }
+bool inside(vec2 uv) { return uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0; }
+float solidAt(vec2 mm) { vec2 uv = uvOf(mm); return inside(uv) ? textureLod(uTex, uv, 0.0).a : 0.0; }
 void main() {
   vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / (0.5 * uRes.y); p.y = -p.y;
   vec2 q; float gone;
   vec2 m = mapAt(p, q, gone);
   float ms = mistAt(m, p, uRes.x / uRes.y, gone);
-  vec2 d = m - uBox.xy;
-  vec2 uv = vec2(uRot.x * d.x + uRot.y * d.y, -uRot.y * d.x + uRot.x * d.y) / (2.0 * uBox.zw) + 0.5;
-  if (gone > 0.5 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
-  if (uRot.z > 0.5) uv.x = 1.0 - uv.x;
-  vec4 c = textureLod(uTex, uv, 0.0); // (its colours come multiplied by how solid it is)
-  if (c.a < 0.004) discard;
-  vec3 rgb = c.rgb / c.a;
+  if (gone > 0.5) discard;
+  vec2 uv = uvOf(m);
+  vec4 c = inside(uv) ? textureLod(uTex, uv, 0.0) : vec4(0.0); // (its colours come multiplied by how solid it is)
+  // its shadow (Beta 3.14: the TV left it out): the picture's outline, moved and softened, dark on the map under it
+  float sh = 0.0;
+  if (uShadow.z > 0.0 && c.a < 0.996) {
+    vec2 from = m - uShadow.xy;
+    sh = solidAt(from) * 2.0;
+    for (int i = 0; i < 8; i++) { float ang = float(i) * 0.7854; sh += solidAt(from + uShadow.z * (mod(float(i), 2.0) < 0.5 ? 1.0 : 0.55) * vec2(cos(ang), sin(ang))); }
+    sh *= 0.1;
+  }
+  if (c.a < 0.004 && sh < 0.004) discard;
+  vec3 rgb = c.a > 0.004 ? c.rgb / c.a : vec3(0.0);
   if (abs(uLook.z) > 0.001) { // its colours turned round the colour wheel
     float co = cos(uLook.z); float si = sin(uLook.z); vec3 k = vec3(0.57735);
     rgb = rgb * co + cross(k, rgb) * si + k * dot(k, rgb) * (1.0 - co);
   }
   rgb *= 1.0 - uLook.y;
-  float a = c.a * uLook.x * (1.0 - smoothstep(0.0, 1.0, ms));
-  o = vec4(clamp(rgb, 0.0, 1.0) * a, a);
+  float a = c.a * uLook.x;
+  float clear = 1.0 - smoothstep(0.0, 1.0, ms);
+  o = vec4(clamp(rgb, 0.0, 1.0) * a, a + 0.6 * sh * uLook.x * (1.0 - a)) * clear;
 }`;
 
   // the mist without the graphics card: the same billows, worked out coarsely on the processor
@@ -253,6 +294,7 @@ void main() {
     // (Beta 3.13) travelling from one map into another: the camera dives into a place (or pulls away), the mist closes
     // over everything, the maps change under it, and the mist opens on the new one
     let trip = null; let lastTrip = 0; let veil = 0;
+    let viewPx = 0; let viewStep = 0; // (the GM's window) how many of its pixels an inch of the map is, and that in coarse steps: routes are painted anew when it changes much
     let wxOn = false; const heard = new Set(); // the weather drawn over it; the flashes whose thunder was asked for
     const media = new Map(); // url -> { el, ok, w, h, kind, tex }
     const nodes = new Map(); // what stands: id -> element
@@ -270,6 +312,7 @@ void main() {
         const v = document.createElement('video');
         v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
         v.addEventListener('loadeddata', () => { done(v.videoWidth, v.videoHeight); v.play().catch(() => {}); });
+        if (v.requestVideoFrameCallback) { m.rvfc = true; const cb = () => { m.fresh = true; m.told = performance.now(); v.requestVideoFrameCallback(cb); }; v.requestVideoFrameCallback(cb); } // (each picture it presents)
         m.el = v;
       } else {
         const i = new Image();
@@ -302,6 +345,62 @@ void main() {
     }
     // the animated assets that get a moving picture of their own (with the graphics card, the first LIVE_MAX of them)
     const liveAssets = (map) => (gl && !plain() ? (map.layers || []).filter((l) => l.role === 'asset' && !l.hidden && l.kind === 'video').slice(0, LIVE_MAX) : []); // (on the GM's flat map they lie still, painted with the rest)
+
+    // ---------- a route ----------
+    // A slim line with a dark edge: dashed, dotted or solid, its bends rounded if wanted, a small ring where it starts,
+    // an arrow (or a ring) where it ends. The part the party has walked is drawn solid, with a marker where they are.
+    function paintRoute(g, m, span, ppi) {
+      // (never thinner than a pixel and a half of the picture; in the GM's window, which shows the map small, never
+      // thinner than a pixel and a half of the window)
+      const w = Math.max(1.6 / ppi, opts.edit && viewPx ? 1.5 / viewPx : 0, routeWidth(m, span));
+      const poly = routeLine(m.pts, m.round !== false ? w * 9 : 0);
+      const n = poly.length / 2;
+      let len = 0; const at = [0];
+      for (let i = 1; i < n; i++) { len += Math.hypot(poly[i * 2] - poly[i * 2 - 2], poly[i * 2 + 1] - poly[i * 2 - 1]); at.push(len); }
+      const look = m.look === 'dots' || m.look === 'solid' ? m.look : 'dash';
+      const arrow = m.arrow !== false && len > w * 8; const head = w * 5.2;
+      const end = arrow ? Math.max(0, len - head * 0.7) : len; // (the line stops inside the arrow's head)
+      const walked = clamp(m.walked || 0, 0, 1) * len;
+      const spot = (d) => { let i = 1; while (i < n - 1 && at[i] < d) i++; const a = at[i - 1]; const f = at[i] > a ? (d - a) / (at[i] - a) : 0; return [poly[i * 2 - 2] + (poly[i * 2] - poly[i * 2 - 2]) * f, poly[i * 2 - 1] + (poly[i * 2 + 1] - poly[i * 2 - 1]) * f, i]; };
+      const part = (d0, d1) => { // the line from d0 to d1 along it
+        if (d1 - d0 < 1e-6) return false;
+        const a = spot(d0); const b = spot(d1);
+        g.beginPath(); g.moveTo(a[0], a[1]);
+        for (let i = a[2]; i < b[2]; i++) g.lineTo(poly[i * 2], poly[i * 2 + 1]);
+        g.lineTo(b[0], b[1]);
+        return true;
+      };
+      const stroke = (d0, d1, kind, alpha) => {
+        if (!part(d0, d1)) return;
+        const lw = kind === 'dots' ? w * 1.7 : w;
+        g.setLineDash(kind === 'dash' ? [w * 3.4, w * 3.2] : kind === 'dots' ? [0.0001, w * 3.5] : []);
+        g.lineCap = 'round'; g.lineJoin = 'round';
+        g.globalAlpha = alpha * 0.8; g.strokeStyle = 'rgba(18, 14, 8, 1)'; g.lineWidth = lw + w * 0.9; g.stroke();
+        g.globalAlpha = alpha; g.strokeStyle = m.color; g.lineWidth = lw; g.stroke();
+        g.setLineDash([]);
+      };
+      const ring = (x, y, r, fill) => { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fillStyle = fill; g.fill(); g.lineWidth = w * 0.55; g.strokeStyle = 'rgba(18, 14, 8, 0.85)'; g.stroke(); };
+      g.save();
+      const dim = m.hidden ? 0.4 : 1; // (hidden from the players: the GM still sees it, faint)
+      if (n >= 2 && len > 0) {
+        stroke(0, Math.min(walked, end), 'solid', dim);                                  // walked
+        stroke(Math.min(walked, end), end, look, dim * (walked > 0 && look === 'solid' ? 0.45 : 1)); // still ahead
+      }
+      g.globalAlpha = dim;
+      ring(poly[0], poly[1], w * 1.7, m.color); // where it starts
+      if (n >= 2 && len > 0) {
+        const e = spot(len); const b = spot(Math.max(0, len - head));
+        if (arrow) {
+          const an = Math.atan2(e[1] - b[1], e[0] - b[0]);
+          g.translate(e[0], e[1]); g.rotate(an);
+          g.beginPath(); g.moveTo(0, 0); g.lineTo(-head, -head * 0.5); g.lineTo(-head * 0.72, 0); g.lineTo(-head, head * 0.5); g.closePath();
+          g.fillStyle = m.color; g.fill(); g.lineJoin = 'round'; g.lineWidth = w * 0.55; g.strokeStyle = 'rgba(18, 14, 8, 0.85)'; g.stroke();
+          g.rotate(-an); g.translate(-e[0], -e[1]);
+        } else ring(e[0], e[1], w * 1.7, m.color);
+        if (walked > 0 && walked < len) { const k = spot(walked); ring(k[0], k[1], w * 2.3, '#fff'); g.beginPath(); g.arc(k[0], k[1], w * 1.0, 0, Math.PI * 2); g.fillStyle = m.color; g.fill(); } // where the party is
+      }
+      g.restore();
+    }
 
     // ---------- the surface: the map painted flat ----------
     function paintSurface() {
@@ -372,24 +471,15 @@ void main() {
           g.fillStyle = d.color; g.fillText(d.text, d.x, d.y);
         }
       }
-      // routes: dotted from point to point
-      const dot = Math.max(R.w, R.h) * 0.0032;
-      for (const m of map.marks || []) {
-        if (m.kind !== 'route' || m.hidden || !m.pts || m.pts.length < 2) continue;
-        const path = () => { g.beginPath(); g.moveTo(m.pts[0], m.pts[1]); for (let i = 2; i + 1 < m.pts.length; i += 2) g.lineTo(m.pts[i], m.pts[i + 1]); };
-        g.setLineDash([0.001, dot * 2.6]);
-        path(); g.strokeStyle = 'rgba(0, 0, 0, 0.55)'; g.lineWidth = dot * 1.7; g.stroke();
-        path(); g.strokeStyle = m.color; g.lineWidth = dot; g.stroke();
-        g.setLineDash([]);
-        for (let i = 0; i + 1 < m.pts.length; i += 2) { g.beginPath(); g.arc(m.pts[i], m.pts[i + 1], dot * 1.15, 0, Math.PI * 2); g.fillStyle = m.color; g.fill(); g.lineWidth = dot * 0.35; g.strokeStyle = 'rgba(0, 0, 0, 0.6)'; g.stroke(); }
-      }
+      // routes (Beta 3.14: slim lines; before, a string of big dots)
+      for (const m of map.marks || []) { if (m.kind === 'route' && (!m.hidden || opts.edit) && m.pts && m.pts.length >= 2) paintRoute(g, m, Math.max(R.w, R.h), ppi); }
       surfRect = R; surfPpi = ppi; surfOk = true; texDirty = true; drawnSig = '';
       for (const w8 of waiters.splice(0)) w8(true);
       return true;
     }
     const surfaceSig = (map) => { const mov = new Set(liveAssets(map).map((l) => l.id)); return JSON.stringify([map.bg && [map.bg.url, map.bg.x, map.bg.y, map.bg.scale, map.bg.span, map.bg.rotation, (pic(map.bg.url, map.bg.kind) || {}).ok], map.grid,
       (map.layers || []).filter((l) => l.role === 'asset' && !mov.has(l.id)).map((l) => [l.url, l.x, l.y, l.w, l.rotation, l.flip, l.stretch, l.hue, l.dark, l.opacity, l.shadow, l.hidden, (pic(l.url, l.kind) || {}).ok]),
-      [...mov], map.draw, (map.marks || []).filter((m) => m.kind === 'route'), gl ? 1 : 0, plain() ? 1 : 0]); };
+      [...mov], map.draw, (map.marks || []).filter((m) => m.kind === 'route'), gl ? 1 : 0, plain() ? 1 : 0, opts.edit && (map.marks || []).some((m) => m.kind === 'route') ? viewStep : 0]); };
 
     // ---------- the graphics card ----------
     function initGl() {
@@ -402,7 +492,7 @@ void main() {
         const names = (p, list) => Object.fromEntries(list.map((n) => [n, g.getUniformLocation(p, n)]));
         const shared = ['uRes', 'uRect', 'uCam', 'uTurn', 'uKb', 'uTilt', 'uTime', 'uPlain', 'uMist', 'uVeil', 'uTex'];
         const p = link(VS, FS); const ap = link(AVS, AFS);
-        uni = names(p, [...shared, 'uBlur', 'uReady', 'uSun']); auni = names(ap, [...shared, 'uBox', 'uRot', 'uLook', 'uBounds']);
+        uni = names(p, [...shared, 'uBlur', 'uReady', 'uSun']); auni = names(ap, [...shared, 'uBox', 'uRot', 'uLook', 'uBounds', 'uShadow']);
         quad = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, quad); g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), g.STATIC_DRAW);
         g.enableVertexAttribArray(0);
         tex = g.createTexture(); g.bindTexture(g.TEXTURE_2D, tex);
@@ -448,16 +538,22 @@ void main() {
       gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
       for (const l of live) {
         const m = pic(l.url, 'video');
-        if (!m || !m.ok || m.el.readyState < 2) continue;
+        if (!m || !m.ok || (!m.tex && m.el.readyState < 2)) continue;
         if (!m.tex) { m.tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, m.tex); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); m.at = -1; }
         gl.bindTexture(gl.TEXTURE_2D, m.tex);
-        if (m.at !== m.el.currentTime) { try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, m.el); m.at = m.el.currentTime; } catch { continue; } }
+        // A new picture is taken from the video only when it has presented one. (Beta 3.13 took whatever the video had
+        // whenever its time had changed: at the moment an animation starts over it has no picture for an instant, and
+        // the asset flickered.) Until then the last picture stays.
+        const fresh = m.rvfc && performance.now() - (m.told || 0) < 1500 ? m.fresh : m.at !== m.el.currentTime; // (a video that does not tell: by its clock)
+        if (fresh && m.el.readyState >= 2 && !m.el.seeking) { try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, m.el); m.at = m.el.currentTime; m.fresh = false; m.has = true; } catch {} }
+        if (!m.has) continue;
         const aw = l.w || 1; const ah = ((aw * m.h) / m.w) * (l.stretch || 1); const a = (l.rotation || 0) * D2R; const co = Math.cos(a); const si = Math.sin(a);
         // the box of the screen it can lie in: round its outline (the whole screen when a part of it lies nearer than the eye)
         let x0 = 1e9; let y0 = 1e9; let x1 = -1e9; let y1 = -1e9; let whole = false;
+        const room = l.shadow ? aw * 0.17 : 0; // (its shadow falls a little beside it)
         for (let i = 0; i < 32 && !whole; i++) {
           const e = i >> 3; const f = (i & 7) / 8;
-          const lx = ((e === 0 ? -1 + 2 * f : e === 1 ? 1 : e === 2 ? 1 - 2 * f : -1) * aw) / 2; const ly = ((e === 0 ? -1 : e === 1 ? -1 + 2 * f : e === 2 ? 1 : 1 - 2 * f) * ah) / 2;
+          const lx = (e === 0 ? -1 + 2 * f : e === 1 ? 1 : e === 2 ? 1 - 2 * f : -1) * (aw / 2 + room); const ly = (e === 0 ? -1 : e === 1 ? -1 + 2 * f : e === 2 ? 1 : 1 - 2 * f) * (ah / 2 + room);
           const q = G.toScreen(l.x + lx * co - ly * si, l.y + lx * si + ly * co);
           if (!q) whole = true; else { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
         }
@@ -468,6 +564,7 @@ void main() {
         gl.uniform4f(auni.uBounds, (x0 / G.W) * 2 - 1, 1 - (y1 / G.H) * 2, (x1 / G.W) * 2 - 1, 1 - (y0 / G.H) * 2);
         gl.uniform4f(auni.uBox, l.x, l.y, aw / 2, ah / 2); gl.uniform3f(auni.uRot, co, si, l.flip ? 1 : 0);
         gl.uniform3f(auni.uLook, l.opacity ?? 1, l.dark || 0, (l.hue || 0) * D2R);
+        if (l.shadow) gl.uniform3f(auni.uShadow, aw * 0.05, aw * 0.08, aw * 0.06); else gl.uniform3f(auni.uShadow, 0, 0, 0); // (as it is painted on the flat map)
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       }
     }
@@ -550,7 +647,7 @@ void main() {
       const out = [];
       for (const m of map.marks || []) {
         if (m.kind === 'note' || (m.hidden && !opts.edit)) continue;
-        if (m.kind === 'route') { if (m.pts && m.pts.length >= 2) out.push({ id: m.id, kind: 'route', x: m.x, y: m.y, color: m.color, title: m.title || '', sub: m.pts.length >= 4 ? Geom.routeLabel(map.grid, m) : '', hidden: !!m.hidden }); continue; }
+        if (m.kind === 'route') { if (m.pts && m.pts.length >= 2) out.push({ id: m.id, kind: 'route', ...routeMid(m.pts), color: m.color, title: m.title || '', sub: m.pts.length >= 4 ? Geom.routeLabel(map.grid, m) : '', hidden: !!m.hidden }); continue; }
         out.push({ id: m.id, kind: m.kind, x: m.x, y: m.y, color: m.color || '#e3963e', title: m.title || m.label || '', sub: m.kind === 'counter' ? String(m.value) : m.sub || '', n: m.n, style: STYLES[m.style] ? m.style : 'medallion', icon: m.icon || 'flag',
           note: cur.note && cur.note.id === m.id ? m.note : '', hidden: !!m.hidden, leads: !!m.to });
       }
@@ -562,7 +659,7 @@ void main() {
       const e = el('div', `atl-s kind-${it.kind}${it.hidden ? ' is-hidden' : ''}`);
       e.dataset.id = it.id;
       const inner = el('div', 'atl-s-in'); e.append(inner);
-      const words = (cls) => { const p = el('div', cls); if (it.title) { const t = el('b'); t.textContent = it.title; p.append(t); } if (it.kind === 'route' && it.title && it.sub) p.append(el('i', 'atl-rule')); if (it.sub) { const s = el('span'); s.textContent = it.sub; p.append(s); } return p; };
+      const words = (cls) => { const p = el('div', cls); if (it.title) { const t = el('b'); t.textContent = it.title; p.append(t); } if (it.sub) { const s = el('span'); s.textContent = it.sub; p.append(s); } return p; };
       if (it.kind === 'place') {
         e.classList.add(`st-${it.style}`);
         if (it.style === 'diamond') { const p = words('atl-words'); if (it.sub && it.title) p.insertBefore(el('i', 'atl-rule'), p.lastChild); inner.append(p); }
@@ -570,7 +667,7 @@ void main() {
         const body = el('div', 'atl-body'); body.innerHTML = SHAPE[it.style] + `<span class="atl-ico">${typeof icon === 'function' ? icon(iconOf(it.icon)) : ''}</span>`;
         inner.append(body);
         if (it.note) { const n = el('div', 'atl-note'); n.textContent = it.note; e.append(n); }
-      } else if (it.kind === 'route') inner.append(words('atl-words'));
+      } else if (it.kind === 'route') inner.append(words('atl-plate dark'));
       else if (it.kind === 'pin') inner.innerHTML = SIMPLE.pin;
       else if (it.kind === 'x') inner.innerHTML = SIMPLE.x;
       else if (it.kind === 'dot') { const b = el('b', 'atl-dot'); b.textContent = String(it.n ?? ''); inner.append(b); }
@@ -701,6 +798,7 @@ void main() {
       const dTurn = ((lookT.turn - look.turn + 540) % 360) - 180; // (the short way round)
       look.turn = Math.abs(dTurn) < 0.05 ? lookT.turn : look.turn + dTurn * k;
       const L = plain() ? FLAT : look;
+      if (opts.edit) { viewPx = H / 2 / cam.S; viewStep = Math.round(Math.log2(viewPx) * 2); }
       // the surface, when the map changed (a video picture: a few times a second)
       const sig = surfaceSig(cur.map);
       if (sig !== surfSig || (liveVideo && t - lastVideoT > 80)) { surfSig = sig; lastVideoT = t; if (!paintSurface()) surfOk = false; }
@@ -773,7 +871,7 @@ void main() {
       if (!G) return { on: false, id: null };
       const A = air();
       return {
-        on: root.classList.contains('on'), id: cur.id, gl: !!gl, quality, px: [cv.width, cv.height], ready: surfOk, plain: plain(), cam: { ...cam }, camT: { ...camT }, look: { ...look }, air: A, live: live.length, trip: trip ? trip.phase : null, veil, wx: wxOn,
+        on: root.classList.contains('on'), id: cur.id, gl: !!gl, quality, px: [cv.width, cv.height], ready: surfOk, plain: plain(), cam: { ...cam }, camT: { ...camT }, look: { ...look }, air: A, live: live.length, told: live.filter((l) => (pic(l.url, 'video') || {}).told).length, trip: trip ? trip.phase : null, veil, wx: wxOn,
         surface: surfOk ? { w: surf.width, h: surf.height, rect: surfRect } : null,
         standing: items.map((it) => { const e = nodes.get(it.id); const p = G.toScreen(it.x, it.y); return { id: it.id, kind: it.kind, title: it.title, sub: it.sub, style: it.style, icon: it.icon, note: it.note || '', shown: !!e && e.style.display !== 'none', opacity: e ? Number(e.style.opacity) : 0, x: p ? p.x : null, y: p ? p.y : null }; }),
       };
@@ -792,6 +890,6 @@ void main() {
       assetSize: (l) => { const m = pic(l.url, l.kind); return m && m.ok ? { w: l.w || 1, h: (((l.w || 1) * m.h) / m.w) * (l.stretch || 1) } : null; },
     };
   }
-  return { mount, geo, ICONS, STYLES, LIVE_MAX };
+  return { mount, geo, ICONS, STYLES, LIVE_MAX, routeLine, routeMid, routeWidth };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = TableAtlas;

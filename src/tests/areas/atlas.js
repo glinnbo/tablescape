@@ -396,6 +396,79 @@ module.exports = (area) => {
     await t.g(`Play.Floats.hide('atlas')`);
   }, { ms: 80000 });
 
+  area.quick('a route: a slim line with its look; its points snap to the grid, are dragged, added and taken out; its label stands at its middle', async (t) => {
+    for (const m of [...M(t, world).marks]) t.handle('mark.remove', { mapId: world, id: m.id });
+    t.handle('grid.update', { mapId: world, type: 'square', size: 1, ox: 0, oy: 0, show: true, unit: { n: 1, name: 'day of travel' } });
+    // what is kept with it, within limits
+    const id = t.handle('mark.add', { mapId: world, kind: 'route', x: 2.5, y: 2.5, look: 'zigzag', width: 9, arrow: false }).selected;
+    const R0 = () => M(t, world).marks.find((m) => m.id === id);
+    t.eq([R0().look, R0().width, R0().arrow, R0().round, R0().walked], ['dash', 3, false, true, 0], 'a route starts dashed and rounded; an unknown line is dashed, a width stays within thin … bold');
+    t.handle('mark.update', { mapId: world, id, look: 'dots', width: 1, arrow: true, round: false, walked: 3 });
+    t.eq([R0().look, R0().width, R0().arrow, R0().round, R0().walked], ['dots', 1, true, false, 1], 'its look changed; it cannot be walked further than its end');
+    t.handle('mark.update', { mapId: world, id, look: 'dash', width: 2, round: true, walked: 0.4 });
+    for (const [x, y] of [[6.5, 2.5], [6.5, 6.5]]) t.handle('mark.route', { mapId: world, id, x, y });
+    t.eq([R0().x, R0().y], [6.5, 2.5], 'its label stands at its middle, measured along it');
+    t.handle('mark.route', { mapId: world, id, at: 1, x: 8.5, y: 2.5 });
+    t.eq(R0().pts, [2.5, 2.5, 8.5, 2.5, 6.5, 6.5], 'a point moved');
+    t.handle('mark.route', { mapId: world, id, insert: 1, x: 4.5, y: 3.5 });
+    t.eq(R0().pts, [2.5, 2.5, 4.5, 3.5, 8.5, 2.5, 6.5, 6.5], 'a point put in');
+    t.handle('mark.route', { mapId: world, id, remove: 2 });
+    t.eq(R0().pts, [2.5, 2.5, 4.5, 3.5, 6.5, 6.5], 'a point taken out');
+    t.handle('mark.route', { mapId: world, id, at: 9, x: 1, y: 1 }); t.handle('mark.route', { mapId: world, id, remove: -1 }); t.handle('mark.route', { mapId: world, id, insert: 7, x: 1, y: 1 });
+    t.eq(R0().pts, [2.5, 2.5, 4.5, 3.5, 6.5, 6.5], 'a point that is not there changes nothing');
+    t.handle('mark.remove', { mapId: world, id });
+    // in the Map table: clicks snap to the middle of the cells
+    const d = await openTable(t, world);
+    await t.g(`Play.Atlas.win.setMode('flat')`);
+    const R = d.ed.surface.rect; const at = (fx, fy) => ({ x: R.x + R.w * fx, y: R.y + R.h * fy });
+    await tool(t, 'route');
+    t.eq(await t.g(`[...document.querySelectorAll('.mt-opts .ctl-label')].map((e) => e.textContent)`), ['Colour', 'Line', 'Width', 'Arrow at the end', 'Rounded bends'], 'how the next route is drawn');
+    await t.clickText('.mt-opts .seg-btn', 'Solid');
+    const clicks = [at(0.3, 0.3), at(0.5, 0.3), at(0.5, 0.5)];
+    for (const p of clicks) { const q = await scr(t, p); await t.click(q.x, q.y); await t.sleep(450); }
+    // (the pointer moved on: what the next leg would add stands next to it)
+    const hov = await scr(t, at(0.6, 0.5)); await t.mouse('mouseMove', hov.x, hov.y);
+    const say = await t.until(async () => { const x = await t.text('.mt-count'); return /^\+\d+ · \d+ days of travel$/.test(x || '') && x; }, 3000, 'what the next leg adds');
+    t.ok(/^\+\d+ · \d+ days of travel$/.test(say), 'counted while drawing', say);
+    await t.key('Enter');
+    const r = M(t, world).marks.find((m) => m.kind === 'route');
+    t.eq(r.look, 'solid', 'drawn the way that was chosen');
+    const frac = (v) => Math.abs(((v % 1) + 1) % 1 - 0.5);
+    t.ok(r.pts.every((v) => frac(v) < 0.002), 'every point on the middle of a cell', r.pts);
+    t.near(r.pts[0], clicks[0].x, 0.51, 'in the cell that was clicked');
+    // picked, it glows; with the routes\' lock open its points are handles
+    await tool(t, 'move');
+    await t.g(`Play.Atlas.win.select({ kind: 'mark', id: ${JSON.stringify(r.id)} })`);
+    await t.until(() => t.g(`getComputedStyle(document.querySelector('.mt-rglow')).display !== 'none'`), 3000, 'the glow of the picked route');
+    t.eq(await t.count('.mt-rh:not([hidden])'), 0, 'locked: no handles');
+    const lk = await t.rect('.mt-lock[data-k="lockRoutes"]'); await t.click(lk.cx, lk.cy);
+    await t.until(async () => (await t.count('.mt-rh:not([hidden])')) === 3, 3000, 'a handle for every point');
+    const h1 = await t.rect('.mt-rh[data-i="1"]'); const to = await scr(t, at(0.6, 0.2));
+    await t.drag({ x: h1.cx, y: h1.cy }, to);
+    await t.until(() => Math.abs(M(t, world).marks.find((m) => m.id === r.id).pts[2] - at(0.6, 0.2).x) < 1.01, 4000, 'the point to follow its handle'); // (the cell under the pointer, or its neighbour when the pointer ends on their border)
+    t.ok(M(t, world).marks.find((m) => m.id === r.id).pts.every((v) => frac(v) < 0.002), 'and to land on the middle of a cell', M(t, world).marks.find((m) => m.id === r.id).pts);
+    // a click on its line puts a point in; a right-click on a handle takes one out
+    const a0 = M(t, world).marks.find((m) => m.id === r.id).pts; const midPt = await scr(t, { x: (a0[0] + a0[2]) / 2, y: (a0[1] + a0[3]) / 2 });
+    await t.click(midPt.x, midPt.y);
+    await t.until(() => M(t, world).marks.find((m) => m.id === r.id).pts.length === 8, 4000, 'one more point, on the line');
+    const h0 = await t.rect('.mt-rh[data-i="3"]'); await t.click(h0.cx, h0.cy, 'right');
+    await t.until(() => M(t, world).marks.find((m) => m.id === r.id).pts.length === 6, 4000, 'a point to be taken out');
+    // the side: its look, and how far the party has come
+    t.eq(await t.g(`[...document.querySelectorAll('.mt-opts .ctl-label')].map((e) => e.textContent)`), ['Colour', 'Line', 'Width', 'Arrow at the end', 'Rounded bends', 'Travelled'], 'what can be changed about a route');
+    await t.click(lk.cx, lk.cy);
+    // on the TV: its label on a plate at its middle
+    t.handle('mark.update', { mapId: world, id: r.id, title: 'The pilgrim road' });
+    t.handle('atlas.show', { id: world });
+    await shownOn(t, world);
+    const st = await t.until(async () => { const x = (await tvA(t)).standing.find((s) => s.kind === 'route'); return x && x.shown && x; }, 5000, 'the route\'s label on the TV');
+    t.ok(/days of travel$/.test(st.sub) && st.title === 'The pilgrim road', 'its name and its length', st);
+    t.eq(await t.t(`!!document.querySelector('#table-atlas .atl-s.kind-route .atl-plate.dark b')`), true, 'on a plate');
+    t.handle('atlas.hide', {});
+    await t.until(async () => { const x = await tvA(t); return !x.on && !x.busy; }, 8000, 'off the TV');
+    t.handle('grid.update', { mapId: world, show: false });
+    await t.g(`Play.Floats.hide('atlas')`);
+  }, { ms: 80000 });
+
   area.deep('an asset lies on the world map: added from the Map table, picked, moved, sized by its handle', async (t) => {
     const d = await openTable(t, world);
     await t.g(`Play.Atlas.win.setMode('flat')`);

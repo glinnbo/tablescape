@@ -49,7 +49,7 @@ module.exports = (area) => {
     const R = a.surface.rect; const at = { x: a.cam.cx, y: a.cam.cy };
     const before = (await grab(t))(0.5, 0.5);
     const orb = t.lib('assets').find((x) => x.kind === 'video');
-    const id = t.handle('layer.add', { mapId: world, role: 'asset', path: orb.path, x: at.x, y: at.y, w: R.w * 0.25 }).selected;
+    const id = t.handle('layer.add', { mapId: world, role: 'asset', path: orb.path, x: at.x, y: at.y, w: R.w * 0.25, shadow: true }).selected;
     await t.until(async () => (await tvA(t)).live === 1, 20000, 'the asset to be drawn as a moving picture');
     const differs = (c) => Math.abs(c[0] - before[0]) + Math.abs(c[1] - before[1]) + Math.abs(c[2] - before[2]) > 24;
     const after = (await grab(t, (q) => differs(q(0.5, 0.5))))(0.5, 0.5);

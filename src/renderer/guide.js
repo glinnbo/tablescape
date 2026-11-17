@@ -23,6 +23,15 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.14', [
+      'Cartographer (still in early development): routes are drawn anew. A slim line with a dark edge instead of the string of big dots: dashed, dotted or solid, thin, medium or bold, with an arrow at its end and rounded bends if you like, chosen for each route',
+      'Routes snap to the grid: with the grid shown, every point lands on the middle of a cell (hold Alt for a free point). While you draw, the pointer shows what the next leg adds and what the route comes to',
+      'A picked route glows. With Lock routes open, its points show as handles: drag one to move it, click the line to add one, right-click one to take it out',
+      'Travelled: a slider for each route. The part the party has walked is drawn solid, with a marker where they are',
+      'A route\'s name and length stand on a small plate at its middle',
+      'Fixed: an animated asset on a world map had its shadow on your screen but not on the TV',
+      'Fixed: an animated asset on a world map flickered each time its animation started over',
+    ]],
     ['Beta 3.13', [
       'Cartographer (still in early development): double click a place that leads to another map (Move tool) and you are asked whether to open it. On the TV the camera dives into the place, the mist closes, and the other map opens. "Zoom out", top right on every regional map, goes back the same way: the region shrinks away, the mist closes, and the world map opens at that place and pulls back to the view it had',
       'Map table: the TV\'s frame has a round handle at its corner to move it (it pulses until you have used it once). It stays in the picture when the frame\'s corner does not',

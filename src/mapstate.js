@@ -136,6 +136,28 @@ const placeIcon = (v) => (typeof v === 'string' && /^[a-z0-9-]{1,32}$/.test(v) ?
 // Beta 3.12: how a world or regional map shows on the TV, kept with the map so each region has its own air:
 //   mist: 'cloud' (white) | 'dark' (black): what the map fades into at its edges; reach: how far it comes in from the
 //   map's edges; rim: how far from the TV's rim (0: not at all); weather: cloud shadows, rain, snow, sunshine, storm (0 to 1)
+// (Beta 3.14) how a route is drawn: its line, its width (1 thin … 3 bold), an arrow at its end, rounded bends, and how
+// much of it the party has walked (0 … 1: that part is drawn solid)
+const ROUTE_LOOKS = ['dash', 'dots', 'solid'];
+function routeLook(m, p) {
+  if ('look' in p && ROUTE_LOOKS.includes(p.look)) m.look = p.look;
+  if ('width' in p) m.width = Math.min(3, Math.max(1, Math.round(num(p.width, 2))));
+  if ('arrow' in p) m.arrow = !!p.arrow;
+  if ('round' in p) m.round = !!p.round;
+  if ('walked' in p) m.walked = Math.round(Math.min(1, Math.max(0, num(p.walked, 0))) * 1000) / 1000;
+}
+// the middle of a route, measured along it: where its label stands
+function routeMid(pts) {
+  let len = 0;
+  for (let i = 0; i + 3 < pts.length; i += 2) len += Math.hypot(pts[i + 2] - pts[i], pts[i + 3] - pts[i + 1]);
+  let left = len / 2;
+  for (let i = 0; i + 3 < pts.length; i += 2) {
+    const d = Math.hypot(pts[i + 2] - pts[i], pts[i + 3] - pts[i + 1]);
+    if (d > 0 && left <= d) return { x: r3(pts[i] + ((pts[i + 2] - pts[i]) * left) / d), y: r3(pts[i + 1] + ((pts[i + 3] - pts[i + 1]) * left) / d) };
+    left -= d;
+  }
+  return { x: pts[pts.length - 2], y: pts[pts.length - 1] };
+}
 const ATLAS_WEATHER = ['sun']; // (Beta 3.13: sunshine only; the rest is the map's own weather, as on a battlemap)
 const part = (v, d) => (Number.isFinite(Number(v)) ? Math.round(Math.min(1, Math.max(0, Number(v))) * 100) / 100 : d);
 function atlasMapSet(map, p) {
@@ -797,7 +819,7 @@ function apply(map, type, p, media) {
       if (kind === 'counter') Object.assign(m, { label: String(p.label || 'Counter').slice(0, 40), value: Math.round(num(p.value, 0)), auto: ['up', 'down'].includes(p.auto) ? p.auto : null });
       if (kind === 'note') m.text = String(p.text || '').slice(0, 600);
       if (kind === 'place') Object.assign(m, { style: PLACE_STYLES.includes(p.style) ? p.style : 'medallion', icon: placeIcon(p.icon), title: short(p.title, 60) || 'New place', sub: short(p.sub, 80), to: typeof p.to === 'string' ? p.to : null, note: String(p.note || '').slice(0, 600), ho: p.ho && p.ho.path && media ? media(String(p.ho.path)) : null });
-      if (kind === 'route') Object.assign(m, { title: short(p.title, 60), pts: [r3(m.x), r3(m.y)] });
+      if (kind === 'route') { Object.assign(m, { title: short(p.title, 60), pts: [r3(m.x), r3(m.y)], look: 'dash', width: 2, arrow: true, round: true, walked: 0 }); routeLook(m, p); }
       map.marks.push(m);
       const what = { pin: 'Pin', x: 'Cross', dot: `Marker ${m.n}`, counter: m.label, note: 'Note', place: m.title, route: 'Route' }[kind];
       return { changed: 'all', selected: m.id, label: `${what} added` };
@@ -819,20 +841,27 @@ function apply(map, type, p, media) {
       }
       if (m.kind === 'route') {
         if ('title' in p) m.title = short(p.title, 60);
+        routeLook(m, p);
         // moved by its label: the whole route goes along
         const dx = m.x - was.x; const dy = m.y - was.y;
-        if (dx || dy) for (let i = 0; i < m.pts.length; i += 2) { m.pts[i] = r3(m.pts[i] + dx); m.pts[i + 1] = r3(m.pts[i + 1] + dy); }
+        if (dx || dy) { for (let i = 0; i < m.pts.length; i += 2) { m.pts[i] = r3(m.pts[i] + dx); m.pts[i + 1] = r3(m.pts[i + 1] + dy); } Object.assign(m, routeMid(m.pts)); }
       }
       return { changed: 'all' };
     }
     case 'atlasmap.set': atlasMapSet(map, p); return { changed: 'all' }; // (Beta 3.12)
-    case 'mark.route': { // (Beta 3.11) a route grows by a point, or loses its last one (back: true)
+    case 'mark.route': { // (Beta 3.11) a route grows by a point, or loses its last one (back: true). (Beta 3.14) One of its points is moved (at: which one), a point is put in before one (insert: which one), or one is taken out (remove)
       const m = map.marks.find((x) => x.id === p.id && x.kind === 'route');
       if (!m) return { changed: null };
-      if (p.back) { if (m.pts.length <= 2) return { changed: null }; m.pts.length -= 2; }
-      else { if (m.pts.length >= 400) return { changed: null }; m.pts.push(r3(num(p.x, 0)), r3(num(p.y, 0))); }
-      m.x = m.pts[m.pts.length - 2]; m.y = m.pts[m.pts.length - 1]; // (its label stands at its end)
-      return { changed: 'all', label: p.back ? 'Route shortened' : 'Route drawn' };
+      const n = m.pts.length / 2; const idx = (v) => (Number.isInteger(v) && v >= 0 && v < n ? v : -1);
+      const pos = () => [r3(num(p.x, 0)), r3(num(p.y, 0))];
+      let label = 'Route drawn';
+      if (p.back) { if (m.pts.length <= 2) return { changed: null }; m.pts.length -= 2; label = 'Route shortened'; }
+      else if ('at' in p) { const i = idx(p.at); if (i < 0) return { changed: null }; [m.pts[i * 2], m.pts[i * 2 + 1]] = pos(); label = 'Route changed'; }
+      else if ('remove' in p) { const i = idx(p.remove); if (i < 0 || n <= 2) return { changed: null }; m.pts.splice(i * 2, 2); label = 'Route changed'; }
+      else if ('insert' in p) { const i = Number.isInteger(p.insert) && p.insert >= 0 && p.insert <= n ? p.insert : -1; if (i < 0 || m.pts.length >= 400) return { changed: null }; m.pts.splice(i * 2, 0, ...pos()); label = 'Route changed'; }
+      else { if (m.pts.length >= 400) return { changed: null }; m.pts.push(...pos()); }
+      Object.assign(m, routeMid(m.pts)); // (its label stands at its middle)
+      return { changed: 'all', label };
     }
     case 'mark.remove': {
       const m = map.marks.find((x) => x.id === p.id);
