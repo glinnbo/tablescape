@@ -42,7 +42,8 @@ const Table = (() => {
       g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
       g.fillStyle = '#000'; g.fillRect(0, 0, w, hh);
       const lv = views.get(liveId);
-      if (lv && !(last && last.blackout)) {
+      if (atlasId && atlas && !(last && last.blackout)) atlas.sample(g, w, hh); // (Beta 3.12: a world map on the TV colours the room)
+      else if (lv && !(last && last.blackout)) {
         lv.view.ambientSample(g, w, hh);
         // the map dimmed behind Talk, a handout or the break screen
         const st = document.getElementById('table-stage');
@@ -118,6 +119,7 @@ const Table = (() => {
           }
           v.layer.classList.add('instant', 'shown');
           requestAnimationFrame(() => requestAnimationFrame(() => { for (const x of views.values()) x.layer.classList.remove('instant'); }));
+          atlasNow(last, true); // (Beta 3.12: a world map leaves under the same cover)
           look.reveal();
           return finishApply(last); // the newest state: more may have arrived while the ink covered the table
         }
@@ -151,6 +153,52 @@ const Table = (() => {
 
     finishApply(s);
   }
+  // ---- Beta 3.12: a world or regional map coming onto the TV, changing or leaving it ----
+  // It changes like any map: the table's own map-change animation covers the TV, the maps swap underneath, it clears.
+  // (Plain fade chosen, or nothing on the TV yet: it fades in.) While a world map lies there the battlemap under it
+  // rests: nothing of it is drawn or played until the world map is taken off.
+  const atlasWant = (s) => (s && s.atlas && s.atlas.map ? s.atlas.id : null);
+  function rest(on) {
+    resting = on;
+    document.getElementById('table-root').classList.toggle('atlas-on', on);
+    const lv = views.get(liveId); if (lv) lv.view.setPlaying(!on);
+  }
+  // the swap itself (instant: under a cover, without the fade)
+  function atlasNow(s, instant) {
+    const want = atlasWant(s);
+    if (want === atlasId) { atlas.set(s); return; }
+    atlasId = want;
+    const root = document.getElementById('table-atlas');
+    root.classList.toggle('instant', !!instant);
+    if (instant) requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('instant')));
+    if (!want) rest(false);
+    atlas.set(s);
+  }
+  async function applyAtlas(s) {
+    const want = atlasWant(s);
+    if (atlasBusy) return; // (covered in a moment: the newest state is taken then)
+    if (want === atlasId) { atlas.set(s); if (resting) { const lv = views.get(liveId); if (lv && lv.view.playing) lv.view.setPlaying(false); } return; }
+    const kind = s.transition || 'ink';
+    const shown = !!atlasId || !!(liveId && views.has(liveId));
+    if (kind === 'fade' || !shown || s.blackout) {
+      atlasNow(s, false);
+      if (want) setTimeout(() => { if (atlasId === want && !atlasBusy) rest(true); }, 700); // (once it has faded in)
+      return;
+    }
+    const look = kind === 'ink' ? Ink : (Look || (Look = Looks.makeCover(stage)));
+    const ph = look.debug().phase;
+    const mine = ph !== 'covering' && ph !== 'covered'; // (a battlemap changing at the same moment runs the cover, and clears it)
+    atlasBusy = true;
+    try {
+      await look.cover(kind, want ? s.atlas.map.name : (s.live ? s.live.name : ''));
+      atlasNow(last, true);
+      if (atlasId) { await atlas.ready(4000); rest(true); }
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    } finally { atlasBusy = false; }
+    if (mine) look.reveal();
+    if (atlasWant(last) !== atlasId) applyAtlas(last); // (changed again meanwhile)
+  }
+
   function finishApply(s) {
     // ---- preload the map the GM is preparing (hidden and paused) ----
     if (s.prep) {
@@ -173,7 +221,7 @@ const Table = (() => {
     const k = Math.min(innerWidth / s.view.world.w, innerHeight / s.view.world.h);
     timer.set(s.timer || null, { on: true, volume: s.sfx ? s.sfx.volume : 0.7 }, { seats: s.seats, tin: s.view.ppi * k, hud: s.hud || 1 });
     overlays.set(s, s.view);
-    atlas.set(s);
+    applyAtlas(s);
     show.set(s.show || null, liveId && views.has(liveId) ? views.get(liveId).view : null);
     dice.set(s.dice || null, { seats: s.seats, hud: s.hud || 1, volume: s.sfx ? s.sfx.volume : 0.7 });
     FX.setQuality(s.quality);
@@ -305,6 +353,7 @@ const Table = (() => {
     return c.length && c[0][0] >= 1.5 ? c[0][1] : null;
   }
 
+  let atlasId = null; let atlasBusy = false; let resting = false; // Beta 3.12: the world map on the TV, its change running, the battlemap resting under it
   let Look = null; // 4.4: smoke, parchment, embers (table-looks.js)
   let waitCover = null; // the map waiting for the table to be covered
   // ---- the ink that sweeps over the table while the map changes ----
@@ -498,7 +547,7 @@ const Table = (() => {
       timer: timer.debug(),
       // 0.6: talk, handouts, break, initiative, soundboard, lightning
       over: overlays.debug(),
-      atlas: atlas ? atlas.debug() : null,
+      atlas: atlas ? { ...atlas.debug(), resting, busy: atlasBusy } : null,
       events: { strikes: events.strikes, thunders: events.thunders },
       turnGlow: lv ? lv.view.tokensEl.querySelectorAll('.sv-token.is-turn').length : 0,
       weather: lv ? lv.view.stats.weather : null,

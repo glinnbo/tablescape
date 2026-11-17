@@ -211,6 +211,7 @@ const LibraryDrawer = (() => {
     const PURPOSE = {
       newMap: 'Pick a map to add it to this chapter',
       atlasMap: 'Pick the picture of the world or regional map', // Beta 3.11: the Cartographer
+      atlasAsset: 'Pick what should lie on the world map', // Beta 3.12: the Map table
       replace: 'Pick a new background for this map',
       place: 'Pick what to place where you clicked',
       ambience: 'Pick the ambience for this chapter',
@@ -228,7 +229,7 @@ const LibraryDrawer = (() => {
       if (!p) return null;
       if (p === 'newMap' || p === 'replace' || p === 'atlasMap') return 'maps';
       if (p === 'place' || p === 'addToken' || p === 'tokenBrush') return 'tokens';
-      if (p === 'brush') return 'assets';
+      if (p === 'brush' || p === 'atlasAsset') return 'assets';
       if (p === 'talk') return 'portraits';
       if (p === 'ambience' || p === 'mapSound' || p === 'fight' || p.startsWith('sfx:') || p.startsWith('moment:')) return 'sounds';
       return null;
@@ -723,6 +724,7 @@ const LibraryDrawer = (() => {
       if (purpose && purpose.startsWith('sfx:')) return c === 'sounds' ? 'sfx' : null;
       if (purpose && purpose.startsWith('moment:')) return c === 'sounds' ? 'momentSound' : null;
       if (purpose === 'brush') return c === 'assets' ? 'brush' : null;
+      if (purpose === 'atlasAsset') return c === 'assets' ? 'atlasAsset' : null;
       if (purpose === 'tokenBrush') return c === 'tokens' ? 'tokenBrush' : null;
       if (purpose === 'mapSound') return c === 'sounds' ? 'sound' : null;
       if (purpose === 'fight') return c === 'sounds' ? 'fight' : null;
@@ -750,6 +752,9 @@ const LibraryDrawer = (() => {
           if (r.ok) { toast(`${it.name} added to the atlas`); done(null); }
           break;
         }
+        case 'atlasAsset': // (Beta 3.12) onto the world map the Map table works on
+          await ctx.atlasAsset(it); done(null);
+          break;
         case 'replace':
           if (s.map) { await undoable('bg.set', { path: it.path }, 'Background replaced'); done('bg'); }
           break;

@@ -23,6 +23,17 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.12', [
+      'The Cartographer has been built anew (it is still in early development: tell me what you run into). It now has a window of its own, the Map table (Toolbox → Cartographer): the map as a picture, every tool at its side, as big as you drag it. World maps no longer open in the battlemap editor',
+      'Map table: the picture is the whole map, flat, with the TV\'s frame on it (drag its tab to move it, its corner to size it). "As on the TV" shows it the way the players see it; there, dragging and the mouse wheel move the TV\'s camera',
+      'Map table, the tools: Maps, Move, Place, Route, Draw, Write, Erase, Assets, Grid (with what one cell stands for), On the TV (tilt, bulge, blur, which side it faces) and Weather. Ctrl + Z takes back the last change to this map, Delete removes what is picked',
+      'Places have new markers: a medallion, a diamond or a pin, each with an icon (city, castle, harbour, camp, ruin, danger and more) and a colour of its own',
+      'The mist at the edges of a world map is new. It hides where the map ends, with soft bays instead of a line, as wide at the far edge as at the near one: white cloud or dark mist, kept with each map. Reach and Screen edge set how far it comes in',
+      'Weather on a world map (each map has its own): cloud shadows drifting over the land, rain, snow, sunshine, and a storm with lightning',
+      'Animated assets lie on a world map and move there, tilted and bulged with it (up to 20 at once; more than that stand still)',
+      'A world map comes onto the TV, changes and leaves with the table style\'s map change (ink, smoke, parchment …) instead of clouds',
+      'Easier on the computer: while a world map is on the TV, the battlemap under it rests; while the Map table is open, the battlemap on your screen rests too',
+    ]],
     ['Beta 3.11', [
       'The Cartographer is in early development: it works, but expect rough edges, and it will change. Tell me what you run into',
       'New: the Cartographer (Toolbox). World and regional maps that belong to the campaign, not to a chapter. On the TV such a map lies over the battlemap as an immersive view: tilted, bulged like a globe, sharp in the middle, clouds round the edge. Take it off and the battlemap is there again as it was',

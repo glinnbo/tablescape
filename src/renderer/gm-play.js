@@ -94,7 +94,6 @@ const Play = (() => {
   const viewChapter = () => chapters().find((c) => c.id === ui.viewChapterId) || chapterOfMap(S.editMapId) || chapters()[0] || null;
   const isLive = () => S && S.editMapId && S.table.liveMapId === S.editMapId;
   // (Beta 3.11) the map being edited is a world or regional map that lies on the TV right now
-  const atlasLive = () => !!(S && S.atlas && S.atlas.on && S.atlas.on === S.editMapId);
   // 2.2: a chapter's Ready lists (Tokens, Talk): the tokens and portraits the GM wants at hand there
   const Ready = {
     chapter: () => chapterOfMap(S && S.editMapId) || viewChapter(),
@@ -2193,7 +2192,7 @@ const Play = (() => {
       t.classList.add('on');
       return;
     }
-    if (!S || !S.map || isLive() || atlasLive()) { t.classList.remove('on'); return; }
+    if (!S || !S.map || isLive()) { t.classList.remove('on'); return; }
     const liveName = S.table.liveName;
     t.append(h('div', { class: 'bar bar-prep' },
       iconEl('eye-off'),
@@ -2424,7 +2423,7 @@ const Play = (() => {
     const r = view.frameRect();
     const sr = els.stage.getBoundingClientRect();
     Object.assign(els.frame.style, { left: `${r.left - sr.left}px`, top: `${r.top - sr.top}px`, width: `${r.width}px`, height: `${r.height}px` });
-    const live = isLive() || atlasLive();
+    const live = isLive();
     const kind = !live ? 'prep' : S.table.blackout ? 'black' : S.table.open ? 'live' : 'closed';
     els.frame.className = `on ${kind}`;
     els.frame.firstChild.textContent = { prep: 'Prep: players can\'t see this', live: 'On the table', black: 'Blacked out', closed: 'On the table (window closed)' }[kind];
@@ -3546,6 +3545,7 @@ const Play = (() => {
     ui, get els() { return els; }, cmd, undoable, ready: Ready,
     state: () => S, closePop: () => closePop(), renderRail: () => renderRail(), viewChapter: () => viewChapter(),
     viewCenter: () => viewCenter(), anchorFor, placeToken, placeAsset, setBrush: (it) => setBrush(it), setTokenBrush: (it) => Tools.setTokenBrush(it),
+    atlasAsset: (it) => AtlasP.addAsset(it), // Beta 3.12
     talkToggle: (it) => TB.talkToggle(it),
     returnTo: (back, key) => returnTo(back, key),
   });
@@ -3637,12 +3637,11 @@ const Play = (() => {
     state: () => S, ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
     refresh: () => { refreshPop(); renderRail(); },
   });
-  // The Cartographer (atlas-panel.js, Beta 3.11), opened from the Toolbox: the campaign's world and regional maps
+  // The Cartographer (atlas-panel.js, Beta 3.11; a window of its own since 3.12: the Map table), opened from the Toolbox
   const AtlasP = AtlasPanel.create({
     cmd, send, state: () => S, ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
     get Drawer() { return Drawer; },
-    useTool: (t, mode) => { Tools.setMode(t, mode); setTool(t); openPop(t); },
-    openTool: (t) => { setTool(t); openPop(t); },
+    withBinds: (list, fn) => { const keep = refreshers; refreshers = list; try { return fn(); } finally { refreshers = keep; } }, // (Beta 3.12: the Map table's side changes with its tool)
     undoToast: (res) => { if (res && res.undo) toast(res.label || 'Done', { action: { label: 'Undo', run: () => cmd(res.undo.type, res.undo.payload) } }); },
   });
   // Players' phones (players-panel.js, Prototype 1), opened from the Toolbox
@@ -3713,7 +3712,7 @@ const Play = (() => {
   Floats = FloatPanels.create({
     host: () => els.stage,
     withBinds: (list, fn) => { const keep = refreshers; refreshers = list; try { return fn(); } finally { refreshers = keep; } },
-    onChange: () => { renderRail(); if (popId === 'toolbox') refreshPop(); sendPreviewSize(); if (Hot) Hot.render(); if (S && S.map) placeCard(); }, // (Prototype 17: the player toolbar's arrow)
+    onChange: () => { renderRail(); if (popId === 'toolbox') refreshPop(); sendPreviewSize(); if (Hot) Hot.render(); if (S && S.map) placeCard(); restForMapTable(); }, // (Prototype 17: the player toolbar's arrow)
   });
   // The hotbar (hotbar.js): the bar itself; what each kind of thing does is here
   Hot = Hotbar.create({
@@ -4861,7 +4860,7 @@ const Play = (() => {
         case 'k': togglePop('layers'); break;
         case 'g': cmd('grid.update', { show: !S.map.grid.show }); break;
         case 'f': if (e.shiftKey) fitAll(); else view.fit(); break;
-        case 't': if (!isLive() && !atlasLive()) cmd('table.send'); break;
+        case 't': if (!isLive()) cmd('table.send'); break;
         case 'b': if (S.table.open) cmd('table.blackout'); break;
         case '+': case '=': case '-': case '_':
           if (ui.tool === 'spell') setSpell({ size: stepIn(SIZES, ui.spell.size, k === '+' || k === '=' ? 1 : -1) });
@@ -4899,12 +4898,22 @@ const Play = (() => {
   function setActive(on) {
     if (on === active) return;
     active = on;
-    if (view) view.setPlaying(on);
+    if (view) view.setPlaying(on && !mapTable);
+  }
+  // Beta 3.12: while the Map table (the Cartographer's window) is open, the battlemap behind it rests: nothing of it
+  // is drawn or played, so the world map has the computer to itself. Closed, it plays on.
+  let mapTable = false;
+  function restForMapTable() {
+    const on = !!(Floats && Floats.isOpen('atlas'));
+    if (!on && AtlasP.isOpen()) AtlasP.closed();
+    if (on === mapTable) return;
+    mapTable = on;
+    if (view) view.setPlaying(active && !on);
   }
 
   return {
     helpSections, showToolHint, mount, update, setActive, setTool, openPop, closePop, Drawer, view: () => view, ui, state: () => S,
-    offTable: () => [...offTable().entries()].map(([id, o]) => ({ id, ...o })), fitAll, aimMoment, Show, get TB() { return TB; }, get Floats() { return Floats; },
+    offTable: () => [...offTable().entries()].map(([id, o]) => ({ id, ...o })), fitAll, aimMoment, Show, get TB() { return TB; }, get Floats() { return Floats; }, get Atlas() { return AtlasP; },
     simFps: (r) => { const n = typeof r === 'number' ? r : r.fps; ui.tableFps = n; ui.fpsSimAt = Date.now(); fpsWatch(n, r.hitches || 0, r.heavy || null); }, bigPreview, setPreviewWidth,
     openRadial, startAlign, finishAlign, alignGrid, castAt, cast, spellFromPointer, setSpell, pickSpell, oneInch, fitView, selectFx: (id) => selectFx(id),
     get Snaps() { return Snaps; }, get Hot() { return Hot; }, captureMap, hotRun, pinnable: (id) => !UNPINNED.has(id),

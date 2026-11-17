@@ -131,6 +131,21 @@ const TAGS = ['off', 'gm', 'all'];
 // grid cells)
 const MARK_KINDS = ['pin', 'x', 'dot', 'counter', 'note', 'place', 'route'];
 const short = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+const PLACE_STYLES = ['medallion', 'diamond', 'pin']; // (Beta 3.12)
+const placeIcon = (v) => (typeof v === 'string' && /^[a-z0-9-]{1,32}$/.test(v) ? v : 'flag');
+// Beta 3.12: how a world or regional map shows on the TV, kept with the map so each region has its own air:
+//   mist: 'cloud' (white) | 'dark' (black): what the map fades into at its edges; reach: how far it comes in from the
+//   map's edges; rim: how far from the TV's rim (0: not at all); weather: cloud shadows, rain, snow, sunshine, storm (0 to 1)
+const ATLAS_WEATHER = ['shadows', 'rain', 'snow', 'sun', 'storm'];
+const part = (v, d) => (Number.isFinite(Number(v)) ? Math.round(Math.min(1, Math.max(0, Number(v))) * 100) / 100 : d);
+function atlasMapSet(map, p) {
+  const a = { mist: 'cloud', reach: 0.5, rim: 0.3, weather: {}, ...(map.atlas || {}) };
+  if ('mist' in p) a.mist = p.mist === 'dark' ? 'dark' : 'cloud';
+  if ('reach' in p) a.reach = part(p.reach, a.reach);
+  if ('rim' in p) a.rim = part(p.rim, a.rim);
+  if (p.weather && typeof p.weather === 'object') { a.weather = { ...a.weather }; for (const k of ATLAS_WEATHER) if (k in p.weather) { const v = part(p.weather[k], 0); if (v > 0) a.weather[k] = v; else delete a.weather[k]; } }
+  map.atlas = a;
+}
 // what one grid cell stands for (Beta 3.11): { n, name } as in "1 day of travel", "6 miles"; null: 5 ft, as on a battlemap
 function gridUnit(u) {
   if (!u || typeof u !== 'object') return null;
@@ -780,7 +795,7 @@ function apply(map, type, p, media) {
       if (kind === 'dot') m.n = Number.isFinite(p.n) ? p.n : Math.max(0, ...map.marks.filter((x) => x.kind === 'dot').map((x) => x.n || 0)) + 1;
       if (kind === 'counter') Object.assign(m, { label: String(p.label || 'Counter').slice(0, 40), value: Math.round(num(p.value, 0)), auto: ['up', 'down'].includes(p.auto) ? p.auto : null });
       if (kind === 'note') m.text = String(p.text || '').slice(0, 600);
-      if (kind === 'place') Object.assign(m, { title: short(p.title, 60) || 'New place', sub: short(p.sub, 80), to: typeof p.to === 'string' ? p.to : null, note: String(p.note || '').slice(0, 600), ho: p.ho && p.ho.path && media ? media(String(p.ho.path)) : null });
+      if (kind === 'place') Object.assign(m, { style: PLACE_STYLES.includes(p.style) ? p.style : 'medallion', icon: placeIcon(p.icon), title: short(p.title, 60) || 'New place', sub: short(p.sub, 80), to: typeof p.to === 'string' ? p.to : null, note: String(p.note || '').slice(0, 600), ho: p.ho && p.ho.path && media ? media(String(p.ho.path)) : null });
       if (kind === 'route') Object.assign(m, { title: short(p.title, 60), pts: [r3(m.x), r3(m.y)] });
       map.marks.push(m);
       const what = { pin: 'Pin', x: 'Cross', dot: `Marker ${m.n}`, counter: m.label, note: 'Note', place: m.title, route: 'Route' }[kind];
@@ -794,6 +809,8 @@ function apply(map, type, p, media) {
       if (m.kind === 'counter') { m.value = Math.round(num(m.value, 0)); if (!['up', 'down'].includes(m.auto)) m.auto = null; }
       if (m.kind === 'place') {
         if ('title' in p) m.title = short(p.title, 60) || m.title;
+        if ('style' in p && PLACE_STYLES.includes(p.style)) m.style = p.style; // (Beta 3.12: how it looks: a medallion, a diamond or a pin; and its icon)
+        if ('icon' in p) m.icon = placeIcon(p.icon);
         if ('sub' in p) m.sub = short(p.sub, 80);
         if ('to' in p) m.to = typeof p.to === 'string' ? p.to : null;
         if ('note' in p) m.note = String(p.note || '').slice(0, 600);
@@ -807,6 +824,7 @@ function apply(map, type, p, media) {
       }
       return { changed: 'all' };
     }
+    case 'atlasmap.set': atlasMapSet(map, p); return { changed: 'all' }; // (Beta 3.12)
     case 'mark.route': { // (Beta 3.11) a route grows by a point, or loses its last one (back: true)
       const m = map.marks.find((x) => x.id === p.id && x.kind === 'route');
       if (!m) return { changed: null };
@@ -1117,7 +1135,7 @@ class History {
   }
 }
 
-const SNAP_KEYS = ['bg', 'view', 'layers', 'grid', 'fog', 'fx', 'spells', 'weather', 'light', 'draw', 'marks', 'round', 'walls', 'vision', 'areas', 'frame', 'pframe'];
+const SNAP_KEYS = ['bg', 'view', 'layers', 'grid', 'fog', 'fx', 'spells', 'weather', 'light', 'draw', 'marks', 'round', 'walls', 'vision', 'areas', 'frame', 'pframe', 'atlas']; // (Beta 3.12: atlas, a world map's mist and weather)
 function snapshot(map) { return structuredClone(Object.fromEntries(SNAP_KEYS.map((k) => [k, map[k]]))); }
 function restore(map, snap) { for (const k of SNAP_KEYS) if (k in snap) map[k] = snap[k]; }
 

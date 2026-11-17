@@ -107,6 +107,7 @@ const state = {
   editMapId: null,
   liveMapId: null,
   atlas: null, // Beta 3.11: a world or regional map on the TV, over the battlemap: { id, at, note: { id, at } | null (a place's note shown) }
+  atlasEdit: null, // Beta 3.12: the atlas map the Map table (the Cartographer's window) works on; never the map being edited
   blackout: false,
   blackoutPreview: false, // the blackout is only the campaign page trying it out
   calibrating: false,
@@ -1456,6 +1457,7 @@ function gmState() {
     table: tableInfo(),
     campaign: campaignSummary(),
     atlas: atlasInfo(), // Beta 3.11
+    atlasMap: store.isAtlas(state.atlasEdit) ? forWindow(gm, store.map(state.atlasEdit)) : null, // Beta 3.12: the Map table's map
     editMapId: edit ? edit.id : null,
     map: edit ? forWindow(gm, edit) : null,
     history: edit ? store.history(edit.id).state : { canUndo: false, canRedo: false },
@@ -1567,6 +1569,9 @@ function atlasInfo() {
   const A = store.atlas();
   return {
     world: A.world, look: A.look, on: state.atlas ? state.atlas.id : null, note: state.atlas && state.atlas.note ? state.atlas.note.id : null,
+    // (Beta 3.12) the map the Map table works on, with its own Undo
+    edit: store.isAtlas(state.atlasEdit) ? state.atlasEdit : null,
+    history: store.isAtlas(state.atlasEdit) ? store.history(state.atlasEdit).state : { canUndo: false, canRedo: false },
     maps: A.maps.map((x) => {
       const m = store.map(x.id);
       return m ? { id: x.id, name: m.name, found: x.found, bgPath: m.bg ? m.bg.path : null, bgKind: m.bg ? m.bg.kind : null, missing: !!(m.bg && m.bg.missing),
@@ -1579,7 +1584,7 @@ function atlasShow(id, p = {}) {
   if (!store.isAtlas(id) || !store.map(id)) return { ok: false, error: 'That map is not in the atlas' };
   state.atlas = { id, at: Date.now(), note: null };
   store.structure('atlas.found', { id, found: true }); // (a map on the table is a map the party has)
-  if (p.edit !== false) setEdit(id);
+  if (p.edit !== false) state.atlasEdit = id; // (Beta 3.12: the Map table follows; the battlemap editor stays on its map)
   state.blackout = false;
   tip('sent');
   if (!player) openPlayer();
@@ -2169,7 +2174,7 @@ function devtoolsShortcut(win) {
 // =====================================================================
 // Commands
 // =====================================================================
-const MAP_CMD = /^(bg|view|layer|grid|fog|fx|light|weather|spell|draw|mark|round|wall|vision|area|scene)\./;
+const MAP_CMD = /^(bg|view|layer|grid|fog|fx|light|weather|spell|draw|mark|round|wall|vision|area|scene|atlasmap)\./;
 
 // ---------- walls from files, and what the party has seen ----------
 const sightLast = new Map(); // mapId -> Map(eyeId -> what was last recorded into the fog)
@@ -2246,12 +2251,12 @@ function goHome() {
   state.session = null; state.title = null;
   state.editMapId = null;
   state.liveMapId = null;
-  state.atlas = null;
+  state.atlas = null; state.atlasEdit = null;
   state.blackout = false; state.blackoutPreview = false;
 }
 
 function setEdit(id) {
-  if (!store.map(id)) return;
+  if (!store.map(id) || store.isAtlas(id)) return; // (Beta 3.12: world and regional maps are worked on in the Map table, never here)
   state.editMapId = id;
   store.cur.meta.lastMapId = id;
   store.touch();
@@ -2266,7 +2271,7 @@ function liveView(map, p) {
   const h = store.history(map.id);
   h.before(map, p.coalesce, 'view.update', p.stepLabel, !!p.hold); // (4.5.1: resting mid-drag took a new undo step, a copy of the whole map, when it moved on)
   mapstate.apply(map, 'view.update', p, library.media);
-  if (player && !player.isDestroyed() && (state.liveMapId === map.id)) player.webContents.send('view', { mapId: map.id, view: { ...map.view } });
+  if (player && !player.isDestroyed() && (state.liveMapId === map.id || (state.atlas && state.atlas.id === map.id))) player.webContents.send('view', { mapId: map.id, view: { ...map.view } }); // (Beta 3.12: a world map on the TV follows too)
   clearTimeout(liveViewEnd.get(map.id));
   liveViewEnd.set(map.id, setTimeout(() => { liveViewEnd.delete(map.id); handle('view.update', { mapId: map.id, x: map.view.x, y: map.view.y, zoom: map.view.zoom, coalesce: p.coalesce }); }, p.hold ? 30000 : 600)); // a held drag settles when it is let go
   return { ok: true, mapId: map.id, live: true };
@@ -2409,11 +2414,13 @@ function handle(type, p = {}) {
     case 'atlas.add': case 'atlas.remove': case 'atlas.restore': case 'atlas.world': case 'atlas.found': case 'atlas.look': {
       const res = store.structure(type, p);
       if (!res.ok) return res;
-      if (type === 'atlas.add') { bumpFog(res.id); if (p.open !== false) setEdit(res.id); }
+      if (type === 'atlas.add') { bumpFog(res.id); if (p.open !== false) state.atlasEdit = res.id; }
       if (type === 'atlas.remove') {
         if (state.atlas && state.atlas.id === p.id) state.atlas = null;
+        if (state.atlasEdit === p.id) state.atlasEdit = store.atlas().world;
         if (state.editMapId === p.id) state.editMapId = state.liveMapId || store.allMapIds()[0] || null;
       }
+      if (type === 'atlas.restore' && !state.atlasEdit) state.atlasEdit = p.id;
       broadcast();
       return res;
     }
@@ -2421,7 +2428,6 @@ function handle(type, p = {}) {
     case 'atlas.hide': { // off the TV: the battlemap is there again; the GM is back on it too
       if (!state.atlas) return { ok: true };
       state.atlas = null;
-      if (p.back !== false && state.liveMapId && store.isAtlas(state.editMapId)) setEdit(state.liveMapId);
       broadcast();
       return { ok: true, label: 'Map taken off the table' };
     }
@@ -2437,7 +2443,14 @@ function handle(type, p = {}) {
     }
 
     // ----- what the GM edits / what the table shows -----
+    case 'atlas.open': { // (Beta 3.12) the Map table works on this map of the atlas (none given: the one it had, else the world map)
+      const id = store.isAtlas(p.id) ? p.id : store.isAtlas(state.atlasEdit) ? state.atlasEdit : (state.atlas && state.atlas.id) || store.atlas().world;
+      state.atlasEdit = store.isAtlas(id) ? id : null;
+      broadcast();
+      return { ok: true, id: state.atlasEdit };
+    }
     case 'edit.open':
+      if (store.isAtlas(p.id)) { state.atlasEdit = p.id; broadcast(); return { ok: true, atlas: true }; } // (world and regional maps are worked on in the Map table)
       setEdit(p.id);
       broadcast();
       return { ok: true };

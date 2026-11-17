@@ -35,7 +35,7 @@ You need a laptop and a TV or projector. Send a map to the table with one key, u
 | Title, break and blackout screens | Players move their tokens from their phones |
 | A check before you start | A phone or tablet as your remote |
 | Undo and redo | Spotify moods, a soundboard, room lights (IKEA, Govee) |
-| | A world map and regional maps the party carries, shown like a globe under clouds |
+| | A world map and regional maps the party carries, shown like a globe with mist at its edges, weather and named places |
 
 ![Paint the world onto the map: effects like water, lava, mist, webs and burning ground, plus light and weather](docs/effects.jpg)
 

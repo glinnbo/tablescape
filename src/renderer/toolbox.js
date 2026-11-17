@@ -219,7 +219,7 @@ const Toolbox = (() => {
       { id: 'spotify', label: 'Spotify', icon: 'brand-spotify', tip: 'Your Spotify: moods, playlists and the volume' },
       { id: 'dice', label: 'Dice', icon: 'dice', tip: 'A dramatic roll, the wheel of luck and death saves on the table' },
       { id: 'handouts', label: 'Handouts', icon: 'script', tip: 'Letters, maps and pictures shown big on the table' }, // Prototype 25
-      { id: 'atlas', label: 'Cartographer', short: 'Atlas', icon: 'world', tip: 'The world map and regional maps the party carries, big on the table' }, // Beta 3.11
+      { id: 'atlas', label: 'Cartographer', short: 'Atlas', icon: 'world', tip: 'The Map table: the world map and regional maps the party carries, big on the TV' }, // Beta 3.11; 3.12: its own window
       { id: 'break', label: 'Break', icon: 'coffee', tip: 'A break screen with a countdown' },
       { id: 'notes', label: 'Session log', short: 'Log', icon: 'notes', tip: 'Notes during the session, saved with the campaign' },
       { id: 'lights', label: 'Room lights', short: 'Lights', icon: 'bulb', tip: 'Govee and IKEA lamps around the table follow the game' },
@@ -329,26 +329,20 @@ const Toolbox = (() => {
       break: ['The map blurs and a dial counts down on the table.', 'At zero a soft chime plays and the map comes back.', '+5 min adds time while it runs.'],
       notes: ['Saved with the campaign as you type.', 'Time stamp writes the time, the map and the round where the cursor is.', 'Export writes it into a text file in the campaign\'s Notes folder.'],
       lights: ['The lamps take the colours of the TV and flash with lightning, explosions and spells.', 'Room light: warm and bright. Off: the lamps switch off. Let go: they go back to how they were.', '−20 % and +20 % work on the hotbar too (right-click them).'],
-      atlas: ['World and regional maps belong to the campaign, not to a chapter. Click one to work on it: it opens like any map, with the same tools.',
-        'The screen button puts it on the TV, over the battlemap: tilted, bulged like a globe, sharp in the middle, clouds round the edge. Take it off and the battlemap is there again as it was.',
-        'The TV shows the part inside the table frame. Move the frame (or the map) and the TV flies there.',
-        'The backpack marks a map the party has found; a map put on the TV counts as found.',
-        'Place (Mark tool): a named place. It can lead to a regional map and bring a note or a handout; pick it to open them.',
-        'Route (Mark tool): click from point to point, double click to end. Its length is counted in grid cells, in what one cell stands for: "17 days of travel".',
-        'Lay a grid with the Grid tool (squares or hexes) so that it matches the map; it can stay hidden and still count.'],
       chars: ['Only you see this.', 'HP and conditions come from the turn order; inspiration, exhaustion and death saves stay with the campaign.'],
       players: ['A player scans the join code, picks their character and moves its token with a stick on the phone.', 'Steps stop at walls, closed doors and other tokens; in a fight each moves on their own turn.',
         'Hand a token: any token on the table (a familiar, a summoned beast) for a phone.', 'Right-click a phone: movement again, take the character away.'],
       remote: ['Windows may ask once whether Tablescape may use the network: allow it on private networks.', 'A tablet at the table: set its Auto-Lock to Never.', 'Right-click a device in the list to choose which deck it shows.'],
     };
     const defOf = (id) => {
+      if (id === 'atlas') return ctx.Atlas.def(); // (Beta 3.12: the Cartographer is a window of its own, the Map table)
       const p = PANELS.find((x) => x.id === id) || PANELS[0];
       return { id: p.id, title: p.label, icon: p.icon, build: () => panel(p.id), tips: PANEL_TIPS[p.id] };
     };
     function openPanel(id) { if (id === 'mapnotes') { ctx.mapNotes(false); return; } if (id === 'snaps') { ctx.snaps(false); return; } ctx.showPanel(defOf(id)); }
     function togglePanel(id) { if (id === 'mapnotes') { ctx.mapNotes(true); return; } if (id === 'snaps') { ctx.snaps(true); return; } ctx.togglePanel(defOf(id)); }
     function panel(id) {
-      const body = id === 'atlas' ? ctx.Atlas.buildPanel() : id === 'handouts' ? buildHandouts() : id === 'init' ? buildInit() : id === 'timer' ? ctx.Tools.buildTimerPop() : id === 'sound' ? buildSound() : id === 'notes' ? buildNotes()
+      const body = id === 'handouts' ? buildHandouts() : id === 'init' ? buildInit() : id === 'timer' ? ctx.Tools.buildTimerPop() : id === 'sound' ? buildSound() : id === 'notes' ? buildNotes()
         : id === 'moments' ? ctx.Show.buildMoments() : id === 'spotify' ? ctx.Spot.buildPanel() : id === 'dice' ? ctx.Dice.buildPanel() : id === 'lights' ? ctx.Lights.buildPanel() : id === 'remote' ? ctx.Remote.buildPanel() : id === 'players' ? ctx.Players.buildPanel() : id === 'chars' ? ctx.Chars.buildPanel() : buildBreak();
       return h('div', { class: 'stack' }, body);
     }
