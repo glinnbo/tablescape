@@ -82,6 +82,21 @@ float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32)
 float noise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
 float fbm(vec2 p) { float a = 0.5; float s = 0.0; for (int i = 0; i < 4; i++) { s += a * noise(p); p = p * 2.03 + 17.1; a *= 0.5; } return s; }
+// the spot of the map under a dot of the screen (p), the geometry above backwards. q: the dot turned to the map's own
+// up and down; gone: 1 where there is no map under it (past the horizon, round the bulge)
+vec2 mapAt(vec2 p, out vec2 q, out float gone) {
+  float ct = cos(uTurn); float st = sin(uTurn);
+  q = vec2(ct * p.x + st * p.y, -st * p.x + ct * p.y);
+  float r = length(q);
+  gone = 0.0;
+  vec2 q2 = q;
+  if (uKb > 0.001 && r > 0.00001) { float kr = uKb * r; gone = smoothstep(${(KR_MAX - 0.32).toFixed(2)}, ${(KR_MAX - 0.02).toFixed(2)}, kr); q2 = q * (tan(min(kr, ${KR_MAX.toFixed(2)})) / kr); }
+  float den = uTilt.x * D + q2.y * uTilt.y;
+  gone = max(gone, 1.0 - smoothstep(0.06, 0.5, den));
+  float v = q2.y * D / max(den, 0.06);
+  float u = q2.x * (D - v * uTilt.y) / D;
+  return uCam.xy + uCam.z * vec2(u, v);
+}
 // how much mist lies on this dot: 0 clear map, 1 and more only mist (m: its spot on the map, p: on the screen)
 float mistAt(vec2 m, vec2 p, float asp, float gone) {
   vec2 dd = 0.5 * uRect.zw - abs(m - (uRect.xy + 0.5 * uRect.zw)); // inches to the picture's sides (outside: negative)
@@ -97,7 +112,9 @@ float mistAt(vec2 m, vec2 p, float asp, float gone) {
   float e2 = smoothstep(3.5, 9.0, max(length(dFdx(m)), length(dFdy(m))) / (uCam.z / (0.5 * uRes.y))) * 1.3;
   // 3: the rim of the screen
   float e3 = uMist.y < 0.01 ? 0.0 : (length(p / vec2(asp, 1.0)) - mix(1.3, 0.5, uMist.y) + bays * 0.4) / 0.5;
-  return max(max(max(e1, e2), e3), gone * 2.0);
+  float raw = max(max(max(e1, e2), e3), gone * 2.0);
+  // (Beta 3.13) the mist closing over everything while the TV travels from one map into another
+  return uVeil > 0.001 ? mix(max(raw, -1.2), 1.9 + bays * 0.9, uVeil) : raw;
 }
 // its colour there: the mist itself, and what lies beyond it (faint slow clouds, or a drift of smoke in the dark)
 vec3 mistCol(vec2 p, float raw) {
@@ -110,28 +127,20 @@ vec3 mistCol(vec2 p, float raw) {
 precision highp float;
 uniform vec2 uRes; uniform vec4 uRect; uniform vec3 uCam; uniform float uTurn; uniform float uKb; uniform vec2 uTilt;
 uniform float uTime; uniform float uPlain; uniform vec3 uMist; // reach, rim, dark
+uniform float uVeil; // 0 … 1: the mist closing over the whole picture (travelling from map to map)
 const float D = ${CAM_D.toFixed(2)};`;
   const VS = '#version 300 es\nin vec2 aPos; void main() { gl_Position = vec4(aPos, 0.0, 1.0); }';
   const FS = `${HEAD}
 uniform sampler2D uTex; uniform float uBlur; uniform float uReady;
-uniform vec4 uWx;     // cloud shadows, rain, snow, sunshine
-uniform vec2 uStorm;  // storm, the flash of its lightning
+uniform float uSun; // sunshine
 out vec4 o;
 ${NOISE}
 void main() {
   float asp = uRes.x / uRes.y;
   vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / (0.5 * uRes.y); p.y = -p.y;
-  float ct = cos(uTurn); float st = sin(uTurn);
-  vec2 q = vec2(ct * p.x + st * p.y, -st * p.x + ct * p.y);
+  vec2 q; float gone;
+  vec2 m = mapAt(p, q, gone);
   float r = length(q);
-  float gone = 0.0;
-  vec2 q2 = q;
-  if (uKb > 0.001 && r > 0.00001) { float kr = uKb * r; gone = smoothstep(${(KR_MAX - 0.32).toFixed(2)}, ${(KR_MAX - 0.02).toFixed(2)}, kr); q2 = q * (tan(min(kr, ${KR_MAX.toFixed(2)})) / kr); }
-  float den = uTilt.x * D + q2.y * uTilt.y;
-  gone = max(gone, 1.0 - smoothstep(0.06, 0.5, den));
-  float v = q2.y * D / max(den, 0.06);
-  float u = q2.x * (D - v * uTilt.y) / D;
-  vec2 m = uCam.xy + uCam.z * vec2(u, v);
   vec2 uv = (m - uRect.xy) / uRect.zw;
   // (what the dots need from their neighbours is worked out first: after that, whole parts are skipped where they do not show)
   vec2 dx = dFdx(uv); vec2 dy = dFdy(uv);
@@ -154,73 +163,34 @@ void main() {
     }
     if (uPlain < 0.5) {
       col = mix(col, vec3(0.80, 0.86, 0.92), far * 0.22 * uTilt.y * (1.0 - uMist.z)); // the far side pales, as land does toward the horizon
-      // ---- the weather, lying on the land ----
-      if (uWx.x + uWx.w + uStorm.x > 0.001) {
-        vec2 wm = (m - uRect.xy) / max(uRect.z, uRect.w);
-        float shade = smoothstep(0.42, 0.68, fbm(wm * 5.0 + vec2(uTime * 0.008, uTime * 0.003)));
-        col *= 1.0 - 0.5 * clamp(uWx.x + uStorm.x * 0.6, 0.0, 1.0) * shade;               // cloud shadows drifting over it
-        col *= mix(vec3(1.0), vec3(1.12, 1.05, 0.90), uWx.w);                            // sunshine: warm,
-        col += uWx.w * 0.10 * (1.0 - shade) * vec3(1.0, 0.92, 0.7);                      // and bright where no cloud is
-        float lum = dot(col, vec3(0.299, 0.587, 0.114));
-        col = mix(col, vec3(lum) * vec3(0.55, 0.62, 0.75), 0.55 * uStorm.x) * (1.0 - 0.3 * uStorm.x); // a storm: dark and drained
-      }
-      col += uStorm.y * vec3(0.5, 0.56, 0.68);                                            // its lightning lights it all
+      col = col * mix(vec3(1.0), vec3(1.12, 1.05, 0.90), uSun) + uSun * 0.06 * vec3(1.0, 0.92, 0.7); // sunshine: warm and bright
     }
   }
   // ---- the mist ----
   if (uPlain > 0.5) col = mix(col, vec3(0.075, 0.085, 0.10), mist);
-  else {
-    if (mist > 0.001) col = mix(col, mistCol(p, raw) + uStorm.y * 0.25, mist);
-    // ---- what falls: rain and snow, toward the near side ----
-    float rainAmt = clamp(uWx.y + uStorm.x * 0.8, 0.0, 1.0);
-    if (rainAmt > 0.01) {
-      float rr = 0.0;
-      for (int i = 0; i < 2; i++) {
-        float sc = i == 0 ? 1.0 : 1.7;
-        vec2 g = vec2((q.x + q.y * 0.18) * 70.0 * sc, q.y * 2.6 * sc - uTime * (2.6 + float(i)));
-        vec2 f = fract(g);
-        float on = step(1.0 - 0.10 * rainAmt - 0.03, hash(floor(g)));
-        rr += on * smoothstep(0.5, 0.2, abs(f.x - 0.5)) * smoothstep(0.0, 0.2, f.y) * smoothstep(1.0, 0.55, f.y) * (i == 0 ? 0.5 : 0.3);
-      }
-      col = mix(col, vec3(0.82, 0.88, 0.97), clamp(rr, 0.0, 1.0) * 0.4);
-    }
-    if (uWx.z > 0.01) {
-      float sn = 0.0;
-      for (int i = 0; i < 3; i++) {
-        float sc = 9.0 + float(i) * 7.0;
-        vec2 g = q * sc + vec2(sin(uTime * 0.3 + float(i)) * 0.6, -uTime * (0.25 + 0.12 * float(i)));
-        vec2 id = floor(g); vec2 f = fract(g) - 0.5;
-        vec2 off = (vec2(hash(id), hash(id + 7.3)) - 0.5) * 0.6;
-        sn += step(1.0 - 0.5 * uWx.z, hash(id + 3.1)) * smoothstep(0.09 - 0.02 * float(i), 0.0, length(f - off));
-      }
-      col = mix(col, vec3(1.0), clamp(sn, 0.0, 1.0) * 0.85);
-    }
-  }
+  else if (mist > 0.001) col = mix(col, mistCol(p, raw), mist);
   o = vec4(col, 1.0);
 }`;
-  // an animated asset: a small grid laid on the map, bent the same way (the geometry above, forward)
-  const AVS = `${HEAD}
-in vec2 aPos; uniform vec4 uBox; uniform vec3 uRot; // its middle and half its size (map inches); cos, sin, mirrored
-out vec2 vUv; out vec2 vMap;
-void main() {
-  vec2 l = (aPos - 0.5) * 2.0 * uBox.zw;
-  vec2 m = uBox.xy + vec2(uRot.x * l.x - uRot.y * l.y, uRot.y * l.x + uRot.x * l.y);
-  vec2 uv = (m - uCam.xy) / uCam.z;
-  float den = D - uv.y * uTilt.y;
-  vec2 xy = vec2(uv.x * D, uv.y * uTilt.x * D) / max(den, 0.05);
-  float r2 = length(xy);
-  vec2 q = xy * ((uKb > 0.001 && r2 > 0.000001) ? atan(uKb * r2) / (uKb * r2) : 1.0);
-  float ct = cos(uTurn); float st = sin(uTurn);
-  vec2 p = vec2(ct * q.x - st * q.y, st * q.x + ct * q.y);
-  gl_Position = den < 0.05 ? vec4(3.0, 3.0, 3.0, 1.0) : vec4(p.x / (uRes.x / uRes.y), -p.y, 0.0, 1.0);
-  vUv = vec2(uRot.z > 0.5 ? 1.0 - aPos.x : aPos.x, aPos.y); vMap = m;
-}`;
+  // An animated asset: a moving picture laid onto the map. It is drawn the way the map is: for every dot of the screen
+  // inside the box it can lie in, the spot of the map under it is worked out, and what the asset shows there. (Beta 3.12
+  // bent a small grid forward instead; where an asset reached below the screen its corners flew off and it was drawn
+  // as long streaks.)
+  const AVS = '#version 300 es\nin vec2 aPos; uniform vec4 uBounds; void main() { gl_Position = vec4(mix(uBounds.xy, uBounds.zw, aPos * 0.5 + 0.5), 0.0, 1.0); }';
   const AFS = `${HEAD}
 uniform sampler2D uTex; uniform vec3 uLook; // opacity, darken, hue (radians)
-in vec2 vUv; in vec2 vMap; out vec4 o;
+uniform vec4 uBox; uniform vec3 uRot;       // its middle and half its size (map inches); cos, sin, mirrored
+out vec4 o;
 ${NOISE}
 void main() {
-  vec4 c = texture(uTex, vUv); // (its colours come multiplied by how solid it is)
+  vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / (0.5 * uRes.y); p.y = -p.y;
+  vec2 q; float gone;
+  vec2 m = mapAt(p, q, gone);
+  float ms = mistAt(m, p, uRes.x / uRes.y, gone);
+  vec2 d = m - uBox.xy;
+  vec2 uv = vec2(uRot.x * d.x + uRot.y * d.y, -uRot.y * d.x + uRot.x * d.y) / (2.0 * uBox.zw) + 0.5;
+  if (gone > 0.5 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+  if (uRot.z > 0.5) uv.x = 1.0 - uv.x;
+  vec4 c = textureLod(uTex, uv, 0.0); // (its colours come multiplied by how solid it is)
   if (c.a < 0.004) discard;
   vec3 rgb = c.rgb / c.a;
   if (abs(uLook.z) > 0.001) { // its colours turned round the colour wheel
@@ -228,8 +198,7 @@ void main() {
     rgb = rgb * co + cross(k, rgb) * si + k * dot(k, rgb) * (1.0 - co);
   }
   rgb *= 1.0 - uLook.y;
-  vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / (0.5 * uRes.y); p.y = -p.y;
-  float a = c.a * uLook.x * (1.0 - smoothstep(0.0, 1.0, mistAt(vMap, p, uRes.x / uRes.y, 0.0)));
+  float a = c.a * uLook.x * (1.0 - smoothstep(0.0, 1.0, ms));
   o = vec4(clamp(rgb, 0.0, 1.0) * a, a);
 }`;
 
@@ -266,12 +235,13 @@ void main() {
   function mount(root, opts = {}) {
     const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
     let cv = el('canvas', 'atl-cv'); const mistCv = el('canvas', 'atl-clouds'); const dof = el('div', 'atl-dof'); const tint = el('div', 'atl-tint'); const labels = el('div', 'atl-labels');
+    const veilEl = el('div', 'atl-veil'); const wxCv = el('canvas', 'atl-wx'); // the mist closing while it travels (without the card); the weather falling over it all
     dof.append(el('i', 'far'), el('i', 'near'));
     const defs = el('div'); defs.innerHTML = DEFS;
-    root.append(defs, cv, dof, mistCv, tint, labels);
+    root.append(defs, cv, dof, mistCv, tint, labels, wxCv, veilEl);
     root.classList.add('atl-root'); if (opts.edit) root.classList.add('edit');
     const surf = document.createElement('canvas'); // the flat map
-    let gl = null; let glBad = false; let prog = null; let aprog = null; let tex = null; let quad = null; let grid = null; let gridN = 0; let uni = {}; let auni = {}; let maxTex = 2048;
+    let gl = null; let glBad = false; let prog = null; let aprog = null; let tex = null; let quad = null; let uni = {}; let auni = {}; let maxTex = 2048;
     let cur = null; let viewInfo = null; let dead = false;
     let running = false; let raf = 0; let lastT = 0; const t0 = performance.now();
     let cam = null; let camT = null; let look = null; let lookT = null;
@@ -279,7 +249,11 @@ void main() {
     let selected = null; let onDraw = null;
     let surfRect = null; let surfPpi = 1; let surfSig = ''; let surfOk = false; let texDirty = false;
     let drawnSig = ''; let mistSig = ''; let labelSig = '';
-    let quality = 1; let slow = 0; let lastDraw = 0; let flash = 0; let nextFlash = 0;
+    let quality = 1; let slow = 0; let lastDraw = 0;
+    // (Beta 3.13) travelling from one map into another: the camera dives into a place (or pulls away), the mist closes
+    // over everything, the maps change under it, and the mist opens on the new one
+    let trip = null; let lastTrip = 0; let veil = 0;
+    let wxOn = false; const heard = new Set(); // the weather drawn over it; the flashes whose thunder was asked for
     const media = new Map(); // url -> { el, ok, w, h, kind, tex }
     const nodes = new Map(); // what stands: id -> element
     let live = []; // the animated assets drawn as moving pictures this frame
@@ -311,7 +285,7 @@ void main() {
     // ---------- where the camera looks: the middle of the map's table frame ----------
     const frameOf = (v) => { const w = viewInfo.world.w / viewInfo.ppi / v.zoom; const hh = viewInfo.world.h / viewInfo.ppi / v.zoom; return { x: -v.x / v.zoom, y: -v.y / v.zoom, w, h: hh }; };
     const camOf = (v) => { const r = frameOf(v); return { cx: r.x + r.w / 2, cy: r.y + r.h / 2, S: r.h / 2 }; };
-    const air = () => { const a = (cur && cur.map.atlas) || {}; return { dark: a.mist === 'dark', reach: a.reach ?? 0.5, rim: a.rim ?? 0.3, w: a.weather || {} }; };
+    const air = () => { const a = (cur && cur.map.atlas) || {}; return { dark: a.mist === 'dark', reach: a.reach ?? 0.5, rim: a.rim ?? 0.3, sun: (a.weather && a.weather.sun) || 0 }; };
     const plain = () => !!(edit && edit.plain);
 
     // where the picture lies on the map (as scene-view.js places it), and the box it takes up turned
@@ -426,14 +400,10 @@ void main() {
         const sh = (type, src) => { const s = g.createShader(type); g.shaderSource(s, src); g.compileShader(s); if (!g.getShaderParameter(s, g.COMPILE_STATUS)) throw new Error(g.getShaderInfoLog(s) || 'shader'); return s; };
         const link = (vs, fs) => { const p = g.createProgram(); g.attachShader(p, sh(g.VERTEX_SHADER, vs)); g.attachShader(p, sh(g.FRAGMENT_SHADER, fs)); g.bindAttribLocation(p, 0, 'aPos'); g.linkProgram(p); if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p) || 'link'); return p; };
         const names = (p, list) => Object.fromEntries(list.map((n) => [n, g.getUniformLocation(p, n)]));
-        const shared = ['uRes', 'uRect', 'uCam', 'uTurn', 'uKb', 'uTilt', 'uTime', 'uPlain', 'uMist', 'uTex'];
+        const shared = ['uRes', 'uRect', 'uCam', 'uTurn', 'uKb', 'uTilt', 'uTime', 'uPlain', 'uMist', 'uVeil', 'uTex'];
         const p = link(VS, FS); const ap = link(AVS, AFS);
-        uni = names(p, [...shared, 'uBlur', 'uReady', 'uWx', 'uStorm']); auni = names(ap, [...shared, 'uBox', 'uRot', 'uLook']);
+        uni = names(p, [...shared, 'uBlur', 'uReady', 'uSun']); auni = names(ap, [...shared, 'uBox', 'uRot', 'uLook', 'uBounds']);
         quad = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, quad); g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), g.STATIC_DRAW);
-        // the grid an animated asset is laid out on: N by N squares, two triangles each
-        const N = 10; const pts = [];
-        for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const x0 = i / N; const x1 = (i + 1) / N; const y0 = j / N; const y1 = (j + 1) / N; pts.push(x0, y0, x1, y0, x0, y1, x1, y0, x1, y1, x0, y1); }
-        grid = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, grid); g.bufferData(g.ARRAY_BUFFER, new Float32Array(pts), g.STATIC_DRAW); gridN = pts.length / 2;
         g.enableVertexAttribArray(0);
         tex = g.createTexture(); g.bindTexture(g.TEXTURE_2D, tex);
         g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE); g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
@@ -454,6 +424,7 @@ void main() {
       gl.uniform4f(u.uRect, R.x, R.y, R.w, R.h); gl.uniform3f(u.uCam, cam.cx, cam.cy, cam.S);
       gl.uniform1f(u.uTurn, G.tr); gl.uniform1f(u.uKb, G.kb); gl.uniform2f(u.uTilt, G.c, G.s);
       gl.uniform1f(u.uTime, t / 1000); gl.uniform1f(u.uPlain, plain() ? 1 : 0); gl.uniform3f(u.uMist, A.reach, A.rim, A.dark ? 1 : 0);
+      gl.uniform1f(u.uVeil, plain() ? 0 : veil);
     }
     function drawGl(G, t, L) {
       const A = air();
@@ -465,7 +436,7 @@ void main() {
       if (texDirty && surfOk) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, surf); gl.generateMipmap(gl.TEXTURE_2D); texDirty = false; }
       shared(uni, G, t, A);
       gl.uniform1f(uni.uBlur, L.blur); gl.uniform1f(uni.uReady, surfOk ? 1 : 0);
-      gl.uniform4f(uni.uWx, A.w.shadows || 0, A.w.rain || 0, A.w.snow || 0, A.w.sun || 0); gl.uniform2f(uni.uStorm, A.w.storm || 0, flash);
+      gl.uniform1f(uni.uSun, A.sun);
       gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       // animated assets: each a small moving picture laid onto the map
@@ -474,17 +445,30 @@ void main() {
       shared(auni, G, t, A);
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-      gl.bindBuffer(gl.ARRAY_BUFFER, grid); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
       for (const l of live) {
         const m = pic(l.url, 'video');
         if (!m || !m.ok || m.el.readyState < 2) continue;
         if (!m.tex) { m.tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, m.tex); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); m.at = -1; }
         gl.bindTexture(gl.TEXTURE_2D, m.tex);
         if (m.at !== m.el.currentTime) { try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, m.el); m.at = m.el.currentTime; } catch { continue; } }
-        const aw = l.w || 1; const ah = ((aw * m.h) / m.w) * (l.stretch || 1); const a = (l.rotation || 0) * D2R;
-        gl.uniform4f(auni.uBox, l.x, l.y, aw / 2, ah / 2); gl.uniform3f(auni.uRot, Math.cos(a), Math.sin(a), l.flip ? 1 : 0);
+        const aw = l.w || 1; const ah = ((aw * m.h) / m.w) * (l.stretch || 1); const a = (l.rotation || 0) * D2R; const co = Math.cos(a); const si = Math.sin(a);
+        // the box of the screen it can lie in: round its outline (the whole screen when a part of it lies nearer than the eye)
+        let x0 = 1e9; let y0 = 1e9; let x1 = -1e9; let y1 = -1e9; let whole = false;
+        for (let i = 0; i < 32 && !whole; i++) {
+          const e = i >> 3; const f = (i & 7) / 8;
+          const lx = ((e === 0 ? -1 + 2 * f : e === 1 ? 1 : e === 2 ? 1 - 2 * f : -1) * aw) / 2; const ly = ((e === 0 ? -1 : e === 1 ? -1 + 2 * f : e === 2 ? 1 : 1 - 2 * f) * ah) / 2;
+          const q = G.toScreen(l.x + lx * co - ly * si, l.y + lx * si + ly * co);
+          if (!q) whole = true; else { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+        }
+        if (whole) { x0 = 0; y0 = 0; x1 = G.W; y1 = G.H; }
+        const pad = 4 + 0.06 * Math.max(x1 - x0, y1 - y0);
+        x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(G.W, x1 + pad); y1 = Math.min(G.H, y1 + pad);
+        if (x1 <= x0 || y1 <= y0) continue; // (off the screen)
+        gl.uniform4f(auni.uBounds, (x0 / G.W) * 2 - 1, 1 - (y1 / G.H) * 2, (x1 / G.W) * 2 - 1, 1 - (y0 / G.H) * 2);
+        gl.uniform4f(auni.uBox, l.x, l.y, aw / 2, ah / 2); gl.uniform3f(auni.uRot, co, si, l.flip ? 1 : 0);
         gl.uniform3f(auni.uLook, l.opacity ?? 1, l.dark || 0, (l.hue || 0) * D2R);
-        gl.drawArrays(gl.TRIANGLES, 0, gridN);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       }
     }
 
@@ -626,7 +610,7 @@ void main() {
         const p = G.toScreen(it.x, it.y);
         const m = 0.25;
         if (!p || p.x < -G.W * m || p.x > G.W * (1 + m) || p.y < -G.H * m || p.y > G.H * (1 + m)) { e.style.display = 'none'; continue; }
-        const op = 1 - sstep(0.35, 0.9, mistOn(G, p, it.x, it.y, A));
+        const op = (1 - sstep(0.35, 0.9, mistOn(G, p, it.x, it.y, A))) * (plain() ? 1 : 1 - veil);
         if (op < 0.02) { e.style.display = 'none'; continue; }
         const soft = plain() ? 0 : G.soft(p.qx, p.qy, L.blur) * G.H * 0.0045;
         const full = it.kind === 'token' ? tok : base;
@@ -640,6 +624,52 @@ void main() {
         const blur = soft > 0.6 ? `blur(${(soft / k).toFixed(1)}px)` : '';
         if (e.style.filter !== blur) e.style.filter = blur;
         e.style.setProperty('--flat', G.c.toFixed(3)); // (the ring on the ground lies as flat as the map leans)
+      }
+    }
+
+    // ---------- the weather (Beta 3.13): the battlemap's own, falling over the map in front of it ----------
+    // (fx.js draws it, as on a battlemap: rain with splashes, snow, fog banks, lightning … in the table's inches)
+    function drawWx(G) {
+      const w = cur.map.weather;
+      const on = !plain() && typeof FX === 'object' && FX.weatherOn(w);
+      if (!on) { if (wxOn) { wxOn = false; wxCv.getContext('2d').clearRect(0, 0, wxCv.width, wxCv.height); } return; }
+      wxOn = true;
+      const cw = Math.max(2, Math.min(1280, Math.round(G.W))); const ch = Math.max(2, Math.round((cw * G.H) / G.W));
+      if (wxCv.width !== cw || wxCv.height !== ch) { wxCv.width = cw; wxCv.height = ch; }
+      const Wt = viewInfo.world.w / viewInfo.ppi; const Ht = (Wt * G.H) / G.W; const k = cw / Wt;
+      const now = Date.now(); const t = now / 1000 - FXDATA.TBASE;
+      const g = wxCv.getContext('2d');
+      g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, cw, ch);
+      g.setTransform(k, 0, 0, k, 0, 0);
+      FX.weather(g, w, Wt, Ht, t, now);
+      // thunder follows lightning (only the TV plays it)
+      if (opts.onThunder) for (const f of FX.flashes(w, t, now)) { if (heard.has(f.id)) continue; heard.add(f.id); if (heard.size > 200) heard.clear(); opts.onThunder(f); }
+    }
+
+    // ---------- travelling from map to map ----------
+    function stepTrip(now) {
+      const T = trip; const u = clamp((now - T.t0) / T.ms, 0, 1);
+      if (T.phase === 'leave') { // into the place (or away from the map), the mist closing
+        const e = u * u * (3 - 2 * u);
+        cam.S = T.cam0.S * Math.pow(T.k, e);
+        if (T.dir === 'in' && T.x != null) { cam.cx = T.cam0.cx + (T.x - T.cam0.cx) * e; cam.cy = T.cam0.cy + (T.y - T.cam0.cy) * e; }
+        veil = sstep(0.3, 1, u);
+        if (u < 1) return;
+        // under the mist: the other map
+        cur = { ...T.next }; lookT = { ...FLAT, ...cur.look }; camT = camOf(cur.map.view);
+        surfSig = ''; surfOk = false; labelSig = ''; drawnSig = ''; mistSig = '';
+        // into a region: it is seen from further away at first and comes nearer; back out: the world map is seen close
+        // at the place that led there, and the camera pulls back to where it was
+        T.cam0 = T.dir === 'in' ? { cx: camT.cx, cy: camT.cy, S: camT.S * 1.9 } : { cx: T.x ?? camT.cx, cy: T.y ?? camT.cy, S: camT.S * (T.x != null ? 0.25 : 0.45) };
+        cam = { ...T.cam0 }; T.phase = 'wait'; T.t0 = now; veil = 1;
+      } else if (T.phase === 'wait') { // until its picture is painted
+        veil = 1;
+        if (surfOk || now - T.t0 > 4000) { T.phase = 'arrive'; T.t0 = now; T.ms = 1300; }
+      } else { // the mist opens, the camera settles
+        const o = 1 - Math.pow(1 - u, 3);
+        cam.cx = T.cam0.cx + (camT.cx - T.cam0.cx) * o; cam.cy = T.cam0.cy + (camT.cy - T.cam0.cy) * o; cam.S = T.cam0.S * Math.pow(camT.S / T.cam0.S, o);
+        veil = 1 - sstep(0, 0.7, u);
+        if (u >= 1) { trip = null; veil = 0; cam = { ...camT }; }
       }
     }
 
@@ -665,6 +695,7 @@ void main() {
       // the camera flies, the look glides (the GM's own flat view follows the hand at once)
       const k = 1 - Math.exp(-dt / 0.3);
       if (edit && edit.cam) { cam = { ...edit.cam }; }
+      else if (trip) stepTrip(t);
       else { cam.cx = ease(cam.cx, camT.cx, k); cam.cy = ease(cam.cy, camT.cy, k); cam.S = ease(cam.S, camT.S, k); }
       for (const key of ['tilt', 'bulge', 'blur']) look[key] = ease(look[key], lookT[key], k);
       const dTurn = ((lookT.turn - look.turn + 540) % 360) - 180; // (the short way round)
@@ -674,11 +705,9 @@ void main() {
       const sig = surfaceSig(cur.map);
       if (sig !== surfSig || (liveVideo && t - lastVideoT > 80)) { surfSig = sig; lastVideoT = t; if (!paintSurface()) surfOk = false; }
       live = liveAssets(cur.map);
-      // a storm's lightning: a flash now and then
       const A = air();
-      if (A.w.storm > 0.01 && !plain()) { if (t > nextFlash) { flash = 0.5 + Math.random() * 0.5; nextFlash = t + (2500 + Math.random() * 9000) / (0.4 + A.w.storm); } flash *= Math.exp(-dt * 7); } else flash = 0;
       const G = geo(L, cam, W, H);
-      const still = !live.length && flash < 0.01 && !(edit && edit.cam) && Math.abs(cam.cx - camT.cx) + Math.abs(cam.cy - camT.cy) + Math.abs(cam.S - camT.S) < 1e-3 && Math.abs(dTurn) < 0.05 && ['tilt', 'bulge', 'blur'].every((key) => look[key] === lookT[key]);
+      const still = !live.length && !trip && !(edit && edit.cam) && Math.abs(cam.cx - camT.cx) + Math.abs(cam.cy - camT.cy) + Math.abs(cam.S - camT.S) < 1e-3 && Math.abs(dTurn) < 0.05 && ['tilt', 'bulge', 'blur'].every((key) => look[key] === lookT[key]);
       if (gl) {
         if (!still || texDirty || t - lastDraw > 30) {
           const gap = t - lastDraw; lastDraw = t;
@@ -691,10 +720,12 @@ void main() {
         drawFlat(G); drawMist(G);
         dof.style.transform = `rotate(${L.turn.toFixed(2)}deg)`;
         dof.style.setProperty('--b', (L.blur * H * 0.006 * (0.4 + 0.6 * L.tilt)).toFixed(1));
-        // (without the card the weather is a tint only)
-        const sun = plain() ? 0 : A.w.sun || 0; const storm = plain() ? 0 : A.w.storm || 0;
-        tint.style.background = storm > 0.01 ? `rgba(20, 28, 48, ${(0.45 * storm).toFixed(2)})` : sun > 0.01 ? `rgba(255, 196, 96, ${(0.12 * sun).toFixed(2)})` : 'transparent';
+        // (without the card sunshine is a tint, and the mist that closes while it travels a plain veil)
+        const sun = plain() ? 0 : A.sun;
+        tint.style.background = sun > 0.01 ? `rgba(255, 196, 96, ${(0.12 * sun).toFixed(2)})` : 'transparent';
+        veilEl.style.background = A.dark ? '#08090c' : '#f4f6fb'; veilEl.style.opacity = plain() ? '0' : veil.toFixed(3);
       }
+      drawWx(G);
       syncNodes(); placeNodes(G, L);
       if (onDraw) { try { onDraw(G); } catch (e) { console.warn('[atlas]', e); } }
       raf = requestAnimationFrame(frame);
@@ -713,7 +744,18 @@ void main() {
       viewInfo = s.view || viewInfo;
       const want = s.atlas && s.atlas.map && viewInfo ? s.atlas : null;
       const same = cur && want && cur.id === want.id;
-      if (!want) { cur = null; root.classList.remove('on'); labels.innerHTML = ''; nodes.clear(); labelSig = ''; quality = 1; slow = 0; stop(); for (const w8 of waiters.splice(0)) w8(false); return; }
+      if (!want) { cur = null; trip = null; veil = 0; root.classList.remove('on'); labels.innerHTML = ''; nodes.clear(); labelSig = ''; quality = 1; slow = 0; stop(); for (const w8 of waiters.splice(0)) w8(false); return; }
+      // travelling (Beta 3.13): a map opened from a place, or left with Zoom out, while another one lies there
+      if (trip && trip.phase === 'leave') { if (want.id === trip.next.id) { trip.next = { ...want }; return; } trip = null; veil = 0; } // (the newest state is taken under the mist; another map meanwhile: at once)
+      else if (trip && want.id !== cur.id) { trip = null; veil = 0; }
+      const via = want.via;
+      if (!opts.edit && cur && cam && cur.id !== want.id && via && via.at === want.at && via.at !== lastTrip) {
+        lastTrip = via.at;
+        const out = via.dir === 'out';
+        trip = { dir: out ? 'out' : 'in', phase: 'leave', t0: performance.now(), ms: 950, k: out ? 2.6 : 0.2, x: via.x, y: via.y, cam0: { ...cam }, next: { ...want } };
+        start();
+        return;
+      }
       cur = { ...want };
       lookT = { ...FLAT, ...cur.look }; camT = camOf(cur.map.view);
       if (!same) { cam = { ...camT }; look = { ...lookT }; surfSig = ''; surfOk = false; labelSig = ''; drawnSig = ''; mistSig = ''; }
@@ -731,7 +773,7 @@ void main() {
       if (!G) return { on: false, id: null };
       const A = air();
       return {
-        on: root.classList.contains('on'), id: cur.id, gl: !!gl, quality, px: [cv.width, cv.height], ready: surfOk, plain: plain(), cam: { ...cam }, camT: { ...camT }, look: { ...look }, air: A, live: live.length,
+        on: root.classList.contains('on'), id: cur.id, gl: !!gl, quality, px: [cv.width, cv.height], ready: surfOk, plain: plain(), cam: { ...cam }, camT: { ...camT }, look: { ...look }, air: A, live: live.length, trip: trip ? trip.phase : null, veil, wx: wxOn,
         surface: surfOk ? { w: surf.width, h: surf.height, rect: surfRect } : null,
         standing: items.map((it) => { const e = nodes.get(it.id); const p = G.toScreen(it.x, it.y); return { id: it.id, kind: it.kind, title: it.title, sub: it.sub, style: it.style, icon: it.icon, note: it.note || '', shown: !!e && e.style.display !== 'none', opacity: e ? Number(e.style.opacity) : 0, x: p ? p.x : null, y: p ? p.y : null }; }),
       };

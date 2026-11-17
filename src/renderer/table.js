@@ -24,7 +24,7 @@ const Table = (() => {
     timer = Countdown.mount(document.getElementById('table-timer'));
     overlays = TableOverlays.mount(document.getElementById('table-overlays'));
     show = TableShow.mount(document.getElementById('table-show')); // Beta 3.2: a token shown to the table
-    atlas = TableAtlas.mount(document.getElementById('table-atlas')); // Beta 3.11: a world or regional map over the battlemap
+    atlas = TableAtlas.mount(document.getElementById('table-atlas'), { onThunder: (f) => thunder(0.5 + Math.random() * 1.6, 0.55 + 0.25 * Math.min(1, f.size || 1)) }); // Beta 3.11: a world or regional map over the battlemap
     // dice, the wheel of luck, death saves (dice-fx.js); their sounds come from the sound window
     dice = DiceFX.mount(document.getElementById('table-dice'), { sound: (name, args) => window.ts.soundEvent({ kind: 'synth', name, args }) });
     window.ts.onEvent(onEvent);
@@ -178,6 +178,8 @@ const Table = (() => {
     const want = atlasWant(s);
     if (atlasBusy) return; // (covered in a moment: the newest state is taken then)
     if (want === atlasId) { atlas.set(s); if (resting) { const lv = views.get(liveId); if (lv && lv.view.playing) lv.view.setPlaying(false); } return; }
+    // (Beta 3.13) from one world map into another through a place, or back out: the view itself travels (table-atlas.js)
+    if (want && atlasId && s.atlas.via && s.atlas.via.at === s.atlas.at) { atlasId = want; atlas.set(s); return; }
     const kind = s.transition || 'ink';
     const shown = !!atlasId || !!(liveId && views.has(liveId));
     if (kind === 'fade' || !shown || s.blackout) {

@@ -136,14 +136,15 @@ const placeIcon = (v) => (typeof v === 'string' && /^[a-z0-9-]{1,32}$/.test(v) ?
 // Beta 3.12: how a world or regional map shows on the TV, kept with the map so each region has its own air:
 //   mist: 'cloud' (white) | 'dark' (black): what the map fades into at its edges; reach: how far it comes in from the
 //   map's edges; rim: how far from the TV's rim (0: not at all); weather: cloud shadows, rain, snow, sunshine, storm (0 to 1)
-const ATLAS_WEATHER = ['shadows', 'rain', 'snow', 'sun', 'storm'];
+const ATLAS_WEATHER = ['sun']; // (Beta 3.13: sunshine only; the rest is the map's own weather, as on a battlemap)
 const part = (v, d) => (Number.isFinite(Number(v)) ? Math.round(Math.min(1, Math.max(0, Number(v))) * 100) / 100 : d);
 function atlasMapSet(map, p) {
   const a = { mist: 'cloud', reach: 0.5, rim: 0.3, weather: {}, ...(map.atlas || {}) };
   if ('mist' in p) a.mist = p.mist === 'dark' ? 'dark' : 'cloud';
   if ('reach' in p) a.reach = part(p.reach, a.reach);
   if ('rim' in p) a.rim = part(p.rim, a.rim);
-  if (p.weather && typeof p.weather === 'object') { a.weather = { ...a.weather }; for (const k of ATLAS_WEATHER) if (k in p.weather) { const v = part(p.weather[k], 0); if (v > 0) a.weather[k] = v; else delete a.weather[k]; } }
+  a.weather = Object.fromEntries(Object.entries(a.weather || {}).filter(([k]) => ATLAS_WEATHER.includes(k))); // (what Beta 3.12 kept there besides is gone)
+  if (p.weather && typeof p.weather === 'object') { for (const k of ATLAS_WEATHER) if (k in p.weather) { const v = part(p.weather[k], 0); if (v > 0) a.weather[k] = v; else delete a.weather[k]; } }
   map.atlas = a;
 }
 // what one grid cell stands for (Beta 3.11): { n, name } as in "1 day of travel", "6 miles"; null: 5 ft, as on a battlemap

@@ -23,6 +23,16 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.13', [
+      'Cartographer (still in early development): double click a place that leads to another map (Move tool) and you are asked whether to open it. On the TV the camera dives into the place, the mist closes, and the other map opens. "Zoom out", top right on every regional map, goes back the same way: the region shrinks away, the mist closes, and the world map opens at that place and pulls back to the view it had',
+      'Map table: the TV\'s frame has a round handle at its corner to move it (it pulses until you have used it once). It stays in the picture when the frame\'s corner does not',
+      'Map table: right-click the map for a round menu. On empty map: a place, a route, a label or an asset right there, or "TV looks here". On a place, a route or an asset: what can be done with it',
+      'Map table: two locks at the top right, Lock markers and Lock routes. They are on at first: markers and routes can be picked and changed, but not dragged by accident. Open a lock to move them',
+      'Map table: the tools are sorted. At the top what you use all the time (Move, Place, Route, Draw, Write, Erase), at the bottom what is set once for a map (Maps, Assets, Grid, On the TV, Weather)',
+      'Weather on a world map is now the battlemap\'s: the same mixes (Rain, Thunderstorm, Blizzard, Foggy morning …) and single layers, falling over the map; each world map keeps its own. Sunshine stays as a slider of its own. The rain, snow, cloud shadows and storm sliders of Beta 3.12 are gone',
+      'Fixed: an animated asset on a world map that reached below the edge of the TV was drawn as long streaks across the screen',
+      'A route in the Map table really ends with a double click now (it only ended with Enter)',
+    ]],
     ['Beta 3.12', [
       'The Cartographer has been built anew (it is still in early development: tell me what you run into). It now has a window of its own, the Map table (Toolbox → Cartographer): the map as a picture, every tool at its side, as big as you drag it. World maps no longer open in the battlemap editor',
       'Map table: the picture is the whole map, flat, with the TV\'s frame on it (drag its tab to move it, its corner to size it). "As on the TV" shows it the way the players see it; there, dragging and the mouse wheel move the TV\'s camera',

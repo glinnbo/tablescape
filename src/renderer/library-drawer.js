@@ -753,7 +753,7 @@ const LibraryDrawer = (() => {
           break;
         }
         case 'atlasAsset': // (Beta 3.12) onto the world map the Map table works on
-          await ctx.atlasAsset(it); done(null);
+          await ctx.atlasAsset(it, d.at || null); done(null);
           break;
         case 'replace':
           if (s.map) { await undoable('bg.set', { path: it.path }, 'Background replaced'); done('bg'); }

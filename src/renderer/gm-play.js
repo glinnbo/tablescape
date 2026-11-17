@@ -1380,7 +1380,6 @@ const Play = (() => {
 
   // ---------- weather: a mix of layers ----------
   const WT = Object.fromEntries(FXDATA.WEATHER_TYPES.map((x) => [x.id, x]));
-  const wxLayers = () => map().weather.layers.filter((l) => !l.dying);
   function applyWeather(p) {
     cmd('weather.preset', { name: p.label, layers: p.layers.map((l) => ({ dir: (WT[l.type] || {}).dir, ...l })) });
     ui.wxOpen = null;
@@ -1401,7 +1400,13 @@ const Play = (() => {
     bind(() => { const v = get() ?? 90; arrow.style.transform = `rotate(${v}deg)`; out.textContent = `${Math.round(v)}°`; });
     return h('div', { class: 'ctl compass-row' }, h('span', { class: 'ctl-label' }, 'Direction'), dial, out);
   }
-  function weatherPanel() {
+  // o (Beta 3.13: the Map table uses it for a world map): { map () => the map it works on, cmd, send, refresh, key (where
+  // ui keeps which layer is open), plain: no hotbar offers and no "Lightning" button (they are the battlemap's) }
+  function weatherPanel(o = {}) {
+    const wmap = o.map || map; const wcmd = o.cmd || cmd; const again = o.refresh || refreshPop; const key = o.key || 'wxOpen';
+    const wxLayers = () => wmap().weather.layers.filter((l) => !l.dying);
+    const applyWeather = (p) => { wcmd('weather.preset', { name: p.label, layers: p.layers.map((l) => ({ dir: (WT[l.type] || {}).dir, ...l })) }); ui[key] = null; };
+    const offer = (el, it, opt) => (o.plain ? el : Hotbar.offer(el, it, opt));
     const own = () => (S.settings && S.settings.weatherPresets) || [];
     const presets = h('div', { class: 'tiles wx-presets' });
     // a mix is lit when the weather on the map has exactly its kinds of layers
@@ -1414,7 +1419,7 @@ const Play = (() => {
       presets.innerHTML = '';
       const list = [...WEATHER, ...own().map((o) => ({ id: `own:${o.name}`, label: o.name, icon: 'bookmark', layers: o.layers, own: true }))];
       for (const p of list) {
-        presets.append(Hotbar.offer(h('button', {
+        presets.append(offer(h('button', {
           class: `tile ${kinds(p.layers) === now ? 'on' : ''}`, 'data-tip': p.own ? 'Your own mix. Right-click to delete it' : `${p.layers.length ? p.layers.map((l) => (WT[l.type] || {}).label).join(' + ') : 'No weather'}`,
           onclick: () => applyWeather(p),
           oncontextmenu: p.own ? (e) => { e.preventDefault(); ts.settings({ weatherPresets: own().filter((o) => o.name !== p.label) }); toast(`${p.label} deleted`); } : null,
@@ -1427,7 +1432,7 @@ const Play = (() => {
     let details = [];
     bind(() => {
       const ls = wxLayers();
-      const nsig = JSON.stringify([ls.map((l) => [l.id, l.type, l.hidden]), ui.wxOpen]);
+      const nsig = JSON.stringify([ls.map((l) => [l.id, l.type, l.hidden]), ui[key]]);
       if (nsig === sig) { for (const f of details) f(); return; }
       sig = nsig;
       details = [];
@@ -1435,23 +1440,23 @@ const Play = (() => {
       if (!ls.length) { list.append(hint('No weather on this map.')); return; }
       for (const L of ls) {
         const def = WT[L.type] || { label: L.type, icon: 'cloud' };
-        const open = ui.wxOpen === L.id;
+        const open = ui[key] === L.id;
         list.append(h('div', { class: `layer-row ${open ? 'open' : ''} ${L.hidden ? 'is-hidden' : ''}` },
-          h('button', { class: 'layer-main', onclick: () => { ui.wxOpen = open ? null : L.id; refreshPop(); } }, iconEl(def.icon), h('span', { class: 'ellipsis grow' }, def.label), iconEl(open ? 'chevron-up' : 'chevron-down')),
-          h('button', { class: 'icon-btn', 'aria-label': L.hidden ? 'Show' : 'Hide', 'data-tip': L.hidden ? 'Off. Click to show it' : 'Showing. Click to hide it', onclick: () => cmd('weather.update', { id: L.id, hidden: !L.hidden }) }, iconEl(L.hidden ? 'eye-off' : 'eye')),
-          h('button', { class: 'icon-btn', 'aria-label': 'Remove', 'data-tip': 'Remove', onclick: () => cmd('weather.remove', { id: L.id }) }, iconEl('trash'))));
-        if (open) list.append(wxDetail(L, def, (f) => { details.push(f); f(); }));
+          h('button', { class: 'layer-main', onclick: () => { ui[key] = open ? null : L.id; again(); } }, iconEl(def.icon), h('span', { class: 'ellipsis grow' }, def.label), iconEl(open ? 'chevron-up' : 'chevron-down')),
+          h('button', { class: 'icon-btn', 'aria-label': L.hidden ? 'Show' : 'Hide', 'data-tip': L.hidden ? 'Off. Click to show it' : 'Showing. Click to hide it', onclick: () => wcmd('weather.update', { id: L.id, hidden: !L.hidden }) }, iconEl(L.hidden ? 'eye-off' : 'eye')),
+          h('button', { class: 'icon-btn', 'aria-label': 'Remove', 'data-tip': 'Remove', onclick: () => wcmd('weather.remove', { id: L.id }) }, iconEl('trash'))));
+        if (open) list.append(wxDetail(L, def, (f) => { details.push(f); f(); }, o));
       }
     });
     // lightning on demand, while the mix has lightning in it
     const strike = row(Hotbar.offer(btn('Lightning', 'bolt', () => { cmd('strike.now', {}); toast('Lightning!', { ms: 1200 }); }, { kind: 'primary wx-strike', tip: 'A lightning flash on the table right now; thunder follows' }), doHot('strike')));
-    bind(() => { strike.hidden = !wxLayers().some((l) => l.type === 'lightning' && !l.hidden); });
+    bind(() => { strike.hidden = !!o.plain || !wxLayers().some((l) => l.type === 'lightning' && !l.hidden); });
     // every single layer as a switch: lit while it is in the mix, click again to take it out
     async function toggleLayer(t) {
       const ls = wxLayers().filter((l) => l.type === t.id);
-      if (ls.length) { for (const l of ls) await cmd('weather.remove', { id: l.id }); if (ls.some((l) => l.id === ui.wxOpen)) ui.wxOpen = null; refreshPop(); return; }
-      const r = await cmd('weather.add', { type: t.id, dir: t.dir });
-      if (r && r.selected) { ui.wxOpen = r.selected; refreshPop(); }
+      if (ls.length) { for (const l of ls) await wcmd('weather.remove', { id: l.id }); if (ls.some((l) => l.id === ui[key])) ui[key] = null; again(); return; }
+      const r = await wcmd('weather.add', { type: t.id, dir: t.dir });
+      if (r && r.selected) { ui[key] = r.selected; again(); }
     }
     const add = h('div', { class: 'tiles wx-add' }, ...FXDATA.WEATHER_TYPES.map((t) => h('button', {
       class: 'tile', dataset: { v: t.id }, 'aria-label': t.label, onclick: () => toggleLayer(t),
@@ -1468,7 +1473,7 @@ const Play = (() => {
       h('div', { class: 'ctl-label' }, 'In this mix (click one to change it)'),
       list,
       strike,
-      seg({ label: 'Changes come in', options: [{ value: 0, label: 'At once' }, { value: 10, label: 'Over 10 s' }, { value: 60, label: 'Over a minute' }], get: () => map().weather.fade ?? 0, set: (v) => cmd('weather.fade', { fade: v }) }),
+      seg({ label: 'Changes come in', options: [{ value: 0, label: 'At once' }, { value: 10, label: 'Over 10 s' }, { value: 60, label: 'Over a minute' }], get: () => wmap().weather.fade ?? 0, set: (v) => wcmd('weather.fade', { fade: v }) }),
       row(btn('Save this mix', 'device-floppy', async () => {
         const ls = wxLayers();
         if (!ls.length) { toast('Add some weather first.'); return; }
@@ -1480,9 +1485,10 @@ const Play = (() => {
       }, { tip: 'Keep this mix to use on other maps' })),
     ];
   }
-  function wxDetail(L, def, local) {
-    const cur = (k, d) => { const x = map().weather.layers.find((l) => l.id === L.id); return x ? (x[k] ?? d) : d; };
-    const set = (k) => (v, key) => send(key || `wx-${L.id}-${k}`, 'weather.update', { id: L.id, [k]: v });
+  function wxDetail(L, def, local, o = {}) {
+    const wmap = o.map || map; const cmd = o.cmd || ((type, payload) => ts.cmd(type, payload)); const wsend = o.send || send; // (this map's own commands)
+    const cur = (k, d) => { const x = wmap().weather.layers.find((l) => l.id === L.id); return x ? (x[k] ?? d) : d; };
+    const set = (k) => (v, key) => wsend(key || `wx-${L.id}-${k}`, 'weather.update', { id: L.id, [k]: v });
     const sl = (label, k, min, max, step, fmt, d = 1) => {
       const out = h('output');
       const input = h('input', { type: 'range', min, max, step, 'aria-label': label });
@@ -3545,7 +3551,7 @@ const Play = (() => {
     ui, get els() { return els; }, cmd, undoable, ready: Ready,
     state: () => S, closePop: () => closePop(), renderRail: () => renderRail(), viewChapter: () => viewChapter(),
     viewCenter: () => viewCenter(), anchorFor, placeToken, placeAsset, setBrush: (it) => setBrush(it), setTokenBrush: (it) => Tools.setTokenBrush(it),
-    atlasAsset: (it) => AtlasP.addAsset(it), // Beta 3.12
+    atlasAsset: (it, at) => AtlasP.addAsset(it, at), // Beta 3.12
     talkToggle: (it) => TB.talkToggle(it),
     returnTo: (back, key) => returnTo(back, key),
   });
@@ -3642,6 +3648,7 @@ const Play = (() => {
     cmd, send, state: () => S, ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
     get Drawer() { return Drawer; },
     withBinds: (list, fn) => { const keep = refreshers; refreshers = list; try { return fn(); } finally { refreshers = keep; } }, // (Beta 3.12: the Map table's side changes with its tool)
+    get Radial() { return Radial; }, weatherPanel: (o) => weatherPanel(o), // (Beta 3.13: its right-click menu; the battlemap's weather for a world map)
     undoToast: (res) => { if (res && res.undo) toast(res.label || 'Done', { action: { label: 'Undo', run: () => cmd(res.undo.type, res.undo.payload) } }); },
   });
   // Players' phones (players-panel.js, Prototype 1), opened from the Toolbox

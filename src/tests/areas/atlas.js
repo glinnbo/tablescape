@@ -167,21 +167,33 @@ module.exports = (area) => {
     await t.until(async () => { const x = await tvA(t); return !x.on && !x.busy; }, 8000, 'off the TV');
   });
 
-  area.quick('the mist and the weather are kept with each map, within their limits, and reach the TV', async (t) => {
+  area.quick('the mist and sunshine are kept with each map, within their limits; its weather is the battlemap\'s and falls on the TV', async (t) => {
     t.eq(M(t, world).atlas, undefined, 'a map starts without any (cloud, half way in, a little at the screen\'s edge)');
-    t.handle('atlasmap.set', { mapId: world, mist: 'dark', reach: 0.8, rim: 7, weather: { rain: 0.6, snow: -2, sun: 'x', fire: 1 } });
-    t.eq(M(t, world).atlas, { mist: 'dark', reach: 0.8, rim: 1, weather: { rain: 0.6 } }, 'kept, tidied');
-    t.handle('atlasmap.set', { mapId: world, mist: 'purple', weather: { rain: 0, storm: 0.5 } });
-    t.eq(M(t, world).atlas, { mist: 'cloud', reach: 0.8, rim: 1, weather: { storm: 0.5 } }, 'an unknown mist is cloud; weather set to nothing is taken away');
+    t.handle('atlasmap.set', { mapId: world, mist: 'dark', reach: 0.8, rim: 7, weather: { sun: 0.6, rain: 0.7, fire: 1 } });
+    t.eq(M(t, world).atlas, { mist: 'dark', reach: 0.8, rim: 1, weather: { sun: 0.6 } }, 'kept, tidied (sunshine is the one weather a world map keeps here)');
+    t.handle('atlasmap.set', { mapId: world, mist: 'purple', weather: { sun: 0 } });
+    t.eq(M(t, world).atlas, { mist: 'cloud', reach: 0.8, rim: 1, weather: {} }, 'an unknown mist is cloud; sunshine set to nothing is taken away');
     t.eq(M(t, region).atlas, undefined, 'the other map keeps its own');
+    t.handle('history.undo', { mapId: world });
+    t.eq(M(t, world).atlas.weather, { sun: 0.6 }, 'Undo for this map takes the last change back');
+    t.eq(t.state.editMapId, battle, 'the battlemap is untouched by it');
     t.handle('atlas.show', { id: world });
     await shownOn(t, world);
     const air = (await tvA(t)).air;
-    t.eq([air.dark, air.reach, air.rim, air.w], [false, 0.8, 1, { storm: 0.5 }], 'what the TV draws');
-    t.handle('history.undo', { mapId: world });
-    t.eq(M(t, world).atlas.weather, { rain: 0.6 }, 'Undo for this map takes the last change back');
-    t.eq(t.state.editMapId, battle, 'the battlemap is untouched by it');
-    t.handle('atlasmap.set', { mapId: world, mist: 'cloud', reach: 0.5, rim: 0.3, weather: { rain: 0, storm: 0 } });
+    t.eq([air.dark, air.reach, air.rim, air.sun], [true, 0.8, 1, 0.6], 'what the TV draws');
+    // the weather: a mix as on a battlemap, drawn over the world map
+    t.eq((await tvA(t)).wx, false, 'no weather yet');
+    const FXDATA = require('../../renderer/fx-data');
+    const storm = FXDATA.WEATHER.find((w) => w.id === 'storm');
+    t.handle('weather.preset', { mapId: world, name: storm.label, layers: storm.layers });
+    t.eq(M(t, world).weather.layers.map((l) => l.type), ['rain', 'splash', 'clouds', 'lightning'], 'a thunderstorm on the world map');
+    t.eq(M(t, battle).weather.layers.length, 0, 'none of it on the battlemap');
+    await t.until(async () => (await tvA(t)).wx === true, 5000, 'the weather to be drawn on the TV');
+    const drawn = await t.until(async () => { const n = await t.t(`(() => { const c = document.querySelector('#table-atlas .atl-wx'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 16) if (d[i] > 8) n++; return n; })()`); return n > 40 && n; }, 6000, 'rain on its canvas');
+    t.ok(drawn > 40, 'it rains over the map', drawn);
+    t.handle('weather.preset', { mapId: world, name: 'None', layers: [] });
+    await t.until(async () => (await tvA(t)).wx === false, 5000, 'the weather to stop');
+    t.handle('atlasmap.set', { mapId: world, mist: 'cloud', reach: 0.5, rim: 0.3, weather: { sun: 0 } });
     t.handle('atlas.hide', {});
     await t.until(async () => { const x = await tvA(t); return !x.on && !x.busy; }, 8000, 'off the TV');
   });
@@ -201,6 +213,9 @@ module.exports = (area) => {
     t.eq([t.state.editMapId, t.state.atlasEdit], [battle, region], 'the Map table takes it, the editor stays');
     await t.until(async () => (await W(t, 'w.debug().map')) === region, 4000, 'the window to show the region');
     // the list of the atlas
+    t.eq(await t.g(`[...document.querySelectorAll('.mt-tool')].map((b) => b.dataset.id)`), ['move', 'place', 'route', 'draw', 'write', 'erase', 'maps', 'assets', 'grid', 'view', 'weather'], 'the tools: what is used all the time first, what is set once for a map last');
+    const gap = await t.g(`document.querySelector('.mt-tool[data-id="maps"]').getBoundingClientRect().top - document.querySelector('.mt-tool[data-id="erase"]').getBoundingClientRect().bottom`);
+    t.ok(gap > 20, 'the two groups stand apart', gap);
     await tool(t, 'maps');
     await t.until(async () => (await t.count('.fp[data-id="atlas"] .atl-row')) === 2, 4000, 'both maps in the list');
     t.eq(await t.g(`[...document.querySelectorAll('.fp[data-id="atlas"] .atl-name b')].map((b) => b.textContent)`), ['The world', 'The north'], 'their names');
@@ -213,7 +228,13 @@ module.exports = (area) => {
       await tool(t, id);
       t.ok((await t.count('.mt-opts > *')) >= 2, `${id}: its choices stand at the side`, await t.text('.mt-opts'));
     }
-    t.eq(await t.g(`[...document.querySelectorAll('.mt-opts .ctl-label')].map((e) => e.textContent)`), ['Cloud shadows', 'Rain', 'Snow', 'Sunshine', 'Storm'], 'the weather');
+    const wx = await t.g(`({ mixes: [...document.querySelectorAll('.mt-opts .wx-presets .tile')].map((e) => e.textContent.trim()), last: [...document.querySelectorAll('.mt-opts .ctl-label')].pop().textContent })`);
+    t.ok(wx.mixes.includes('Thunderstorm') && wx.mixes.includes('Blizzard'), 'the weather: the battlemap\'s mixes', wx.mixes);
+    t.eq(wx.last, 'Sunshine', 'and sunshine');
+    await t.clickText('.mt-opts .wx-presets .tile', 'Snow');
+    await t.until(() => M(t, world).weather.layers.some((l) => l.type === 'snow'), 3000, 'a click on Snow to make it snow on the world map');
+    t.eq(M(t, battle).weather.layers.length, 0, 'not on the battlemap');
+    t.handle('weather.preset', { mapId: world, name: 'None', layers: [] });
     t.eq(await t.badText(), [], 'nothing odd written anywhere');
     // closed: the battlemap plays again
     await t.g(`Play.Floats.hide('atlas')`);
@@ -240,9 +261,16 @@ module.exports = (area) => {
     const ic = await t.rect('.mt-opts .mt-icon[data-v="tower"]'); await t.click(ic.cx, ic.cy);
     await t.until(() => { const m = M(t, world).marks.find((x) => x.id === pl.id); return m.style === 'diamond' && m.icon === 'tower'; }, 3000, 'a diamond with a tower');
     await t.until(async () => (await W(t, 'w.debug().ed.standing')).some((s) => s.title === 'Emberfall' && s.style === 'diamond' && s.shown), 4000, 'it stands in the picture');
-    // dragged somewhere else
+    // locked, it stays where it is (but it is picked); unlocked, it is dragged somewhere else
     const s1 = await scr(t, { x: pl.x, y: pl.y }); const p2 = at(0.3, 0.5); const s2 = await scr(t, p2);
     await tool(t, 'move');
+    t.eq(await W(t, 'w.debug().locks'), [true, true], 'markers and routes are locked at first');
+    const was = { x: M(t, world).marks.find((m) => m.id === pl.id).x, y: M(t, world).marks.find((m) => m.id === pl.id).y };
+    await t.drag({ x: s1.x, y: s1.y - 14 }, { x: s2.x, y: s2.y - 14 });
+    t.eq([M(t, world).marks.find((m) => m.id === pl.id).x, M(t, world).marks.find((m) => m.id === pl.id).y], [was.x, was.y], 'locked: dragging it moves nothing');
+    t.eq((await W(t, 'w.debug().sel')).id, pl.id, 'but it is picked');
+    const lk = await t.rect('.mt-lock[data-k="lockMarks"]'); await t.click(lk.cx, lk.cy);
+    await t.until(async () => (await W(t, 'w.debug().locks'))[0] === false, 3000, 'the markers\' lock to open');
     await t.drag({ x: s1.x, y: s1.y - 14 }, { x: s2.x, y: s2.y - 14 });
     await t.until(() => Math.abs(M(t, world).marks.find((m) => m.id === pl.id).x - p2.x) < R.w * 0.006, 4000, 'the place to follow the drag');
     t.near(M(t, world).marks.find((m) => m.id === pl.id).y, p2.y, R.w * 0.006, 'down too');
@@ -253,6 +281,17 @@ module.exports = (area) => {
     await t.key('Enter');
     const routes = M(t, world).marks.filter((m) => m.kind === 'route');
     t.eq(routes.length, 1, 'one route'); t.eq(routes[0].pts.length / 2, 4, 'a point for every click', routes[0].pts);
+    // a second route, ended by a double click (its second click adds no point)
+    const more = [[0.5, 0.7], [0.6, 0.7]].map(([fx, fy]) => at(fx, fy));
+    for (const p of more) { const q = await scr(t, p); await t.click(q.x, q.y); await t.sleep(450); }
+    const end = await scr(t, at(0.65, 0.75));
+    await t.click(end.x, end.y); await t.mouse('mouseDown', end.x, end.y); await t.mouse('mouseUp', end.x, end.y);
+    await t.until(async () => (await W(t, 'w.debug().routeId')) === null, 3000, 'the double click to end the route');
+    await t.sleep(300);
+    const second = M(t, world).marks.filter((m) => m.kind === 'route')[1];
+    t.eq(second.pts.length / 2, 3, 'three points: the double click set the last one once', second.pts);
+    t.handle('mark.remove', { mapId: world, id: second.id });
+    await tool(t, 'route');
     t.ok(/miles$/.test(require('../../renderer/geom').routeLabel(M(t, world).grid, routes[0])), 'counted in miles', require('../../renderer/geom').routeLabel(M(t, world).grid, routes[0]));
     t.eq(await W(t, 'w.debug().routeId'), null, 'Enter ended it');
     // drawn with the pen, rubbed out, and back with Undo
@@ -277,7 +316,7 @@ module.exports = (area) => {
     const d = await openTable(t, world);
     await tool(t, 'move');
     const v0 = { ...M(t, world).view };
-    const tab = await t.until(() => t.rect('.mt-tv-tab'), 3000, 'the TV\'s frame in the picture');
+    const tab = await t.until(() => t.rect('.mt-tv-knob'), 3000, 'the handle of the TV\'s frame');
     const inch = d.ed.cam.S / (d.size.H / 2); // inches of the map for a pixel of the picture
     await t.drag({ x: tab.cx, y: tab.cy }, { x: tab.cx + 60, y: tab.cy + 30 });
     await t.until(() => Math.abs(M(t, world).view.x - v0.x) > 0.01, 4000, 'the frame to move');
@@ -301,6 +340,61 @@ module.exports = (area) => {
     t.handle('view.update', { mapId: world, ...v0 });
     await t.g(`Play.Floats.hide('atlas')`);
   });
+
+  area.quick('a double click on a place opens the map behind it: asked first, then the TV dives in; Zoom out goes back; right-click makes things', async (t) => {
+    for (const m of [...M(t, world).marks]) t.handle('mark.remove', { mapId: world, id: m.id });
+    t.handle('atlas.show', { id: world });
+    const a = await shownOn(t, world);
+    const R = a.surface.rect; const at = (fx, fy) => ({ x: R.x + R.w * fx, y: R.y + R.h * fy });
+    const gate = t.handle('mark.add', { mapId: world, kind: 'place', title: 'North gate', to: region, ...at(0.6, 0.4) }).selected;
+    const d = await openTable(t, world);
+    await t.g(`Play.Atlas.win.setMode('flat')`);
+    await tool(t, 'move');
+    t.eq(await t.g(`document.querySelector('.mt-out').hidden`), true, 'no Zoom out on the world map');
+    // a double click on the place: asked first
+    const s = await scr(t, at(0.6, 0.4));
+    await t.mouse('mouseMove', s.x, s.y - 14); await t.mouse('mouseDown', s.x, s.y - 14); await t.mouse('mouseUp', s.x, s.y - 14);
+    await t.mouse('mouseDown', s.x, s.y - 14); await t.mouse('mouseUp', s.x, s.y - 14);
+    await t.until(async () => (await t.text('.modal h2')) === 'Open The north?', 4000, 'the question');
+    t.eq(t.state.atlas.id, world, 'nothing opened yet');
+    await t.clickText('.modal .btn', 'Open');
+    await t.until(() => t.state.atlas.id === region, 3000, 'the region to be opened');
+    t.eq([t.state.atlas.via.dir, t.state.atlas.via.x, t.state.atlas.via.y], ['in', M(t, world).marks.find((m) => m.id === gate).x, M(t, world).marks.find((m) => m.id === gate).y], 'the TV is told to dive into the place');
+    const runs = (await t.tvDebug()).mapInk.runs;
+    const seen = new Set();
+    const b = await t.until(async () => { const x = await tvA(t); if (x.trip) seen.add(x.trip); return x.id === region && !x.trip && x.ready && x; }, 12000, 'the TV to arrive on the region');
+    t.ok(seen.has('leave') || seen.has('wait') || seen.has('arrive'), 'it travelled there (dive, mist, the new map)', [...seen]);
+    t.eq((await t.tvDebug()).mapInk.runs, runs, 'through the mist, not with the table\'s map change');
+    t.near(b.veil, 0, 0.001, 'the mist has opened again'); t.near(b.cam.S, b.camT.S, 0.01, 'the camera has settled on the region\'s view');
+    await t.until(async () => (await W(t, 'w.debug().map')) === region, 4000, 'the Map table to follow');
+    // Zoom out: back to the world map, through the mist, to the view it had
+    const out = await t.until(async () => { const r = await t.rect('.mt-out'); return r && r.w > 10 && r; }, 4000, 'Zoom out on the regional map');
+    await t.click(out.cx, out.cy);
+    await t.until(() => t.state.atlas.id === world, 3000, 'the world map to be asked for');
+    t.eq(t.state.atlas.via.dir, 'out', 'the TV is told to pull back out');
+    t.near(t.state.atlas.via.x, at(0.6, 0.4).x, 0.01, 'to the place that leads there');
+    const c = await t.until(async () => { const x = await tvA(t); return x.id === world && !x.trip && x.ready && x; }, 12000, 'the TV to be back on the world map');
+    t.near(c.cam.cx, a.cam.cx, 0.02, 'where it looked before (across)'); t.near(c.cam.S, a.cam.S, 0.02, 'as far away as before');
+    // right-click on empty map: a round menu to make things; "Place here" sets a place there
+    await t.until(async () => (await W(t, 'w.debug().map')) === world, 4000, 'the Map table back on the world map');
+    const e = await scr(t, at(0.3, 0.7));
+    await t.click(e.x, e.y, 'right');
+    await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the round menu');
+    t.eq(await t.g(`[...document.querySelectorAll('.radial-item span')].map((x) => x.textContent)`), ['Place here', 'Route from here', 'Write here', 'Asset here', 'TV looks here'], 'what can be made here');
+    await t.clickText('.radial-item', 'Place here');
+    const made = await t.until(() => M(t, world).marks.find((m) => m.kind === 'place' && m.id !== gate), 4000, 'the place');
+    t.near(made.x, at(0.3, 0.7).x, R.w * 0.005, 'where the right-click was');
+    // right-click on a place: what can be done with it
+    await t.sleep(300);
+    await t.click(s.x, s.y - 14, 'right');
+    await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the round menu of the place');
+    t.eq(await t.g(`[...document.querySelectorAll('.radial-item span')].map((x) => x.textContent)`), ['Open The north', 'Hide', 'Remove'], 'open its map, hide it, remove it');
+    await t.clickText('.radial-item', 'Hide');
+    await t.until(() => M(t, world).marks.find((m) => m.id === gate).hidden === true, 3000, 'the place to be hidden');
+    t.handle('atlas.hide', {});
+    await t.until(async () => { const x = await tvA(t); return !x.on && !x.busy; }, 8000, 'off the TV');
+    await t.g(`Play.Floats.hide('atlas')`);
+  }, { ms: 80000 });
 
   area.deep('an asset lies on the world map: added from the Map table, picked, moved, sized by its handle', async (t) => {
     const d = await openTable(t, world);

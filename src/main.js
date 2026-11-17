@@ -106,7 +106,7 @@ const state = {
   title: null, // the session's title screen on the TV: { id, title, sub, pic }; it gives way to the first map sent
   editMapId: null,
   liveMapId: null,
-  atlas: null, // Beta 3.11: a world or regional map on the TV, over the battlemap: { id, at, note: { id, at } | null (a place's note shown) }
+  atlas: null, // Beta 3.11: a world or regional map on the TV, over the battlemap: { id, at, note: { id, at } | null (a place's note shown), via: (Beta 3.13) { dir: 'in' | 'out', x, y, at } | null: how the TV travels there from the map before }
   atlasEdit: null, // Beta 3.12: the atlas map the Map table (the Cartographer's window) works on; never the map being edited
   blackout: false,
   blackoutPreview: false, // the blackout is only the campaign page trying it out
@@ -1575,14 +1575,23 @@ function atlasInfo() {
     maps: A.maps.map((x) => {
       const m = store.map(x.id);
       return m ? { id: x.id, name: m.name, found: x.found, bgPath: m.bg ? m.bg.path : null, bgKind: m.bg ? m.bg.kind : null, missing: !!(m.bg && m.bg.missing),
-        places: m.marks.filter((k) => k.kind === 'place').length, routes: m.marks.filter((k) => k.kind === 'route').length } : null;
+        places: m.marks.filter((k) => k.kind === 'place').length, routes: m.marks.filter((k) => k.kind === 'route').length,
+        to: [...new Set(m.marks.filter((k) => k.kind === 'place' && k.to).map((k) => k.to))] } : null; // (Beta 3.13: the maps its places lead to)
     }).filter(Boolean),
   };
 }
 // a world or regional map onto the TV, over the battlemap (which stays as it is underneath)
 function atlasShow(id, p = {}) {
   if (!store.isAtlas(id) || !store.map(id)) return { ok: false, error: 'That map is not in the atlas' };
-  state.atlas = { id, at: Date.now(), note: null };
+  // (Beta 3.13) from one world map into another, the TV travels: into the place that leads there ('in': the camera dives
+  // into it, the mist closes, the region opens), or back out ('out': the region shrinks away, the mist closes, the map
+  // it came from opens at the place that leads here and the camera pulls back)
+  const prev = state.atlas && state.atlas.id !== id && store.map(state.atlas.id) ? state.atlas.id : null;
+  const at = Date.now();
+  let via = null;
+  if (prev && p.via === 'in') { const mk = store.map(prev).marks.find((m) => m.kind === 'place' && m.id === p.place); via = { dir: 'in', x: mk ? mk.x : null, y: mk ? mk.y : null, at }; }
+  if (prev && p.via === 'out') { const mk = store.map(id).marks.find((m) => m.kind === 'place' && m.to === prev); via = { dir: 'out', x: mk ? mk.x : null, y: mk ? mk.y : null, at }; }
+  state.atlas = { id, at, note: null, via };
   store.structure('atlas.found', { id, found: true }); // (a map on the table is a map the party has)
   if (p.edit !== false) state.atlasEdit = id; // (Beta 3.12: the Map table follows; the battlemap editor stays on its map)
   state.blackout = false;
@@ -1596,7 +1605,7 @@ function atlasForTable() {
   if (!map) return null;
   const A = store.atlas();
   // (a place that leads to a map the party hasn't found is the GM's to know: the TV learns which maps are found)
-  return { id: a.id, at: a.at, look: A.look, note: a.note, found: A.maps.filter((x) => x.found).map((x) => x.id), map: forWindow(player, map) };
+  return { id: a.id, at: a.at, via: a.via || null, look: A.look, note: a.note, found: A.maps.filter((x) => x.found).map((x) => x.id), map: forWindow(player, map) };
 }
 
 function tableState() {
@@ -4889,7 +4898,7 @@ function startApp() {
     if (state.dice && Date.now() > state.dice.t0 + state.dice.dur) { state.dice = null; broadcast(); }
     if (!store.cur) return;
     let changed = false;
-    for (const id of [state.liveMapId, state.editMapId]) {
+    for (const id of new Set([state.liveMapId, state.editMapId, state.atlasEdit, state.atlas && state.atlas.id])) { // (Beta 3.13: world maps have weather too)
       const m = store.map(id);
       if (m && mapstate.expire(m)) { store.touch(m.id); changed = true; }
     }
