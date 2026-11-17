@@ -23,7 +23,7 @@ const Play = (() => {
     look: { color: null, intensity: 1, density: 1, speed: 1, flicker: true, angle: null, variant: null, wave: null }, // the next effect you place
     // assets tool
     brush: null, assetMode: 'stamp', assetCells: 2, assetRot: 0, scatterIn: 3, scatterGap: 1.2, scatterTurn: true, scatterVary: 0.25, selAsset: null, selAssets: [],
-    assetLook: { opacity: 1, dark: 0, shadow: false, flip: false }, // the next asset you stamp
+    assetLook: { opacity: 1, dark: 0, shadow: false, flip: false, stretch: 1, hue: 0 }, // the next asset you stamp
     // spells tool
     spell: { name: 'Fireball', shape: 'sphere', size: 20, width: 5, skin: 'fire', mode: 'burst', squares: true, count: false, color: null, duration: null },
     spellAngle: 0, spellQuery: '', recent: [], aimFrom: null,
@@ -514,6 +514,7 @@ const Play = (() => {
     Walls.toolChanged(t);
     // effect markers: all of them in the Effects tool, party lights also while selecting
     view.setHandles(t === 'fx' ? 'all' : WallsTool.PLAY_TOOLS.includes(t) ? 'party' : false); // (Prototype 4: the party's marker in every Play tool)
+    view.setGizmo(t === 'asset'); // (Beta 3.10: the frame round a picked asset)
     view.setWide(wideFor(t)); // (Prototype 5: the Build tools show the whole map with its light and effects)
     Party.toolChanged(t);
     view.setAreaMode(t === 'fog');
@@ -650,6 +651,7 @@ const Play = (() => {
     spell: ['Click the map to cast; drag to aim a cone, line or cube.', 'Ctrl + wheel turns the area before you place it (Shift: small steps).', '+ and − change the size in 5 ft steps.',
       'Shift snaps the aim to 15°, Alt skips the grid.', 'Right-click a placed area for its options; H hides it from the players.', 'Drag a spell onto the hotbar to cast it with a number key.', 'Speakers and spell sounds: Options → Sound.'],
     asset: ['Click to stamp, drag to scatter.', 'Click a placed asset to select it; Shift + click or Shift + drag selects several.', 'Drag to move, Ctrl + wheel to turn, [ and ] to resize.',
+      'A picked asset has a frame: pull a side to make it flat or long, a corner to size it, the knob to turn it (Shift: steps of 15°).',
       'Assets lie under tokens and only react while this tool is on.'],
     layers: ['Click a row to select it on the map; H hides it from the players.', 'Delete removes what is selected; Ctrl + Z brings it back.'],
     grid: ['First match the printed grid, then make the squares 1 inch so miniatures fit.', 'One cell is 5 ft.', 'G switches the grid on or off.'],
@@ -2486,7 +2488,7 @@ const Play = (() => {
   function cardPinKey(t, sr) {
     const items = t.kind === 'assets' ? t.items : [t.item];
     const ids = items.map((a) => a && a.id).join();
-    const pos = items.map((a) => (a && a.x != null ? `${round(a.x, 3)},${round(a.y, 3)}` : '')).join(';');
+    const pos = items.map((a) => (a && a.x != null ? `${round(a.x, 3)},${round(a.y, 3)}${t.kind === 'asset' ? `,${a.w},${a.stretch || 1},${a.rotation || 0}` : ''}` : '')).join(';'); // (Beta 3.10: a picked asset's card keeps clear of its frame as it is sized, stretched or turned)
     const cam = view && view.cam ? `${round(view.cam.s, 4)},${Math.round(view.cam.tx)},${Math.round(view.cam.ty)}` : '';
     const mv = S.map.view ? `${S.map.view.x},${S.map.view.y},${S.map.view.zoom}` : '';
     return `${t.kind}|${ids}|${pos}|${cam}|${mv}|${Math.round(sr.width)}x${Math.round(sr.height)}|${popId || ''}`;
@@ -2549,7 +2551,15 @@ const Play = (() => {
   }
   function cardAnchor(t) {
     if (t.kind === 'token') return view.tokenPicRect(t.item.id);
-    if (t.kind === 'asset') return view.assetRect(t.item.id);
+    if (t.kind === 'asset') {
+      // Beta 3.10: with its frame on, the card keeps clear of the whole frame (it lies turned, and the knob stands above it)
+      const f = view.gizmoEl.querySelector(`.sv-gizmo[data-id="${t.item.id}"]`);
+      if (!f) return view.assetRect(t.item.id);
+      const rs = [f, ...f.querySelectorAll('.sv-grip')].map((x) => x.getBoundingClientRect());
+      const l = Math.min(...rs.map((r) => r.left)); const tp = Math.min(...rs.map((r) => r.top));
+      const r = Math.max(...rs.map((x) => x.right)); const b = Math.max(...rs.map((x) => x.bottom));
+      return { left: l, top: tp, width: r - l, height: b - tp, bottom: b };
+    }
     if (t.kind === 'mark') return Tools.cardAnchor(t);
     if (t.kind === 'assets') {
       const rs = t.items.map((a) => view.assetRect(a.id)).filter(Boolean);
@@ -3962,6 +3972,8 @@ const Play = (() => {
         drag.o.moved = drag.moved;
         updateGhost(pt, drag.o);
         if (drag.moved && directional(ui.spell.shape) && drag.o.origin) showReadout(e, aimAngle(drag.o.origin, pt, e.shiftKey));
+      } else if (drag.kind === 'assetgrip') {
+        gripMove(drag, pt, e, false);
       } else if (drag.kind === 'assetmove') {
         if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 4) drag.moved = true;
         if (drag.moved) moveAssets(drag, pt, false);
@@ -4017,6 +4029,8 @@ const Play = (() => {
       } else if (d.kind === 'spellmove' && d.moved) {
         pending.delete(d.key);
         cmd('spell.update', { id: d.id, x: pt.x + d.dx, y: pt.y + d.dy, coalesce: d.key });
+      } else if (d.kind === 'assetgrip') {
+        gripMove(d, pt, e, true);
       } else if (d.kind === 'assetmove' && d.moved) {
         moveAssets(d, pt, true);
       } else if (d.kind === 'assetbox') {
@@ -4044,6 +4058,8 @@ const Play = (() => {
     });
   }
 
+  // the asset under a point of the window (Beta 3.10: found by its picture as it lies, which is what takes the pointer)
+  function assetElAt(x, y) { for (const el of document.elementsFromPoint(x, y)) { const a = el.closest && el.closest('.sv-asset'); if (a) return a; } return null; }
   // ---------- turning with Ctrl + wheel ----------
   const stepTurn = (a, dir, step) => normAngle(Math.round((a || 0) / step) * step + dir * step);
   // Beta 2: Ctrl + wheel turns a light shaft, arcs or a bullseye lantern (the selected one, or the next one placed)
@@ -4059,7 +4075,7 @@ const Play = (() => {
   function turnWithWheel(e, dir, step) {
     const pt = view.toMap(e.clientX, e.clientY);
     if (ui.tool === 'asset') {
-      const el = document.elementsFromPoint(e.clientX, e.clientY).find((x) => x.classList && x.classList.contains('sv-asset'));
+      const el = assetElAt(e.clientX, e.clientY);
       const over = el && layer(el.dataset.id);
       if (ui.selAssets.length > 1 && (!over || ui.selAssets.includes(over.id))) {
         // a selected group turns together, each piece around its own centre
@@ -4165,7 +4181,7 @@ const Play = (() => {
     const b = ui.brush;
     if (!b) return null;
     const L = ui.assetLook;
-    return cmd('layer.add', { path: b.path, role: 'asset', x: pt.x, y: pt.y, w: round(ui.assetCells * grid().size * scale, 3), rotation: normAngle(rotation), opacity: L.opacity, dark: L.dark, shadow: L.shadow, flip: L.flip, coalesce: key });
+    return cmd('layer.add', { path: b.path, role: 'asset', x: pt.x, y: pt.y, w: round(ui.assetCells * grid().size * scale, 3), rotation: normAngle(rotation), opacity: L.opacity, dark: L.dark, shadow: L.shadow, flip: L.flip, stretch: L.stretch || 1, hue: L.hue || 0, coalesce: key });
   }
   function scatterAt(pt, key) {
     const R = ui.scatterIn / 2 / zoom();
@@ -4193,7 +4209,60 @@ const Play = (() => {
     } else if (patches.length === 1) send(d.key, 'layer.update', patches[0]);
     else send(d.key, 'layer.many', { patches });
   }
+  // Beta 3.10: the frame round a picked asset. A side makes it flat or long (the opposite side stays where it is), a
+  // corner sizes it (the opposite corner stays, its shape too), the knob turns it (Shift: in steps of 15°).
+  const GRIPS = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0], ne: [1, -1], nw: [-1, -1], se: [1, 1], sw: [-1, 1] };
+  const STRETCH = [0.05, 20];
+  function gripStart(e, pt, gripEl) {
+    const frame = gripEl.closest('.sv-gizmo');
+    const b = frame && view.assetBox(frame.dataset.id);
+    if (!b) return false;
+    const g = gripEl.dataset.grip;
+    const th = (b.rot * Math.PI) / 180; const ux = { x: Math.cos(th), y: Math.sin(th) }; const uy = { x: -ux.y, y: ux.x };
+    const d = { kind: 'assetgrip', id: b.id, g, b, ux, uy, el: gripEl, moved: false, sx: e.clientX, sy: e.clientY, key: `ag-${b.id}-${Date.now()}`, patch: null };
+    if (g === 'turn') d.a0 = b.rot - (Math.atan2(pt.y - b.y, pt.x - b.x) * 180) / Math.PI;
+    else { const [sx, sy] = GRIPS[g]; const q = { x: (pt.x - b.x) * ux.x + (pt.y - b.y) * ux.y, y: (pt.x - b.x) * uy.x + (pt.y - b.y) * uy.y }; d.off = { x: q.x - (sx * b.w) / 2, y: q.y - (sy * b.h) / 2 }; }
+    gripEl.classList.add('on');
+    drag = d;
+    return true;
+  }
+  function gripPatch(d, pt, e) {
+    const b = d.b;
+    if (d.g === 'turn') {
+      let a = d.a0 + (Math.atan2(pt.y - b.y, pt.x - b.x) * 180) / Math.PI;
+      a = normAngle(e.shiftKey ? Math.round(a / 15) * 15 : Math.round(a));
+      showReadout(e, a);
+      return { id: b.id, rotation: a };
+    }
+    const [sx, sy] = GRIPS[d.g];
+    const q = { x: (pt.x - b.x) * d.ux.x + (pt.y - b.y) * d.ux.y - d.off.x, y: (pt.x - b.x) * d.uy.x + (pt.y - b.y) * d.uy.y - d.off.y };
+    const aspect = b.own / b.w; // the picture's own height for a width of one
+    let w = b.w; let hgt = b.h; let cx = 0; let cy = 0; // the new size, and how far its centre moves along its own axes
+    if (sx && sy) { // a corner: the same shape, bigger or smaller, the opposite corner stays
+      const D = { x: sx * b.w, y: sy * b.h };
+      const k = Math.max(0.05 / Math.min(b.w, b.h), ((q.x + D.x / 2) * D.x + (q.y + D.y / 2) * D.y) / (D.x * D.x + D.y * D.y));
+      w = b.w * k; hgt = b.h * k; cx = (D.x * (k - 1)) / 2; cy = (D.y * (k - 1)) / 2;
+    } else if (sx) { // the left or right side: longer or shorter along its own width, as tall as it was
+      w = clamp(sx * q.x + b.w / 2, Math.max(0.05, b.h / (aspect * STRETCH[1])), b.h / (aspect * STRETCH[0]));
+      cx = (sx * (w - b.w)) / 2;
+    } else { // the top or bottom side: taller or flatter
+      hgt = clamp(sy * q.y + b.h / 2, Math.max(0.05, b.own * STRETCH[0]), b.own * STRETCH[1]);
+      cy = (sy * (hgt - b.h)) / 2;
+    }
+    return { id: b.id, x: round(b.x + d.ux.x * cx + d.uy.x * cy, 4), y: round(b.y + d.ux.y * cx + d.uy.y * cy, 4), w: round(w, 3), stretch: round(hgt / (w * aspect), 3) };
+  }
+  function gripMove(d, pt, e, done) {
+    if (!d.moved && !done && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 3) d.moved = true;
+    if (d.moved) d.patch = gripPatch(d, pt, e);
+    if (done) {
+      d.el.classList.remove('on');
+      pending.delete(d.key);
+      if (d.patch) cmd('layer.update', { ...d.patch, coalesce: d.key });
+    } else if (d.patch) send(d.key, 'layer.update', d.patch);
+  }
   function assetPointerDown(e, pt) {
+    const gripEl = e.target.closest('.sv-grip');
+    if (gripEl && gripStart(e, pt, gripEl)) return;
     const el = e.target.closest('.sv-asset');
     if (el) {
       const a = layer(el.dataset.id);
@@ -4262,7 +4331,7 @@ const Play = (() => {
   function updateAssetGhost() {
     if (!view) return;
     if (dropGhost) { placeDropGhost(); return; }
-    const hovering = lastPointer && document.elementsFromPoint(lastPointer.x, lastPointer.y).some((x) => x.classList && x.classList.contains('sv-asset'));
+    const hovering = lastPointer && !!assetElAt(lastPointer.x, lastPointer.y);
     const show = ui.tool === 'asset' && ui.brush && ui.assetMode === 'stamp' && lastPointer && S && S.map && !ui.selAsset && !hovering && !(drag && drag.kind === 'assetmove');
     if (!show) { hideGhost(); return; }
     const g = ghostMedia(ui.brush.url, ui.brush.kind);
@@ -4273,7 +4342,7 @@ const Play = (() => {
     g.el.classList.remove('is-token');
     showGhost(g, {
       left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${w}px`, height: 'auto', opacity: String(0.5 * L.opacity),
-      transform: `translate(-50%, -50%) rotate(${ui.assetRot}deg) scaleX(${L.flip ? -1 : 1})`, filter: L.dark > 0 ? `brightness(${1 - L.dark})` : '',
+      transform: `translate(-50%, -50%) rotate(${ui.assetRot}deg) scale(${L.flip ? -1 : 1}, ${L.stretch || 1})`, filter: `${L.hue ? `hue-rotate(${L.hue}deg) ` : ''}${L.dark > 0 ? `brightness(${1 - L.dark})` : ''}`,
     });
   }
   // the size a drop gives it (placeAsset: 256 pixels a square), a token on the square it snaps to (dropAsset)
@@ -4334,6 +4403,7 @@ const Play = (() => {
       cardSep(),
       ib('rotate-clockwise', 'Turn 15° (or Ctrl + wheel)', () => cmd('layer.update', { id: a.id, rotation: normAngle((a.rotation || 0) + 15) })),
       ib('flip-vertical', 'Mirror', () => cmd('layer.update', { id: a.id, flip: !a.flip }), { on: a.flip }),
+      a.stretch ? ib('restore', 'Back to its own shape (it was made flat or long)', () => cmd('layer.update', { id: a.id, stretch: 1, stepLabel: 'Own shape' })) : null, // Beta 3.10
       ib('shadow', a.shadow ? 'Casts a shadow. Click to remove it' : 'Cast a shadow', () => cmd('layer.update', { id: a.id, shadow: !a.shadow }), { on: a.shadow }),
       // 4.8: an animated asset: its frames prepared (light to play), or the video itself (sharp at any size, heavier)
       a.kind === 'video' ? ib('movie', a.asVideo ? 'Plays as a video (sharp, heavier). Click for prepared frames again' : 'Play as a video: sharper for big animations, but heavier', () => setAsVideo(a, !a.asVideo), { on: !!a.asVideo }) : null,
@@ -4391,9 +4461,15 @@ const Play = (() => {
     return h('div', { class: 'stack look' }, head,
       slider({ label: 'Opacity', min: 0.1, max: 1, step: 0.05, get: () => get('opacity', 1), set: (v, k) => set('opacity', v, k), fmt: pct }),
       slider({ label: 'Darken', min: 0, max: 0.8, step: 0.05, get: () => get('dark', 0), set: (v, k) => set('dark', v, k), fmt: (v) => (v < 0.01 ? 'Off' : pct(v)) }),
+      // Beta 3.10: its colours turned round the colour wheel (a red banner made blue, green leaves made autumn)
+      slider({ label: 'Hue', min: -180, max: 180, step: 5, get: () => get('hue', 0) || 0, set: (v, k) => set('hue', v, k), fmt: (v) => (v ? `${v > 0 ? '+' : ''}${v}°` : 'Off') }),
       slider({ label: 'Turn', min: -180, max: 180, step: 5,
         get: () => { const list = sel(); return list.length ? (list[0].rotation || 0) : ui.assetRot; },
         set: (v, k) => { const list = sel(); if (list.length) send(k, 'layer.many', { patches: list.map((a) => ({ id: a.id, rotation: v })) }); else { ui.assetRot = v; updateAssetGhost(); } }, fmt: (v) => `${v}°` }),
+      // Beta 3.10: flat or long (also for several at once, and for the next one placed). The slider runs evenly from a
+      // quarter to four times the picture's own height, with 100 % in the middle; the frame's sides go further.
+      slider({ label: 'Height', min: -2, max: 2, step: 0.05, get: () => round(Math.log2(clamp(get('stretch', 1) || 1, 0.25, 4)), 2),
+        set: (u, k) => set('stretch', Math.abs(u) < 0.04 ? 1 : round(2 ** u, 3), k), fmt: (u) => pct(Math.abs(u) < 0.04 ? 1 : 2 ** u) }),
       toggle({ label: 'Shadow', get: () => get('shadow', false), set: (v) => set('shadow', v) }),
       toggle({ label: 'Mirror', get: () => get('flip', false), set: (v) => set('flip', v) }),
       lockBox);

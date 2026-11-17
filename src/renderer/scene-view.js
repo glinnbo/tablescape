@@ -96,12 +96,14 @@ class SceneView {
     this.wallMode = false; // false | 'doors' | 'edit'
     this.wallSel = null; this.wallPreview = null; this.wallSig = '';
     this.handlesEl = div('sv-handles');
+    this.gizmoEl = div('sv-handles sv-gizmos'); // (Beta 3.10: the frame round a picked asset)
+    this.gizmoOn = false; this.gizmoId = null; this.gizmoSig = '';
     this.marks = div('sv-marks');
     // GM only: the map goes on beyond the TV's edge; that part is dimmed (things there can still be reached)
     this.offEl = div('sv-off');
     this.moments = []; this.momentsLive = false; this.momentSig = '';
     this.world.append(this.mapA, this.cv.sway.el, this.mapA2, this.cv.atmo.el, this.cv.grid.el, this.mapA3, this.cv.veil.el, this.cv.dv.el, this.mapB, this.mapA4, this.cv.light.el, this.cv.glow.el, this.cv.spell.el,
-      this.mapC, this.mapT, this.annoEl, this.glassEl, this.labelsEl, this.fogEl, this.offEl, this.wallsEl, this.areasEl, this.tableOv, this.cv.weather.el, this.cv.moment.el, this.inkEl, this.handlesEl, this.marks);
+      this.mapC, this.mapT, this.annoEl, this.glassEl, this.labelsEl, this.fogEl, this.offEl, this.wallsEl, this.areasEl, this.tableOv, this.cv.weather.el, this.cv.moment.el, this.inkEl, this.handlesEl, this.gizmoEl, this.marks);
     this.root.appendChild(this.world);
     host.appendChild(this.root);
 
@@ -285,6 +287,7 @@ class SceneView {
     this.renderRound();
     this.renderInk();
     this.renderHandles();
+    this.renderGizmo();
     this.renderWalls();
     this.renderAreas();
     this.renderTrails();
@@ -675,12 +678,22 @@ class SceneView {
       if (!n || !n.el) continue;
       const x0 = parseFloat(n.el.style.left) || 0; const y0 = parseFloat(n.el.style.top) || 0;
       const w = parseFloat(n.el.style.width) || 0; const hgt = parseFloat(n.el.style.height) || 0;
-      const holes = toks.filter((t) => t.x + t.r > x0 && t.x - t.r < x0 + w && t.y + t.r > y0 && t.y - t.r < y0 + hgt);
-      const mask = holes.length ? holes.map((t) => `radial-gradient(circle ${Math.round(t.r)}px at ${Math.round(t.x - x0)}px ${Math.round(t.y - y0)}px, rgba(0,0,0,0.18) 0, rgba(0,0,0,0.18) 58%, #000 100%)`).join(', ') : '';
-      if (n.el.dataset.mask === mask) continue;
-      n.el.dataset.mask = mask;
+      // Beta 3.10: the asset as it lies. Its box stands upright round its middle while its picture is turned inside
+      // it, and a mask the size of that box cut a turned asset down to it as soon as a token stood under it (a long
+      // bridge turned a quarter lost both ends). The tokens are looked for under the turned picture, and the mask is
+      // a square big enough for any turn, with the windows placed in it.
+      const cx = x0 + w / 2; const cy = y0 + hgt / 2;
+      const th = ((a.rotation || 0) * Math.PI) / 180; const co = Math.cos(th); const si = Math.sin(th);
+      const holes = toks.filter((t) => { const dx = t.x - cx; const dy = t.y - cy; return Math.abs(dx * co + dy * si) < w / 2 + t.r && Math.abs(-dx * si + dy * co) < hgt / 2 + t.r; });
+      const D = Math.ceil(Math.hypot(w, hgt) * 1.3); // (with room for its shadow)
+      const ox = cx - D / 2; const oy = cy - D / 2;
+      const mask = holes.length ? holes.map((t) => `radial-gradient(circle ${Math.round(t.r)}px at ${Math.round(t.x - ox)}px ${Math.round(t.y - oy)}px, rgba(0,0,0,0.18) 0, rgba(0,0,0,0.18) 58%, #000 100%)`).join(', ') : '';
+      const key = mask ? `${mask}|${D}|${Math.round(w)}x${Math.round(hgt)}` : '';
+      if (n.el.dataset.mask === key) continue;
+      n.el.dataset.mask = key;
       n.el.style.maskImage = mask || '';
       n.el.style.maskComposite = holes.length > 1 ? 'intersect' : '';
+      Object.assign(n.el.style, mask ? { maskSize: `${D}px ${D}px`, maskPosition: `${round3((w - D) / 2)}px ${round3((hgt - D) / 2)}px`, maskClip: 'no-clip', maskOrigin: 'border-box' } : { maskSize: '', maskPosition: '', maskClip: '', maskOrigin: '' });
     }
   }
 
@@ -778,12 +791,14 @@ class SceneView {
         if (l.asVideo) { if (n.sheet || !n.media) { n.asked = 0; this.unbake(n, l); return; } } else { n.asked = 0; if (this.io) this.io.observe(n.el); this.wantSheet(n, l); }
       }
       const w = (l.w || 1) * ppi;
-      const hgt = n.nw ? (w * n.nh) / n.nw : w;
+      const st = l.stretch || 1; // (Beta 3.10: flat or long: the box takes the shape, the picture fills it, then it turns)
+      const hgt = (n.nw ? (w * n.nh) / n.nw : w) * st;
       const turn = `rotate(${l.rotation || 0}deg) scaleX(${l.flip ? -1 : 1})`;
       // the picture turns; its shadow keeps falling the same way (light from the top left). A baked animation
       // brings its shadow worked out once (anim.js); everything else gets it drawn by the browser.
-      const baked = n.sheet ? this.placeShadow(n, l, w, turn) : false;
+      const baked = n.sheet ? this.placeShadow(n, l, w, turn, st) : false;
       const filter = [];
+      if (l.hue) filter.push(`hue-rotate(${l.hue}deg)`); // (Beta 3.10: its colours turned; before the shadow, which stays black)
       if (l.dark > 0) filter.push(`brightness(${round3(1 - l.dark)})`);
       if (l.shadow && !baked) filter.push(`drop-shadow(${round3(w * 0.05)}px ${round3(w * 0.08)}px ${round3(w * 0.06)}px rgba(0, 0, 0, 0.7))`);
       Object.assign(n.el.style, {
@@ -793,6 +808,7 @@ class SceneView {
       if (n.media) n.media.style.transform = turn;
       n.el.classList.toggle('is-selected', this.selAssets.has(l.id));
       n.el.classList.toggle('is-locked', !!l.locked);
+      if (this.gizmoId === l.id) this.renderGizmo();
       if (n.anim && this.animTier(l) > (n.asked || 0)) this.wantSheet(n, l); // made bigger: a sharper sheet
       return;
     }
@@ -889,6 +905,48 @@ class SceneView {
   setSelectedAssets(ids) {
     this.selAssets = new Set(ids);
     for (const [lid, n] of this.nodes) if (n.role === 'asset') n.el.classList.toggle('is-selected', this.selAssets.has(lid));
+    this.renderGizmo();
+  }
+  // ---------- the frame round a picked asset (Beta 3.10, GM only) ----------
+  // One asset picked in the Assets tool gets a frame that lies and turns with it: pull a side to make it flat or long
+  // (the other side stays where it is), a corner to size it (its shape stays), the knob above it to turn it.
+  // The frame lies on the handle layer (screen pixels), so its dots keep their size at any zoom.
+  setGizmo(on) { on = !!on; if (this.gizmoOn === on) return; this.gizmoOn = on; this.renderGizmo(); }
+  // where an asset lies, in map inches: its centre, its own width and height, its turn; null until its picture's size is known
+  assetBox(id) {
+    const l = this.map && this.map.layers.find((x) => x.id === id && x.role === 'asset');
+    const n = l && this.nodes.get(id);
+    if (!l || !n || !n.nw || !n.nh) return null;
+    const w = l.w || 1; const own = (w * n.nh) / n.nw;
+    return { id, x: l.x, y: l.y, w, h: own * (l.stretch || 1), own, stretch: l.stretch || 1, rot: l.rotation || 0, locked: !!l.locked };
+  }
+  renderGizmo() {
+    if (!this.gm || !this.gizmoEl) return;
+    const id = this.gizmoOn && this.selAssets.size === 1 ? [...this.selAssets][0] : null;
+    const b = id ? this.assetBox(id) : null;
+    const show = b && !b.locked;
+    if (this.gizmoId && this.gizmoId !== (show ? id : null)) { const o = this.nodes.get(this.gizmoId); if (o && o.el) o.el.classList.remove('has-gizmo'); }
+    this.gizmoId = show ? id : (id || null); // (still waiting for the picture's size: asked again when it is placed)
+    if (!show) { if (this.gizmoEl.firstChild) this.gizmoEl.innerHTML = ''; this.gizmoSig = ''; return; }
+    const n = this.nodes.get(id); if (n && n.el) n.el.classList.add('has-gizmo');
+    const at = this.mapToPx(b.x, b.y); const s = this.ppi * this.v.zoom;
+    const sig = [id, round3(at.x), round3(at.y), round3(b.w * s), round3(b.h * s), b.rot].join('|');
+    if (sig === this.gizmoSig && this.gizmoEl.firstChild) return;
+    this.gizmoSig = sig;
+    let f = this.gizmoEl.firstChild;
+    if (!f) {
+      f = div('sv-gizmo');
+      for (const g of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) { const d = div(`sv-grip ${g.length === 1 ? 'side' : 'corner'} g-${g}`); d.dataset.grip = g; f.append(d); }
+      const stem = div('sv-grip-stem'); const knob = div('sv-grip knob'); knob.dataset.grip = 'turn'; knob.innerHTML = icon('rotate-clockwise');
+      f.append(stem, knob);
+      this.gizmoEl.append(f);
+    }
+    f.dataset.id = id;
+    Object.assign(f.style, { left: `${at.x}px`, top: `${at.y}px`, width: `${b.w * s}px`, height: `${b.h * s}px`, transform: `translate(-50%, -50%) rotate(${b.rot}deg)` });
+    // the pointer over a dot shows which way it pulls, as the asset lies now
+    const CUR = ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize'];
+    const base = { n: 0, ne: 45, e: 90, se: 135, s: 180, sw: 225, w: 270, nw: 315 };
+    for (const d of f.querySelectorAll('.sv-grip[data-grip]')) { const a = base[d.dataset.grip]; if (a != null) d.style.cursor = CUR[((Math.round((a + b.rot) / 45) % 4) + 4) % 4]; }
   }
   assetRect(id) {
     const n = this.nodes.get(id);
@@ -1270,7 +1328,7 @@ class SceneView {
   }
   // how sharp a sheet this asset needs: its size on the TV in screen pixels
   animTier(l) {
-    const px = (l.w || 1) * this.v.zoom * this.ppi * ((this.view && this.view.dpr) || 1);
+    const px = (l.w || 1) * Math.max(1, l.stretch || 1) * this.v.zoom * this.ppi * ((this.view && this.view.dpr) || 1); // (stretched long: as sharp as its longer side needs)
     return [128, 256, 384, 512, 768, 1024].find((t) => t >= px * 0.9) || 1024; // (4.8: up to 1024)
   }
   wantSheet(n, l) {
@@ -1312,7 +1370,7 @@ class SceneView {
     this.emit('render');
   }
   // the shadow canvas of a baked asset, at the frame's place; false while its shadow is still being worked out
-  placeShadow(n, l, w, turn) {
+  placeShadow(n, l, w, turn, st = 1) {
     const sh = l.shadow ? AnimCache.shadow(n.sheet) : null;
     if (!sh) { if (n.shadowCv) n.shadowCv.style.display = 'none'; return false; }
     if (!n.shadowCv) { n.shadowCv = this.newCanvas('sv-ashadow'); n.sctx = null; }
@@ -1320,9 +1378,10 @@ class SceneView {
     if (n.shadowCv.parentNode !== n.el) n.el.insertBefore(n.shadowCv, n.el.firstChild);
     if (n.shadowCv.style.display === 'none') n.sframe = -1;
     const k = w / sh.fw; // window pixels per shadow pixel
+    const ky = k * st;   // (Beta 3.10: a stretched asset's shadow takes its shape)
     Object.assign(n.shadowCv.style, {
-      display: '', left: `${round3(w * 0.05 - sh.pad * k)}px`, top: `${round3(w * 0.08 - sh.pad * k)}px`,
-      width: `${round3(sh.cw * k)}px`, height: `${round3(sh.ch * k)}px`, transform: turn,
+      display: '', left: `${round3(w * 0.05 - sh.pad * k)}px`, top: `${round3(w * 0.08 - sh.pad * ky)}px`,
+      width: `${round3(sh.cw * k)}px`, height: `${round3(sh.ch * ky)}px`, transform: turn,
     });
     if (n.sframe < 0) this.drawBakedNode(n, this.freezeAt || Date.now(), true);
     return true;

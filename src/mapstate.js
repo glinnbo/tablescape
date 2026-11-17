@@ -121,14 +121,31 @@ const TOKEN_DEFAULTS = { size: 1, rotation: 0, opacity: 1, hidden: false };
 const OVERLAY_DEFAULTS = { x: 0, y: 0, scale: 1, fill: true, opacity: 1, blend: 'screen', rate: 1, hidden: false, anchor: 'map' };
 const AUDIO_DEFAULTS = { volume: 0.6, muted: false, hidden: false };
 // Assets (trees, rocks, furniture): free placement, w = width in map inches
+const STRETCH = [0.05, 20]; // (Beta 3.10: an asset's height against its own picture's)
 const ASSET_DEFAULTS = { rotation: 0, opacity: 1, hidden: false, flip: false, shadow: false, dark: 0, locked: false };
-const LAYER_KEYS = ['front', 'over', 'x', 'y', 'scale', 'fill', 'opacity', 'blend', 'rate', 'size', 'rotation', 'hidden', 'volume', 'muted', 'name', 'anchor', 'w', 'flip', 'shadow', 'dark', 'locked', 'n', 'tag', 'named', 'asVideo', 'pic']; // (4.8: asVideo; 4.10: pic, a token's own picture size)
+const LAYER_KEYS = ['front', 'over', 'x', 'y', 'scale', 'fill', 'opacity', 'blend', 'rate', 'size', 'rotation', 'hidden', 'volume', 'muted', 'name', 'anchor', 'w', 'flip', 'shadow', 'dark', 'locked', 'n', 'tag', 'named', 'asVideo', 'pic', 'stretch', 'hue']; // (4.8: asVideo; 4.10: pic, a token's own picture size)
 // a token's name tag: 'off' (none), 'gm' (on the GM screen only), 'all' (on the TV too, unless the token is hidden)
 const TAGS = ['off', 'gm', 'all'];
 const MARK_KINDS = ['pin', 'x', 'dot', 'counter', 'note'];
 const pick = (src, keys) => Object.fromEntries(keys.filter((k) => k in src).map((k) => [k, src[k]]));
 const num = (v, d) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 
+function fixStretch(l) {
+  fixHue(l);
+  if (!('stretch' in l)) return;
+  const k = Number(l.stretch);
+  if (l.role !== 'asset' || !Number.isFinite(k) || Math.abs(k - 1) < 0.005) delete l.stretch;
+  else l.stretch = Math.round(Math.min(STRETCH[1], Math.max(STRETCH[0], k)) * 1000) / 1000;
+}
+// Beta 3.10: an asset's colours turned round the colour wheel, in whole degrees from -179 to 180 (a red banner made
+// blue, autumn leaves from green ones). Only kept when it is turned at all.
+function fixHue(l) {
+  if (!('hue' in l)) return;
+  const d = Math.round(Number(l.hue));
+  const v = Number.isFinite(d) ? ((((d + 180) % 360) + 360) % 360) - 180 : 0;
+  if (l.role !== 'asset' || !Number.isFinite(d) || v === 0) delete l.hue;
+  else l.hue = v === -180 ? 180 : v;
+}
 function updateLayer(l, p) {
   Object.assign(l, pick(p, LAYER_KEYS));
   if ('tag' in p && !TAGS.includes(l.tag)) l.tag = 'off';
@@ -139,6 +156,9 @@ function updateLayer(l, p) {
   if ('over' in p) { if (p.over) { l.over = true; delete l.front; } else delete l.over; } // (Prototype 23: above the tokens: tree tops, roofs)
   if (p.front) delete l.over;
   if (l.role === 'asset') { l.w = Math.max(0.05, Number(l.w) || 1); l.dark = Math.min(0.9, Math.max(0, Number(l.dark) || 0)); }
+  // Beta 3.10: an asset's shape: how tall it is drawn against its own picture (1: as the picture is; below: flat, above:
+  // long). Its width stays "w", so Bigger and Smaller keep the shape. Only kept when it differs from the picture's own.
+  fixStretch(l);
 }
 // Copies of the same NPC get numbers: Goblin 1, Goblin 2 ... (one renamed on its own, "named", stays out of it)
 function numberToken(map, layer) {
@@ -407,7 +427,8 @@ function apply(map, type, p, media) {
       }
       if (role === 'overlay') Object.assign(layer, OVERLAY_DEFAULTS, pick(p, ['blend', 'anchor']));
       if (role === 'audio') Object.assign(layer, AUDIO_DEFAULTS);
-      if (role === 'asset') Object.assign(layer, ASSET_DEFAULTS, { x: p.x ?? 0, y: p.y ?? 0, w: Math.max(0.05, p.w ?? 1) }, pick(p, ['rotation', 'flip', 'opacity', 'shadow', 'dark']));
+      if (role === 'asset') Object.assign(layer, ASSET_DEFAULTS, { x: p.x ?? 0, y: p.y ?? 0, w: Math.max(0.05, p.w ?? 1) }, pick(p, ['rotation', 'flip', 'opacity', 'shadow', 'dark', 'stretch', 'hue']));
+      fixStretch(layer);
       map.layers.push(layer); // drawing order within each role follows this list
       const what = role === 'audio' ? 'Sound' : role === 'overlay' ? (layer.anchor === 'table' ? 'Weather overlay' : 'Atmosphere overlay') : role === 'asset' ? 'Asset' : `${layer.name}${layer.n ? ` ${layer.n}` : ''}`;
       return { changed: 'all', selected: layer.id, label: `${what} added` };

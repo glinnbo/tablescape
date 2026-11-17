@@ -13,7 +13,7 @@ const Guide = (() => {
   const KEYS = [
     ['Build', [['M', 'Move the map (also while Build is folded)'], ['S', 'Assets: trees, rocks, furniture'], ['E', 'Effects, lights and weather'], ['W', 'Walls and doors (W again: next mode)'], ['K', 'Layers'], ['G', 'Grid on or off']]],
     ['Play', [['V', 'Select and move tokens'], ['N', 'Tokens: click to drop NPCs'], ['U', 'Party marker: where it is (arrow keys: one square)'], ['R / C', 'Reveal / cover fog'], ['A', 'Spells'], ['P', 'Point: ping, laser, spotlight, ruler (P again: next)'], ['D', 'Draw: chalk, pen, text, eraser (D again: next)'], ['X', 'Markers and counters (Toolbox)'], ['J', 'Map notes only you see (Build)'], ['O', 'Conversation: NPC portraits on the table'], ['Q', 'Toolbox: map tools and panels'], ['I', 'Initiative'], ['Enter', 'Next turn / next round']]],
-    ['Spells and assets', [['Click', 'Cast or stamp'], ['Drag', 'Aim a cone, line or cube / scatter assets'], ['Ctrl + wheel', 'Turn by 15° (Shift: 5°), also placed areas and assets'], ['Shift while aiming', 'Snap to 15°'], ['+  −', 'Spell size in 5 ft steps'], ['[  ]', 'Asset size'], ['Shift + drag', 'Select several assets'], ['Alt', 'Place or measure without snapping']]],
+    ['Spells and assets', [['Click', 'Cast or stamp'], ['Drag', 'Aim a cone, line or cube / scatter assets'], ['Ctrl + wheel', 'Turn by 15° (Shift: 5°), also placed areas and assets'], ['Shift while aiming', 'Snap to 15°'], ['+  −', 'Spell size in 5 ft steps'], ['[  ]', 'Asset size'], ['A picked asset\'s frame', 'Sides: flat or long · corners: size · knob: turn'], ['Shift + drag', 'Select several assets'], ['Alt', 'Place or measure without snapping']]],
     ['Walls', [['Click', 'Wall corner by corner (Alt: no snapping)'], ['Double-click / Enter', 'End the line of walls'], ['Click a door', 'Open or close it (also with V)'], ['Delete', 'Remove the selected wall']]],
     ['Table', [['T', 'Send this map to the table'], ['B', 'Blackout on or off'], ['1 – 0', 'Use the hotbar (3 pages: the mouse wheel over it)'], ['Alt 1 – 9', 'Open a map of this chapter'], ['F1 – F8', 'Play snapshot 1 to 8 of the map on the table'], ['Shift 1 – 9', 'Play a starred screen effect'], ['Ctrl 1 – 9', 'Play a Spotify mood'], ['F', 'Fit the view to the table'], ['Shift F', 'Show everything, also off the table'], ['Esc on the TV', 'Close the table window']]],
     ['Panels', [['L', 'Library'], ['Shift L', 'Library full screen'], ['Tab', 'Map thumbnails on or off'], ['Shift I', 'Character cards: the party at a glance (only for you)'], ['?', 'This guide'], ['Ctrl ,', 'Options: the TV, picture, players, sound, performance'], ['Ctrl + / Ctrl − / Ctrl 0', 'Size of everything on your screen (not the TV)']]],
@@ -23,6 +23,11 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.10', [
+      'Assets can be made flat or long. Pick one in the Assets tool and it gets a frame: pull a side to stretch it (the other side stays where it is), a corner to size it, the knob above it to turn it. The frame lies turned the way the asset does',
+      'The asset\'s card has "Back to its own shape" once it is stretched, and the Assets panel has a Height slider: for several picked assets at once, and for the next one you place',
+      'Assets panel: a Hue slider turns an asset\'s colours (a red banner made blue, green leaves made autumn), also for several at once and for the next one you place',
+    ]],
     ['Beta 3.9', [
       'Turning the map with everything on it: painted effects (water, mist, ice, webs, magical darkness, Sway and the others) away from the middle now turn with it. Before, they kept their old outline and showed nothing, or only a slice, at their new place',
       'Start screen: Check for updates is always there, also while a new version is on offer',
