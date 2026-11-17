@@ -93,6 +93,8 @@ const Play = (() => {
   const allMaps = () => chapters().flatMap((c) => c.maps);
   const viewChapter = () => chapters().find((c) => c.id === ui.viewChapterId) || chapterOfMap(S.editMapId) || chapters()[0] || null;
   const isLive = () => S && S.editMapId && S.table.liveMapId === S.editMapId;
+  // (Beta 3.11) the map being edited is a world or regional map that lies on the TV right now
+  const atlasLive = () => !!(S && S.atlas && S.atlas.on && S.atlas.on === S.editMapId);
   // 2.2: a chapter's Ready lists (Tokens, Talk): the tokens and portraits the GM wants at hand there
   const Ready = {
     chapter: () => chapterOfMap(S && S.editMapId) || viewChapter(),
@@ -2191,7 +2193,7 @@ const Play = (() => {
       t.classList.add('on');
       return;
     }
-    if (!S || !S.map || isLive()) { t.classList.remove('on'); return; }
+    if (!S || !S.map || isLive() || atlasLive()) { t.classList.remove('on'); return; }
     const liveName = S.table.liveName;
     t.append(h('div', { class: 'bar bar-prep' },
       iconEl('eye-off'),
@@ -2204,7 +2206,8 @@ const Play = (() => {
   function renderTableCtl() {
     const c = els.tctl;
     const t = S.table;
-    const status = !t.open ? 'Table closed' : t.blackout ? 'Blacked out' : t.title ? `Title: ${t.title}` : t.liveName ? `On the table: ${t.liveName}` : 'Table is dark';
+    const atlasOn = S.atlas && S.atlas.on ? S.atlas.maps.find((x) => x.id === S.atlas.on) : null; // (Beta 3.11: a world or regional map lies over the battlemap)
+    const status = !t.open ? 'Table closed' : t.blackout ? 'Blacked out' : atlasOn ? `On the table: ${atlasOn.name}` : t.title ? `Title: ${t.title}` : t.liveName ? `On the table: ${t.liveName}` : 'Table is dark';
     const cls = !t.open ? 'closed' : t.blackout ? 'black' : t.liveName ? 'live' : 'dark';
     let img = $('#tc-preview', c);
     if (!img) {
@@ -2421,7 +2424,7 @@ const Play = (() => {
     const r = view.frameRect();
     const sr = els.stage.getBoundingClientRect();
     Object.assign(els.frame.style, { left: `${r.left - sr.left}px`, top: `${r.top - sr.top}px`, width: `${r.width}px`, height: `${r.height}px` });
-    const live = isLive();
+    const live = isLive() || atlasLive();
     const kind = !live ? 'prep' : S.table.blackout ? 'black' : S.table.open ? 'live' : 'closed';
     els.frame.className = `on ${kind}`;
     els.frame.firstChild.textContent = { prep: 'Prep: players can\'t see this', live: 'On the table', black: 'Blacked out', closed: 'On the table (window closed)' }[kind];
@@ -3597,7 +3600,7 @@ const Play = (() => {
   const TB = Toolbox.create({
     doHot, toolHot, // Prototype 24: actions and tools on the hotbar
     ui, cmd, state: () => S, ready: Ready, ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib, ctlLabel: (t) => h('div', { class: 'ctl-label' }, t) },
-    refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), closePop: () => closePop(), get Drawer() { return Drawer; }, get Tools() { return Tools; }, get Show() { return Show; }, get Spot() { return Spot; }, get Lights() { return Lights; }, get Remote() { return Remote; }, get Players() { return PlayersP; }, get Chars() { return Chars; }, get Dice() { return Dice; },
+    refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), closePop: () => closePop(), get Drawer() { return Drawer; }, get Tools() { return Tools; }, get Show() { return Show; }, get Spot() { return Spot; }, get Lights() { return Lights; }, get Remote() { return Remote; }, get Players() { return PlayersP; }, get Atlas() { return AtlasP; }, get Chars() { return Chars; }, get Dice() { return Dice; },
     setTick: (fn) => { popTicker = fn; }, nextTurn: () => Tools.nextRound(),
     showPanel: (def) => Floats.show(def), togglePanel: (def) => Floats.toggle(def), panelOpen: (id) => Floats.isOpen(id),
     pins: () => pins, togglePin: (id) => togglePin(id),
@@ -3633,6 +3636,14 @@ const Play = (() => {
   const Remote = RemotePanel.create({
     state: () => S, ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
     refresh: () => { refreshPop(); renderRail(); },
+  });
+  // The Cartographer (atlas-panel.js, Beta 3.11), opened from the Toolbox: the campaign's world and regional maps
+  const AtlasP = AtlasPanel.create({
+    cmd, send, state: () => S, ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
+    get Drawer() { return Drawer; },
+    useTool: (t, mode) => { Tools.setMode(t, mode); setTool(t); openPop(t); },
+    openTool: (t) => { setTool(t); openPop(t); },
+    undoToast: (res) => { if (res && res.undo) toast(res.label || 'Done', { action: { label: 'Undo', run: () => cmd(res.undo.type, res.undo.payload) } }); },
   });
   // Players' phones (players-panel.js, Prototype 1), opened from the Toolbox
   const PlayersP = PlayersPanel.create({
@@ -4753,6 +4764,7 @@ const Play = (() => {
         else if (ui.momentAim) aimMoment(null);
         else if (ui.align) stopAlign();
         else if (ui.aimFrom) { ui.aimFrom = null; updateGhost(); renderTopbar(); }
+        else if (Tools.routeEnd()) { /* (Beta 3.11) the route being drawn ends here */ }
         else if (popId) closePop();
         else if (ui.drawer) Drawer.cancel();
         else if (ui.selected) { ui.selected = null; view.setSelected(null); placeCard(); }
@@ -4849,7 +4861,7 @@ const Play = (() => {
         case 'k': togglePop('layers'); break;
         case 'g': cmd('grid.update', { show: !S.map.grid.show }); break;
         case 'f': if (e.shiftKey) fitAll(); else view.fit(); break;
-        case 't': if (!isLive()) cmd('table.send'); break;
+        case 't': if (!isLive() && !atlasLive()) cmd('table.send'); break;
         case 'b': if (S.table.open) cmd('table.blackout'); break;
         case '+': case '=': case '-': case '_':
           if (ui.tool === 'spell') setSpell({ size: stepIn(SIZES, ui.spell.size, k === '+' || k === '=' ? 1 : -1) });

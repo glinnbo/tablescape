@@ -126,7 +126,17 @@ const ASSET_DEFAULTS = { rotation: 0, opacity: 1, hidden: false, flip: false, sh
 const LAYER_KEYS = ['front', 'over', 'x', 'y', 'scale', 'fill', 'opacity', 'blend', 'rate', 'size', 'rotation', 'hidden', 'volume', 'muted', 'name', 'anchor', 'w', 'flip', 'shadow', 'dark', 'locked', 'n', 'tag', 'named', 'asVideo', 'pic', 'stretch', 'hue']; // (4.8: asVideo; 4.10: pic, a token's own picture size)
 // a token's name tag: 'off' (none), 'gm' (on the GM screen only), 'all' (on the TV too, unless the token is hidden)
 const TAGS = ['off', 'gm', 'all'];
-const MARK_KINDS = ['pin', 'x', 'dot', 'counter', 'note'];
+// (Beta 3.11, for world and regional maps: 'place', a marker with a title and a line under it that can lead to a
+// regional map and bring a note or a handout; 'route', a dotted path from point to point whose length is counted in
+// grid cells)
+const MARK_KINDS = ['pin', 'x', 'dot', 'counter', 'note', 'place', 'route'];
+const short = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+// what one grid cell stands for (Beta 3.11): { n, name } as in "1 day of travel", "6 miles"; null: 5 ft, as on a battlemap
+function gridUnit(u) {
+  if (!u || typeof u !== 'object') return null;
+  const n = Number(u.n); const name = short(u.name, 30);
+  return name && Number.isFinite(n) && n > 0 ? { n: Math.round(Math.min(100000, n) * 100) / 100, name } : null;
+}
 const pick = (src, keys) => Object.fromEntries(keys.filter((k) => k in src).map((k) => [k, src[k]]));
 const num = (v, d) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 
@@ -229,7 +239,7 @@ function turnMap(map, p) {
     }
     for (const s of map.light.seen || []) pt(s);
     for (const dr of map.draw) { flat(dr.pts); pt(dr); }
-    for (const m of map.marks) pt(m);
+    for (const m of map.marks) { pt(m); flat(m.pts); } // (Beta 3.11: a route turns with all its points)
     for (const ar of map.areas || []) for (const r of ar.rings || []) flat(r);
   }
   return { changed: 'all', fog: true, label: all ? 'Map turned' : 'Picture turned' };
@@ -497,6 +507,7 @@ function apply(map, type, p, media) {
     // ---------- grid ----------
     case 'grid.update':
       Object.assign(map.grid, pick(p, ['type', 'size', 'angle', 'ox', 'oy', 'show', 'color', 'opacity', 'width', 'under']));
+      if ('unit' in p) { const u = gridUnit(p.unit); if (u) map.grid.unit = u; else delete map.grid.unit; } // (Beta 3.11)
       map.grid.under = !!map.grid.under;
       map.grid.size = Math.max(0.05, Number(map.grid.size) || 1);
       return { changed: 'all' };
@@ -769,22 +780,46 @@ function apply(map, type, p, media) {
       if (kind === 'dot') m.n = Number.isFinite(p.n) ? p.n : Math.max(0, ...map.marks.filter((x) => x.kind === 'dot').map((x) => x.n || 0)) + 1;
       if (kind === 'counter') Object.assign(m, { label: String(p.label || 'Counter').slice(0, 40), value: Math.round(num(p.value, 0)), auto: ['up', 'down'].includes(p.auto) ? p.auto : null });
       if (kind === 'note') m.text = String(p.text || '').slice(0, 600);
+      if (kind === 'place') Object.assign(m, { title: short(p.title, 60) || 'New place', sub: short(p.sub, 80), to: typeof p.to === 'string' ? p.to : null, note: String(p.note || '').slice(0, 600), ho: p.ho && p.ho.path && media ? media(String(p.ho.path)) : null });
+      if (kind === 'route') Object.assign(m, { title: short(p.title, 60), pts: [r3(m.x), r3(m.y)] });
       map.marks.push(m);
-      const what = { pin: 'Pin', x: 'Cross', dot: `Marker ${m.n}`, counter: m.label, note: 'Note' }[kind];
+      const what = { pin: 'Pin', x: 'Cross', dot: `Marker ${m.n}`, counter: m.label, note: 'Note', place: m.title, route: 'Route' }[kind];
       return { changed: 'all', selected: m.id, label: `${what} added` };
     }
     case 'mark.update': {
       const m = map.marks.find((x) => x.id === p.id);
       if (!m) return { changed: null };
+      const was = { x: m.x, y: m.y };
       Object.assign(m, pick(p, ['x', 'y', 'color', 'label', 'value', 'auto', 'text', 'hidden', 'n']));
       if (m.kind === 'counter') { m.value = Math.round(num(m.value, 0)); if (!['up', 'down'].includes(m.auto)) m.auto = null; }
+      if (m.kind === 'place') {
+        if ('title' in p) m.title = short(p.title, 60) || m.title;
+        if ('sub' in p) m.sub = short(p.sub, 80);
+        if ('to' in p) m.to = typeof p.to === 'string' ? p.to : null;
+        if ('note' in p) m.note = String(p.note || '').slice(0, 600);
+        if ('ho' in p) m.ho = p.ho && p.ho.path && media ? media(String(p.ho.path)) : null; // (a handout from the library: it travels with the campaign)
+      }
+      if (m.kind === 'route') {
+        if ('title' in p) m.title = short(p.title, 60);
+        // moved by its label: the whole route goes along
+        const dx = m.x - was.x; const dy = m.y - was.y;
+        if (dx || dy) for (let i = 0; i < m.pts.length; i += 2) { m.pts[i] = r3(m.pts[i] + dx); m.pts[i + 1] = r3(m.pts[i + 1] + dy); }
+      }
       return { changed: 'all' };
+    }
+    case 'mark.route': { // (Beta 3.11) a route grows by a point, or loses its last one (back: true)
+      const m = map.marks.find((x) => x.id === p.id && x.kind === 'route');
+      if (!m) return { changed: null };
+      if (p.back) { if (m.pts.length <= 2) return { changed: null }; m.pts.length -= 2; }
+      else { if (m.pts.length >= 400) return { changed: null }; m.pts.push(r3(num(p.x, 0)), r3(num(p.y, 0))); }
+      m.x = m.pts[m.pts.length - 2]; m.y = m.pts[m.pts.length - 1]; // (its label stands at its end)
+      return { changed: 'all', label: p.back ? 'Route shortened' : 'Route drawn' };
     }
     case 'mark.remove': {
       const m = map.marks.find((x) => x.id === p.id);
       if (!m) return { changed: null };
       map.marks = map.marks.filter((x) => x.id !== p.id);
-      return { changed: 'all', label: m.kind === 'note' ? 'Note removed' : m.kind === 'counter' ? `${m.label} removed` : 'Marker removed' };
+      return { changed: 'all', label: m.kind === 'note' ? 'Note removed' : m.kind === 'counter' ? `${m.label} removed` : m.kind === 'place' ? `${m.title} removed` : m.kind === 'route' ? 'Route removed' : 'Marker removed' };
     }
     case 'mark.clear': {
       const kinds = new Set(p.kinds || MARK_KINDS);

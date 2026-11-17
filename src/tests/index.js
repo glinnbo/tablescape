@@ -11,7 +11,7 @@ const path = require('path');
 const kit = require('./kit');
 
 // the order they are run and listed in
-const AREAS = ['start', 'tv', 'tools', 'panels', 'fog', 'tokens', 'spells', 'initiative', 'hotbar', 'handouts', 'burn', 'ready', 'options', 'guide', 'phones', 'sound', 'keep', 'light', 'walls', 'maptools', 'assets', 'screens', 'snapshots', 'library', 'portraits', 'styles', 'safety'];
+const AREAS = ['start', 'tv', 'tools', 'panels', 'fog', 'tokens', 'spells', 'initiative', 'hotbar', 'handouts', 'burn', 'ready', 'options', 'guide', 'phones', 'sound', 'keep', 'light', 'walls', 'maptools', 'assets', 'atlas', 'atlasgl', 'screens', 'snapshots', 'library', 'portraits', 'styles', 'safety'];
 exports.AREAS = AREAS;
 exports.titles = () => Object.fromEntries(AREAS.filter((a) => fs.existsSync(path.join(__dirname, 'areas', `${a}.js`))).map((a) => [a, load(a).title]));
 

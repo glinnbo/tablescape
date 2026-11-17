@@ -5,7 +5,7 @@
 
 const Table = (() => {
   const FADE_MS = 800;
-  let stage; let black; let calib; let timer; let overlays; let testEl; let dice; let show;
+  let stage; let black; let calib; let timer; let overlays; let testEl; let dice; let show; let atlas;
   // Sound is played by the sound window (sound-engine.js, its own process); the table only asks it
   // for thunder after a lightning flash and for the countdown's pulses and chimes.
   const events = { strikes: 0, thunders: 0 };
@@ -24,13 +24,14 @@ const Table = (() => {
     timer = Countdown.mount(document.getElementById('table-timer'));
     overlays = TableOverlays.mount(document.getElementById('table-overlays'));
     show = TableShow.mount(document.getElementById('table-show')); // Beta 3.2: a token shown to the table
+    atlas = TableAtlas.mount(document.getElementById('table-atlas')); // Beta 3.11: a world or regional map over the battlemap
     // dice, the wheel of luck, death saves (dice-fx.js); their sounds come from the sound window
     dice = DiceFX.mount(document.getElementById('table-dice'), { sound: (name, args) => window.ts.soundEvent({ kind: 'synth', name, args }) });
     window.ts.onEvent(onEvent);
     window.ts.onTableState(apply);
     window.ts.onFog((d) => SceneView.fogDelta(d, [...views.values()].map((x) => x.view)));
     window.ts.onDrag((d) => { const v = views.get(d.mapId); if (v) v.view.dragLive(d.id, d.x, d.y); }); // Prototype 14
-    window.ts.onView((d) => { const v = views.get(d.mapId); if (v) v.view.setViewLive(d.view); }); // 4.4: the map moving
+    window.ts.onView((d) => { const v = views.get(d.mapId); if (v) v.view.setViewLive(d.view); if (atlas) atlas.viewLive(d); }); // 4.4: the map moving
     window.ts.onPing((p) => { const v = views.get(liveId); if (v && p.mapId === liveId) v.view.ping(p); });
     // 4.11.1: the room lights' picture of the table, drawn here when main asks (a capture of the window made it flicker)
     const amb = document.createElement('canvas');
@@ -172,6 +173,7 @@ const Table = (() => {
     const k = Math.min(innerWidth / s.view.world.w, innerHeight / s.view.world.h);
     timer.set(s.timer || null, { on: true, volume: s.sfx ? s.sfx.volume : 0.7 }, { seats: s.seats, tin: s.view.ppi * k, hud: s.hud || 1 });
     overlays.set(s, s.view);
+    atlas.set(s);
     show.set(s.show || null, liveId && views.has(liveId) ? views.get(liveId).view : null);
     dice.set(s.dice || null, { seats: s.seats, hud: s.hud || 1, volume: s.sfx ? s.sfx.volume : 0.7 });
     FX.setQuality(s.quality);
@@ -496,6 +498,7 @@ const Table = (() => {
       timer: timer.debug(),
       // 0.6: talk, handouts, break, initiative, soundboard, lightning
       over: overlays.debug(),
+      atlas: atlas ? atlas.debug() : null,
       events: { strikes: events.strikes, thunders: events.thunders },
       turnGlow: lv ? lv.view.tokensEl.querySelectorAll('.sv-token.is-turn').length : 0,
       weather: lv ? lv.view.stats.weather : null,
@@ -563,6 +566,6 @@ const Table = (() => {
 
   // self-test: whether the TV shows an effect or light of the live map
   function fxShown(id) { const lv = views.get(liveId); const f = lv && lv.view.map && lv.view.map.fx.find((x) => x.id === id); return f ? lv.view.shown(f) : null; }
-  return { start, debug, probe, probeMap, coverage, sees, fogAt, fxShown, burn: (on) => overlays && overlays.burn(on) };
+  return { start, debug, probe, probeMap, coverage, sees, fogAt, fxShown, burn: (on) => overlays && overlays.burn(on), atlasProject: (x, y) => (atlas ? atlas.project(x, y) : null), atlasUnproject: (x, y) => (atlas ? atlas.unproject(x, y) : null) };
 })();
-window.__table = { burn: (on) => Table.burn(on), debug: () => Table.debug(), probe: (l, x, y) => Table.probe(l, x, y), probeMap: (l, x, y) => Table.probeMap(l, x, y), coverage: (l) => Table.coverage(l), sees: (x, y) => Table.sees(x, y), fogAt: (x, y) => Table.fogAt(x, y), fxShown: (id) => Table.fxShown(id) };
+window.__table = { atlasProject: (x, y) => Table.atlasProject(x, y), atlasUnproject: (x, y) => Table.atlasUnproject(x, y), burn: (on) => Table.burn(on), debug: () => Table.debug(), probe: (l, x, y) => Table.probe(l, x, y), probeMap: (l, x, y) => Table.probeMap(l, x, y), coverage: (l) => Table.coverage(l), sees: (x, y) => Table.sees(x, y), fogAt: (x, y) => Table.fogAt(x, y), fxShown: (id) => Table.fxShown(id) };

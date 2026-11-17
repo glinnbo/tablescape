@@ -210,6 +210,35 @@ const Geom = (() => {
     return { ft: cells * 5, cells, a: sa, b: sb };
   }
 
+  // ---------- Beta 3.11: what one grid cell stands for, and routes counted in cells ----------
+  // grid.unit = { n, name }: one cell is n of that ("1 day of travel", "6 miles"). A number of cells in words:
+  // "17 days of travel". The name is given for one; for several its first word is made plural.
+  const PLURAL = { foot: 'feet', Foot: 'Feet' };
+  function plural(name) {
+    const m = /^(\S+)(.*)$/.exec(String(name || '').trim());
+    if (!m) return '';
+    const w = m[1];
+    if (PLURAL[w]) return PLURAL[w] + m[2];
+    if (w.length <= 2 || /[^a-zA-Z]$/.test(w) || /s$/i.test(w) && !/ss$/i.test(w)) return w + m[2]; // (km, mi, "5-ft", already plural)
+    if (/(ss|x|ch|sh)$/i.test(w)) return `${w}es${m[2]}`;
+    if (/[^aeiou]y$/i.test(w)) return `${w.slice(0, -1)}ies${m[2]}`;
+    return `${w}s${m[2]}`;
+  }
+  const tidy = (v) => String(Math.round(v * 100) / 100);
+  function unitLabel(g, cells) {
+    const u = g && g.unit;
+    if (!u || !u.name) { const what = isHex(g || {}) ? 'hex' : 'square'; return `${tidy(cells)} ${cells === 1 ? what : plural(what)}`; }
+    const v = Math.round(cells * u.n * 100) / 100;
+    return `${tidy(v)} ${v === 1 ? u.name : plural(u.name)}`;
+  }
+  // a route's length in cells: from point to point, counted like the ruler (hexes: steps from hex to hex)
+  function routeCells(g, pts) {
+    let n = 0;
+    for (let i = 0; i + 3 < pts.length; i += 2) n += measure(g, { x: pts[i], y: pts[i + 1] }, { x: pts[i + 2], y: pts[i + 3] }, 'phb', false).cells;
+    return n;
+  }
+  const routeLabel = (g, m) => (m && m.pts && m.pts.length >= 4 ? unitLabel(g, routeCells(g, m.pts)) : '');
+
   // 4.10: how big a token's picture is drawn, as a share of the squares it takes (Options → Tokens: one value per 5e size,
   // sizes in between lie between them), times its own adjustment (l.pic). The token still takes its squares.
   const PIC_DEFAULT = { tiny: 1.2, medium: 1.3, large: 1.15, huge: 1.1, garg: 1.05 };
@@ -227,6 +256,6 @@ const Geom = (() => {
     }
     return k * (Number(own) > 0 ? Number(own) : 1);
   }
-  return { isHex, toLocal, fromLocal, hexAt, hexCenter, hexCorners, eachCell, snap, template, tracePath, affected, ftToIn, pointInPoly, measure, D2R, tokenPic, PIC_DEFAULT };
+  return { isHex, toLocal, fromLocal, hexAt, hexCenter, hexCorners, eachCell, snap, template, tracePath, affected, ftToIn, pointInPoly, measure, D2R, tokenPic, PIC_DEFAULT, plural, unitLabel, routeCells, routeLabel };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = Geom; // (Prototype 1: the main process steps tokens on the grid too)

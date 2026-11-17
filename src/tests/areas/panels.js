@@ -2,7 +2,7 @@
 'use strict';
 
 const PANELS = [['init', 'Initiative'], ['chars', 'Character cards'], ['timer', 'Countdown'], ['dice', 'Dice'], ['moments', 'Screen effects'], ['snaps', 'Snapshots'], ['sound', 'Soundboard'],
-  ['spotify', 'Spotify'], ['handouts', 'Handouts'], ['notes', 'Session log'], ['break', 'Break'], ['lights', 'Room lights'], ['players', 'Player phones'], ['remote', 'Remote']];
+  ['spotify', 'Spotify'], ['handouts', 'Handouts'], ['atlas', 'Cartographer'], ['notes', 'Session log'], ['break', 'Break'], ['lights', 'Room lights'], ['players', 'Player phones'], ['remote', 'Remote']];
 
 module.exports = (area) => {
   area.title('Toolbox panels');

@@ -66,6 +66,20 @@ const PlayTools = (() => {
     const snapOn = () => tokSet().snap !== false;
     const save = () => { try { localStorage.setItem('playPrefs', JSON.stringify(Object.fromEntries(Object.keys(prefs).map((k) => [k, ui[k]])))); } catch {} };
 
+    // Beta 3.11: on a world or regional map (the atlas) the Mark tool also sets places and draws routes
+    const onAtlas = () => { const st = S(); return !!(st && st.atlas && st.atlas.maps.some((x) => x.id === st.editMapId)); };
+    const markMode = () => (ui.mark.mode === 'counter' ? 'counter' : onAtlas() && (ui.mark.mode === 'place' || ui.mark.mode === 'route') ? ui.mark.mode : 'marker');
+    let routeId = null; // the route being drawn: every click adds a point
+    const routeNow = () => (routeId && map() ? map().marks.find((m) => m.id === routeId && m.kind === 'route') || null : null);
+    function routeEnd() { if (!routeId) return false; const id = routeId; routeId = null; if (map() && map().marks.some((m) => m.id === id)) selectMark(id); ctx.refreshPop(); return true; } // (picked once it is done: its card would lie in the way of the next click)
+    async function routeClick(pt, e) {
+      if (e.detail >= 2) { routeEnd(); return; } // (a double click ends it)
+      const at = e.altKey ? pt : Geom.snap(grid(), pt.x, pt.y, 1);
+      const r = routeNow();
+      if (r) { cmd('mark.route', { id: r.id, x: at.x, y: at.y, coalesce: `route-${r.id}` }); return; }
+      const res = await cmd('mark.add', { kind: 'route', x: at.x, y: at.y, color: ui.mark.color });
+      if (res && res.selected) { routeId = res.selected; if (ui.selMark) selectMark(null); ctx.refreshPop(); }
+    }
     const markOf = (id) => (map() && id ? map().marks.find((m) => m.id === id) || map().draw.find((d) => d.id === id && d.kind === 'text') || null : null);
     const isText = (m) => m && m.kind === 'text';
     function selectMark(id) {
@@ -267,7 +281,8 @@ const PlayTools = (() => {
     }
     function measureMsg(a, b, free, done) {
       const m = Geom.measure(grid(), a, b, ui.point.rule, free);
-      const label = `${ui.point.rule === 'real' && !Geom.isHex(grid()) ? '≈ ' : ''}${m.ft} ft`;
+      // (Beta 3.11: a map whose grid cells stand for something, "1 day of travel", measures in that)
+      const label = grid().unit ? Geom.unitLabel(grid(), Math.round(m.cells * 10) / 10) : `${ui.point.rule === 'real' && !Geom.isHex(grid()) ? '≈ ' : ''}${m.ft} ft`;
       return { mapId: S().editMapId, kind: 'measure', a: m.a, b: m.b, ft: m.ft, label, ring: ui.point.ring, done: !!done };
     }
     function showMeasure(msg) {
@@ -388,11 +403,17 @@ const PlayTools = (() => {
     function buildMarkPop() {
       const extra = h('div', { class: 'stack' });
       c().bind(() => {
-        const sig = `${ui.mark.mode}|${ui.mark.auto}`;
+        const sig = `${markMode()}|${ui.mark.auto}|${routeNow() ? 1 : 0}`;
         if (extra.dataset.sig === sig) return;
         extra.dataset.sig = sig;
         extra.innerHTML = '';
-        if (ui.mark.mode !== 'counter') {
+        if (markMode() === 'place') {
+          extra.append(swatchRow(() => ui.mark.color, (v) => { ui.mark.color = v; save(); ctx.refreshPop(); }));
+        } else if (markMode() === 'route') {
+          extra.append(swatchRow(() => ui.mark.color, (v) => { ui.mark.color = v; save(); ctx.refreshPop(); }),
+            c().row(c().btn('Finish the route', 'check', () => routeEnd(), { kind: routeNow() ? 'primary' : 'ghost', tip: 'Also: double click, or Esc' }),
+              c().btn('One point back', 'arrow-back-up', () => { const r = routeNow(); if (r) cmd('mark.route', { id: r.id, back: true }); }, { kind: 'ghost' })));
+        } else if (ui.mark.mode !== 'counter') {
           extra.append(
             c().seg({ label: 'Shape', options: [{ value: 'pin', label: 'Pin', icon: 'map-pin' }, { value: 'x', label: 'Cross', icon: 'x' }, { value: 'dot', label: 'Number', icon: 'circle-number-1', tip: 'Numbered markers: 1, 2, 3 …' }],
               get: () => ui.mark.shape, set: (v) => { ui.mark.shape = v; save(); ctx.refreshPop(); } }),
@@ -409,9 +430,19 @@ const PlayTools = (() => {
       });
       const count = h('span', { class: 'grow hint' });
       c().bind(() => { const n = map().marks.filter((m) => m.kind !== 'note').length; count.textContent = n ? `${n} marker${n === 1 ? '' : 's'} and counters` : 'No markers on this map'; });
+      // (Beta 3.11) world and regional maps: named places and routes too (the choice follows the map being worked on)
+      const modeBox = h('div', {});
+      c().bind(() => {
+        const atlas = onAtlas();
+        if (modeBox.dataset.atlas === String(atlas)) return;
+        modeBox.dataset.atlas = String(atlas);
+        const modes = [{ value: 'marker', label: 'Marker', icon: 'map-pin', tip: 'Pins, crosses and numbered markers' }, { value: 'counter', label: 'Counter', icon: 'plus-minus', tip: 'A number on the map, e.g. rounds until the ritual completes' }];
+        if (atlas) modes.push({ value: 'place', label: 'Place', icon: 'flag', tip: 'A named place: it can lead to a regional map, and bring a note or a handout' }, { value: 'route', label: 'Route', icon: 'route', tip: 'A dotted path from click to click; its length is counted in grid cells' });
+        modeBox.replaceChildren(c().seg({ cls: modes.length > 2 ? 'seg-4' : '', options: modes,
+          get: () => markMode(), set: (v) => { if (v !== 'route') routeEnd(); ui.mark.mode = v; save(); ctx.refreshPop(); } }));
+      });
       return h('div', { class: 'stack' },
-        c().seg({ options: [{ value: 'marker', label: 'Marker', icon: 'map-pin', tip: 'Pins, crosses and numbered markers' }, { value: 'counter', label: 'Counter', icon: 'plus-minus', tip: 'A number on the map, e.g. rounds until the ritual completes' }],
-          get: () => (ui.mark.mode === 'counter' ? 'counter' : 'marker'), set: (v) => { ui.mark.mode = v; save(); ctx.refreshPop(); } }),
+        modeBox,
         extra,
         c().sep(),
         c().row(count, c().btn('Clear', 'trash', () => undoable('mark.clear', { kinds: ['pin', 'x', 'dot', 'counter'] }), { kind: 'danger', tip: 'Remove every marker and counter from this map (notes stay)' })));
@@ -446,7 +477,11 @@ const PlayTools = (() => {
         if (!text) return;
         p = { kind: 'note', text, color: '#e2b44f' };
       } else if (mode === 'counter') p = { kind: 'counter', label: (m.label || 'Counter').trim() || 'Counter', value: m.value, auto: m.auto || null, color: m.color };
-      else p = { kind: m.shape, color: m.color };
+      else if (mode === 'place') {
+        const title = await askText('Name the place', '', { ok: 'Place it', placeholder: 'Kintsugi' });
+        if (!title) return;
+        p = { kind: 'place', title, color: m.color };
+      } else p = { kind: m.shape, color: m.color };
       const r = await cmd('mark.add', { ...p, x: pt.x, y: pt.y });
       if (r && r.selected) selectMark(r.selected);
     }
@@ -511,7 +546,8 @@ const PlayTools = (() => {
           selectMark(m.id);
           return { kind: 'markmove', id: m.id, dx: m.x - pt.x, dy: m.y - pt.y, sx: e.clientX, sy: e.clientY, moved: false, key: `mk-${m.id}-${Date.now()}` };
         }
-        placeMark(pt, t === 'notes' ? 'note' : ui.mark.mode === 'counter' ? 'counter' : 'marker'); // (Esc deselects; a click on the map always places the next one)
+        if (t === 'mark' && markMode() === 'route') { routeClick(pt, e); return null; } // (Beta 3.11)
+        placeMark(pt, t === 'notes' ? 'note' : markMode()); // (Esc deselects; a click on the map always places the next one)
         return null;
       }
       return null;
@@ -576,6 +612,7 @@ const PlayTools = (() => {
     function toolChanged(t) {
       if (t !== 'point') spotOff();
       if (t !== 'mark' && t !== 'notes' && t !== 'draw' && ui.selMark) { ui.selMark = null; view().setSelectedMark(null); }
+      if (t !== 'mark') routeId = null;
       document.body.dataset.pointMode = ui.point.mode;
       document.body.dataset.drawMode = ui.draw.mode;
       updateGhost();
@@ -583,7 +620,7 @@ const PlayTools = (() => {
     // P and D pressed again step through their modes
     function setMode(t, v) {
       if (t === 'point') { setPointMode(v); return; }
-      if (t === 'mark') { ui.mark.mode = v === 'counter' ? 'counter' : 'marker'; save(); ctx.refreshPop(); return; }
+      if (t === 'mark') { if (v !== 'route') routeId = null; ui.mark.mode = ['counter', 'place', 'route'].includes(v) ? v : 'marker'; save(); ctx.refreshPop(); return; }
       if (t === 'draw') { ui.draw.mode = v; save(); document.body.dataset.drawMode = v; ctx.refreshPop(); if (ctx.updateCursor) ctx.updateCursor(); }
     }
     function cycle(t) {
@@ -640,6 +677,45 @@ const PlayTools = (() => {
             () => upd({ auto: m.auto === 'down' ? 'up' : m.auto === 'up' ? null : 'down' }), { on: !!m.auto }),
           col, cardSep(), hide, del];
       }
+      if (m.kind === 'place') { // (Beta 3.11) a place on a world or regional map
+        const st = S(); const A = (st && st.atlas) || { maps: [] };
+        const dest = m.to ? A.maps.find((x) => x.id === m.to) : null;
+        const others = A.maps.filter((x) => x.id !== st.editMapId);
+        const onTv = A.on === st.editMapId;
+        const leadMenu = (e) => { const r = e.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 6, [
+          ...others.map((x) => ({ icon: x.id === m.to ? 'check' : 'map-2', checked: x.id === m.to, label: x.name, action: () => upd({ to: x.id }) })),
+          ...(others.length ? [] : [{ icon: 'info-circle', label: 'No other map in the atlas yet', disabled: true }]),
+          ...(m.to ? [{ sep: true }, { icon: 'x', label: 'Leads nowhere', action: () => upd({ to: null }) }] : [])]); };
+        const hoMenu = async (e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          let list = []; try { list = (await ts.library('list')).filter((x) => x.cat === 'handouts'); } catch {}
+          openMenu(r.left, r.bottom + 6, [
+            ...list.slice(0, 60).map((x) => ({ icon: m.ho && m.ho.path === x.path ? 'check' : 'script', checked: !!(m.ho && m.ho.path === x.path), label: x.name, action: () => upd({ ho: { path: x.path, name: x.name } }) })),
+            ...(list.length ? [] : [{ icon: 'info-circle', label: 'No handouts in the library yet', disabled: true }]),
+            ...(m.ho ? [{ sep: true }, { icon: 'x', label: 'No handout', action: () => upd({ ho: null }) }] : [])]);
+        };
+        const out = [h('span', { class: 'card-title ellipsis' }, iconEl('flag'), m.title),
+          ib('pencil', 'Rename', async () => { const n = await askText('Name the place', m.title, { ok: 'Save' }); if (n) upd({ title: n }); }),
+          ib('typography', m.sub ? `Line under the name: ${m.sub}` : 'A line under the name', async () => { const n = await askText('The line under the name (empty: none)', m.sub || '', { ok: 'Save', placeholder: 'Capital of the Ashen Coasts', allowEmpty: true }); if (n != null) upd({ sub: n }); }, { on: !!m.sub }),
+          col, cardSep(),
+          ib('map-2', dest ? `Leads to ${dest.name}. Click to change` : 'Lead to a regional map', leadMenu, { on: !!dest }),
+          ib('note', m.note ? 'Its note. Click to change' : 'Give it a note', async () => { const n = await askText('The note the table can read (empty: none)', m.note || '', { ok: 'Save', allowEmpty: true }); if (n != null) upd({ note: n }); }, { on: !!m.note }),
+          ib('script', m.ho ? `Its handout: ${m.ho.name}. Click to change` : 'Give it a handout', hoMenu, { on: !!m.ho })];
+        const acts = [];
+        if (dest) acts.push(c().btn(`Open ${dest.name}`, 'door-enter', () => cmd('atlas.show', { id: dest.id }), { kind: 'small primary', tip: 'The TV flies into this map' }));
+        if (m.note) acts.push(ib('message', onTv ? (A.note === m.id ? 'Its note is on the TV. Click to put it away' : 'Show its note on the TV') : 'Its note shows once this map is on the TV', () => cmd('atlas.note', { id: m.id }), { on: A.note === m.id }));
+        if (m.ho) acts.push(ib('cast', 'Show its handout on the table', () => cmd('handout.show', { path: m.ho.path, add: true })));
+        if (acts.length) out.push(cardSep(), ...acts);
+        out.push(cardSep(), hide, del);
+        return out;
+      }
+      if (m.kind === 'route') {
+        return [h('span', { class: 'card-title ellipsis' }, iconEl('route'), m.title || Geom.routeLabel(grid(), m) || 'Route'),
+          ib('pencil', 'Name it', async () => { const n = await askText('Name the route (empty: none)', m.title || '', { ok: 'Save', placeholder: 'The pilgrim road', allowEmpty: true }); if (n != null) upd({ title: n }); }),
+          ib('route', 'Draw on: every click adds a point', () => { routeId = m.id; ui.mark.mode = 'route'; save(); ctx.refreshPop(); }, { on: routeId === m.id }),
+          ib('arrow-back-up', 'One point back', () => cmd('mark.route', { id: m.id, back: true })),
+          col, cardSep(), hide, del];
+      }
       const name = m.kind === 'pin' ? 'Pin' : m.kind === 'x' ? 'Cross' : `Marker ${m.n}`;
       const out = [h('span', { class: 'card-title ellipsis' }, iconEl(m.kind === 'x' ? 'x' : m.kind === 'dot' ? 'circle-number-1' : 'map-pin'), name)];
       if (m.kind === 'dot') out.push(ib('minus', 'Lower number', () => upd({ n: Math.max(0, (m.n || 1) - 1) })), ib('plus', 'Higher number', () => upd({ n: (m.n || 0) + 1 })));
@@ -659,7 +735,8 @@ const PlayTools = (() => {
       if (m.kind === 'counter') items.unshift({ icon: 'plus', label: '+1', run: () => counterStep(m.id, 1) }, { icon: 'minus', label: '−1', run: () => counterStep(m.id, -1) });
       if (isText(m)) items.unshift({ icon: 'pencil', label: 'Edit', run: () => editText(m) });
       if (m.kind === 'note') items.splice(0, 1, { icon: 'pencil', label: 'Edit', run: async () => { const text = await askText('Note (only you see it)', m.text, { ok: 'Save' }); if (text != null) upd({ text }); } });
-      ctx.Radial.open(x, y, items, isText(m) ? 'Label' : m.kind === 'counter' ? m.label : m.kind === 'note' ? 'Note' : 'Marker');
+      if (m.kind === 'place' && m.to) items.unshift({ icon: 'door-enter', label: 'Open', run: () => cmd('atlas.show', { id: m.to }) });
+      ctx.Radial.open(x, y, items, isText(m) ? 'Label' : m.kind === 'counter' ? m.label : m.kind === 'note' ? 'Note' : m.kind === 'place' ? m.title : m.kind === 'route' ? 'Route' : 'Marker');
       return true;
     }
     function removeSelected() {
@@ -825,7 +902,7 @@ const PlayTools = (() => {
     return {
       buildTokenPop, buildPointPop, buildDrawPop, buildMarkPop, buildNotesPop, buildTimerPop,
       pointerDown, pointerMove, pointerUp, hover, leave, toolChanged, cycle, setMode, owns: (k) => OWN.has(k),
-      cardTarget, cardAnchor, card, markRadial, removeSelected, toggleSelectedHidden, selectMark,
+      cardTarget, cardAnchor, card, markRadial, removeSelected, toggleSelectedHidden, selectMark, routeEnd, onAtlas,
       setTokenBrush, placeToken, counterStep, nextRound, renderHud, update, spotOff, sizeName, SIZES,
       // 4.10: Options → Tokens sets what new tokens get (size, hidden, numbers, name tag)
       tokPref: (k) => ui.tok[k], setTokPref: (k, v) => { ui.tok[k] = v; save(); ctx.refreshPop(); updateGhost(); },

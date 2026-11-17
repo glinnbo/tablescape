@@ -27,6 +27,24 @@ function safeName(name) {
 }
 const clampName = (s, fallback) => String(s || '').trim().slice(0, 120) || fallback;
 
+// Beta 3.11: the atlas, the campaign's world and regional maps (the Cartographer). They are maps like any other (the
+// same file per map, the same tools), but they belong to the campaign, not to a chapter:
+//   meta.atlas = { maps: [{ id, found }], world: id | null, look: { tilt, bulge, blur, clouds, turn } }
+// found: the party has it in its map case. world: the map the Cartographer opens with. look: how the TV shows them
+// (tilt, bulge, blur and clouds from 0 to 1; turn: which side of the table the view faces, in quarter turns).
+const ATLAS_LOOK = { tilt: 0.6, bulge: 0.6, blur: 0.6, clouds: 0.6, turn: 0 };
+const unit01 = (v, d) => (Number.isFinite(Number(v)) ? Math.min(1, Math.max(0, Number(v))) : d);
+function atlasLook(l) {
+  const o = l || {};
+  return { tilt: unit01(o.tilt, ATLAS_LOOK.tilt), bulge: unit01(o.bulge, ATLAS_LOOK.bulge), blur: unit01(o.blur, ATLAS_LOOK.blur), clouds: unit01(o.clouds, ATLAS_LOOK.clouds), turn: [0, 90, 180, 270].includes(Number(o.turn)) ? Number(o.turn) : 0 };
+}
+function normAtlas(a) {
+  const o = a || {};
+  const seen = new Set();
+  const maps = (Array.isArray(o.maps) ? o.maps : []).filter((x) => x && typeof x.id === 'string' && !seen.has(x.id) && seen.add(x.id)).map((x) => ({ id: x.id, found: !!x.found }));
+  return { maps, world: maps.some((x) => x.id === o.world) ? o.world : (maps[0] ? maps[0].id : null), look: atlasLook(o.look) };
+}
+
 class CampaignStore {
   constructor() {
     this.cur = null;
@@ -117,7 +135,8 @@ class CampaignStore {
     meta.chapters = (meta.chapters || []).map((c) => ({ ...c, id: c.id || newId('ch'), name: c.name || 'Chapter', ambience: c.ambience || null, fight: c.fight || null, maps: c.maps || [] }));
     if (!meta.chapters.length) meta.chapters.push({ id: newId('ch'), name: 'Chapter 1', ambience: null, fight: null, maps: [] });
     const maps = new Map();
-    const referenced = new Set(meta.chapters.flatMap((c) => c.maps));
+    meta.atlas = normAtlas(meta.atlas);
+    const referenced = new Set([...meta.chapters.flatMap((c) => c.maps), ...meta.atlas.maps.map((x) => x.id)]);
     const mapDir = path.join(dir, 'maps');
     fs.mkdirSync(mapDir, { recursive: true });
     for (const f of fs.readdirSync(mapDir)) {
@@ -136,6 +155,7 @@ class CampaignStore {
       if (c.ambience) library.hydrate(c.ambience);
       if (c.fight) library.hydrate(c.fight);
     }
+    meta.atlas = normAtlas({ ...meta.atlas, maps: meta.atlas.maps.filter((x) => maps.has(x.id)) });
     this.cur = { dir, meta, maps, dirty: new Set(), metaDirty: false, history: new Map(), deletedMaps: new Map(), deletedChapters: new Map() };
     return this.cur;
   }
@@ -192,6 +212,11 @@ class CampaignStore {
 
   // ---------- helpers ----------
   allMapIds() { return this.cur ? this.cur.meta.chapters.flatMap((ch) => ch.maps) : []; }
+  // (Beta 3.11) the atlas: the campaign's world and regional maps; every map there is, the atlas included
+  atlas() { if (!this.cur) return normAtlas(null); if (!this.cur.meta.atlas) this.cur.meta.atlas = normAtlas(null); return this.cur.meta.atlas; }
+  atlasIds() { return this.atlas().maps.map((x) => x.id); }
+  isAtlas(id) { return this.atlasIds().includes(id); }
+  everyMapId() { return [...this.allMapIds(), ...this.atlasIds()]; }
   chapterOf(mapId) { return this.cur ? this.cur.meta.chapters.find((ch) => ch.maps.includes(mapId)) || null : null; }
   map(id) { return this.cur ? this.cur.maps.get(id) || null : null; }
   history(id) {
@@ -383,6 +408,56 @@ class CampaignStore {
         this.touch();
         return { ok: true };
       }
+      // ---------- Beta 3.11: the atlas ----------
+      case 'atlas.add': {
+        const A = this.atlas();
+        const m = emptyMap(clampName(p.name, p.path ? path.parse(p.path).name : (A.maps.length ? `Region ${A.maps.length}` : 'World map')));
+        if (p.path) {
+          const kind = library.kindOf(p.path);
+          if (kind === 'image' || kind === 'video') m.bg = { ...library.media(p.path), kind, x: 0, y: 0, scale: null, volume: 0, rate: 1 };
+        }
+        m.grid.show = false; // (a world map usually brings its own hexes; the Grid tool lays one over it)
+        c.maps.set(m.id, m);
+        A.maps.push({ id: m.id, found: false });
+        if (!A.world) A.world = m.id;
+        this.touch(m.id);
+        return { ok: true, id: m.id, label: `${m.name} added to the atlas` };
+      }
+      case 'atlas.remove': {
+        const A = this.atlas(); const m = c.maps.get(p.id);
+        const index = A.maps.findIndex((x) => x.id === p.id);
+        if (index < 0 || !m) return { ok: false };
+        const [entry] = A.maps.splice(index, 1);
+        c.deletedMaps.set(p.id, { atlas: { index, found: entry.found, world: A.world === p.id } });
+        if (A.world === p.id) A.world = A.maps[0] ? A.maps[0].id : null;
+        this.touch();
+        return { ok: true, label: `${m.name} taken out of the atlas`, undo: { type: 'atlas.restore', payload: { id: p.id } } };
+      }
+      case 'atlas.restore': {
+        const A = this.atlas(); const d = c.deletedMaps.get(p.id);
+        if (!d || !d.atlas || !c.maps.get(p.id)) return { ok: false };
+        A.maps.splice(Math.min(d.atlas.index, A.maps.length), 0, { id: p.id, found: !!d.atlas.found });
+        if (d.atlas.world || !A.world) A.world = p.id;
+        c.deletedMaps.delete(p.id); this.touch(p.id);
+        return { ok: true, label: 'Map back in the atlas' };
+      }
+      case 'atlas.world': {
+        const A = this.atlas();
+        if (!A.maps.some((x) => x.id === p.id)) return { ok: false };
+        A.world = p.id; this.touch();
+        return { ok: true };
+      }
+      case 'atlas.found': {
+        const e = this.atlas().maps.find((x) => x.id === p.id);
+        if (!e) return { ok: false };
+        e.found = 'found' in p ? !!p.found : !e.found; this.touch();
+        return { ok: true, found: e.found };
+      }
+      case 'atlas.look': {
+        const A = this.atlas();
+        A.look = atlasLook({ ...A.look, ...(p.look || {}) }); this.touch();
+        return { ok: true };
+      }
       default:
         return { ok: false };
     }
@@ -392,6 +467,7 @@ class CampaignStore {
 function hydrateMap(m) {
   if (m.bg) library.hydrate(m.bg);
   for (const l of m.layers) library.hydrate(l);
+  for (const k of m.marks || []) if (k.ho) library.hydrate(k.ho); // (Beta 3.11: a place's handout)
   for (const s of m.snaps || []) { // the files a snapshot brings back (a picture, assets, films, map sounds)
     if (s.data.bg) library.hydrate(s.data.bg);
     for (const l of s.data.layers || []) library.hydrate(l);

@@ -125,11 +125,11 @@ const UI = (() => {
   document.addEventListener('pointerdown', (e) => { if (menuOpen() && !e.target.closest('#menu')) closeMenu(); }, true);
 
   // ---------- text prompt (Electron has no window.prompt) ----------
-  function askText(title, value = '', { ok = 'Save', placeholder = '' } = {}) {
+  function askText(title, value = '', { ok = 'Save', placeholder = '', allowEmpty = false } = {}) { // (allowEmpty: an empty answer is an answer, e.g. "no line under the name")
     return new Promise((resolve) => {
       const input = h('input', { type: 'text', value, placeholder, spellcheck: 'false' });
       const close = (v) => { back.remove(); resolve(v); };
-      const form = h('form', { class: 'modal', onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (v) close(v); else input.focus(); } },
+      const form = h('form', { class: 'modal', onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (v || allowEmpty) close(v); else input.focus(); } },
         h('h2', {}, title),
         input,
         h('div', { class: 'modal-actions' },

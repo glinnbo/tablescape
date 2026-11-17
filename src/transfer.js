@@ -246,11 +246,17 @@ function plan(dir, { kind = 'adventure', chapterId = null } = {}) {
   const chapter = chapterId ? chapters[0] : null;
   if (chapter) { out.name = `${meta.name}: ${chapter.name}`; if (!chapter.maps.includes(out.lastMapId)) out.lastMapId = chapter.maps[0] || null; }
   if (kind === 'adventure') for (const k of PERSONAL) delete out[k];
+  // Beta 3.11: the atlas (world and regional maps) goes with the whole campaign, not with a single chapter; as an
+  // adventure, no map is found yet
+  const atlas = !chapter && out.atlas && Array.isArray(out.atlas.maps) ? out.atlas.maps.filter((x) => x && x.id) : [];
+  if (chapter) delete out.atlas;
+  else if (out.atlas && kind === 'adventure') out.atlas = { ...out.atlas, maps: atlas.map((x) => ({ ...x, found: false })) };
+  const atlasIds = new Set(atlas.map((x) => x.id));
   const maps = [];
-  for (const id of chapters.flatMap((c) => c.maps || [])) {
+  for (const id of [...chapters.flatMap((c) => c.maps || []), ...atlasIds]) {
     const m = readJson(path.join(dir, 'maps', `${id}.json`));
     if (!m) continue;
-    if (kind === 'adventure') { // as prepared: the fog covered again, nothing left over from a session
+    if (kind === 'adventure' && !atlasIds.has(id)) { // as prepared: the fog covered again, nothing left over from a session
       if (m.fog) m.fog.ops = [];
       if (m.light) m.light.seen = [];
       m.spells = []; m.draw = [];

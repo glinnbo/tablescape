@@ -33,7 +33,7 @@ const NAMES = [
   'category', 'star-off', 'box', 'building-castle', 'volume-3', 'chess-rook',
   'user-plus', 'scribble', 'ballpen', 'typography', 'circle-number-1', 'plus-minus', 'note', 'trending-up', 'trending-down',
   'heartbeat', 'player-stop', 'player-track-next', 'swords', 'tools', 'shadow',
-  'messages', 'briefcase', 'list-numbers', 'coffee', 'window-off', 'umbrella', 'rotate-360', 'brand-github', 'speakerphone', 'script', 'flip-horizontal', 'user-check', 'player-skip-back',
+  'messages', 'briefcase', 'list-numbers', 'coffee', 'window-off', 'umbrella', 'rotate-360', 'brand-github', 'route', 'world', 'message', 'backpack', 'flag', 'arrow-down', 'speakerphone', 'script', 'flip-horizontal', 'user-check', 'player-skip-back',
   'player-skip-forward', 'arrow-left', 'arrow-right', 'device-floppy', 'tornado', 'mist', 'wind', 'flower',
   'wall', 'door', 'door-enter', 'border-outer', 'vector', 'file-import', 'eye-check',
   'beach', 'flask', 'spiral', 'app-window',

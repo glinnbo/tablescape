@@ -23,6 +23,15 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.11', [
+      'The Cartographer is in early development: it works, but expect rough edges, and it will change. Tell me what you run into',
+      'New: the Cartographer (Toolbox). World and regional maps that belong to the campaign, not to a chapter. On the TV such a map lies over the battlemap as an immersive view: tilted, bulged like a globe, sharp in the middle, clouds round the edge. Take it off and the battlemap is there again as it was',
+      'A world map is worked on like any map, with the same tools: the picture, the grid (squares or hexes), assets, tokens, drawing and writing. The TV shows the part inside the table frame and flies there when you move it',
+      'Places (Mark tool, on a world or regional map): a name and a line under it, standing upright on the map. A place can lead to a regional map (the TV changes to it through the clouds) and bring a note or a handout',
+      'Routes (Mark tool): click from point to point, double click to end. A route shows how far it is, counted in grid cells',
+      'What one grid cell stands for (Cartographer): "1 day of travel", "6 miles". Routes and the ruler count in it: 17 hexes are 17 days of travel',
+      'The view (Cartographer): tilt, bulge, blur and clouds, and which side of the table it faces. A PC without a usable graphics card draws a simpler version of the same view',
+    ]],
     ['Beta 3.10', [
       'Assets can be made flat or long. Pick one in the Assets tool and it gets a frame: pull a side to stretch it (the other side stays where it is), a corner to size it, the knob above it to turn it. The frame lies turned the way the asset does',
       'The asset\'s card has "Back to its own shape" once it is stretched, and the Assets panel has a Height slider: for several picked assets at once, and for the next one you place',

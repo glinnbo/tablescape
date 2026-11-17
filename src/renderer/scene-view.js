@@ -2377,11 +2377,19 @@ class SceneView {
   renderPen() {
     if (!this.map) return;
     const pens = this.map.draw.filter((d) => d.kind === 'pen' && (this.gm || !d.hidden));
-    const sig = JSON.stringify([pens.map((d) => [d.id, d.pts.length, d.color, d.w, d.hidden]), this.ppi]);
+    // (Beta 3.11) routes: dotted from point to point, as thick on the screen at any zoom
+    const routes = this.map.marks.filter((m) => m.kind === 'route' && m.pts && (this.gm || !m.hidden));
+    const sig = JSON.stringify([pens.map((d) => [d.id, d.pts.length, d.color, d.w, d.hidden]), this.ppi, routes.length ? [routes.map((m) => [m.id, m.pts, m.color, m.hidden]), this.v.zoom] : 0]);
     if (sig === this.penSig) return;
     this.penSig = sig;
     const k = this.ppi;
     let html = '';
+    for (const m of routes) {
+      const w = round3((0.07 * k) / this.v.zoom);
+      let d = ''; let dots = '';
+      for (let i = 0; i + 1 < m.pts.length; i += 2) { d += `${i ? 'L' : 'M'}${round3(m.pts[i] * k)} ${round3(m.pts[i + 1] * k)}`; dots += `<circle cx="${round3(m.pts[i] * k)}" cy="${round3(m.pts[i + 1] * k)}" r="${round3(w * 1.1)}" fill="${esc(m.color)}" stroke="rgba(0,0,0,0.55)" stroke-width="${round3(w * 0.35)}"/>`; }
+      html += `<g data-id="${m.id}" class="sv-route ${m.hidden ? 'is-hidden' : ''}"><path d="${d}" stroke="rgba(0,0,0,0.5)" stroke-width="${round3(w * 1.7)}" stroke-dasharray="0.01 ${round3(w * 2.6)}"/><path d="${d}" stroke="${esc(m.color)}" stroke-width="${w}" stroke-dasharray="0.01 ${round3(w * 2.6)}"/>${dots}</g>`;
+    }
     for (const d of pens) {
       const path = smoothPath(d.pts, k, k);
       const w = Math.max(0.5, d.w * k);
@@ -2395,7 +2403,7 @@ class SceneView {
     if (!this.map) return;
     const texts = this.map.draw.filter((d) => d.kind === 'text' && (this.gm || !d.hidden));
     const marks = this.map.marks.filter((m) => m.kind !== 'note' && (this.gm || !m.hidden));
-    const sig = JSON.stringify([texts, marks, this.v, this.ppi, this.W, this.selectedMark]);
+    const sig = JSON.stringify([texts, marks, this.v, this.ppi, this.W, this.selectedMark, marks.some((m) => m.kind === 'route') ? this.map.grid : 0]);
     if (sig === this.annoSig) return;
     this.annoSig = sig;
     this.annoEl.innerHTML = '';
@@ -2432,6 +2440,16 @@ class SceneView {
         } else el.append(label, val);
         if (m.auto) { const a = document.createElement('i'); a.className = 'sv-counter-auto'; a.textContent = m.auto === 'up' ? '▲' : '▼'; a.title = 'Follows the rounds'; el.append(a); }
         if (m.auto === 'down' && m.value === 0) el.classList.add('zero');
+      } else if (m.kind === 'place') { // (Beta 3.11) a place on a world map: its name, a line under it, a pointer
+        const t = document.createElement('b'); t.className = 'sv-place-title'; t.textContent = m.title || '';
+        el.append(t);
+        if (m.sub) { const s = document.createElement('span'); s.className = 'sv-place-sub'; s.textContent = m.sub; el.append(s); }
+        const p = document.createElement('i'); p.className = 'sv-place-tip'; el.append(p);
+        el.classList.toggle('leads', !!m.to); el.classList.toggle('has-note', !!(m.note || m.ho));
+      } else if (m.kind === 'route') { // its label stands at its end: its name, and how far it is
+        if (m.title) { const t = document.createElement('b'); t.className = 'sv-place-title'; t.textContent = m.title; el.append(t); }
+        const far = Geom.routeLabel(this.map.grid, m);
+        const s = document.createElement('span'); s.className = 'sv-place-sub'; s.textContent = far || 'Route'; el.append(s);
       }
       this.annoEl.append(el);
     }

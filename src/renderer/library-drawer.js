@@ -210,6 +210,7 @@ const LibraryDrawer = (() => {
 
     const PURPOSE = {
       newMap: 'Pick a map to add it to this chapter',
+      atlasMap: 'Pick the picture of the world or regional map', // Beta 3.11: the Cartographer
       replace: 'Pick a new background for this map',
       place: 'Pick what to place where you clicked',
       ambience: 'Pick the ambience for this chapter',
@@ -225,7 +226,7 @@ const LibraryDrawer = (() => {
     // which section new files from the PC belong to, for what is being picked
     const catFor = (p) => {
       if (!p) return null;
-      if (p === 'newMap' || p === 'replace') return 'maps';
+      if (p === 'newMap' || p === 'replace' || p === 'atlasMap') return 'maps';
       if (p === 'place' || p === 'addToken' || p === 'tokenBrush') return 'tokens';
       if (p === 'brush') return 'assets';
       if (p === 'talk') return 'portraits';
@@ -247,6 +248,9 @@ const LibraryDrawer = (() => {
       toast(r.copied ? `${got.length === 1 ? got[0].name : `${got.length} files`} copied into ${where || 'the library'}${r.walls ? ' (with walls)' : ''}` : `${got.length === 1 ? got[0].name : `${got.length} files`} already in the library`);
       if (d.purpose === 'newMap') {
         for (const it of got.filter((x) => x.cat === 'maps')) await cmd('map.add', { chapterId: d.chapterId || (ctx.viewChapter() || {}).id, path: it.path, index: d.index });
+        done(null);
+      } else if (d.purpose === 'atlasMap') {
+        for (const it of got.filter((x) => x.cat === 'maps')) await cmd('atlas.add', { path: it.path });
         done(null);
       } else if (d.purpose && got[0]) use(got[0]);
       else flashTiles(got.map((x) => x.path));
@@ -713,7 +717,7 @@ const LibraryDrawer = (() => {
     // ---------- using things ----------
     function actionFor(it, purpose) {
       const c = it.cat;
-      if (purpose === 'newMap' || purpose === 'replace') return c === 'maps' ? purpose : null;
+      if (purpose === 'newMap' || purpose === 'replace' || purpose === 'atlasMap') return c === 'maps' ? purpose : null;
       if (purpose === 'place') return c === 'tokens' ? 'token' : c === 'assets' ? 'assetAt' : null;
       if (purpose === 'ambience') return c === 'sounds' ? 'ambience' : null;
       if (purpose && purpose.startsWith('sfx:')) return c === 'sounds' ? 'sfx' : null;
@@ -739,6 +743,11 @@ const LibraryDrawer = (() => {
         case 'newMap': {
           const r = await cmd('map.add', { chapterId: d.chapterId || (ch && ch.id), path: it.path, index: d.index });
           if (r.ok) { toast(`${it.name} added as a new map`); done(null); }
+          break;
+        }
+        case 'atlasMap': { // (Beta 3.11) a world or regional map for the campaign's atlas
+          const r = await cmd('atlas.add', { path: it.path });
+          if (r.ok) { toast(`${it.name} added to the atlas`); done(null); }
           break;
         }
         case 'replace':
