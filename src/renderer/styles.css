@@ -1133,12 +1133,22 @@ body.gm .sv-measure-label { transform: translate(10px, -100%) scale(var(--inv, 1
 .hud-r { color: var(--muted); font-size: 11px; font-weight: 600; margin-right: 1px; }
 .hud-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hud-label .hud-hid { width: 14px; height: 14px; margin-left: 4px; vertical-align: -2px; color: var(--muted); }
-.hud-round { border-color: color-mix(in srgb, var(--live) 45%, var(--line-2)); }
-.hud-round b { color: var(--live); }
 .hud-round.off { padding: 0; background: none; border: none; min-height: 0; }
 .hud-round.off .btn { justify-content: center; }
-.hud-timer.dramatic { border-color: color-mix(in srgb, var(--danger) 55%, var(--line-2)); }
-.hud-timer.dramatic > .i { color: var(--danger); }
+/* Beta 3.15: every row has a colour and a light at its edge. Red: combat. Green: what lies on the TV (a world map,
+   handouts, a conversation). Pale orange: the rest. A row that has just come is brighter for a moment. */
+.hud-row.c-red { --c: var(--danger); }
+.hud-row.c-green { --c: var(--live); }
+.hud-row.c-pale { --c: #e8b77a; }
+.hud-row[class*=" c-"] { position: relative; padding-left: 13px; border-color: color-mix(in srgb, var(--c) 45%, var(--line-2)); background: linear-gradient(90deg, color-mix(in srgb, var(--c) 20%, var(--raise)), var(--raise) 60%); }
+.hud-row[class*=" c-"]::before { content: ""; position: absolute; left: 0; top: 5px; bottom: 5px; width: 4px; border-radius: 0 4px 4px 0; background: var(--c); box-shadow: 0 0 10px var(--c); }
+.hud-row[class*=" c-"] > .i { color: var(--c); }
+.hud-row.c-red b { color: color-mix(in srgb, var(--c) 70%, #fff); }
+.hud-row.arrive { animation: hud-arrive 1.3s ease-out; }
+@keyframes hud-arrive { 0% { box-shadow: 0 0 0 1px var(--c), 0 0 18px var(--c); filter: brightness(1.5); } 100% { box-shadow: 0 0 0 0 transparent, 0 0 0 transparent; filter: none; } }
+.hud-fight-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.hud-fight-text small { color: color-mix(in srgb, var(--c) 70%, #fff); font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.hud-fight-text span { font-weight: 600; }
 .hud-row .icon-btn { width: 26px; height: 26px; }
 .hud-next { padding: 4px 8px; gap: 3px; }
 .hud-next .i { width: 14px; height: 14px; }
@@ -1849,7 +1859,6 @@ input.ini-hp.zero { color: var(--danger); }
 .cue-chip kbd { font: 600 9.5px/1 var(--mono, ui-monospace, monospace); padding: 2px 3px; border-radius: 4px; background: color-mix(in srgb, var(--prep) 22%, transparent); color: var(--prep); }
 .cue-chip .i { width: 13px; height: 13px; }
 .tc-moments:empty { display: none; }
-.hud-moment .i { color: var(--torch); }
 /* the big preview (double-click the small one) */
 .fp[data-id="preview"] { width: auto; max-width: none; }
 .fp[data-id="preview"] .fp-body { padding: 6px; }
@@ -3566,7 +3575,10 @@ body.gm .sv-token.on-show::before { content: ""; position: absolute; inset: calc
 @keyframes atl-note-in { from { opacity: 0; transform: translateY(0.6em) scale(0.96); } }
 /* in the GM's Map table: what stands there can be picked up */
 .atl-root.edit .atl-s.is-hidden .atl-s-in { opacity: 0.45; }
-.atl-root.edit.pick .atl-s-in { pointer-events: auto; cursor: pointer; }
+.atl-root.edit.pick .atl-s-in { pointer-events: none; }
+/* (Beta 3.15) only what is painted can be clicked: the plate, the marker's shape, its icon; not the empty box round them */
+.atl-root.edit.pick .atl-plate, .atl-root.edit.pick .atl-words, .atl-root.edit.pick .atl-ico, .atl-root.edit.pick .atl-dot, .atl-root.edit.pick .atl-count, .atl-root.edit.pick .atl-tok, .atl-root.edit.pick .atl-grab { pointer-events: auto; cursor: pointer; }
+.atl-root.edit.pick .atl-shape *, .atl-root.edit.pick .pin *, .atl-root.edit.pick .xmark * { pointer-events: visiblePainted; cursor: pointer; }
 .atl-root.edit .atl-s.sel .atl-s-in { filter: drop-shadow(0 0 0.35em var(--torch)) drop-shadow(0 0 0.1em var(--torch)); }
 .atl-root.edit .kind-text { display: none !important; }
 .atl-root.edit.grab .kind-text { display: block !important; }
@@ -3645,6 +3657,9 @@ body.gm .sv-token.on-show::before { content: ""; position: absolute; inset: calc
 .mt-lock .i { width: 15px; height: 15px; }
 .mt-lock.on { color: var(--torch); border-color: var(--torch); }
 .mt-lock:hover { color: var(--text); }
+.mt-lock.flash { animation: mt-lock-flash 0.7s ease-out; }
+@keyframes mt-lock-flash { 0%, 40% { background: var(--torch); color: var(--torch-ink); box-shadow: 0 0 14px var(--torch); scale: 1.15; } 100% { scale: 1; } }
+.radial-center { cursor: pointer; }
 .mt-out { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
 .mt-ask { justify-content: flex-end; }
 .mt-none { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }

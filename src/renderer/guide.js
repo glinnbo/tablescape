@@ -23,6 +23,16 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.15', [
+      'The rows under the table preview stand out: each has a colour with a light at its edge. Red is combat, green is what lies on the TV (a world map, handouts, a conversation), pale orange is the rest. They are sorted by colour, and a row that has just come is brighter for a moment',
+      'New rows under the preview, each with a button to end it: the fight (its round, whose turn it is, Next, and End the fight), a world map on the TV (take it off; Zoom out on a regional map), several handouts ("3 handouts": open the Handout table, or put them all away), the spotlight, the join code on the TV with the time it has left, and tokens shown to the table',
+      'Map table: the round menu closes easily. A right-click while it is open only closes it (it used to open a new one at once), so do Esc and a click on its middle. A click beside it closes it and does nothing else',
+      'Map table: a right-click ends the route you are drawing (Enter and a double click still do). A route with a single point is taken away again',
+      'Map table: Move is the tool you come back to. After a place is set, a route ended or a label written it is back by itself; the window always opens with it. Draw and Erase stay until you pick another tool or press Esc',
+      'Map table: markers, routes and labels can be picked with any tool but Route, Draw and Erase (with Maps, Grid, On the TV or Weather open, a click on a marker used to move the view instead). A route is picked by a click on its line too',
+      'Map table: only what is painted of a marker can be clicked (its plate, its shape, its icon), no longer the empty box round it',
+      'Map table: try to drag a locked marker or route and its lock flashes to say why it stays',
+    ]],
     ['Beta 3.14', [
       'Cartographer (still in early development): routes are drawn anew. A slim line with a dark edge instead of the string of big dots: dashed, dotted or solid, thin, medium or bold, with an arrow at its end and rounded bends if you like, chosen for each route',
       'Routes snap to the grid: with the grid shown, every point lands on the middle of a cell (hold Alt for a free point). While you draw, the pointer shows what the next leg adds and what the route comes to',

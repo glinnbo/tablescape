@@ -269,8 +269,10 @@ const PlayTools = (() => {
     let spotLast = null;
     let spotTimer = 0;
     function sendSpot(pt) {
+      const fresh = !spotLast;
       spotLast = { mapId: S().editMapId, kind: 'spot', x: pt.x, y: pt.y, r: ui.point.spotR, dim: ui.point.spotDim };
       ts.ping(spotLast);
+      if (fresh && ctx.renderCtl) ctx.renderCtl(); // (Beta 3.15: its row under the preview)
       if (!spotTimer) spotTimer = setInterval(() => { if (spotLast) ts.ping(spotLast); }, 1000); // keep it alive while the pointer rests
     }
     function spotOff() {
@@ -278,6 +280,7 @@ const PlayTools = (() => {
       ts.ping({ mapId: spotLast.mapId, kind: 'spot', off: true });
       spotLast = null;
       clearInterval(spotTimer); spotTimer = 0;
+      if (ctx.renderCtl) ctx.renderCtl();
     }
     function measureMsg(a, b, free, done) {
       const m = Geom.measure(grid(), a, b, ui.point.rule, free);
@@ -832,48 +835,95 @@ const PlayTools = (() => {
         if (r && r.ok) toast(r.label, { undo: () => cmd('history.undo', { mapId: cb.mapId }), ms: r.ended && r.ended.length ? 7000 : 3500 });
       });
     }
+    // Beta 3.15: every row has a colour (red: combat; green: what lies on the TV: a world map, handouts, a conversation;
+    // pale orange: the rest), they are sorted by it, and a row that has just come is brighter for a moment. New rows:
+    // the fight, a world map on the TV, several handouts, the spotlight, the join code, tokens shown to the table.
+    let hudKeys = new Set();
     function renderHud(box) {
       const s = S();
       const cb = s.combat;
       const t = s.timer;
       const I = s.init;
       const talk = s.talk;
-      const fight = !!(I && I.running); // the turn order and its round live in the Initiative panel
-      const sig = JSON.stringify([cb, t && [t.id, t.mode, !!t.endsAt], fight, talk && talk.cast.map((x) => x.name), s.handout && s.handout.name, s.brk && s.brk.id]);
+      const fight = !!(I && I.running);
+      const A = s.atlas; const world = A && A.on ? A.maps.find((x) => x.id === A.on) : null;
+      const hos = s.handouts || [];
+      const sh = s.show && s.show.phase === 'show' ? s.show : null;
+      const join = s.players && s.players.join ? s.players : null;
+      const unit = fight && I.cur >= 0 ? I.units[I.cur] : null;
+      const sig = JSON.stringify([cb, t && [t.id, t.mode, !!t.endsAt], fight && [unit && unit.name, I.cur], talk && talk.cast.map((x) => x.name), hos.map((x) => x.path), s.brk && s.brk.id,
+        world && [world.id, world.name, A.world], sh && sh.ids, !!spotLast, !!join]);
       if (box.dataset.sig !== sig) {
         box.dataset.sig = sig;
         box.innerHTML = '';
-        if (talk) {
-          box.append(h('div', { class: 'hud-row hud-talk' }, iconEl('messages'),
-            h('span', { class: 'grow ellipsis' }, talk.cast.length ? talk.cast.map((x) => x.name).reverse().join(', ') : 'Conversation: nobody on stage yet'),
-            h('button', { class: 'icon-btn', 'aria-label': 'Conversation', 'data-tip': 'Choose portraits', onclick: () => ctx.openPop('talk') }, iconEl('user-circle')),
-            h('button', { class: 'icon-btn', 'aria-label': 'End the conversation', 'data-tip': 'End the conversation', onclick: () => cmd('talk.off') }, iconEl('player-stop'))));
+        const keys = new Set();
+        const add = (key, colour, cls, ...kids) => { keys.add(key); box.append(h('div', { class: `hud-row ${cls} c-${colour}${hudKeys.has(key) ? '' : ' arrive'}` }, ...kids.filter(Boolean))); };
+        const ib = (ic, label, tip, run) => h('button', { class: 'icon-btn', 'aria-label': label, 'data-tip': tip, onclick: run }, iconEl(ic));
+        // ---- red: combat
+        if (fight) {
+          add('fight', 'red', 'hud-fight', iconEl('swords'),
+            // (two short lines: the box is narrow, and whose turn it is must stay readable)
+            h('span', { class: 'grow hud-fight-text', 'data-tip': `The fight${cb && cb.n != null ? `: round ${cb.n}` : ''}${unit ? `, ${unit.name}'s turn` : ''}` },
+              h('small', {}, cb && cb.n != null ? `Round ${cb.n}` : 'Fight'), h('span', { class: 'ellipsis' }, unit ? unit.name : '')),
+            ib('player-stop', 'End the fight', 'End the fight (it can be brought back)', () => cmd('init.end').then((r) => { if (r && r.ok) toast(r.label, { undo: () => cmd('init.restore') }); })),
+            h('button', { class: 'btn primary small hud-next', 'data-tip': 'Next turn (Enter)', onclick: nextRound }, 'Next', iconEl('player-track-next')));
         }
-        if (s.handout) {
-          box.append(h('div', { class: 'hud-row hud-handout' }, iconEl('script'), h('span', { class: 'grow ellipsis' }, s.handout.name),
-            h('button', { class: 'icon-btn', 'aria-label': 'Put it away', 'data-tip': 'Put the handout away', onclick: () => cmd('handout.hide') }, iconEl('x'))));
+        // 2.2: no "Count rounds" button here (Enter starts counting); while rounds are counted outside a fight, this row shows the round
+        if (cb && !fight && cb.n != null) {
+          add('round', 'red', 'hud-round',
+            h('span', { class: 'grow hud-label', 'data-tip': cb.show ? `Round ${cb.n}, shown on the table` : `Round ${cb.n}, hidden from players` }, h('small', { class: 'hud-r' }, 'Round'), ' ', h('b', {}, String(cb.n)), cb.show ? null : iconEl('eye-off', 'hud-hid')),
+            ib('drag-drop-2', 'Round on the table', 'Where and how big the round shows on the table', () => ctx.openPop('round')),
+            ib('x', 'Stop counting', 'Stop counting rounds', () => cmd('round.set', { mapId: cb.mapId, n: null })),
+            Hotbar.offer(h('button', { class: 'btn primary small hud-next', 'data-tip': 'Next round: counts spell areas and counters along', 'data-key': 'Enter', onclick: nextRound }, 'Next', iconEl('player-track-next')), ctx.doHot('next')));
+        }
+        // ---- green: what lies on the TV
+        if (world) {
+          // (a regional map is left the way the Map table's Zoom out leaves it: to the map whose place leads here, the world map first)
+          const lead = A.maps.filter((x) => x.id !== world.id && (x.to || []).includes(world.id));
+          const back = world.id === A.world ? null : (lead.find((x) => x.id === A.world) || lead[0] || A.maps.find((x) => x.id === A.world && x.id !== world.id) || null);
+          add('atlas', 'green', 'hud-atlas', iconEl('world'), h('span', { class: 'grow ellipsis' }, world.name),
+            back ? ib('zoom-out', 'Zoom out', `Zoom out to ${back.name}`, () => cmd('atlas.show', { id: back.id, via: 'out' })) : null,
+            ib('x', 'Take it off the table', 'Take the world map off the table: the battlemap is there again', () => cmd('atlas.hide')));
+        }
+        if (hos.length > 1) {
+          add('handouts', 'green', 'hud-handout', iconEl('script'), h('span', { class: 'grow ellipsis', 'data-tip': hos.map((x) => x.name).join(', ') }, `${hos.length} handouts`),
+            ib('layout-board', 'Handout table', 'Open the Handout table', () => ctx.openPanel('handouts')),
+            ib('x', 'Put them all away', 'Put all handouts away', () => cmd('handout.hide')));
+        } else if (s.handout) {
+          add('handouts', 'green', 'hud-handout', iconEl('script'), h('span', { class: 'grow ellipsis' }, s.handout.name),
+            ib('x', 'Put it away', 'Put the handout away', () => cmd('handout.hide')));
+        }
+        if (talk) {
+          add('talk', 'green', 'hud-talk', iconEl('messages'),
+            h('span', { class: 'grow ellipsis' }, talk.cast.length ? talk.cast.map((x) => x.name).reverse().join(', ') : 'Conversation: nobody on stage yet'),
+            ib('user-circle', 'Conversation', 'Choose portraits', () => ctx.openPop('talk')),
+            ib('player-stop', 'End the conversation', 'End the conversation', () => cmd('talk.off')));
+        }
+        // ---- pale orange: the rest
+        if (sh) {
+          const live = s.map && s.map.id === sh.mapId ? s.map : null;
+          const names = sh.ids.map((id) => { const l = live && live.layers.find((x) => x.id === id); return l ? `${l.name || 'Token'}${l.n ? ` ${l.n}` : ''}` : null; }).filter(Boolean);
+          add('show', 'pale', 'hud-show', iconEl('users'), h('span', { class: 'grow ellipsis' }, `Shown: ${names.length ? names.join(', ') : `${sh.ids.length} token${sh.ids.length === 1 ? '' : 's'}`}`),
+            ib('x', 'Put them back', 'Back to the map', () => cmd('show.end')));
+        }
+        if (spotLast) {
+          add('spot', 'pale', 'hud-spot', iconEl('focus-2'), h('span', { class: 'grow ellipsis' }, 'Spotlight is on'),
+            ib('x', 'Spotlight off', 'Take the spotlight off the table', () => spotOff()));
+        }
+        if (join) {
+          add('join', 'pale', 'hud-join', iconEl('qrcode'), h('span', { class: 'grow ellipsis' }, 'Join code on the TV ', h('b', { class: 'hud-join-t' })),
+            ib('x', 'Take the code off the table', 'Take the join code off the table', () => ts.players('join', { on: false })));
         }
         if (s.brk) {
-          box.append(h('div', { class: 'hud-row hud-break' }, iconEl('coffee'), h('span', {}, 'Break'), h('b', { class: 'hud-brk grow' }),
-            h('button', { class: 'icon-btn', 'aria-label': 'End the break', 'data-tip': 'End the break', onclick: () => cmd('break.end') }, iconEl('player-stop'))));
+          add('brk', 'pale', 'hud-break', iconEl('coffee'), h('span', {}, 'Break'), h('b', { class: 'hud-brk grow' }),
+            ib('player-stop', 'End the break', 'End the break', () => cmd('break.end')));
         }
         if (t) {
-          box.append(h('div', { class: `hud-row hud-timer ${t.mode}` },
-            iconEl(t.mode === 'dramatic' ? 'heartbeat' : 'clock'), h('b', { class: 'hud-time grow' }),
-            h('button', { class: 'icon-btn', 'aria-label': t.endsAt ? 'Pause' : 'Resume', 'data-tip': t.endsAt ? 'Pause the countdown' : 'Resume', onclick: () => cmd(t.endsAt ? 'timer.pause' : 'timer.resume') }, iconEl(t.endsAt ? 'player-pause' : 'player-play')),
-            h('button', { class: 'icon-btn', 'aria-label': 'Stop', 'data-tip': 'Stop and remove it from the table', onclick: () => cmd('timer.stop') }, iconEl('player-stop'))));
+          add('timer', 'pale', `hud-timer ${t.mode}`, iconEl(t.mode === 'dramatic' ? 'heartbeat' : 'clock'), h('b', { class: 'hud-time grow' }),
+            ib(t.endsAt ? 'player-pause' : 'player-play', t.endsAt ? 'Pause' : 'Resume', t.endsAt ? 'Pause the countdown' : 'Resume', () => cmd(t.endsAt ? 'timer.pause' : 'timer.resume')),
+            ib('player-stop', 'Stop', 'Stop and remove it from the table', () => cmd('timer.stop')));
         }
-        // 2.2: no "Count rounds" button here any more (Enter starts counting; in a fight the Initiative panel counts);
-        // while rounds are counted outside a fight, this row shows the round
-        if (cb && !fight) {
-          if (cb.n != null) {
-            box.append(h('div', { class: 'hud-row hud-round' },
-              h('span', { class: 'grow hud-label', 'data-tip': cb.show ? `Round ${cb.n}, shown on the table` : `Round ${cb.n}, hidden from players` }, h('small', { class: 'hud-r' }, 'Round'), ' ', h('b', {}, String(cb.n)), cb.show ? null : iconEl('eye-off', 'hud-hid')),
-              h('button', { class: 'icon-btn', 'aria-label': 'Round on the table', 'data-tip': 'Where and how big the round shows on the table', onclick: () => ctx.openPop('round') }, iconEl('drag-drop-2')),
-              h('button', { class: 'icon-btn', 'aria-label': 'Stop counting', 'data-tip': 'Stop counting rounds', onclick: () => cmd('round.set', { mapId: cb.mapId, n: null }) }, iconEl('x')),
-              Hotbar.offer(h('button', { class: 'btn primary small hud-next', 'data-tip': 'Next round: counts spell areas and counters along', 'data-key': 'Enter', onclick: nextRound }, 'Next', iconEl('player-track-next')), ctx.doHot('next'))));
-          }
-        }
+        hudKeys = keys;
       }
       tickHud(box);
     }
@@ -885,11 +935,14 @@ const PlayTools = (() => {
       const b = S() && S().brk;
       const brkOut = box.querySelector('.hud-brk');
       if (brkOut && b) { const s = Math.ceil(Math.max(0, b.endsAt - Date.now()) / 1000); brkOut.textContent = s > 0 ? clock(s) : 'Time!'; }
+      const j = S() && S().players && S().players.join ? S().players.joinUntil : null; // (the join code leaves the TV by itself)
+      const joinOut = box.querySelector('.hud-join-t');
+      if (joinOut && j) joinOut.textContent = clock(Math.ceil(Math.max(0, j - Date.now()) / 1000));
       const inPop = ctx.popId() === 'timer' || ctx.popId() === 'toolbox';
       if (popTick && inPop) popTick();
       if (inPop && ctx.tick) ctx.tick();
-      if ((t || b) && !hudTimer) hudTimer = setInterval(() => tickHud(box), 250);
-      if (!t && !b && hudTimer) { clearInterval(hudTimer); hudTimer = 0; if (popTick && inPop) popTick(); if (inPop && ctx.tick) ctx.tick(); }
+      if ((t || b || j) && !hudTimer) hudTimer = setInterval(() => tickHud(box), 250);
+      if (!t && !b && !j && hudTimer) { clearInterval(hudTimer); hudTimer = 0; if (popTick && inPop) popTick(); if (inPop && ctx.tick) ctx.tick(); }
     }
 
     function update() {

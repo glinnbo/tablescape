@@ -144,8 +144,10 @@ module.exports = (area) => {
     // standing on the TV (the hidden one is the GM's to know)
     const st = await t.until(async () => { const x = (await tvA(t)).standing; return x.length === 3 && x.every((s) => s.shown) && x; }, 6000, 'the two places and the route to stand on the TV');
     t.eq(st.map((s) => [s.kind, s.title, s.sub, s.style || null, s.icon || null]), [['place', 'Kintsugi', 'Seat of the shogun', 'medallion', 'flag'], ['place', 'Hollow Reach', '', 'diamond', 'harbour'], ['route', 'The pilgrim road', '7 days of travel', null, null]], 'what stands there');
-    const want = await t.t(`window.__table.atlasProject(${at(0.5, 0.5).x}, ${at(0.5, 0.5).y})`);
-    t.near(st[0].x, want.x, 1, 'the place stands on its spot');
+    // (measured once the camera rests: while it still glides, the place and its spot are read a moment apart)
+    await t.until(async () => { const x = await tvA(t); return Math.abs(x.cam.cx - x.camT.cx) + Math.abs(x.cam.cy - x.camT.cy) + Math.abs(x.cam.S - x.camT.S) < 1e-3; }, 6000, 'the camera to rest');
+    const both = await t.t(`(() => { const s = window.__table.debug().atlas.standing[0]; const w = window.__table.atlasProject(${at(0.5, 0.5).x}, ${at(0.5, 0.5).y}); return [s.x, w.x]; })()`);
+    t.near(both[0], both[1], 1, 'the place stands on its spot');
     const dom = await t.t(`[...document.querySelectorAll('#table-atlas .atl-s.kind-place')].map((e) => [(e.className.match(/st-[a-z]+/) || [''])[0], !!e.querySelector('.atl-shape'), !!e.querySelector('.atl-ico svg'), (e.querySelector('.atl-plate b, .atl-words b') || {}).textContent])`);
     t.eq(dom, [['st-medallion', true, true, 'Kintsugi'], ['st-diamond', true, true, 'Hollow Reach']], 'each drawn as its marker, with its icon and its name');
     t.handle('mark.update', { mapId: world, id: pin, hidden: false });
@@ -281,7 +283,9 @@ module.exports = (area) => {
     await t.key('Enter');
     const routes = M(t, world).marks.filter((m) => m.kind === 'route');
     t.eq(routes.length, 1, 'one route'); t.eq(routes[0].pts.length / 2, 4, 'a point for every click', routes[0].pts);
+    await t.until(async () => { const x = await W(t, 'w.debug()'); return x.tool === 'move' && x.sel && x.sel.id === routes[0].id; }, 3000, 'the Move tool to be back, with the route picked');
     // a second route, ended by a double click (its second click adds no point)
+    await tool(t, 'route');
     const more = [[0.5, 0.7], [0.6, 0.7]].map(([fx, fy]) => at(fx, fy));
     for (const p of more) { const q = await scr(t, p); await t.click(q.x, q.y); await t.sleep(450); }
     const end = await scr(t, at(0.65, 0.75));
@@ -291,7 +295,19 @@ module.exports = (area) => {
     const second = M(t, world).marks.filter((m) => m.kind === 'route')[1];
     t.eq(second.pts.length / 2, 3, 'three points: the double click set the last one once', second.pts);
     t.handle('mark.remove', { mapId: world, id: second.id });
+    // a third, ended by a right-click: no round menu, the Move tool is back; one with a single point is taken away again
     await tool(t, 'route');
+    for (const p of [at(0.2, 0.2), at(0.3, 0.2)]) { const q = await scr(t, p); await t.click(q.x, q.y); await t.sleep(450); }
+    const rc = await scr(t, at(0.4, 0.3)); await t.click(rc.x, rc.y, 'right');
+    await t.until(async () => { const x = await W(t, 'w.debug()'); return x.routeId === null && x.tool === 'move'; }, 3000, 'the right-click to end the route');
+    t.eq(await t.g(`!!document.querySelector('#radial')`), false, 'without the round menu');
+    const third = M(t, world).marks.filter((m) => m.kind === 'route')[1];
+    t.eq(third.pts.length / 2, 2, 'the right-click added no point', third.pts);
+    t.handle('mark.remove', { mapId: world, id: third.id });
+    await tool(t, 'route');
+    { const q = await scr(t, at(0.2, 0.25)); await t.click(q.x, q.y); await t.sleep(450); await t.click(q.x + 30, q.y, 'right'); }
+    await t.until(async () => (await W(t, 'w.debug().tool')) === 'move', 3000, 'the route to end');
+    await t.until(() => M(t, world).marks.filter((m) => m.kind === 'route').length === 1, 3000, 'a route of one point to be taken away');
     t.ok(/miles$/.test(require('../../renderer/geom').routeLabel(M(t, world).grid, routes[0])), 'counted in miles', require('../../renderer/geom').routeLabel(M(t, world).grid, routes[0]));
     t.eq(await W(t, 'w.debug().routeId'), null, 'Enter ended it');
     // drawn with the pen, rubbed out, and back with Undo
@@ -466,6 +482,74 @@ module.exports = (area) => {
     t.handle('atlas.hide', {});
     await t.until(async () => { const x = await tvA(t); return !x.on && !x.busy; }, 8000, 'off the TV');
     t.handle('grid.update', { mapId: world, show: false });
+    await t.g(`Play.Floats.hide('atlas')`);
+  }, { ms: 80000 });
+
+  area.quick('finishing touches: Move is the tool to come back to; markers are picked with any tool, only where they are painted; a route by its line; the round menu closes easily', async (t) => {
+    for (const m of [...M(t, world).marks]) t.handle('mark.remove', { mapId: world, id: m.id });
+    t.handle('grid.update', { mapId: world, show: false });
+    let d = await openTable(t, world);
+    await t.g(`Play.Atlas.win.setMode('flat')`);
+    const R = d.ed.surface.rect; const at = (fx, fy) => ({ x: R.x + R.w * fx, y: R.y + R.h * fy });
+    const place = t.handle('mark.add', { mapId: world, kind: 'place', title: 'Kanbari village of the long name', style: 'medallion', icon: 'crown', ...at(0.5, 0.5) }).selected;
+    const route = t.handle('mark.add', { mapId: world, kind: 'route', ...at(0.2, 0.8) }).selected;
+    t.handle('mark.route', { mapId: world, id: route, ...at(0.6, 0.8) });
+    // the window opens with Move, whatever was used last
+    await tool(t, 'weather');
+    await t.g(`Play.Floats.hide('atlas')`);
+    d = await openTable(t, world);
+    t.eq(d.tool, 'move', 'opened again: the Move tool');
+    // with another tool open (Weather), a click on a marker picks it and brings Move back
+    await tool(t, 'weather');
+    await t.until(async () => (await t.count('.mt-view .atl-s.kind-place .atl-plate')) === 1, 4000, 'the place in the picture');
+    const shape = await t.rect('.mt-view .atl-s.kind-place .atl-shape'); const plate = await t.rect('.mt-view .atl-s.kind-place .atl-plate');
+    await t.click(shape.cx, shape.y + shape.h * 0.35);
+    await t.until(async () => { const x = await W(t, 'w.debug()'); return x.tool === 'move' && x.sel && x.sel.id === place; }, 3000, 'the marker to be picked, with the Move tool');
+    await t.key('Escape');
+    await t.until(async () => (await W(t, 'w.debug().sel')) === null, 3000, 'Esc to let go of it');
+    // only what is painted counts: beside the marker, under the wide plate, there is nothing to click
+    t.ok(plate.w > shape.w + 40, 'the plate is wider than the marker', [plate.w, shape.w]);
+    await t.click(plate.x + 6, shape.y + shape.h * 0.5);
+    await t.sleep(300);
+    t.eq(await W(t, 'w.debug().sel'), null, 'a click beside the marker, under the plate\'s end, picks nothing');
+    await t.click(plate.x + 6, plate.cy);
+    await t.until(async () => { const x = await W(t, 'w.debug().sel'); return x && x.id === place; }, 3000, 'a click on the plate to pick it');
+    // locked, it cannot be dragged: its lock flashes to say why
+    if (!(await W(t, 'w.debug().locks'))[0]) { const lk = await t.rect('.mt-lock[data-k="lockMarks"]'); await t.click(lk.cx, lk.cy); await t.until(async () => (await W(t, 'w.debug().locks'))[0], 3000, 'the markers to be locked'); } // (an earlier check opened it)
+    await t.drag({ x: shape.cx, y: shape.y + shape.h * 0.35 }, { x: shape.cx + 60, y: shape.y + shape.h * 0.35 + 20 });
+    t.eq(await t.g(`document.querySelector('.mt-lock[data-k="lockMarks"]').classList.contains('flash')`), true, 'the markers\' lock flashes');
+    t.near(M(t, world).marks.find((m) => m.id === place).x, at(0.5, 0.5).x, 0.002, 'and the marker stayed');
+    // a route is picked by a click on its line
+    await t.key('Escape');
+    const on = await scr(t, at(0.3, 0.8));
+    await t.click(on.x, on.y + 2);
+    await t.until(async () => { const x = await W(t, 'w.debug().sel'); return x && x.id === route; }, 3000, 'a click on the route\'s line to pick it');
+    await t.key('Escape');
+    await t.click(on.x, on.y + 30);
+    await t.sleep(300);
+    t.eq(await W(t, 'w.debug().sel'), null, 'a click well beside the line picks nothing');
+    // the round menu: a second right-click closes it (and opens no new one); so do Esc and a click on its middle
+    const empty = await scr(t, at(0.75, 0.3)); const other = await scr(t, at(0.3, 0.3));
+    const menu = () => t.g(`!!document.querySelector('#radial')`);
+    await t.click(empty.x, empty.y, 'right'); await t.until(menu, 3000, 'the round menu');
+    await t.click(other.x, other.y, 'right'); await t.sleep(400);
+    t.eq(await menu(), false, 'a right-click again closes it');
+    await t.sleep(300);
+    await t.click(empty.x, empty.y, 'right'); await t.until(menu, 3000, 'the round menu again');
+    await t.key('Escape'); await t.sleep(200);
+    t.eq(await menu(), false, 'Esc closes it');
+    await t.click(empty.x, empty.y, 'right'); await t.until(menu, 3000, 'the round menu once more');
+    const mid = await t.rect('.radial-center'); await t.click(mid.cx, mid.cy); await t.sleep(200);
+    t.eq(await menu(), false, 'a click on its middle closes it');
+    // a click beside it closes it and does nothing else (with the Place tool it would have set a place)
+    await tool(t, 'place');
+    const n0 = M(t, world).marks.length;
+    await t.click(empty.x, empty.y, 'right'); await t.until(menu, 3000, 'the round menu with the Place tool');
+    await t.click(other.x, other.y); await t.sleep(400);
+    t.eq([await menu(), M(t, world).marks.length], [false, n0], 'closed, and no place was set by that click');
+    await t.click(other.x, other.y);
+    await t.until(() => M(t, world).marks.length === n0 + 1, 3000, 'the next click to set a place');
+    t.eq(await W(t, 'w.debug().tool'), 'move', 'one place set: the Move tool is back');
     await t.g(`Play.Floats.hide('atlas')`);
   }, { ms: 80000 });
 

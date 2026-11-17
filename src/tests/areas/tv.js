@@ -164,4 +164,70 @@ module.exports = (area) => {
     await t.until(() => t.t(`window.__table && window.__table.debug() && window.__table.debug().liveId === ${JSON.stringify(live)}`), 15000, 'the map on the TV again');
     t.expectCrashOff();
   }, { allow: /stopped|gone|crash|table window/i });
+  // Beta 3.15: what stays on the TV has a row under the preview to end it, coloured by what it is and sorted by colour
+  area.quick('the rows under the preview: a fight (red), a world map, handouts and a conversation (green), the rest (pale orange), in that order', async (t) => {
+    const rows = () => t.g(`[...document.querySelectorAll('#table-ctl .tc-hud .hud-row')].map((r) => [[...r.classList].find((c) => c.startsWith('c-')), [...r.classList].find((c) => c.startsWith('hud-') && c !== 'hud-row'), r.querySelector('.grow').textContent.trim()])`);
+    await t.send();
+    t.eq(await rows(), [], 'nothing on: no rows');
+    // a countdown, two handouts, a conversation, a world map, a fight: in the order they are started
+    t.handle('timer.start', { mode: 'plain', seconds: 300, label: '' });
+    const ho = t.lib('handouts');
+    const second = ho[1] || t.lib('maps').find((x) => x.kind === 'image'); // (any picture can be handed out)
+    t.handle('handout.show', { path: ho[0].path }); t.handle('handout.show', { path: second.path, add: true });
+    t.eq((t.state.handouts || []).length, 2, 'two handouts on the table');
+    t.handle('talk.toggle', { path: t.lib('portraits')[0].path });
+    const world = t.handle('atlas.add', { path: t.lib('maps').find((x) => x.kind === 'image').path, name: 'The world', open: false }).id;
+    const region = t.handle('atlas.add', { path: t.lib('maps').find((x) => x.kind === 'image').path, name: 'The north', open: false }).id;
+    t.handle('mark.add', { mapId: world, kind: 'place', title: 'Gate', to: region, x: 3, y: 3 });
+    t.handle('atlas.show', { id: region });
+    const st = t.handle('init.start', { list: [{ name: 'Mira', pc: true, init: 18 }, { name: 'Goblin', init: 9 }] });
+    t.ok(st && st.ok, 'a fight', st);
+    const got = await t.until(async () => { const r = await rows(); return r.length === 5 && r; }, 5000, 'five rows');
+    t.eq(got.map((r) => [r[0], r[1]]), [['c-red', 'hud-fight'], ['c-green', 'hud-atlas'], ['c-green', 'hud-handout'], ['c-green', 'hud-talk'], ['c-pale', 'hud-timer']], 'red first, then green, then pale orange');
+    t.ok(/Round 1\s*Mira/.test(got[0][2]), 'the fight: its round and whose turn it is', got[0][2]);
+    t.eq([got[1][2], got[2][2]], ['The north', '2 handouts'], 'the world map on the TV, and how many handouts lie there');
+    t.eq(await t.g(`getComputedStyle(document.querySelector('.hud-fight'), '::before').backgroundColor !== getComputedStyle(document.querySelector('.hud-atlas'), '::before').backgroundColor`), true, 'each colour has its own light at the edge');
+    // the fight row: Next moves the turn on, the stop button ends the fight
+    await t.clickText('.hud-fight .btn', 'Next');
+    await t.until(async () => /Goblin/.test((await rows())[0][2]), 4000, 'the next one\'s turn');
+    const end = await t.rect('.hud-fight .icon-btn'); await t.click(end.cx, end.cy);
+    await t.until(() => !t.state.init, 4000, 'the fight to end');
+    // the world map row: Zoom out goes to the map that leads here, the x takes it off
+    const zo = await t.rect('.hud-atlas .icon-btn[aria-label="Zoom out"]'); await t.click(zo.cx, zo.cy);
+    await t.until(() => t.state.atlas && t.state.atlas.id === world, 4000, 'Zoom out to the world map');
+    t.eq(t.state.atlas.via.dir, 'out', 'the TV pulls back out');
+    await t.until(async () => (await rows()).some((r) => r[2] === 'The world'), 4000, 'the row to name the world map');
+    t.eq(await t.count('.hud-atlas .icon-btn[aria-label="Zoom out"]'), 0, 'no Zoom out on the world map itself');
+    const off = await t.rect('.hud-atlas .icon-btn[aria-label="Take it off the table"]'); await t.click(off.cx, off.cy);
+    await t.until(() => !t.state.atlas, 4000, 'the world map to be taken off');
+    // the handouts row: put them all away
+    const all = await t.rect('.hud-handout .icon-btn[aria-label="Put them all away"]'); await t.click(all.cx, all.cy);
+    await t.until(() => !(t.state.handouts || []).length, 4000, 'both handouts to be put away');
+    t.handle('talk.off', {}); t.handle('timer.stop', {});
+    await t.until(async () => !(await rows()).length, 4000, 'no rows left');
+    // the join code on the TV: a row with the time it has left; its x takes the code off
+    await t.g(`window.ts.players('set', { on: true })`);
+    const jr = await t.g(`window.ts.players('join', { on: true })`);
+    if (jr && jr.ok !== false) {
+      const join = await t.until(async () => { const r = await rows(); return r.length === 1 && r[0][1] === 'hud-join' && /\d:\d\d/.test(r[0][2]) && r; }, 5000, 'the join code\'s row');
+      t.eq(join[0][0], 'c-pale', 'pale orange');
+      const jx = await t.rect('.hud-join .icon-btn'); await t.click(jx.cx, jx.cy);
+      await t.until(() => !t.state.join, 4000, 'the join code to leave the TV');
+    }
+    await t.g(`window.ts.players('set', { on: false })`);
+    // the spotlight: a row while it is on the table, its x takes it off
+    t.gm().webContents.focus();
+    await t.g(`document.querySelector('.rail-btn[data-id="toolbox"]').click()`);
+    await t.until(() => t.popTitle(), 3000, 'the Toolbox');
+    await t.g(`[...document.querySelectorAll('#pop .tb-tile')].find((x) => (x.querySelector('.tb-name, span') || x).textContent.trim() === 'Spotlight' || x.textContent.trim() === 'Spotlight').click()`);
+    await t.until(async () => (await t.tool()) === 'point' && (await t.g(`Play.ui.point.mode`)) === 'spot', 3000, 'the Spotlight tool');
+    await t.key('Escape'); await t.sleep(200);
+    const mp = await t.scr(...Object.values(await t.g(`(() => { const r = Play.view().tableRectInMap(); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; })()`)));
+    await t.mouse('mouseMove', mp.x - 20, mp.y); await t.mouse('mouseMove', mp.x, mp.y);
+    await t.until(async () => (await rows()).some((r) => r[1] === 'hud-spot' && r[0] === 'c-pale'), 4000, 'the spotlight\'s row');
+    const sx = await t.rect('.hud-spot .icon-btn'); await t.click(sx.cx, sx.cy);
+    await t.until(async () => !(await rows()).length, 4000, 'the spotlight to be off');
+    await t.g(`Play.setTool('select')`);
+    t.handle('atlas.remove', { id: region }); t.handle('atlas.remove', { id: world });
+  }, { ms: 60000 });
 };

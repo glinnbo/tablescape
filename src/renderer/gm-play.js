@@ -2232,9 +2232,9 @@ const Play = (() => {
           Hotbar.offer(h('button', { class: 'btn tc-black', 'data-key': 'B', onclick: () => cmd('table.blackout') }, iconEl('screen-share-off'), h('span', {}, 'Blackout')), doHot('blackout')),
           Hotbar.offer(h('button', { class: 'btn tc-quiet', onclick: () => cmd('sound.quiet') }, iconEl('volume'), h('span', {}, 'Mute')), doHot('quiet')),
           h('button', { class: 'btn tc-open', onclick: () => cmd('table.toggle') }, iconEl('device-tv'), h('span', {}, 'Open'))),
+        h('div', { class: 'tc-hud' }), // (Beta 3.15: sorted by colour: combat, what is on the TV, the rest; Spotify last)
         h('div', { class: 'tc-moments' }),
-        h('div', { class: 'tc-spotify' }),
-        h('div', { class: 'tc-hud' }));
+        h('div', { class: 'tc-spotify' }));
       setPreviewWidth(previewW, false);
     }
     renderMomentsHud($('.tc-moments', c));
@@ -2335,11 +2335,12 @@ const Play = (() => {
     const on = ((S && S.moments) || []).filter((m) => !m.stop && !(Moments.BY[m.id] || {}).dur);
     const sig = on.map((m) => m.key).join();
     if (box.dataset.sig === sig) return;
+    const had = new Set((box.dataset.sig || '').split(','));
     box.dataset.sig = sig;
     box.innerHTML = '';
     for (const m of on) {
       const d = Moments.BY[m.id];
-      box.append(h('div', { class: 'hud-row hud-moment' }, iconEl(d.icon), h('span', { class: 'grow ellipsis' }, `${d.label} is on`),
+      box.append(h('div', { class: `hud-row hud-moment c-pale${had.has(m.key) ? '' : ' arrive'}` }, iconEl(d.icon), h('span', { class: 'grow ellipsis' }, `${d.label} is on`),
         h('button', { class: 'icon-btn', 'aria-label': `Stop ${d.label}`, 'data-tip': `Stop ${d.label}`, onclick: () => cmd('moment.stop', { id: m.key }) }, iconEl('player-stop'))));
     }
   }
@@ -3087,13 +3088,17 @@ const Play = (() => {
       ...(d.cone ? { cone: d.cone, angle: L.angle ?? 0 } : {}), ...(L.wave ? { wave: L.wave } : {}) });
   }
 
+  // Beta 3.15: a right-click while it is open only closes it (it used to open a new one at once); a click on its middle
+  // closes it; opened with { modal: true } (the Map table), the click that closes it does nothing else.
   const Radial = (() => {
-    let el = null;
-    function open(x, y, items, title) {
+    let el = null; let shutAt = -1e9; let modal = false;
+    function open(x, y, items, title, o = {}) {
+      if (performance.now() - shutAt < 350) return; // (the right-click that just closed it)
       close();
+      modal = !!o.modal;
       const R = Math.max(112, Math.round((items.length * 86) / (2 * Math.PI))); // more items: a wider ring
       el = h('div', { id: 'radial', role: 'menu' });
-      const center = h('div', { class: 'radial-center' }, h('span', {}, title));
+      const center = h('div', { class: 'radial-center', 'data-tip': 'Close', onclick: () => close() }, h('span', {}, title));
       el.append(center);
       items.forEach((it, i) => {
         const a = (-90 + (360 / items.length) * i) * (Math.PI / 180);
@@ -3114,7 +3119,18 @@ const Play = (() => {
       requestAnimationFrame(() => el && el.classList.add('on'));
     }
     function close() { if (el) { el.remove(); el = null; } }
-    document.addEventListener('pointerdown', (e) => { if (el && !e.target.closest('#radial')) close(); }, true);
+    document.addEventListener('pointerdown', (e) => {
+      if (!el || (e.target.closest && e.target.closest('#radial'))) return;
+      const eat = modal && e.button === 0;
+      close();
+      if (e.button === 2) { shutAt = performance.now(); return; }
+      if (!eat) return;
+      // (the click that closes it does nothing else: neither this press nor the click that follows it)
+      e.stopPropagation(); e.preventDefault();
+      const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      document.addEventListener('click', stop, { capture: true, once: true });
+      setTimeout(() => document.removeEventListener('click', stop, true), 500);
+    }, true);
     return { open, close, get isOpen() { return !!el; } };
   })();
 
@@ -3593,6 +3609,7 @@ const Play = (() => {
     state: () => S, view: () => view, popId: () => popId,
     ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib, cardSep },
     setTool: (t) => setTool(t), openPop: (id) => openPop(id), refreshPop: () => { refreshPop(); renderRail(); }, placeCard: () => placeCard(),
+    openPanel: (id) => TB.openPanel(id), renderCtl: () => { if (S) renderTableCtl(); }, // (Beta 3.15: the rows under the preview open the Handout table, and follow the spotlight)
     get Drawer() { return Drawer; }, get Radial() { return Radial; },
     dragging: () => !!drag, updateCursor: () => updateBrushCursor(),
     startTokenDrag: (id, pt) => startTokenDrag(id, pt),

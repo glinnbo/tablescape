@@ -1478,7 +1478,7 @@ function gmState() {
     chars: charCards(),
     pcTokens: edit ? pcTokens(edit) : {}, // Prototype 17: which tokens are players'
     update: { ...state.update, current: PKG.version, currentLabel: LABEL }, // Prototype 20
-    players: Players ? { ...Players.view(), join: !!state.join } : null, // Prototype 1
+    players: Players ? { ...Players.view(), join: !!state.join, joinUntil: state.join ? state.join.until : null } : null, // Prototype 1 (joinUntil, Beta 3.15: for the row under the preview)
     trails: Players ? Players.trails() : [], // Prototype 6: the squares walked this turn
     partyLoose: partyLoose().length, // 4.7: the party's pictures outside the Party folder
     settings: {
