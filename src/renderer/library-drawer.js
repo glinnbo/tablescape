@@ -692,7 +692,7 @@ const LibraryDrawer = (() => {
         tokens: [{ icon: 'user', label: 'Place as token', action: () => use(it, 'token') }],
         assets: [
           { icon: 'trees', label: 'Use as asset brush', action: () => use(it, 'brush') },
-          { icon: 'user', label: 'Place as token instead', action: () => use(it, 'token') },
+          ...(it.builtin ? [] : [{ icon: 'user', label: 'Place as token instead', action: () => use(it, 'token') }]), // (Beta 3.20: a living tree is no token)
         ],
         overlays: [
           { icon: 'sparkles', label: 'Overlay that moves with the map', action: () => use(it, 'overlay', 'map') },
@@ -712,7 +712,7 @@ const LibraryDrawer = (() => {
         // Prototype 26: one Ready list per chapter for anything (it was Ready for tokens and portraits, and the Tonight tray)
         ...(it.cat !== 'maps' ? [{ icon: 'checklist', label: inTray ? 'Take off the Ready list' : `Ready for ${(ctx.ready.chapter() || {}).name || 'this chapter'}`, action: () => (inTray ? trayRemove(it.path) : trayAdd(it)) }] : []),
         { icon: 'star', label: it.fav ? 'Remove from favourites' : 'Add to favourites', action: () => setFav(it, !it.fav) },
-        { icon: 'folder', label: 'Show in folder', action: () => window.ts.library('reveal', it.path) }]);
+        ...(it.builtin ? [] : [{ icon: 'folder', label: 'Show in folder', action: () => window.ts.library('reveal', it.path) }])]); // (what comes with the app has no folder of yours)
     }
 
     // ---------- using things ----------

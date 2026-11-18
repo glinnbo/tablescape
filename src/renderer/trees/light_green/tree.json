@@ -1,0 +1,161 @@
+{
+ "id": "light_green",
+ "label": "Light green",
+ "layers": [
+  {
+   "file": "layer0.webp",
+   "w": 644,
+   "h": 653,
+   "cx": 324.3,
+   "cy": 329.5,
+   "radius": 343.9
+  },
+  {
+   "file": "layer1.webp",
+   "w": 490,
+   "h": 595,
+   "cx": 253.9,
+   "cy": 291.5,
+   "radius": 305.5
+  },
+  {
+   "file": "layer2.webp",
+   "w": 502,
+   "h": 541,
+   "cx": 235.4,
+   "cy": 275.2,
+   "radius": 260.4
+  },
+  {
+   "file": "layer3.webp",
+   "w": 381,
+   "h": 422,
+   "cx": 186.0,
+   "cy": 205.9,
+   "radius": 210.4
+  },
+  {
+   "file": "layer4.webp",
+   "w": 287,
+   "h": 265,
+   "cx": 147.0,
+   "cy": 132.1,
+   "radius": 138.4
+  },
+  {
+   "file": "layer5.webp",
+   "w": 252,
+   "h": 319,
+   "cx": 123.3,
+   "cy": 157.1,
+   "radius": 148.0
+  },
+  {
+   "file": "layer6.webp",
+   "w": 241,
+   "h": 243,
+   "cx": 119.7,
+   "cy": 120.2,
+   "radius": 107.9
+  },
+  {
+   "file": "layer7.webp",
+   "w": 175,
+   "h": 174,
+   "cx": 89.6,
+   "cy": 88.9,
+   "radius": 84.9
+  },
+  {
+   "file": "layer8.webp",
+   "w": 157,
+   "h": 148,
+   "cx": 77.8,
+   "cy": 74.2,
+   "radius": 70.3
+  }
+ ],
+ "sizes": [
+  {
+   "id": "large",
+   "base": 0
+  },
+  {
+   "id": "medium",
+   "base": 2
+  },
+  {
+   "id": "small",
+   "base": 4
+  }
+ ],
+ "sway": {
+  "topAmplitude": 0.017,
+  "period": 3.6,
+  "lag": 0.55,
+  "cross": 0.28,
+  "twist": 0.01
+ },
+ "branches": {
+  "layerTurn": 0.012,
+  "period": 5.2,
+  "sectorTurn": 0.032,
+  "lobes": 1.7,
+  "speed": 0.22
+ },
+ "rustle": {
+  "amount": 0.0039,
+  "scale": 0.012,
+  "speed": 0.55,
+  "light": 0.08
+ },
+ "lean": {
+  "top": 0.425,
+  "curve": 1.6,
+  "ease": 1.4,
+  "period": 2.1,
+  "periodTop": 1.35,
+  "damping": 0.34,
+  "dampingStorm": 0.16,
+  "gustVar": 0.35,
+  "gustVarWind": 0.6,
+  "gustRate": 0.33,
+  "maxBend": 0.6
+ },
+ "shadow": {
+  "layerOffset": 0.01,
+  "groundOffset": 0.055,
+  "blur": 0.022,
+  "layerAlpha": 0.5,
+  "groundAlpha": 0.55
+ },
+ "variation": {
+  "rotation": 40,
+  "mirror": true,
+  "scale": 0.05,
+  "offset": 0.03,
+  "hue": 7,
+  "saturation": 0.1,
+  "brightness": 0.06,
+  "layerHue": 2,
+  "layerBrightness": 0.03,
+  "heightLight": 0.08,
+  "heightWarm": 0.04,
+  "patchHue": 5,
+  "patchBrightness": 0.04,
+  "swap": [
+   [
+    1,
+    2
+   ],
+   [
+    5,
+    6
+   ],
+   [
+    7,
+    8
+   ]
+  ]
+ }
+}

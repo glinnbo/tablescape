@@ -102,6 +102,9 @@ class SceneView {
     // GM only: the map goes on beyond the TV's edge; that part is dimmed (things there can still be reached)
     this.offEl = div('sv-off');
     this.moments = []; this.momentsLive = false; this.momentSig = '';
+    // Beta 3.20: living trees: one canvas per level that has any (made when the first tree comes), see drawTrees
+    this.tcv = {}; this.treeN = 0; this.treeAt = 0; this.treeWindNow = null; this.treeShadows = true;
+    this.unTrees = typeof Trees === 'object' ? Trees.onChange(() => { if (this.map && !this.dead) { this.renderLayers(); this.redrawSoon(); this.updateAnimation(); } }) : null;
     this.world.append(this.mapA, this.cv.sway.el, this.mapA2, this.cv.atmo.el, this.cv.grid.el, this.mapA3, this.cv.veil.el, this.cv.dv.el, this.mapB, this.mapA4, this.cv.light.el, this.cv.glow.el, this.cv.spell.el,
       this.mapC, this.mapT, this.annoEl, this.glassEl, this.labelsEl, this.fogEl, this.offEl, this.wallsEl, this.areasEl, this.tableOv, this.cv.weather.el, this.cv.moment.el, this.inkEl, this.handlesEl, this.gizmoEl, this.marks);
     this.root.appendChild(this.world);
@@ -151,6 +154,7 @@ class SceneView {
     this.animMode = gm ? 'light' : 'smooth'; // the GM screen draws them lighter (Options → Performance)
     this.fxMode = gm ? 'light' : 'smooth'; // Prototype 19: the effects, weather and flickering light on the GM screen too
     this.bakedLoop = this.bakedLoop.bind(this);
+    this.treeLoop = this.treeLoop.bind(this); this.treeRaf = 0;
     this.io = typeof IntersectionObserver === 'function' ? new IntersectionObserver((list) => this.onSeen(list), { rootMargin: '64px' }) : null;
     this.unAnim = typeof AnimCache === 'object' ? AnimCache.on((path, what) => this.onSheet(path, what)) : null;
   }
@@ -219,6 +223,7 @@ class SceneView {
       sizeCanvas(c, r.w, r.h);
       c.el.style.left = `${r.x}px`; c.el.style.top = `${r.y}px`;
     }
+    for (const c of Object.values(this.tcv)) this.sizeTrees(c);
     this.gridSig = ''; this._seen = null;
     if (this.map) { this.renderGrid(true); this.redrawSoon(); }
   }
@@ -394,6 +399,10 @@ class SceneView {
     this.ro.disconnect();
     if (this.io) this.io.disconnect();
     if (this.unAnim) this.unAnim();
+    if (this.unTrees) this.unTrees();
+    cancelAnimationFrame(this.treeRaf); this.treeRaf = 0;
+    for (const c of Object.values(this.tcv)) { c.L.free(); c.el.remove(); }
+    this.tcv = {};
     cancelAnimationFrame(this.bakedRaf); this.bakedRaf = 0;
     for (const n of this.nodes.values()) { this.dropSheet(n); if (n.media) { n.media.removeAttribute('src'); n.media.load?.(); } }
     if (this.bgNode && this.bgNode.kind === 'video') { this.bgNode.el.removeAttribute('src'); this.bgNode.el.load(); }
@@ -421,6 +430,7 @@ class SceneView {
     this.qres = res;
     if (this.W) this.layoutLayers(true);
     this.frameGap = level === 'low' ? 30 : 0; // about 30 frames a second on Low
+    this.treeShadows = level !== 'low'; // (Beta 3.20: the living trees' soft shadows are half of what they cost)
     const still = this.gm && level === 'low';
     if (still !== !!this.stillVideo) {
       this.stillVideo = still;
@@ -638,7 +648,7 @@ class SceneView {
       seen.add(l.id);
       let n = this.nodes.get(l.id);
       const parent = l.role === 'overlay' ? (l.anchor === 'table' ? this.tableOv : this.overlaysEl) : l.role === 'asset' ? this.assetParent(l) : null; // (Prototype 18: in front of the effects; 23: above the tokens)
-      if (n && (n.url !== l.url || n.role !== l.role || (parent && n.el.parentNode !== parent))) { this.dropNode(n); this.nodes.delete(l.id); n = null; }
+      if (n && (n.url !== l.url || n.role !== l.role || (parent && n.el.parentNode !== parent) || (l.role === 'asset' && !!n.tree !== this.liveTree(l)))) { this.dropNode(n); this.nodes.delete(l.id); n = null; }
       if (!n) n = this.createNode(l);
       if (n) this.updateNode(l, n);
     }
@@ -663,6 +673,9 @@ class SceneView {
       for (const el of els) par.appendChild(el);
     }
     this.canopiesSoon();
+    const trees = this.map.layers.reduce((k, l) => k + (this.liveTree(l) ? 1 : 0), 0);
+    if (trees !== this.treeN) { this.treeN = trees; this.updateAnimation(); }
+    if (trees || Object.keys(this.tcv).length) this.redrawSoon();
   }
   assetParent(l) { return l.over ? this.assetsOverEl : l.front ? this.assetsFrontEl : this.assetsEl; }
   // Prototype 23: on the TV an asset above the tokens opens where a token stands under it (a soft round window)
@@ -675,7 +688,7 @@ class SceneView {
     const toks = this.map.layers.filter((l) => l.role === 'token' && !l.hidden).map((l) => ({ x: l.x * ppi, y: l.y * ppi, r: (l.size || 1) * g * ppi * 0.78 }));
     for (const a of over) {
       const n = this.nodes.get(a.id);
-      if (!n || !n.el) continue;
+      if (!n || !n.el || n.tree) continue; // (a living tree: its canvas opens, see drawTrees)
       const x0 = parseFloat(n.el.style.left) || 0; const y0 = parseFloat(n.el.style.top) || 0;
       const w = parseFloat(n.el.style.width) || 0; const hgt = parseFloat(n.el.style.height) || 0;
       // Beta 3.10: the asset as it lies. Its box stands upright round its middle while its picture is turned inside
@@ -721,10 +734,13 @@ class SceneView {
       // (4.8: "Play as video (sharp)": an asset the GM wants at the video's own sharpness is never baked)
       n = { id: l.id, el: wrap, media: null, url: l.url, role: l.role, nw: 0, nh: 0, path: l.path || null, anim: l.kind === 'video' && !!l.path && !l.asVideo, vid: l.kind === 'video' && !!l.path };
       this.assetParent(l).appendChild(wrap);
+      // Beta 3.20: a living tree is drawn on its level's canvas (drawTrees); here only its box, to click and to frame
+      const tb = this.liveTree(l) ? Trees.boxOf(l.tree) : null;
       // 2.3: an animated asset already baked is drawn from its frame sheet (no video at all); one not baked yet
       // plays as a video until its sheet comes
       const ready = n.anim && typeof AnimCache === 'object' && !AnimCache.videosOnly ? AnimCache.peek(n.path) : null;
-      if (ready && ready.ready) this.useSheet(n, ready, l);
+      if (tb) { n.tree = true; n.nw = tb.w; n.nh = tb.h; n.box = div('sv-treebox'); wrap.classList.add('is-tree'); wrap.append(n.box); }
+      else if (ready && ready.ready) this.useSheet(n, ready, l);
       else if (n.anim && typeof AnimCache === 'object' && !AnimCache.videosOnly) {
         n.wait = setTimeout(() => { n.wait = 0; if (!n.sheet && !n.media && !n.dead) this.assetMedia(n, l); }, 1500);
       } else this.assetMedia(n, l);
@@ -782,6 +798,16 @@ class SceneView {
       }
       Object.assign(e.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px`, objectFit: r.cover ? 'cover' : 'fill' });
       if (n.media.tagName === 'VIDEO' && n.media.playbackRate !== (l.rate || 1)) n.media.playbackRate = l.rate || 1;
+      return;
+    }
+    if (l.role === 'asset' && n.tree) { // (Beta 3.20) a living tree: its box; the tree itself is drawn in drawTrees
+      const w = (l.w || 1) * ppi; const hgt = (w * n.nh) / n.nw;
+      Object.assign(n.el.style, { width: `${w}px`, height: `${hgt}px`, left: `${l.x * ppi - w / 2}px`, top: `${l.y * ppi - hgt / 2}px`, opacity: '', filter: '' });
+      n.box.style.transform = `rotate(${l.rotation || 0}deg)`;
+      n.el.classList.toggle('is-selected', this.selAssets.has(l.id));
+      n.el.classList.toggle('is-locked', !!l.locked);
+      if (this.gizmoId === l.id) this.renderGizmo();
+      this.redrawSoon();
       return;
     }
     if (l.role === 'asset') {
@@ -918,7 +944,7 @@ class SceneView {
     const n = l && this.nodes.get(id);
     if (!l || !n || !n.nw || !n.nh) return null;
     const w = l.w || 1; const own = (w * n.nh) / n.nw;
-    return { id, x: l.x, y: l.y, w, h: own * (l.stretch || 1), own, stretch: l.stretch || 1, rot: l.rotation || 0, locked: !!l.locked };
+    return { id, x: l.x, y: l.y, w, h: own * (l.stretch || 1), own, stretch: l.stretch || 1, rot: l.rotation || 0, locked: !!l.locked, fixed: !!n.tree };
   }
   renderGizmo() {
     if (!this.gm || !this.gizmoEl) return;
@@ -930,7 +956,7 @@ class SceneView {
     if (!show) { if (this.gizmoEl.firstChild) this.gizmoEl.innerHTML = ''; this.gizmoSig = ''; return; }
     const n = this.nodes.get(id); if (n && n.el) n.el.classList.add('has-gizmo');
     const at = this.mapToPx(b.x, b.y); const s = this.ppi * this.v.zoom;
-    const sig = [id, round3(at.x), round3(at.y), round3(b.w * s), round3(b.h * s), b.rot].join('|');
+    const sig = [id, round3(at.x), round3(at.y), round3(b.w * s), round3(b.h * s), b.rot, b.fixed ? 1 : 0].join('|');
     if (sig === this.gizmoSig && this.gizmoEl.firstChild) return;
     this.gizmoSig = sig;
     let f = this.gizmoEl.firstChild;
@@ -942,6 +968,7 @@ class SceneView {
       this.gizmoEl.append(f);
     }
     f.dataset.id = id;
+    f.classList.toggle('no-sides', !!b.fixed); // (a living tree keeps its shape: corners and the knob only)
     Object.assign(f.style, { left: `${at.x}px`, top: `${at.y}px`, width: `${b.w * s}px`, height: `${b.h * s}px`, transform: `translate(-50%, -50%) rotate(${b.rot}deg)` });
     // the pointer over a dot shows which way it pulls, as the asset lies now
     const CUR = ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize'];
@@ -1631,6 +1658,7 @@ class SceneView {
     return m.light.darkness > 0 && m.fx.some((f) => f.kind === 'light' && (f.flicker || f.wave));
   }
   updateAnimation() {
+    this.updateTreeLoop();
     const on = this.hasAnimation();
     if (on && !this.raf) this.raf = requestAnimationFrame(this.loop);
     if (!on && this.raf) { cancelAnimationFrame(this.raf); this.raf = 0; if (this.map) this.drawMoments(Date.now()); }
@@ -1661,7 +1689,121 @@ class SceneView {
     this.drawSpells(ms);
     this.drawWeather(t);
     this.drawMoments(real);
+    if (!this.treeRaf) this.drawTrees(); // (while they move they draw themselves, see treeLoop)
     this.stats.frames++;
+  }
+
+  // ---------- living trees (Beta 3.20) ----------
+  // An asset with a "tree" (trees.js) where the graphics card can draw it. Each level of assets that has any gets a
+  // canvas of its own, right above that level: on the ground (under the grid), in front of the effects, above the
+  // tokens. All of them lie under the light, the darkness and the fog, like any asset.
+  liveTree(l) { return !!(l && l.role === 'asset' && l.tree && typeof Trees === 'object' && Trees.supported() && Trees.boxOf(l.tree)); }
+  // Living trees never stand still, but they must not make the rest draw: a map with trees and nothing else that moves
+  // (its light, its mist, its weather all still) would otherwise draw every layer sixty times a second. So the trees
+  // have a loop of their own that draws only them; the other layers keep drawing only when something of theirs moves.
+  treesMove() { return this.treeN > 0 && this.playing && !!this.map && !(this.gm && this.fxMode === 'still'); }
+  updateTreeLoop() {
+    const on = this.treesMove();
+    if (on && !this.treeRaf) this.treeRaf = requestAnimationFrame(this.treeLoop);
+    if (!on && this.treeRaf) { cancelAnimationFrame(this.treeRaf); this.treeRaf = 0; }
+  }
+  treeLoop(ms) {
+    this.treeRaf = 0;
+    if (this.dead || !this.treesMove()) return;
+    this.treeRaf = requestAnimationFrame(this.treeLoop);
+    const gap = this.gm ? (this.fxMode === 'smooth' ? 0 : 80) : this.frameGap || 0; // (as the effects: about 12 a second on your screen unless set to full speed; 30 on the TV on Low)
+    if (ms - (this.treeFrame || 0) < gap) return;
+    this.treeFrame = ms;
+    this.drawTrees();
+  }
+  treeCanvas(lev) {
+    if (this.tcv[lev]) return this.tcv[lev];
+    const el = document.createElement('canvas');
+    el.className = `sv-canvas sv-trees sv-trees-${lev}`;
+    const L = Trees.level(el, () => { if (!this.dead) { this.redrawSoon(); this.updateAnimation(); } });
+    if (!L) return null; // (no graphics card after all: trees.js tells every view, the still pictures show)
+    const below = lev === 'over' ? this.mapA4 : lev === 'front' ? this.mapA3 : this.mapA2;
+    this.world.insertBefore(el, below.nextSibling);
+    const c = { el, L, lev, res: 1, mask: '' };
+    this.tcv[lev] = c;
+    this.sizeTrees(c);
+    return c;
+  }
+  // as sharp as the screen shows it (the map picture is), up to 4K; Effects quality lowers it like the other layers
+  sizeTrees(c) {
+    const r = this.wideOn && this.R ? this.R : { x: 0, y: 0, w: this.W, h: this.H };
+    const want = this.cam.s * (window.devicePixelRatio || 1);
+    const step = [0.25, 0.35, 0.5, 0.7, 1, 1.4, 2].find((k) => k >= want * 0.98) || 2;
+    const res = Math.min(step, (this.gm ? 2560 : 3840) / Math.max(1, r.w), 2160 / Math.max(1, r.h)) * (this.qres || 1);
+    const w = Math.max(1, Math.round(r.w * res)); const h = Math.max(1, Math.round(r.h * res));
+    if (c.el.width !== w || c.el.height !== h) { c.el.width = w; c.el.height = h; }
+    c.res = w / r.w; c.rect = r;
+    Object.assign(c.el.style, { width: `${r.w}px`, height: `${r.h}px`, left: `${r.x}px`, top: `${r.y}px` });
+  }
+  drawTrees() {
+    const m = this.map;
+    const now = performance.now();
+    const moving = this.playing && !this.freezeAt && !(this.gm && this.fxMode === 'still');
+    const dt = moving && this.treeAt ? Math.min(0.1, (now - this.treeAt) / 1000) : 0;
+    this.treeAt = now;
+    const st = { n: 0, drawn: 0, levels: [], cover: 0 }; // cover: how much of the table the trees take, layers and all (what they cost)
+    this.stats.trees = st;
+    if (!m) return;
+    const list = m.layers.filter((l) => this.liveTree(l) && (this.gm || !l.hidden));
+    st.n = list.length;
+    if (!list.length && !Object.keys(this.tcv).length) return;
+    { const k = this.ppi * this.v.zoom; const all = this.W * this.H; const T = this.tableRectInMap();
+      for (const l of list) {
+        const w = l.w || 1; if (l.x + w < T.x || l.y + w < T.y || l.x - w > T.x + T.w || l.y - w > T.y + T.h) continue; // (off the table)
+        const vv = Trees.variant(l.tree.v); st.cover += ((w * k) ** 2 / all) * (vv ? (vv.layers.length - l.tree.base) / 6 : 1);
+      } }
+    // the wind: the map's own or the weather's, never with a jump
+    const to = Trees.windOf(m);
+    this.treeWindNow = moving && this.treeWindMap === m.id ? Trees.ease(this.treeWindNow, to, dt) : Trees.ease(null, to, 0);
+    this.treeWindMap = m.id;
+    st.wind = { ...to, now: this.treeWindNow.strength };
+    const rad = Math.PI / 180;
+    const v = this.v;
+    for (const lev of ['ground', 'front', 'over']) {
+      const mine = list.filter((l) => (l.over ? 'over' : l.front ? 'front' : 'ground') === lev);
+      let c = this.tcv[lev];
+      if (!mine.length) { if (c) { c.L.clear(); if (c.mask) { c.mask = ''; c.el.style.maskImage = ''; } } continue; }
+      if (!c) c = this.treeCanvas(lev);
+      if (!c) return;
+      if (c.step !== this.cam.s) { c.step = this.cam.s; this.sizeTrees(c); } // (zoomed in on your screen: sharper)
+      const trees = mine.map((l) => ({
+        id: l.id, variant: l.tree.v, base: l.tree.base, seed: l.tree.seed, x: l.x, y: l.y, size: l.w || 1, rotation: (l.rotation || 0) * rad,
+        opacity: (l.opacity ?? 1) * (l.hidden ? 0.4 : 1), hue: (l.hue || 0) * rad, bright: 1 - (l.dark || 0),
+      }));
+      const k = this.ppi * v.zoom * c.res;
+      const R = c.rect;
+      const t0 = performance.now();
+      const ok = c.L.frame(trees, { dt, wind: this.treeWindNow, shadows: this.treeShadows, animate: true, matrix: [k, 0, 0, k, (v.x * this.ppi - R.x) * c.res, (v.y * this.ppi - R.y) * c.res] });
+      this.treeMs = (this.treeMs || 0) * 0.9 + (performance.now() - t0) * 0.1; st.ms = Math.round(this.treeMs * 100) / 100; // (what handing them to the graphics card costs this window, per frame)
+      if (ok) { st.drawn += c.L.ready(trees); st.levels.push(lev); st.time = c.L.tw ? c.L.tw.time : 0; }
+      if (ok && this.treeProbe) { // (the self-test asks what is drawn at a point of the map)
+        const q = this.treeProbe; const px = c.L.read(q.x * k + (v.x * this.ppi - R.x) * c.res, q.y * k + (v.y * this.ppi - R.y) * c.res);
+        if (px && (px[3] > 0 || !st.px)) st.px = px;
+      }
+      if (lev === 'over' && !this.gm) this.treeWindows(c, mine);
+    }
+  }
+  // Prototype 23, for living trees: on the TV the canvas above the tokens opens where a token stands under a tree
+  treeWindows(c, trees) {
+    const ppi = this.ppi; const g = this.map.grid.size || 1; const z = this.v.zoom;
+    const holes = [];
+    for (const t of this.map.layers) {
+      if (t.role !== 'token' || t.hidden) continue;
+      const r = (t.size || 1) * g * 0.78;
+      if (!trees.some((a) => Math.hypot(t.x - a.x, t.y - a.y) < (a.w || 1) * 0.55 + r)) continue;
+      const p = this.mapToPx(t.x, t.y);
+      holes.push(`radial-gradient(circle ${Math.round(r * ppi * z)}px at ${Math.round(p.x - c.rect.x)}px ${Math.round(p.y - c.rect.y)}px, rgba(0,0,0,0.18) 0, rgba(0,0,0,0.18) 58%, #000 100%)`);
+    }
+    const mask = holes.join(', ');
+    if (mask === c.mask) return;
+    c.mask = mask;
+    c.el.style.maskImage = mask;
+    c.el.style.maskComposite = holes.length > 1 ? 'intersect' : '';
   }
 
   // ---------- screen moments (moments.js) ----------

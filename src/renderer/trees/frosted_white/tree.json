@@ -1,0 +1,121 @@
+{
+ "id": "frosted_white",
+ "label": "Frosted (white)",
+ "layers": [
+  {
+   "file": "layer0.webp",
+   "w": 1134,
+   "h": 1142,
+   "cx": 588.3,
+   "cy": 590.0,
+   "radius": 582.7
+  },
+  {
+   "file": "layer1.webp",
+   "w": 866,
+   "h": 936,
+   "cx": 423.6,
+   "cy": 517.7,
+   "radius": 503.9
+  },
+  {
+   "file": "layer2.webp",
+   "w": 503,
+   "h": 504,
+   "cx": 248.2,
+   "cy": 251.8,
+   "radius": 246.2
+  },
+  {
+   "file": "layer3.webp",
+   "w": 459,
+   "h": 498,
+   "cx": 229.6,
+   "cy": 265.5,
+   "radius": 251.4
+  },
+  {
+   "file": "layer4.webp",
+   "w": 285,
+   "h": 300,
+   "cx": 136.8,
+   "cy": 153.6,
+   "radius": 160.8
+  }
+ ],
+ "sizes": [
+  {
+   "id": "large",
+   "base": 0
+  },
+  {
+   "id": "medium",
+   "base": 1
+  },
+  {
+   "id": "small",
+   "base": 2
+  }
+ ],
+ "sway": {
+  "topAmplitude": 0.009,
+  "period": 4.5,
+  "lag": 0.55,
+  "cross": 0.28,
+  "twist": 0.01
+ },
+ "branches": {
+  "layerTurn": 0.012,
+  "period": 5.2,
+  "sectorTurn": 0.02,
+  "lobes": 1.7,
+  "speed": 0.22
+ },
+ "rustle": {
+  "amount": 0.0015,
+  "scale": 0.012,
+  "speed": 0.55,
+  "light": 0.025
+ },
+ "lean": {
+  "top": 0.3,
+  "curve": 1.6,
+  "ease": 1.4,
+  "period": 3.0,
+  "periodTop": 1.35,
+  "damping": 0.34,
+  "dampingStorm": 0.16,
+  "gustVar": 0.35,
+  "gustVarWind": 0.6,
+  "gustRate": 0.33,
+  "maxBend": 0.6
+ },
+ "shadow": {
+  "layerOffset": 0.01,
+  "groundOffset": 0.055,
+  "blur": 0.022,
+  "layerAlpha": 0.5,
+  "groundAlpha": 0.55
+ },
+ "variation": {
+  "rotation": 180,
+  "mirror": true,
+  "scale": 0.05,
+  "offset": 0.03,
+  "hue": 0,
+  "saturation": 0.05,
+  "brightness": 0.05,
+  "layerHue": 0,
+  "layerBrightness": 0.03,
+  "heightLight": 0.06,
+  "heightWarm": 0.0,
+  "patchHue": 0,
+  "patchBrightness": 0.03,
+  "swap": [
+   [
+    2,
+    3
+   ]
+  ]
+ }
+}

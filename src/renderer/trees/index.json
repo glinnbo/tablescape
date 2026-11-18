@@ -1,0 +1,75 @@
+{
+ "version": 1,
+ "variants": [
+  {
+   "id": "oak_dark_green",
+   "label": "Oak (dark green)",
+   "layers": 6,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ]
+  },
+  {
+   "id": "autumn_orange",
+   "label": "Autumn (orange)",
+   "layers": 6,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ]
+  },
+  {
+   "id": "dark_green_clumps",
+   "label": "Dark green clumps",
+   "layers": 5,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ]
+  },
+  {
+   "id": "light_green",
+   "label": "Light green",
+   "layers": 9,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ]
+  },
+  {
+   "id": "pine",
+   "label": "Pine",
+   "layers": 6,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ]
+  },
+  {
+   "id": "frosted_white",
+   "label": "Frosted (white)",
+   "layers": 5,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ]
+  },
+  {
+   "id": "frost_blue",
+   "label": "Frost (blue)",
+   "layers": 6,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ]
+  }
+ ]
+}

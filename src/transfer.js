@@ -270,6 +270,10 @@ function plan(dir, { kind = 'adventure', chapterId = null } = {}) {
   const fromPc = new Map(); // abs -> rel
   const missing = new Set();
   const fix = (ref) => {
+    if (library.treeOf(ref)) { // (Beta 3.20: a living tree comes with the app: its name goes along, no file)
+      ref.rel = library.toRef(library.resolveRef(ref)).rel; delete ref.path; delete ref.url; delete ref.missing;
+      return;
+    }
     const abs = library.resolveRef(ref);
     if (!abs || !isFile(abs)) { missing.add(ref.rel || ref.path); return; }
     let rel = insideLib(abs);
@@ -420,7 +424,7 @@ async function importFrom(file, campaignsDir, { progress = () => {}, cancelled =
     const swap = (s) => { for (const [a, b] of ids) s = s.split(`"${a}"`).join(`"${b}"`); return s; };
     metaText = swap(metaText);
     mapTexts = mapTexts.map((x) => ({ id: ids.get(x.id), text: swap(x.text) }));
-    const point = (o) => eachRef(o, (ref) => { if (typeof ref.rel !== 'string') return; if (renames.has(ref.rel)) ref.rel = renames.get(ref.rel); const t = target(ref.rel); if (t) ref.path = t; else { delete ref.rel; delete ref.path; } }); // (an unsafe name points nowhere)
+    const point = (o) => eachRef(o, (ref) => { if (typeof ref.rel !== 'string') return; if (library.isBuiltin(ref.rel)) { ref.path = library.resolveRef(ref); return; } if (renames.has(ref.rel)) ref.rel = renames.get(ref.rel); const t = target(ref.rel); if (t) ref.path = t; else { delete ref.rel; delete ref.path; } }); // (an unsafe name points nowhere)
     const meta = JSON.parse(metaText);
     point(meta);
     meta.id = newId('c');

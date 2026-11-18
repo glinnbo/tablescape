@@ -1,0 +1,124 @@
+{
+ "id": "pine",
+ "label": "Pine",
+ "layers": [
+  {
+   "file": "layer0.webp",
+   "w": 839,
+   "h": 967,
+   "cx": 428.4,
+   "cy": 489.8,
+   "radius": 515.9
+  },
+  {
+   "file": "layer1.webp",
+   "w": 614,
+   "h": 621,
+   "cx": 324.9,
+   "cy": 325.4,
+   "radius": 329.0
+  },
+  {
+   "file": "layer2.webp",
+   "w": 514,
+   "h": 535,
+   "cx": 269.9,
+   "cy": 282.6,
+   "radius": 268.5
+  },
+  {
+   "file": "layer3.webp",
+   "w": 402,
+   "h": 407,
+   "cx": 197.4,
+   "cy": 201.9,
+   "radius": 190.7
+  },
+  {
+   "file": "layer4.webp",
+   "w": 282,
+   "h": 280,
+   "cx": 144.4,
+   "cy": 145.8,
+   "radius": 134.3
+  },
+  {
+   "file": "layer5.webp",
+   "w": 198,
+   "h": 188,
+   "cx": 101.8,
+   "cy": 93.6,
+   "radius": 86.6
+  }
+ ],
+ "sizes": [
+  {
+   "id": "large",
+   "base": 0
+  },
+  {
+   "id": "medium",
+   "base": 1
+  },
+  {
+   "id": "small",
+   "base": 2
+  }
+ ],
+ "sway": {
+  "topAmplitude": 0.01,
+  "period": 4.2,
+  "lag": 0.55,
+  "cross": 0.28,
+  "twist": 0.01
+ },
+ "branches": {
+  "layerTurn": 0.008,
+  "period": 5.2,
+  "sectorTurn": 0.022,
+  "lobes": 1.7,
+  "speed": 0.22
+ },
+ "rustle": {
+  "amount": 0.0023,
+  "scale": 0.02,
+  "speed": 0.55,
+  "light": 0.04
+ },
+ "lean": {
+  "top": 0.34,
+  "curve": 1.6,
+  "ease": 1.4,
+  "period": 2.8,
+  "periodTop": 1.35,
+  "damping": 0.4,
+  "dampingStorm": 0.22,
+  "gustVar": 0.35,
+  "gustVarWind": 0.6,
+  "gustRate": 0.33,
+  "maxBend": 0.6
+ },
+ "shadow": {
+  "layerOffset": 0.01,
+  "groundOffset": 0.055,
+  "blur": 0.022,
+  "layerAlpha": 0.5,
+  "groundAlpha": 0.55
+ },
+ "variation": {
+  "rotation": 40,
+  "mirror": true,
+  "scale": 0.05,
+  "offset": 0.03,
+  "hue": 3,
+  "saturation": 0.06,
+  "brightness": 0.05,
+  "layerHue": 2,
+  "layerBrightness": 0.03,
+  "heightLight": 0.08,
+  "heightWarm": 0.04,
+  "patchHue": 2,
+  "patchBrightness": 0.03,
+  "swap": []
+ }
+}

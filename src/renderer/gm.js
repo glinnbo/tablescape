@@ -341,7 +341,7 @@ const App = (() => {
         'Mute (under the table preview) fades all table sound out and back in.'] },
     { id: 'perf', label: 'Performance', icon: 'gauge',
       tips: ['Medium: fewer particles. Low: also 30 frames a second on the TV, and video maps stand still on your screen (the TV still plays them).', 'The frames per second show under the table preview.',
-        'Animated assets are prepared once (the little maid runs at the top meanwhile); after that many animations stay smooth.', 'An animated asset that should be sharp whatever it costs: select it → the film button (Sharp video).', 'The benchmark measures the map on the TV as it is now: run it again after a change to see what it did.'] },
+        'Animated assets are prepared once (the little maid runs at the top meanwhile); after that many animations stay smooth.', 'Living trees are drawn by the graphics card: Medium draws them less sharp, Low also without their soft shadows. Without a graphics card they are still pictures.', 'An animated asset that should be sharp whatever it costs: select it → the film button (Sharp video).', 'The benchmark measures the map on the TV as it is now: run it again after a change to see what it did.'] },
     { id: 'screen', label: 'This screen', icon: 'device-desktop',
       tips: ['Ctrl + and Ctrl − change the size anywhere, Ctrl 0 goes back to 100%. The TV stays as it is.', 'Hotbar: a row, two rows or a column. Right-click the hotbar for the same.', 'Drag the hotbar by its grip to put it anywhere; a double-click on the grip puts it back.'] },
     { id: 'library', label: 'Library', icon: 'folder',

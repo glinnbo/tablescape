@@ -3797,3 +3797,13 @@ span.hm-pl-face { font-size: 22px; }
 .modal.options .cp-tabs .seg-btn { flex-direction: row; gap: 8px; }
 .modal.options .cp-tabs .seg-btn .i { width: 16px; height: 16px; }
 .modal.options .opt-caption { max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Beta 3.20: living trees ---------- */
+.sv-treebox { width: 100%; height: 100%; border-radius: 50%; transform-origin: 50% 50%; }
+body.gm[data-tool="asset"] .sv-asset > .sv-treebox { pointer-events: auto; cursor: move; }
+body.gm .sv-asset.is-selected > .sv-treebox { outline: 2px solid var(--torch); outline-offset: 2px; }
+body.gm .sv-trees-over { opacity: 0.7; } /* (above the tokens: see-through on your screen, like roofs; a little less, or green crowns vanish on a green map) */
+.sv-trees { mask-repeat: no-repeat; }
+.sv-gizmo.no-sides .sv-grip.side { display: none; }
+.wind-box { padding: 10px 12px; border: 1px solid var(--line, rgba(255, 255, 255, 0.08)); border-radius: 10px; background: rgba(255, 255, 255, 0.025); }
+.wind-box .wind-now { margin: 0; }

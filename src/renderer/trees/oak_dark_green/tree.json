@@ -1,0 +1,124 @@
+{
+ "id": "oak_dark_green",
+ "label": "Oak (dark green)",
+ "layers": [
+  {
+   "file": "layer0.webp",
+   "w": 1094,
+   "h": 1173,
+   "cx": 555.2,
+   "cy": 594.4,
+   "radius": 581.2
+  },
+  {
+   "file": "layer1.webp",
+   "w": 627,
+   "h": 698,
+   "cx": 315.5,
+   "cy": 352.6,
+   "radius": 352.8
+  },
+  {
+   "file": "layer2.webp",
+   "w": 543,
+   "h": 551,
+   "cx": 283.9,
+   "cy": 271.2,
+   "radius": 282.8
+  },
+  {
+   "file": "layer3.webp",
+   "w": 381,
+   "h": 388,
+   "cx": 183.2,
+   "cy": 185.6,
+   "radius": 187.1
+  },
+  {
+   "file": "layer4.webp",
+   "w": 316,
+   "h": 317,
+   "cx": 159.0,
+   "cy": 165.8,
+   "radius": 150.3
+  },
+  {
+   "file": "layer5.webp",
+   "w": 215,
+   "h": 196,
+   "cx": 107.9,
+   "cy": 101.5,
+   "radius": 95.4
+  }
+ ],
+ "sizes": [
+  {
+   "id": "large",
+   "base": 0
+  },
+  {
+   "id": "medium",
+   "base": 1
+  },
+  {
+   "id": "small",
+   "base": 2
+  }
+ ],
+ "sway": {
+  "topAmplitude": 0.014,
+  "period": 3.6,
+  "lag": 0.55,
+  "cross": 0.28,
+  "twist": 0.01
+ },
+ "branches": {
+  "layerTurn": 0.012,
+  "period": 5.2,
+  "sectorTurn": 0.032,
+  "lobes": 1.7,
+  "speed": 0.22
+ },
+ "rustle": {
+  "amount": 0.00355,
+  "scale": 0.012,
+  "speed": 0.55,
+  "light": 0.07
+ },
+ "lean": {
+  "top": 0.425,
+  "curve": 1.6,
+  "ease": 1.4,
+  "period": 2.3,
+  "periodTop": 1.35,
+  "damping": 0.34,
+  "dampingStorm": 0.16,
+  "gustVar": 0.35,
+  "gustVarWind": 0.6,
+  "gustRate": 0.33,
+  "maxBend": 0.6
+ },
+ "shadow": {
+  "layerOffset": 0.01,
+  "groundOffset": 0.055,
+  "blur": 0.022,
+  "layerAlpha": 0.5,
+  "groundAlpha": 0.55
+ },
+ "variation": {
+  "rotation": 70,
+  "mirror": true,
+  "scale": 0.05,
+  "offset": 0.03,
+  "hue": 5,
+  "saturation": 0.08,
+  "brightness": 0.06,
+  "layerHue": 2,
+  "layerBrightness": 0.03,
+  "heightLight": 0.08,
+  "heightWarm": 0.04,
+  "patchHue": 4,
+  "patchBrightness": 0.04,
+  "swap": []
+ }
+}

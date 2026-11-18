@@ -636,7 +636,8 @@ const Play = (() => {
       light: ui.lightTab === 'sources'
         ? ['Click the map to place a light, or click a token so it carries the light.', 'The party\'s own light is set in Play → Party marker (U).']
         : ['Darkness covers the whole map; lights, torches and campfires shine through it.', 'Remember lit areas: what the light reached stays dimly visible.', 'Day, Dusk, Night and Cave work on the hotbar and the button deck too.'],
-      weather: ['Weather covers the whole table and stays put when you move the map.', 'With lightning in the mix, the Lightning button flashes it whenever you like.', 'Save a mix to use it on other maps.'],
+      weather: ['Weather covers the whole table and stays put when you move the map.', 'With lightning in the mix, the Lightning button flashes it whenever you like.', 'Save a mix to use it on other maps.',
+        'Living trees take their wind from the weather: where it blows and how hard. Switch "Follows the weather" off to set the wind yourself; Storm (also a hotbar button) blows until you click it again.'],
     }[ui.fxMode] || [])],
     walls: () => [({
       wall: 'Click from corner to corner; double-click, Enter or right-click ends the line. Alt places freely.',
@@ -651,7 +652,7 @@ const Play = (() => {
       'What they revealed stays revealed, also when you remove the party.', 'A split group: Another party.'],
     spell: ['Click the map to cast; drag to aim a cone, line or cube.', 'Ctrl + wheel turns the area before you place it (Shift: small steps).', '+ and − change the size in 5 ft steps.',
       'Shift snaps the aim to 15°, Alt skips the grid.', 'Right-click a placed area for its options; H hides it from the players.', 'Drag a spell onto the hotbar to cast it with a number key.', 'Speakers and spell sounds: Settings → Sound.'],
-    asset: ['Click to stamp, drag to scatter.', 'Click a placed asset to select it; Shift + click or Shift + drag selects several.', 'Drag to move, Ctrl + wheel to turn, [ and ] to resize.',
+    asset: ['Click to stamp, drag to scatter.', 'Living trees (Library → Assets → Living trees) move in the wind. Every one looks a little different; the shuffle button gives one another look. Scatter paints a forest.', 'Click a placed asset to select it; Shift + click or Shift + drag selects several.', 'Drag to move, Ctrl + wheel to turn, [ and ] to resize.',
       'A picked asset has a frame: pull a side to make it flat or long, a corner to size it, the knob to turn it (Shift: steps of 15°).',
       'Assets lie under tokens and only react while this tool is on.'],
     layers: ['Click a row to select it on the map; H hides it from the players.', 'Delete removes what is selected; Ctrl + Z brings it back.'],
@@ -1468,6 +1469,7 @@ const Play = (() => {
     return [
       h('div', { class: 'ctl-label' }, 'Mixes'),
       presets,
+      ...(o.plain ? [] : [windSection()]), // (Beta 3.20: only while the map has living trees)
       h('div', { class: 'ctl-label' }, 'Single layers: click to switch on or off'),
       add,
       h('div', { class: 'ctl-label' }, 'In this mix (click one to change it)'),
@@ -1484,6 +1486,35 @@ const Play = (() => {
         toast(`${name} saved with your mixes`);
       }, { tip: 'Keep this mix to use on other maps' })),
     ];
+  }
+  // Beta 3.20: the wind in the living trees (shown while the map has any). It follows the weather unless you set your
+  // own: where it blows and how hard; the rest (how far they lean, branches, leaves) comes from that, or by hand.
+  function windSection() {
+    const W = () => map().wind || { auto: true };
+    const now = () => Trees.windOf(map());
+    const set = (patch, key) => (key ? send(key, 'wind.set', patch) : cmd('wind.set', patch));
+    const word = (s) => (s < 0.5 ? 'Still' : s < 1.3 ? 'A breeze' : s < 1.9 ? 'Windy' : s < 2.35 ? 'A gale' : 'A storm');
+    const line = h('span', { class: 'grow hint wind-now' });
+    bind(() => { const w = now(); const t = w.from === 'storm' ? 'A storm' : `${word(w.strength)}${w.from === 'weather' ? ', from the weather' : ''}`; if (line.textContent !== t) line.textContent = t; });
+    const storm = Hotbar.offer(btn('Storm', 'tornado', () => cmd('wind.storm', {}), { tip: 'A storm in the trees until you click again, whatever the weather' }), doHot('storm'));
+    bind(() => storm.classList.toggle('primary', !!W().storm));
+    const own = h('div', { class: 'stack' },
+      compass(() => W().dir ?? 30, (v) => set({ dir: v }, 'wind-dir')),
+      slider({ label: 'Strength', min: 0, max: 3, step: 0.05, get: () => W().strength ?? 1, fmt: word,
+        set: (v, k) => { const f = Trees.fromStrength(0, v); set(ui.windFine ? { strength: v } : { strength: v, lean: round(f.lean, 2), branches: round(f.branches, 2), rustle: round(f.rustle, 2) }, k); } }),
+      toggle({ label: 'Fine tuning', get: () => !!ui.windFine, set: (v) => { ui.windFine = v; refreshPop(); } }));
+    const fine = h('div', { class: 'stack' },
+      slider({ label: 'Lean', min: 0, max: 1, step: 0.05, get: () => W().lean ?? 0, set: (v, k) => set({ lean: v }, k), fmt: pct }),
+      slider({ label: 'Branches', min: 0, max: 3, step: 0.05, get: () => W().branches ?? 1, set: (v, k) => set({ branches: v }, k), fmt: pct }),
+      slider({ label: 'Leaves', min: 0, max: 3, step: 0.05, get: () => W().rustle ?? 1, set: (v, k) => set({ rustle: v }, k), fmt: pct }));
+    bind(() => { own.hidden = W().auto !== false; fine.hidden = W().auto !== false || !ui.windFine; });
+    const box = h('div', { class: 'stack wind-box', dataset: { flash: 'wind' } },
+      h('div', { class: 'ctl-label' }, 'Wind in the trees'),
+      row(line, storm),
+      toggle({ label: 'Follows the weather', get: () => W().auto !== false, set: (v) => { const w = now(); cmd('wind.set', v ? { auto: true } : { auto: false, dir: Math.round(w.dir), ...(W().storm ? {} : { strength: round(w.strength, 2), lean: round(w.lean, 2), branches: round(w.branches, 2), rustle: round(w.rustle, 2) }) }); } }),
+      own, fine);
+    bind(() => { box.hidden = !map().layers.some((l) => l.tree); });
+    return box;
   }
   function wxDetail(L, def, local, o = {}) {
     const wmap = o.map || map; const cmd = o.cmd || ((type, payload) => ts.cmd(type, payload)); const wsend = o.send || send; // (this map's own commands)
@@ -3271,6 +3302,7 @@ const Play = (() => {
       case 'tool': return toolLive(r);
       case 'door': { const w = m && r && r.map === m.id && (m.walls || []).find((x) => x.id === r.id); return !!(w && (w.door ? w.open : !w.shut)); } // (Beta 3.1: a window, open)
       case 'do': return r === 'blackout' ? !!S.table.blackout : r === 'quiet' ? !!(S.sound && S.sound.quiet) : r === 'fight' ? !!(S.sound && S.sound.fightNow) : r === 'grid' ? !!(m && m.grid.show)
+        : r === 'storm' ? !!(m && m.wind && m.wind.storm)
         : r === 'sp-toggle' ? !!(S.spotify && S.spotify.now && S.spotify.now.playing)
         : doValue(r) ? (doValue(r).key === 'timer' ? !!S.timer : doValue(r).key === 'break' ? !!S.brk : doValue(r).key === 'dark' ? !!(m && Math.round((m.light.darkness || 0) * 100) === doValue(r).v) : false) : false;
       case 'snap': { const lm = allMaps().find((x) => x.id === S.table.liveMapId); return r !== 'next' && !!(lm && (lm.snaps || []).some((x) => x.id === r && x.at)); }
@@ -3321,6 +3353,7 @@ const Play = (() => {
     next: { label: 'Next turn', icon: 'player-track-next' }, fight: { label: 'Fight music', icon: 'swords' }, strike: { label: 'Lightning', icon: 'bolt' },
     'stop-moments': { label: 'Stop effects', icon: 'player-stop' }, grid: { label: 'Grid on/off', icon: 'grid-4x4' }, fit: { label: 'Fit the view', icon: 'zoom-scan' },
     again: { label: 'Movement again', icon: 'refresh' },
+    storm: { label: 'Storm in the trees', icon: 'tornado' }, // (Beta 3.20: the living trees; again: the storm passes)
     // fight (the Initiative panel's buttons)
     'fight-start': { label: 'Start the fight', icon: 'swords' }, 'fight-end': { label: 'End the fight', icon: 'player-stop' }, prev: { label: 'Previous turn', icon: 'player-skip-back' },
     'roll-enemies': { label: 'Roll enemies', icon: 'dice' }, 'init-sort': { label: 'Sort initiative', icon: 'sort-descending' },
@@ -3331,7 +3364,7 @@ const Play = (() => {
     // the hotbar itself
     'page-next': { label: 'Next hotbar page', icon: 'chevron-down' }, 'page-prev': { label: 'Previous hotbar page', icon: 'chevron-up' },
   };
-  const DO_GROUPS = [['Table', ['send', 'blackout', 'quiet', 'strike', 'stop-moments', 'grid', 'fit']], ['Fight', ['fight-start', 'next', 'prev', 'roll-enemies', 'init-sort', 'fight-end', 'fight', 'again']],
+  const DO_GROUPS = [['Table', ['send', 'blackout', 'quiet', 'strike', 'storm', 'stop-moments', 'grid', 'fit']], ['Fight', ['fight-start', 'next', 'prev', 'roll-enemies', 'init-sort', 'fight-end', 'fight', 'again']],
     ['Selection', ['sel-hide', 'sel-lock', 'sel-dup']], ['Spotify', ['sp-toggle', 'sp-next']], ['Hotbar', ['page-next', 'page-prev']]];
   // H: hide or show what is selected (a token, a marker, assets, a spell area, an effect)
   function toggleSelHidden() {
@@ -3422,6 +3455,7 @@ const Play = (() => {
       case 'next': Tools.nextRound(); break;
       case 'fight': cmd('sound.fight', {}); break;
       case 'strike': cmd('strike.now', {}); toast('Lightning!', { ms: 1200 }); break;
+      case 'storm': { if (!m) break; const x = await cmd('wind.storm', {}); if (x && x.label) toast(m.layers.some((l) => l.tree) ? x.label : `${x.label} (this map has no living trees)`, { ms: 1800 }); break; }
       case 'stop-moments': cmd('moment.stop', {}); break;
       case 'grid': if (m) cmd('grid.update', { show: !m.grid.show }); break;
       case 'fit': view.fit(); break;
@@ -3560,7 +3594,8 @@ const Play = (() => {
     return new Promise((resolve) => {
       const url = it.url || UI.pathToUrl(it.path);
       const add = (w) => resolve(cmd('layer.add', { path: it.path, role: 'asset', x: at.x, y: at.y, w: round(clamp((w || 512) / 256, 0.25, 8) * grid().size, 3) }));
-      if (it.kind === 'video') { const v = document.createElement('video'); v.muted = true; v.preload = 'metadata'; v.onloadedmetadata = () => add(v.videoWidth); v.onerror = () => add(0); v.src = url; } else { const img = new Image(); img.onload = () => add(img.naturalWidth); img.onerror = () => add(0); img.src = url; }
+      const tc = Trees.cells(it.path);
+      if (tc) add(tc * 256); else if (it.kind === 'video') { const v = document.createElement('video'); v.muted = true; v.preload = 'metadata'; v.onloadedmetadata = () => add(v.videoWidth); v.onerror = () => add(0); v.src = url; } else { const img = new Image(); img.onload = () => add(img.naturalWidth); img.onerror = () => add(0); img.src = url; }
     });
   }
   const Drawer = LibraryDrawer.create({
@@ -4202,7 +4237,8 @@ const Play = (() => {
     ui.recentBrushes = [ui.brush, ...(ui.recentBrushes || []).filter((b) => b.path !== it.path)].slice(0, 8);
     // default size from the picture, assuming 256 pixels per 5 ft square (the usual for top-down assets)
     const done = (w) => { if (w) ui.assetCells = clamp(Math.round((w / 256) * 4) / 4, 0.25, 8); refreshPop(); updateAssetGhost(); };
-    if (it.kind === 'video') {
+    const tc = Trees.cells(it.path); // (Beta 3.20: a living tree: four, three or two squares for large, medium, small)
+    if (tc) { ui.assetCells = tc; refreshPop(); updateAssetGhost(); } else if (it.kind === 'video') {
       const v = document.createElement('video');
       v.muted = true; v.preload = 'metadata';
       v.addEventListener('loadedmetadata', () => done(v.videoWidth), { once: true });
@@ -4372,7 +4408,8 @@ const Play = (() => {
     if (g.bad) { hideGhost(); return; }
     const p = view.toTable(lastPointer.x, lastPointer.y);
     const w = ui.assetCells * grid().size * zoom() * view.ppi;
-    const L = ui.assetLook;
+    const tree = !!Trees.cells(ui.brush.path);
+    const L = tree ? { ...ui.assetLook, flip: false, stretch: 1 } : ui.assetLook; // (a living tree keeps its shape)
     g.el.classList.remove('is-token');
     showGhost(g, {
       left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${w}px`, height: 'auto', opacity: String(0.5 * L.opacity),
@@ -4395,7 +4432,7 @@ const Play = (() => {
     }
     if (!g.w0 && !g.bad) { hideGhost(); return; } // its size is known once it has loaded
     const p = view.toTable(x, y);
-    const w = clamp((g.w0 || 512) / 256, 0.25, 8) * cell;
+    const w = (Trees.cells(a.path) || clamp((g.w0 || 512) / 256, 0.25, 8)) * cell;
     g.el.classList.remove('is-token');
     showGhost(g, { left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${w}px`, height: 'auto', opacity: '0.5', transform: 'translate(-50%, -50%)', filter: '' });
   }
@@ -4436,9 +4473,10 @@ const Play = (() => {
       ib('plus', 'Bigger', () => cmd('layer.update', { id: a.id, w: round(a.w * 1.2, 3) }), { key: ']' }),
       cardSep(),
       ib('rotate-clockwise', 'Turn 15° (or Ctrl + wheel)', () => cmd('layer.update', { id: a.id, rotation: normAngle((a.rotation || 0) + 15) })),
-      ib('flip-vertical', 'Mirror', () => cmd('layer.update', { id: a.id, flip: !a.flip }), { on: a.flip }),
+      a.tree ? ib('arrows-shuffle', 'Another look: a different tree of this kind', () => cmd('layer.reroll', { id: a.id })) // (Beta 3.20: a living tree)
+        : ib('flip-vertical', 'Mirror', () => cmd('layer.update', { id: a.id, flip: !a.flip }), { on: a.flip }),
       a.stretch ? ib('restore', 'Back to its own shape (it was made flat or long)', () => cmd('layer.update', { id: a.id, stretch: 1, stepLabel: 'Own shape' })) : null, // Beta 3.10
-      ib('shadow', a.shadow ? 'Casts a shadow. Click to remove it' : 'Cast a shadow', () => cmd('layer.update', { id: a.id, shadow: !a.shadow }), { on: a.shadow }),
+      a.tree ? null : ib('shadow', a.shadow ? 'Casts a shadow. Click to remove it' : 'Cast a shadow', () => cmd('layer.update', { id: a.id, shadow: !a.shadow }), { on: a.shadow }),
       // 4.8: an animated asset: its frames prepared (light to play), or the video itself (sharp at any size, heavier)
       a.kind === 'video' ? ib('movie', a.asVideo ? 'Plays as a video (sharp, heavier). Click for prepared frames again' : 'Play as a video: sharper for big animations, but heavier', () => setAsVideo(a, !a.asVideo), { on: !!a.asVideo }) : null,
       opacityRange([a]),
@@ -4462,13 +4500,14 @@ const Play = (() => {
       ib('rotate-clockwise', 'Turn each 15° (or Ctrl + wheel)', () => many((a) => ({ rotation: normAngle((a.rotation || 0) + 15) }))),
       ib('flip-vertical', 'Mirror', () => many((a) => ({ flip: !a.flip }))),
       ib('shadow', 'Shadows on or off', () => many({ shadow: !items.every((a) => a.shadow) }), { on: items.every((a) => a.shadow) }),
+      items.some((a) => a.tree) ? ib('arrows-shuffle', 'Another look for the living trees', () => cmd('layer.reroll', { ids: items.filter((a) => a.tree).map((a) => a.id) })) : null,
       ib('stack-front', 'Level: under the effects, in front of them, or above the tokens', (e) => levelMenu(e, items), { on: items.every((a) => levelOf(a) !== 'under') }), // Prototype 18 / 23
       opacityRange(items),
       cardSep(),
       ib('lock', 'Lock them in place', () => lockAssets(items)),
       ib(hidden ? 'eye-off' : 'eye', hidden ? 'Hidden. Click to show players' : 'Hide from players', () => many({ hidden: !hidden }), { on: hidden, key: 'H' }),
       ib('trash', 'Remove', () => { undoable('layer.removeMany', { ids: items.map((a) => a.id) }); setAssetSelection([]); }, { danger: true, key: 'Del' }),
-    ];
+    ].filter(Boolean);
   }
   // the look of the selected assets, or of the next one you stamp
   function assetLookSection() {
@@ -4492,6 +4531,15 @@ const Play = (() => {
     };
     const lockBox = h('div', {}, toggle({ label: 'Locked (clicks go through it)', get: () => false, set: (v) => { if (v) lockAssets(sel()); } }));
     bind(() => { lockBox.hidden = !sel().length; });
+    // Beta 3.10: flat or long (also for several at once, and for the next one placed). The slider runs evenly from a
+    // quarter to four times the picture's own height, with 100 % in the middle; the frame's sides go further.
+    // (Beta 3.20: not for living trees: they keep their shape, are never mirrored and bring their own shadows)
+    const shape = h('div', { class: 'stack' },
+      slider({ label: 'Height', min: -2, max: 2, step: 0.05, get: () => round(Math.log2(clamp(get('stretch', 1) || 1, 0.25, 4)), 2),
+        set: (u, k) => set('stretch', Math.abs(u) < 0.04 ? 1 : round(2 ** u, 3), k), fmt: (u) => pct(Math.abs(u) < 0.04 ? 1 : 2 ** u) }),
+      toggle({ label: 'Shadow', get: () => get('shadow', false), set: (v) => set('shadow', v) }),
+      toggle({ label: 'Mirror', get: () => get('flip', false), set: (v) => set('flip', v) }));
+    bind(() => { const list = sel(); shape.hidden = list.length ? list.every((a) => a.tree) : !!(ui.brush && Trees.cells(ui.brush.path)); });
     return h('div', { class: 'stack look' }, head,
       slider({ label: 'Opacity', min: 0.1, max: 1, step: 0.05, get: () => get('opacity', 1), set: (v, k) => set('opacity', v, k), fmt: pct }),
       slider({ label: 'Darken', min: 0, max: 0.8, step: 0.05, get: () => get('dark', 0), set: (v, k) => set('dark', v, k), fmt: (v) => (v < 0.01 ? 'Off' : pct(v)) }),
@@ -4500,12 +4548,7 @@ const Play = (() => {
       slider({ label: 'Turn', min: -180, max: 180, step: 5,
         get: () => { const list = sel(); return list.length ? (list[0].rotation || 0) : ui.assetRot; },
         set: (v, k) => { const list = sel(); if (list.length) send(k, 'layer.many', { patches: list.map((a) => ({ id: a.id, rotation: v })) }); else { ui.assetRot = v; updateAssetGhost(); } }, fmt: (v) => `${v}°` }),
-      // Beta 3.10: flat or long (also for several at once, and for the next one placed). The slider runs evenly from a
-      // quarter to four times the picture's own height, with 100 % in the middle; the frame's sides go further.
-      slider({ label: 'Height', min: -2, max: 2, step: 0.05, get: () => round(Math.log2(clamp(get('stretch', 1) || 1, 0.25, 4)), 2),
-        set: (u, k) => set('stretch', Math.abs(u) < 0.04 ? 1 : round(2 ** u, 3), k), fmt: (u) => pct(Math.abs(u) < 0.04 ? 1 : 2 ** u) }),
-      toggle({ label: 'Shadow', get: () => get('shadow', false), set: (v) => set('shadow', v) }),
-      toggle({ label: 'Mirror', get: () => get('flip', false), set: (v) => set('flip', v) }),
+      shape,
       lockBox);
   }
   function setAsVideo(a, on) {
@@ -4517,7 +4560,7 @@ const Play = (() => {
     Radial.open(x, y, [
       { icon: 'rotate-clockwise', label: 'Turn 45°', run: () => cmd('layer.update', { id: a.id, rotation: normAngle((a.rotation || 0) + 45) }) },
       { icon: 'plus', label: 'Bigger', run: () => cmd('layer.update', { id: a.id, w: round(a.w * 1.25, 3) }) },
-      { icon: 'flip-vertical', label: 'Mirror', run: () => cmd('layer.update', { id: a.id, flip: !a.flip }) },
+      a.tree ? { icon: 'arrows-shuffle', label: 'Another look', run: () => cmd('layer.reroll', { id: a.id }) } : { icon: 'flip-vertical', label: 'Mirror', run: () => cmd('layer.update', { id: a.id, flip: !a.flip }) },
       { icon: 'copy', label: 'Duplicate', run: () => cmd('layer.duplicate', { id: a.id, dx: grid().size, dy: 0 }) },
       { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('layer.remove', { id: a.id }) },
       { icon: 'arrow-bar-to-down', label: 'To back', run: () => cmd('layer.order', { id: a.id, to: 'back' }) },
@@ -4940,7 +4983,7 @@ const Play = (() => {
     offTable: () => [...offTable().entries()].map(([id, o]) => ({ id, ...o })), fitAll, aimMoment, Show, get TB() { return TB; }, get Floats() { return Floats; }, get Atlas() { return AtlasP; },
     simFps: (r) => { const n = typeof r === 'number' ? r : r.fps; ui.tableFps = n; ui.fpsSimAt = Date.now(); fpsWatch(n, r.hitches || 0, r.heavy || null); }, bigPreview, setPreviewWidth,
     openRadial, startAlign, finishAlign, alignGrid, castAt, cast, spellFromPointer, setSpell, pickSpell, oneInch, fitView, selectFx: (id) => selectFx(id),
-    get Snaps() { return Snaps; }, get Hot() { return Hot; }, captureMap, hotRun, pinnable: (id) => !UNPINNED.has(id),
+    get Snaps() { return Snaps; }, get Hot() { return Hot; }, captureMap, hotRun, hotLive: (it) => hotLive(it), pinnable: (id) => !UNPINNED.has(id),
     hotActions: () => Object.keys(DO_HOT).map((k) => doHot(k)), // (for the self-test: every single action)
     holdBake: (on) => { bakeHeld = !!on; if (!on && S && S.map) maybeBakeFog(S.map); },
     tokPref: (k) => Tools.tokPref(k), setTokPref: (k, v) => Tools.setTokPref(k, v), // 4.10: Options → Tokens

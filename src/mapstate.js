@@ -8,7 +8,7 @@
 // effects travel with it. Weather and table-anchored overlays ignore the view.
 'use strict';
 
-const { kindOf } = require('./library');
+const { kindOf, treeOf } = require('./library');
 const Vision = require('./renderer/vision');
 const FXDATA = require('./renderer/fx-data');
 
@@ -23,6 +23,28 @@ function cleanRings(rings) {
     .slice(0, 64).map((r) => r.slice(0, 20000).map((v) => Math.round(v * 1000) / 1000));
 }
 
+// Beta 3.20: the wind in the living trees. auto: it follows the weather (its direction and how hard it blows; no
+// weather: a light breeze); else these values. storm: on top of either, until it is switched off again.
+// dir: degrees, where it blows to (0 = right, 90 = down, like the weather's). strength 0..3 (1: a breeze, 2.4: a storm),
+// lean 0..1, branches and rustle 0..3.
+const WIND_RANGE = { dir: [0, 360], strength: [0, 3], lean: [0, 1], branches: [0, 3], rustle: [0, 3] };
+function defaultWind() { return { auto: true, storm: false, dir: 30, strength: 1, lean: 0, branches: 1, rustle: 1 }; }
+function cleanWind(w) {
+  const out = defaultWind();
+  if (!w || typeof w !== 'object') return out;
+  out.auto = w.auto !== false; out.storm = !!w.storm;
+  for (const [k, [a, b]] of Object.entries(WIND_RANGE)) { const v = Number(w[k]); if (Number.isFinite(v)) out[k] = k === 'dir' ? Math.round(((v % 360) + 360) % 360) : Math.round(Math.min(b, Math.max(a, v)) * 100) / 100; }
+  return out;
+}
+const newSeed = () => 1 + Math.floor(Math.random() * 9998);
+// a living tree's own values: its variant, the layer it starts at (its size), the seed its look and movement come from
+function cleanTree(t, ref) {
+  const k = treeOf(ref);
+  if (!k) return null;
+  const seed = Math.floor(Number(t && t.seed));
+  return { v: k.v, base: k.base, seed: seed >= 1 && seed <= 9999 ? seed : newSeed() };
+}
+
 function defaultGrid() {
   return { type: 'square', size: 1, angle: 0, ox: 0, oy: 0, show: true, color: '#ffffff', opacity: 0.3, width: 1 };
 }
@@ -35,6 +57,7 @@ function emptyMap(name = 'New map') {
     fog: { enabled: false, base: 'cover', ops: [] },
     fx: [], spells: [],
     weather: { layers: [], fade: 0, name: 'None' }, // a mix of weather layers over the whole table (fade: seconds new weather takes to come in)
+    wind: defaultWind(), // (Beta 3.20) the wind in the living trees
     light: { darkness: 0, tint: '#03040a', memory: false, seen: [] },
     draw: [], // pen strokes and text labels
     marks: [], // pins, crosses, numbered dots, counters, GM notes
@@ -69,6 +92,10 @@ function normalize(m) {
   out.fx = Array.isArray(out.fx) ? out.fx : [];
   out.spells = Array.isArray(out.spells) ? out.spells : [];
   out.weather = normalizeWeather(m && m.weather);
+  out.wind = cleanWind(m && m.wind);
+  for (const l of out.layers) { // (Beta 3.20: a living tree is known by its picture; anything else has no "tree")
+    if (l.role === 'asset' && treeOf(l)) l.tree = cleanTree(l.tree, l); else if (l.tree) delete l.tree;
+  }
   out.light = { darkness: 0, tint: '#03040a', memory: false, ...((m && m.light) || {}) };
   if (!Array.isArray(out.light.seen)) out.light.seen = [];
   out.draw = Array.isArray(out.draw) ? out.draw.filter((d) => d && d.kind) : [];
@@ -182,7 +209,7 @@ function fixStretch(l) {
   fixHue(l);
   if (!('stretch' in l)) return;
   const k = Number(l.stretch);
-  if (l.role !== 'asset' || !Number.isFinite(k) || Math.abs(k - 1) < 0.005) delete l.stretch;
+  if (l.role !== 'asset' || l.tree || !Number.isFinite(k) || Math.abs(k - 1) < 0.005) delete l.stretch; // (a living tree keeps its shape)
   else l.stretch = Math.round(Math.min(STRETCH[1], Math.max(STRETCH[0], k)) * 1000) / 1000;
 }
 // Beta 3.10: an asset's colours turned round the colour wheel, in whole degrees from -179 to 180 (a red banner made
@@ -476,6 +503,16 @@ function apply(map, type, p, media) {
       if (role === 'overlay') Object.assign(layer, OVERLAY_DEFAULTS, pick(p, ['blend', 'anchor']));
       if (role === 'audio') Object.assign(layer, AUDIO_DEFAULTS);
       if (role === 'asset') Object.assign(layer, ASSET_DEFAULTS, { x: p.x ?? 0, y: p.y ?? 0, w: Math.max(0.05, p.w ?? 1) }, pick(p, ['rotation', 'flip', 'opacity', 'shadow', 'dark', 'stretch', 'hue']));
+      // Beta 3.20: a living tree: a seed of its own (its look and its movement), above the tokens unless told otherwise,
+      // and turned only as far as its kind allows (the pictures have a little light baked in from the top)
+      const tk = role === 'asset' ? treeOf(layer) : null;
+      if (tk) {
+        layer.tree = cleanTree({ seed: p.seed }, layer);
+        if (p.over !== false && !p.front) layer.over = true; else if (p.front) layer.front = true;
+        const a = ((((Number(layer.rotation) || 0) + 180) % 360) + 360) % 360 - 180;
+        layer.rotation = Math.round((a * Math.min(180, tk.turn)) / 180);
+        layer.flip = false; layer.shadow = false;
+      }
       fixStretch(layer);
       map.layers.push(layer); // drawing order within each role follows this list
       const what = role === 'audio' ? 'Sound' : role === 'overlay' ? (layer.anchor === 'table' ? 'Weather overlay' : 'Atmosphere overlay') : role === 'asset' ? 'Asset' : `${layer.name}${layer.n ? ` ${layer.n}` : ''}`;
@@ -486,6 +523,13 @@ function apply(map, type, p, media) {
       if (!l) return { changed: null };
       updateLayer(l, p);
       return { changed: 'all' };
+    }
+    case 'layer.reroll': { // (Beta 3.20) living trees: another look and movement (a new seed), one or several
+      const ids = new Set(p.ids || (p.id ? [p.id] : []));
+      const ls = map.layers.filter((x) => ids.has(x.id) && x.tree);
+      if (!ls.length) return { changed: null };
+      for (const l of ls) { let n = newSeed(); if (n === l.tree.seed) n = (n % 9999) + 1; l.tree.seed = n; }
+      return { changed: 'all', label: ls.length === 1 ? 'A new look for the tree' : `A new look for ${ls.length} trees` };
     }
     case 'layer.many': { // several layers in one undo step (moving or turning a group of assets)
       let n = 0;
@@ -522,6 +566,7 @@ function apply(map, type, p, media) {
       if (copy.role === 'token' || copy.role === 'asset') { copy.x += p.dx ?? 0; copy.y += p.dy ?? 0; }
       if (copy.role === 'token') { delete copy.n; if (!copy.named) numberToken(map, copy); }
       if (copy.role === 'asset') copy.locked = false;
+      if (copy.tree) copy.tree.seed = newSeed(); // (Beta 3.20: a copy of a living tree is a tree of its own)
       map.layers.splice(map.layers.indexOf(l) + 1, 0, copy);
       return { changed: 'all', selected: copy.id, label: 'Duplicated' };
     }
@@ -731,6 +776,18 @@ function apply(map, type, p, media) {
     case 'weather.fade':
       map.weather.fade = Math.max(0, Math.min(120, Number(p.fade) || 0));
       return { changed: 'all' };
+
+    // ---------- the wind in the living trees (Beta 3.20) ----------
+    case 'wind.set': {
+      const before = JSON.stringify(map.wind);
+      map.wind = cleanWind({ ...map.wind, ...pick(p, ['auto', 'storm', 'dir', 'strength', 'lean', 'branches', 'rustle']) });
+      if (JSON.stringify(map.wind) === before) return { changed: null };
+      return { changed: 'all' };
+    }
+    case 'wind.storm': {
+      map.wind = cleanWind({ ...map.wind, storm: 'on' in p ? !!p.on : !map.wind.storm });
+      return { changed: 'all', label: map.wind.storm ? 'Storm in the trees' : 'The storm has passed' };
+    }
 
     // ---------- spell areas ----------
     case 'spell.add': {

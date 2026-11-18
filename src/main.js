@@ -493,7 +493,7 @@ function remoteLive(it, L) {
     case 'light': return !!(m && m.light && m.light.mood === r);
     case 'map': return state.liveMapId === r;
     case 'door': { const dm = r && store.cur ? store.map(r.map) : null; const w = dm && (dm.walls || []).find((x) => x.id === r.id); return !!(w && w.open); }
-    case 'do': return r === 'blackout' ? !!state.blackout : r === 'quiet' ? !!state.quiet : r === 'fight' ? !!state.fightNow : r === 'grid' ? !!(m && m.grid && m.grid.show) : false; // Prototype 24
+    case 'do': return r === 'blackout' ? !!state.blackout : r === 'quiet' ? !!state.quiet : r === 'fight' ? !!state.fightNow : r === 'grid' ? !!(m && m.grid && m.grid.show) : r === 'storm' ? !!(m && m.wind && m.wind.storm) : false; // Prototype 24 (Beta 3.20: storm)
     case 'lights': if (!L || !L.started) return false; return ['follow', 'room', 'off', 'release'].includes(r) ? L.mode === r : L.mode === 'scene' && L.sceneId === r;
     case 'snap': { const lm = store.cur ? store.map(state.liveMapId) : null; return r !== 'next' && !!(lm && lm.snapAt === r); }
     case 'fog': return r === 'toggle' && !!(m && m.fog && m.fog.enabled);
@@ -1066,7 +1066,7 @@ function remoteCatalog(pc = false) {
   const lean = ({ kind, label, icon, ref }) => ({ kind, label, icon: icon || null, ref: ref ?? null });
   if (c && !pc) add('hotbar', 'On the hotbar', hotbarInfo(c).filter((x) => x && !x.missing && !REMOTE_PC(x)).map(lean));
   if (c && !pc) add('actions', 'Actions', [['send', 'Send to table', 'cast'], ['blackout', 'Blackout', 'screen-share-off'], ['quiet', 'Mute', 'volume-off'], ['next', 'Next turn', 'player-track-next'], ['fight', 'Fight music', 'swords'],
-    ['strike', 'Lightning', 'bolt'], ['stop-moments', 'Stop effects', 'player-stop'], ['grid', 'Grid on/off', 'grid-4x4'], ['again', 'Movement again', 'refresh'],
+    ['strike', 'Lightning', 'bolt'], ['storm', 'Storm in the trees', 'tornado'], ['stop-moments', 'Stop effects', 'player-stop'], ['grid', 'Grid on/off', 'grid-4x4'], ['again', 'Movement again', 'refresh'],
     ['fight-start', 'Start the fight', 'swords'], ['fight-end', 'End the fight', 'player-stop'], ['prev', 'Previous turn', 'player-skip-back'], ['roll-enemies', 'Roll enemies', 'dice'], ['init-sort', 'Sort initiative', 'sort-descending'],
     ['sp-toggle', 'Spotify play/pause', 'player-play'], ['sp-next', 'Spotify next song', 'player-track-next']].map(([ref, label, icon]) => ({ kind: 'do', ref, label, icon }))); // Prototype 24
   add('moments', 'Screen effects', Moments.LIST.map((d) => ({ kind: 'moment', ref: d.id, label: d.label, icon: d.icon })));
@@ -2271,7 +2271,7 @@ function devtoolsShortcut(win) {
 // =====================================================================
 // Commands
 // =====================================================================
-const MAP_CMD = /^(bg|view|layer|grid|fog|fx|light|weather|spell|draw|mark|round|wall|vision|area|scene|atlasmap)\./;
+const MAP_CMD = /^(bg|view|layer|grid|fog|fx|light|weather|wind|spell|draw|mark|round|wall|vision|area|scene|atlasmap)\./;
 
 // ---------- walls from files, and what the party has seen ----------
 const sightLast = new Map(); // mapId -> Map(eyeId -> what was last recorded into the fog)

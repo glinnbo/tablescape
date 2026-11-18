@@ -351,6 +351,8 @@ const Table = (() => {
     if (v.stats.shadowed && m.walls.length) c.push([v.stats.shadowed * (0.4 + m.walls.length / 300), `${v.stats.shadowed} lights with shadows`]);
     const mo = v.myMoments(Date.now()).length;
     if (mo) c.push([mo * 1.2, 'the screen effect']);
+    const tr = v.stats.trees; // (Beta 3.20: living trees cost by how much of the table they cover)
+    if (tr && tr.drawn) c.push([tr.cover * 2.5, tr.n === 1 ? 'the living tree' : `${tr.n} living trees`]);
     c.sort((a, z) => z[0] - a[0]);
     return c.length && c[0][0] >= 1.5 ? c[0][1] : null;
   }
@@ -531,6 +533,7 @@ const Table = (() => {
       fogOps: lv && lv.view.map ? lv.view.map.fog.ops.length : 0,
       fx: lv ? { ...lv.view.stats, animating: !!lv.view.raf } : null,
       assets: lv ? [...lv.view.assetsEl.children, ...lv.view.assetsFrontEl.children].filter((el) => el.style.display !== 'none').length : 0,
+      trees: lv ? { ...(lv.view.stats.trees || {}), live: Trees.supported(), mask: (lv.view.tcv.over && lv.view.tcv.over.mask) || '' } : null, // (Beta 3.20)
       // 2.3: animated assets drawn from frame sheets, videos still playing, assets resting off the table
       anim: lv ? lv.view.animInfo() : null,
       mapView: lv && lv.view.map ? { ...lv.view.map.view, bg: lv.view.map.bg ? { path: lv.view.map.bg.path, x: lv.view.map.bg.x, y: lv.view.map.bg.y, scale: lv.view.map.bg.scale, rotation: lv.view.map.bg.rotation || 0 } : null, grid: { size: lv.view.map.grid.size, ox: lv.view.map.grid.ox, oy: lv.view.map.grid.oy } } : null,
@@ -617,6 +620,6 @@ const Table = (() => {
 
   // self-test: whether the TV shows an effect or light of the live map
   function fxShown(id) { const lv = views.get(liveId); const f = lv && lv.view.map && lv.view.map.fx.find((x) => x.id === id); return f ? lv.view.shown(f) : null; }
-  return { start, debug, probe, probeMap, coverage, sees, fogAt, fxShown, burn: (on) => overlays && overlays.burn(on), atlasProject: (x, y) => (atlas ? atlas.project(x, y) : null), atlasUnproject: (x, y) => (atlas ? atlas.unproject(x, y) : null) };
+  return { start, debug, probe, probeMap, coverage, sees, fogAt, fxShown, treeProbe: (p) => { const lv = views.get(liveId); if (lv) { lv.view.treeProbe = p; lv.view.redrawSoon(); } return !!lv; }, burn: (on) => overlays && overlays.burn(on), atlasProject: (x, y) => (atlas ? atlas.project(x, y) : null), atlasUnproject: (x, y) => (atlas ? atlas.unproject(x, y) : null) };
 })();
-window.__table = { atlasProject: (x, y) => Table.atlasProject(x, y), atlasUnproject: (x, y) => Table.atlasUnproject(x, y), burn: (on) => Table.burn(on), debug: () => Table.debug(), probe: (l, x, y) => Table.probe(l, x, y), probeMap: (l, x, y) => Table.probeMap(l, x, y), coverage: (l) => Table.coverage(l), sees: (x, y) => Table.sees(x, y), fogAt: (x, y) => Table.fogAt(x, y), fxShown: (id) => Table.fxShown(id) };
+window.__table = { treeProbe: (p) => Table.treeProbe(p), atlasProject: (x, y) => Table.atlasProject(x, y), atlasUnproject: (x, y) => Table.atlasUnproject(x, y), burn: (on) => Table.burn(on), debug: () => Table.debug(), probe: (l, x, y) => Table.probe(l, x, y), probeMap: (l, x, y) => Table.probeMap(l, x, y), coverage: (l) => Table.coverage(l), sees: (x, y) => Table.sees(x, y), fogAt: (x, y) => Table.fogAt(x, y), fxShown: (id) => Table.fxShown(id) };

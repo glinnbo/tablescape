@@ -23,6 +23,12 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.20', [
+      'Living trees: trees that move in the wind. Library → Assets → Living trees has seven kinds in three sizes; stamp them like any asset, or paint a forest with Scatter. Every tree looks a little different, and the shuffle button on its card gives it another look',
+      'They start above the tokens: on the table a crown opens where a token stands under it',
+      'Their wind follows the weather (a thunderstorm bends them, snow barely moves them). Effects → Weather → Wind in the trees sets your own, and Storm, also a hotbar button, blows until you click it again',
+      'They are drawn by the graphics card. A PC without one shows them as still pictures; Effects quality Medium and Low make them lighter',
+    ]],
     ['Beta 3.19', [
       'The home screen menu is one list: Play (glowing), Prepare the maps, Players, Campaign settings, Tablescape settings. One marker: the mouse moves it, the arrow keys go on from there, Enter starts what is marked',
       'TV ready, Speakers and Calibrated left the home screen: they are in Tablescape settings → Table check. While something needs a look, Tablescape settings has an orange dot',
@@ -380,7 +386,7 @@ const Guide = (() => {
     const root = s && s.view && s.view.libraryRoot;
     const folders = [
       ['Maps', 'Battle maps: pictures or videos (webm, mp4)'], ['Tokens', 'NPCs and monsters, round or cut out (png with transparency)'],
-      ['Assets', 'Trees, rocks, furniture, traps; animated ones (webm with transparency) in Assets/Animated'], ['Overlays', 'Rain, fog, embers over the whole table'],
+      ['Assets', 'Trees, rocks, furniture, traps; animated ones (webm with transparency) in Assets/Animated. Living trees come with Tablescape: they move in the wind'], ['Overlays', 'Rain, fog, embers over the whole table'],
       ['Sounds', 'Ambience, Music, SFX'], ['Portraits', 'NPC faces for conversations'], ['Handouts', 'Letters and pictures to show the players'], ['Campaigns', 'Your campaigns: one folder each, with backups inside'],
     ];
     return h('div', { class: 'guide-text' },

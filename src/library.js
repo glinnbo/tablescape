@@ -206,6 +206,7 @@ function listLibrary(root = ROOT) {
     }
   };
   walk(root, 0);
+  if (root === ROOT) items.push(...builtinItems(meta)); // (Beta 3.20: the living trees, under Assets)
   return items;
 }
 
@@ -250,6 +251,8 @@ function touchRecent(absPath) {
 // wins when the file exists there, so a library can move drives or computers.
 function toRef(absPath) {
   const p = path.resolve(absPath);
+  const b = BUILTIN_AT.get(p);
+  if (b) return { path: p, name: b.name, rel: b.rel };
   const ref = { path: p, name: path.parse(p).name };
   if (ROOT) {
     const rel = path.relative(ROOT, p);
@@ -259,12 +262,50 @@ function toRef(absPath) {
 }
 function resolveRef(ref) {
   if (!ref) return null;
+  if (ref.rel && BUILTIN.has(ref.rel)) return BUILTIN.get(ref.rel).path; // (Beta 3.20: it comes with the app)
   if (ref.rel && ROOT) {
     const p = path.join(ROOT, ...ref.rel.split('/'));
     if (fs.existsSync(p)) return p;
   }
   return ref.path;
 }
+// ---------- Beta 3.20: what comes with the app (the living trees) ----------
+// They are not files of the library folder: they lie with the app, are listed under Assets → Living trees, and a
+// reference to one is kept by that name (rel), so it is found on any PC and after any update. A living tree on a map
+// is an asset whose picture is the tree's still picture; what makes it live is its "tree" (variant, size, seed).
+const BUILTIN = new Map(); // rel → { rel, path, name, tree: { v, size, base } }
+const BUILTIN_AT = new Map(); // path → the same
+const TREE_FOLDER = 'Assets/Living trees';
+function loadBuiltin() {
+  BUILTIN.clear(); BUILTIN_AT.clear();
+  let data = null;
+  try { data = require('./renderer/tree-data'); } catch { return; }
+  const dir = path.join(__dirname, 'renderer', 'trees');
+  for (const id of data.order) {
+    const v = data.variants[id];
+    for (const s of v.sizes) {
+      const name = `${v.label} ${s.id}`;
+      const e = { rel: `${TREE_FOLDER}/${name}.webp`, path: path.join(dir, id, `still-${s.id}.webp`), name, tree: { v: id, size: s.id, base: s.base }, turn: (v.variation && v.variation.rotation) || 180 };
+      BUILTIN.set(e.rel, e); BUILTIN_AT.set(e.path, e);
+    }
+  }
+}
+loadBuiltin();
+// the living tree a reference stands for ({ v, size, base, turn }), or null
+function treeOf(ref) {
+  if (!ref) return null;
+  const e = (ref.rel && BUILTIN.get(ref.rel)) || (ref.path && BUILTIN_AT.get(path.resolve(ref.path))) || null;
+  return e ? { ...e.tree, turn: e.turn } : null;
+}
+const isBuiltin = (rel) => BUILTIN.has(rel);
+function builtinItems(meta) {
+  const fav = new Set(meta.favs);
+  return [...BUILTIN.values()].map((e) => ({
+    path: e.path, url: pathToFileURL(e.path).href, walls: false, rel: e.rel, name: e.name, kind: 'image', section: 'Assets', cat: 'assets', pack: null,
+    folder: TREE_FOLDER, mtime: 0, fav: fav.has(e.rel), recent: meta.recent.indexOf(e.rel), thumb: pathToFileURL(e.path).href, builtin: true, tree: { ...e.tree },
+  }));
+}
+
 // Adds runtime fields (absolute path + file URL) to a stored reference.
 function hydrate(obj) {
   if (!obj || !(obj.path || obj.rel)) return obj;
@@ -373,6 +414,6 @@ function importFiles(files, { cat, folder } = {}) {
 
 module.exports = {
   FOLDERS, kindOf, categoryOf, resolveLibraryRoot, defaultLibraryRoot, isPortable, ensureLibrary, listLibrary, setFavourite, touchRecent, importFiles,
-  toRef, resolveRef, hydrate, media, thumbUrl, putThumb, vttImagePath, forgetRecent,
+  toRef, resolveRef, hydrate, media, thumbUrl, putThumb, vttImagePath, forgetRecent, treeOf, isBuiltin,
   get root() { return ROOT; },
 };

@@ -1,0 +1,124 @@
+{
+ "id": "autumn_orange",
+ "label": "Autumn (orange)",
+ "layers": [
+  {
+   "file": "layer0.webp",
+   "w": 895,
+   "h": 1035,
+   "cx": 465.9,
+   "cy": 458.5,
+   "radius": 560.8
+  },
+  {
+   "file": "layer1.webp",
+   "w": 788,
+   "h": 840,
+   "cx": 398.7,
+   "cy": 425.7,
+   "radius": 436.7
+  },
+  {
+   "file": "layer2.webp",
+   "w": 467,
+   "h": 542,
+   "cx": 217.8,
+   "cy": 247.0,
+   "radius": 286.2
+  },
+  {
+   "file": "layer3.webp",
+   "w": 337,
+   "h": 331,
+   "cx": 170.4,
+   "cy": 162.6,
+   "radius": 168.9
+  },
+  {
+   "file": "layer4.webp",
+   "w": 266,
+   "h": 234,
+   "cx": 138.3,
+   "cy": 117.0,
+   "radius": 122.8
+  },
+  {
+   "file": "layer5.webp",
+   "w": 161,
+   "h": 149,
+   "cx": 76.0,
+   "cy": 75.0,
+   "radius": 72.3
+  }
+ ],
+ "sizes": [
+  {
+   "id": "large",
+   "base": 0
+  },
+  {
+   "id": "medium",
+   "base": 1
+  },
+  {
+   "id": "small",
+   "base": 2
+  }
+ ],
+ "sway": {
+  "topAmplitude": 0.014,
+  "period": 3.6,
+  "lag": 0.55,
+  "cross": 0.28,
+  "twist": 0.01
+ },
+ "branches": {
+  "layerTurn": 0.012,
+  "period": 5.2,
+  "sectorTurn": 0.032,
+  "lobes": 1.7,
+  "speed": 0.22
+ },
+ "rustle": {
+  "amount": 0.0042,
+  "scale": 0.012,
+  "speed": 0.55,
+  "light": 0.09
+ },
+ "lean": {
+  "top": 0.425,
+  "curve": 1.6,
+  "ease": 1.4,
+  "period": 2.3,
+  "periodTop": 1.35,
+  "damping": 0.34,
+  "dampingStorm": 0.16,
+  "gustVar": 0.35,
+  "gustVarWind": 0.6,
+  "gustRate": 0.33,
+  "maxBend": 0.6
+ },
+ "shadow": {
+  "layerOffset": 0.01,
+  "groundOffset": 0.055,
+  "blur": 0.022,
+  "layerAlpha": 0.5,
+  "groundAlpha": 0.55
+ },
+ "variation": {
+  "rotation": 70,
+  "mirror": true,
+  "scale": 0.05,
+  "offset": 0.03,
+  "hue": 10,
+  "saturation": 0.12,
+  "brightness": 0.08,
+  "layerHue": 4,
+  "layerBrightness": 0.03,
+  "heightLight": 0.08,
+  "heightWarm": 0.04,
+  "patchHue": 8,
+  "patchBrightness": 0.05,
+  "swap": []
+ }
+}
