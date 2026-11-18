@@ -23,6 +23,10 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.16', [
+      'Handouts lie under a conversation: the portraits on both sides of the table, their band, the turn order and the other screens on the TV now stay in front of them (on the far side the portraits used to disappear behind a handout)',
+      'The page on GitHub tells more about what Tablescape does, with pictures of the Cartographer, handouts and initiative',
+    ]],
     ['Beta 3.15', [
       'The rows under the table preview stand out: each has a colour with a light at its edge. Red is combat, green is what lies on the TV (a world map, handouts, a conversation), pale orange is the rest. They are sorted by colour, and a row that has just come is brighter for a moment',
       'New rows under the preview, each with a button to end it: the fight (its round, whose turn it is, Next, and End the fight), a world map on the TV (take it off; Zoom out on a regional map), several handouts ("3 handouts": open the Handout table, or put them all away), the spotlight, the join code on the TV with the time it has left, and tokens shown to the table',

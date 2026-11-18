@@ -14,28 +14,53 @@
   <a href="https://github.com/glinnbo/tablescape/releases/latest"><b>Download for Windows</b></a>
   &nbsp;·&nbsp;
   <a href="https://discord.gg/T99DRNKaSM">Discord</a>
-  &nbsp;·&nbsp;
-  <a href="https://ko-fi.com/tablescape">Toss a coin</a>
 </p>
 
 ![A game night with Tablescape: the laptop runs the map, the TV in the table shows it under the miniatures, a tablet works as the remote](docs/setup-table.jpg)
 
-## Simple by default, as deep as you want
+## Made for the table
 
-You need a laptop and a TV or projector. Send a map to the table with one key, uncover it as the party explores, and you're playing. Everything else waits in the Toolbox until you want it.
+Most map tools were built for playing online and can also be put on a TV. Tablescape is built the other way round: for one room, real miniatures, and a screen everyone sits around.
 
-| The basics | When you want more |
+### The basics: your first evening
+
+You need a laptop and a TV or projector. Nothing else has to be set up.
+
+- **One key sends the map to the TV.** Pictures and animated maps both work.
+- **Fog you paint away** as the party explores, and paint back when the door shuts.
+- **One inch is one inch.** Hold a bank card against the TV once, and every grid fits your miniatures from then on.
+- **NPC tokens and a party marker** for everything that has no miniature.
+- **Campaigns, chapters and maps** in plain folders, with ambience per chapter.
+- **Title, break and blackout screens**, a check before you start, undo and redo.
+
+### What sets it apart
+
+- **NPCs step onto the table to talk.** Start a conversation and the NPC's portrait rises on the TV, facing both sides of the table. Monsters can be revealed in a spotlight.
+- **A world the party travels.** The Cartographer shows your world map like a globe, with mist at its edges, weather, named places and routes that fill in as the party walks them. Dive through the clouds into a regional map and back out.
+- **Handouts that burn onto the table.** Letters, maps and pictures appear out of embers, up to ten at once, placed, sized and turned as you like. They can go to the players' phones too.
+- **Screen effects.** One click and the whole table reacts: an earthquake, a dragon's roar, frost creeping in, gold sparks for a natural 20.
+- **The room plays along.** Room lights (IKEA, Govee) follow the colours on the TV and flash with lightning and spells. Spotify moods and a soundboard are one click away.
+- **The table has a style.** 23 table styles from Deep dungeon to Jungle, each with its own map change, turn order and round banner.
+- **Phones belong to the table.** Players move their own tokens from their phones. Your phone or tablet is the remote, with button decks you arrange yourself.
+
+<img src="docs/cartographer-dive.gif" alt="The Cartographer: a dive through the clouds from the world map into a town" width="100%">
+
+![The world map under dark mist, with named places, routes and the Sulfur Isles volcano](docs/cartographer-mist.jpg)
+
+![Two handouts lying on the table over a stormy coast](docs/handouts.jpg)
+
+### When you want more
+
+Everything else waits in the Toolbox until you open it:
+
+| On the map | Around the table |
 | --- | --- |
-| Campaigns, chapters and maps | 49 D&amp;D spell areas, effects, light and weather |
-| A map on the TV with one key | Walls, doors and line of sight |
-| Reveal and cover the fog | NPCs who step onto the table to talk, monsters shown in a spotlight |
-| NPC tokens and a party marker | 23 table styles, from Deep dungeon to Jungle |
-| A grid at real inch scale | Initiative with a round banner, character cards |
-| Ambience per chapter | Handouts, also on the players' phones |
-| Title, break and blackout screens | Players move their tokens from their phones |
-| A check before you start | A phone or tablet as your remote |
-| Undo and redo | Spotify moods, a soundboard, room lights (IKEA, Govee) |
-| | A world map and regional maps the party carries, shown like a globe with mist at its edges, weather and named places |
+| 49 D&amp;D spell areas | Initiative with a round banner and your own columns |
+| Effects: water, lava, mist, webs, burning ground | Character cards |
+| Light and weather | Dice, the wheel of luck and death saves |
+| Walls, doors and line of sight | Snapshots of a map, back with one key |
+
+![Initiative with HP and your own columns, next to the tokens on the map](docs/initiative.jpg)
 
 ![Paint the world onto the map: effects like water, lava, mist, webs and burning ground, plus light and weather](docs/effects.jpg)
 

@@ -53,6 +53,33 @@ module.exports = (area) => {
     await away(t);
   });
 
+  area.quick('handouts lie under the portraits of a conversation, on both sides of the table', async (t) => {
+    forget(t); await away(t);
+    const faces = t.lib('portraits');
+    t.ok(faces.length >= 1, 'the library has a portrait', faces.length);
+    if (t.state.talk) t.handle('talk.off', {});
+    t.handle('talk.toggle', { path: faces[0].path });
+    t.handle('handout.show', { path: A });
+    t.handle('handout.layout', { path: A, patch: { x: 0.5, y: 0.5, rot: 0, size: 3 } }); // (far bigger than the TV: it lies under every portrait)
+    await settled(t, 1);
+    await t.until(() => t.t(`document.querySelectorAll('.tv-talk.on .talk-npc img').length >= 2 && [...document.querySelectorAll('.tv-talk .talk-npc')].every((n) => n.getBoundingClientRect().height > 20)`), 6000, 'the portrait on both sides of the TV');
+    // what lies on top at the middle of each portrait (the TV's layers take no clicks, so the test lets them for a moment)
+    const top = await t.t(`(() => {
+      const st = document.createElement('style'); st.textContent = '#table-overlays, #table-overlays * { pointer-events: auto !important; }'; document.head.append(st);
+      const out = [...document.querySelectorAll('.tv-talk .talk-npc')].map((n) => {
+        const r = n.getBoundingClientRect(); const x = r.left + r.width / 2; const y = r.top + r.height / 2;
+        const all = document.elementsFromPoint(x, y);
+        return { far: !!n.closest('.talk-side.far'), npc: all.findIndex((e) => e.closest('.talk-npc')), ho: all.findIndex((e) => e.closest('.tv-handout')) };
+      });
+      st.remove();
+      return out;
+    })()`);
+    t.ok(top.some((o) => o.far) && top.some((o) => !o.far), 'a portrait on each side', top);
+    for (const o of top) t.ok(o.npc >= 0 && o.ho >= 0 && o.npc < o.ho, `the portrait on the ${o.far ? 'far' : 'near'} side lies over the handout`, o);
+    t.handle('talk.off', {});
+    await away(t);
+  });
+
   area.quick('showing a handout alone replaces what lies there', async (t) => {
     forget(t); await away(t);
     t.handle('handout.show', { path: A });

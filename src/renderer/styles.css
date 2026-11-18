@@ -1316,6 +1316,8 @@ body.gm .sv-measure-label { transform: translate(10px, -100%) scale(var(--inv, 1
 @keyframes ink-out { from { clip-path: inset(-60% 0 0 0); } to { clip-path: inset(-60% 0 0 100%); } }
 /* handout: large, once per long side */
 /* Beta 3.6: up to ten handouts, one copy each, placed, sized and turned freely; they burn in and away (table-overlays.js) */
+/* Beta 3.16: handouts keep their own order among themselves and lie under the portraits of both sides */
+.tv-handout { z-index: 0; }
 .ho-item { position: absolute; inset: 0; pointer-events: none; }
 .ho-one { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 .ho-one img { display: block; filter: drop-shadow(0 1.2vh 3vh rgba(0, 0, 0, 0.75)); transition: filter 0.5s ease; }

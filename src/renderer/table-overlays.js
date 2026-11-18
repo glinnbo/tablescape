@@ -194,7 +194,9 @@ const TableOverlays = (() => {
     });
     const sRounds = ['near', 'far'].map((s) => { const b = el('div', `sample-round ${s}`); b.innerHTML = '<span>Round</span><b>2</b>'; sampleEl.append(b); return b; });
     sampleEl.append(sDial.el);
-    root.append(talkEl, handoutEl, breakEl, joinEl, calibEl, initEl, titleEl, sampleEl);
+    // Beta 3.16: handouts lie under everything else here (the portraits of both sides, their band, the turn order):
+    // first in the list, and a layer of their own (.tv-handout in styles.css), so that none of them climbs over a portrait
+    root.append(handoutEl, talkEl, breakEl, joinEl, calibEl, initEl, titleEl, sampleEl);
 
     let talk = null; let talkId = null; let inkKey = '';
     let handout = null; let brk = null; let brkTimer = 0; let brkChimed = null; let brkPicUrl = null;
