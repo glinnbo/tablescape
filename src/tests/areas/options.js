@@ -1,21 +1,36 @@
 // Options
 'use strict';
 
-const SECTIONS = [['tv', 'TV'], ['picture', 'Picture'], ['players', 'Seating'], ['looks', 'Looks'], ['init', 'Initiative'], ['tokens', 'Tokens'], ['sound', 'Sound'], ['perf', 'Performance'], ['screen', 'This screen'], ['library', 'Library']];
+// Beta 3.18: two panels, Tablescape settings (for every campaign) and Campaign settings (kept in the campaign)
+const SECTIONS = [['tv', 'TV'], ['picture', 'Picture'], ['tokens', 'Tokens'], ['sound', 'Sound'], ['perf', 'Performance'], ['screen', 'This screen'], ['library', 'Library']];
+const CAMP = [['campaign', 'Campaign'], ['screens', 'Screens'], ['looks', 'Looks'], ['init', 'Initiative'], ['players', 'Players'], ['tabletok', 'Tokens']];
 
 module.exports = (area) => {
   area.title('Options');
   area.before(async (K) => { await K.openDemo(); await K.send(); });
 
-  area.quick('Options lists the sections the app knows', async (t) => {
+  const tabs = (t) => t.g(`[...document.querySelectorAll('.opt-tab')].map((b) => [b.dataset.id, b.textContent.trim()])`);
+  area.quick('Tablescape settings lists the sections the app knows', async (t) => {
     await t.g(`App.openOptions()`);
-    await t.until(() => t.g('App.optionsOpen()'), 3000, 'Options');
-    const tabs = await t.g(`[...document.querySelectorAll('.opt-tab')].map((b) => [b.dataset.id, b.textContent.trim()])`);
-    t.eq(tabs, SECTIONS, 'the sections (a new one needs a check here)');
+    await t.until(() => t.g('App.optionsScope() === "app"'), 3000, 'Tablescape settings');
+    t.eq(await tabs(t), SECTIONS, 'the sections (a new one needs a check here)');
+    t.eq([await t.text('.opt-big'), await t.text('.opt-caption')], ['Tablescape settings', 'For every campaign'], 'its title');
   });
 
-  for (const [id, label] of SECTIONS) {
-    area.quick(`Options → ${label} opens with its controls`, async (t) => {
+  area.quick('Campaign settings lists its sections; the link under them goes to Tablescape settings and back', async (t) => {
+    await t.g(`App.openCampaignSettings()`);
+    await t.until(() => t.g('App.optionsScope() === "camp"'), 3000, 'Campaign settings');
+    t.eq(await tabs(t), CAMP, 'the sections (a new one needs a check here)');
+    t.eq([await t.text('.opt-big'), await t.text('.opt-caption')], ['Campaign settings', t.store.cur.meta.name], 'its title, the campaign above it');
+    await t.clickSel('.opt-other');
+    await t.until(() => t.g('App.optionsScope() === "app"'), 3000, 'Tablescape settings');
+    await t.clickSel('.opt-other');
+    await t.until(() => t.g('App.optionsScope() === "camp"'), 3000, 'Campaign settings again');
+    await t.g('App.closeOptions()');
+  });
+
+  for (const [id, label] of [...SECTIONS, ...CAMP]) {
+    area.quick(`${CAMP.some((x) => x[0] === id) ? 'Campaign settings' : 'Tablescape settings'} → ${label} opens with its controls`, async (t) => {
       await t.g(`App.openOptions(${JSON.stringify(id)})`);
       await t.until(() => t.g(`App.optionsOpen() && document.querySelector('.opt-tab.on') && document.querySelector('.opt-tab.on').dataset.id === ${JSON.stringify(id)}`), 3000, `the ${label} section`);
       await t.sleep(250);
@@ -67,6 +82,61 @@ module.exports = (area) => {
       for (const f of walk(root)) if (!before.has(f)) fs.rmSync(f, { force: true });
       await t.g(`Home.refresh()`);
     }
+  });
+
+  // Beta 3.18: they live in the campaign and travel with it; switching campaigns switches them
+  area.quick('Looks, Initiative, seats, phones, tokens on the table and the remote\'s buttons belong to the campaign; a new one starts like the last played', async (t) => {
+    const fs = require('fs'); const path = require('path');
+    const set = (p) => t.g(`window.ts.settings(${JSON.stringify(p)})`);
+    const tb = () => (t.store.cur && t.store.cur.meta.table) || {};
+    const A = t.store.cur.meta.id;
+    const was = JSON.parse(JSON.stringify(tb()));
+    const deck0 = JSON.parse(JSON.stringify(t.settings.remote.decks.phone));
+    const speed0 = (t.settings.players && t.settings.players.speed) || 30;
+    let B = null;
+    try {
+      await set({ tableStyle: 'meadow', initFoes: 'enemy', seats: 'one', tokens: { shadow: true } });
+      await t.g(`window.ts.players('set', { speed: 45 })`);
+      await t.g(`window.ts.remote('deck.set', { which: 'phone', deck: ${JSON.stringify({ ...deck0, pages: [[{ kind: 'moment', ref: 'nat20', label: 'Nat 20', icon: null }]] })} })`);
+      const nat = (pages) => !!(pages && pages[0] && pages[0][0] && pages[0][0].ref === 'nat20');
+      await t.until(() => tb().tableStyle === 'meadow' && tb().initFoes === 'enemy' && tb().seats === 'one' && tb().tokens && tb().tokens.shadow === true && tb().phones && tb().phones.speed === 45 && tb().deck && nat(tb().deck.phone), 3000, 'kept in the campaign');
+      // a new campaign: like the one played last
+      t.handle('campaign.create', { name: 'Settings test' });
+      B = t.store.cur.meta.id;
+      t.ok(B !== A, 'a new campaign is open');
+      t.eq([tb().tableStyle, tb().seats, tb().phones.speed, nat(tb().deck.phone)], ['meadow', 'one', 45, true], 'it starts like the one played last');
+      await set({ tableStyle: 'ice', seats: 'both', tokens: { shadow: false } });
+      await t.until(() => tb().tableStyle === 'ice' && tb().seats === 'both', 3000, 'its own');
+      // each campaign brings its own back
+      t.handle('campaign.open', { id: A });
+      await t.until(() => t.settings.tableStyle === 'meadow' && t.settings.seats === 'one' && t.settings.tokens.shadow === true && t.settings.players.speed === 45 && nat(t.settings.remote.decks.phone.pages), 3000, 'the first campaign\'s again');
+      await t.until(async () => (await t.g('App.state.settings.tableStyle')) === 'meadow', 3000, 'the GM window knows it');
+      t.handle('campaign.open', { id: B });
+      await t.until(() => t.settings.tableStyle === 'ice' && t.settings.seats === 'both' && t.settings.tokens.shadow === false, 3000, 'the second\'s again');
+      // a campaign without them (saved before Beta 3.18) takes the ones set now
+      t.handle('campaign.open', { id: A });
+      const f = path.join(t.store.findDir(B), 'campaign.json');
+      const m = JSON.parse(fs.readFileSync(f, 'utf8')); delete m.table; fs.writeFileSync(f, JSON.stringify(m));
+      t.handle('campaign.open', { id: B });
+      await t.until(() => tb().tableStyle === 'meadow' && t.settings.tableStyle === 'meadow', 3000, 'an older campaign takes the ones set now');
+      // an adventure takes the looks, not this table's remote, phones and seats; a full copy takes all
+      const Transfer = require('../../transfer');
+      const out = (kind) => JSON.parse(Transfer.plan(t.store.findDir(A), { kind }).json[0].data).table || {};
+      const adv = out('adventure'); const full = out('full');
+      t.ok(adv.tableStyle === 'meadow' && adv.initFoes === 'enemy' && !adv.deck && !adv.phones && !adv.seats, 'as an adventure: the looks only', adv);
+      t.ok(full.tableStyle === 'meadow' && full.seats === 'one' && full.phones && nat(full.deck && full.deck.phone), 'a full copy: all of it', full);
+    } finally {
+      await t.openDemo();
+      await set({ tableStyle: was.tableStyle || 'ink', initFoes: was.initFoes || 'names', seats: was.seats || 'both', tokens: { shadow: !!(was.tokens && was.tokens.shadow) } });
+      await t.g(`window.ts.players('set', { speed: ${speed0} })`);
+      await t.g(`window.ts.remote('deck.set', { which: 'phone', deck: ${JSON.stringify(deck0)} })`);
+      if (B) {
+        t.handle('campaign.delete', { id: B });
+        for (const d of t.store.deleted().filter((x) => x.name === 'Settings test')) t.handle('campaign.purge', { key: d.key });
+      }
+      await t.send();
+    }
+    t.eq(t.settings.tableStyle, was.tableStyle || 'ink', 'the demo as it was');
   });
 
   area.quick('Esc closes Options', async (t) => {

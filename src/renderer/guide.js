@@ -16,13 +16,18 @@ const Guide = (() => {
     ['Spells and assets', [['Click', 'Cast or stamp'], ['Drag', 'Aim a cone, line or cube / scatter assets'], ['Ctrl + wheel', 'Turn by 15° (Shift: 5°), also placed areas and assets'], ['Shift while aiming', 'Snap to 15°'], ['+  −', 'Spell size in 5 ft steps'], ['[  ]', 'Asset size'], ['A picked asset\'s frame', 'Sides: flat or long · corners: size · knob: turn'], ['Shift + drag', 'Select several assets'], ['Alt', 'Place or measure without snapping']]],
     ['Walls', [['Click', 'Wall corner by corner (Alt: no snapping)'], ['Double-click / Enter', 'End the line of walls'], ['Click a door', 'Open or close it (also with V)'], ['Delete', 'Remove the selected wall']]],
     ['Table', [['T', 'Send this map to the table'], ['B', 'Blackout on or off'], ['1 – 0', 'Use the hotbar (3 pages: the mouse wheel over it)'], ['Alt 1 – 9', 'Open a map of this chapter'], ['F1 – F8', 'Play snapshot 1 to 8 of the map on the table'], ['Shift 1 – 9', 'Play a starred screen effect'], ['Ctrl 1 – 9', 'Play a Spotify mood'], ['F', 'Fit the view to the table'], ['Shift F', 'Show everything, also off the table'], ['Esc on the TV', 'Close the table window']]],
-    ['Panels', [['L', 'Library'], ['Shift L', 'Library full screen'], ['Tab', 'Map thumbnails on or off'], ['Shift I', 'Character cards: the party at a glance (only for you)'], ['?', 'This guide'], ['Ctrl ,', 'Options: the TV, picture, players, sound, performance'], ['Ctrl + / Ctrl − / Ctrl 0', 'Size of everything on your screen (not the TV)']]],
+    ['Panels', [['L', 'Library'], ['Shift L', 'Library full screen'], ['Tab', 'Map thumbnails on or off'], ['Shift I', 'Character cards: the party at a glance (only for you)'], ['?', 'This guide'], ['Ctrl ,', 'Tablescape settings: the TV, picture, sound, performance'], ['Ctrl + / Ctrl − / Ctrl 0', 'Size of everything on your screen (not the TV)']]],
     ['Editing', [['Ctrl Z', 'Undo (also the arrows on top of the tools)'], ['Ctrl Y', 'Redo'], ['H', 'Hide or show what is selected'], ['Ctrl D', 'Duplicate the selected token'], ['Delete / Backspace', 'Remove what is selected'], ['[  ]', 'Brush size']]],
     ['Mouse', [['Right-click', 'Radial menu'], ['Right-drag or Space-drag', 'Pan the view'], ['Wheel', 'Zoom the view'], ['Alt + wheel', 'Scale the map (with everything on it)'], ['Double-click', 'Ping'], ['Alt while dragging a token', 'Place it without snapping']]],
   ];
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.18', [
+      'Campaign settings and Tablescape settings. Campaign settings (on the home screen, or the link under the sections of Settings) has the campaign itself, Screens on the table, Looks, Initiative, Players at the table and Tokens on the table. Tablescape settings (the old Options; Settings on the map screen) has the TV, its picture, tokens, sound, performance, this screen and the library',
+      'Each campaign keeps its own look, how initiative and the round show, where the players sit, the phones\' rules, how tokens look on the table and the remote\'s buttons. Your campaigns keep what they had; a new campaign starts like the one played last',
+      'An export takes them along. As an adventure only the looks go: your remote, the phones\' rules and the seating stay at your table',
+    ]],
     ['Beta 3.17', [
       'A new home screen, like a game\'s main menu: your campaigns along the bottom, the one you pick in big letters with its party, Play, Prepare the maps, Continue and its latest maps. Players, Screens on the table, Campaign settings (now with a cover picture) and the table check slide in from the right',
       'Options slide in from the right too, the same panel everywhere',
@@ -347,11 +352,11 @@ const Guide = (() => {
     return h('div', { class: 'guide-text' },
       h('h3', {}, 'Your first evening'),
       h('ul', { class: 'guide-checks' },
-        li('screens', b('Two screens. '), 'Tablescape runs on your laptop; the table shows on a TV lying flat (or a projector). ', b('Options → TV'), ' picks the TV and opens the table there. With one screen only, the table opens as a window, so you can try everything.'),
-        li('inch', b('One inch is one inch. '), 'Hold a bank card against the TV and match the outline (Options → TV → Calibrate). The grid then fits your miniatures: one square is one inch.'),
+        li('screens', b('Two screens. '), 'Tablescape runs on your laptop; the table shows on a TV lying flat (or a projector). ', b('Settings → TV'), ' picks the TV and opens the table there. With one screen only, the table opens as a window, so you can try everything.'),
+        li('inch', b('One inch is one inch. '), 'Hold a bank card against the TV and match the outline (Settings → TV → Calibrate). The grid then fits your miniatures: one square is one inch.'),
         li('campaign', b('A campaign has chapters, chapters have maps. '), 'Pick the demo campaign on the home screen, press ', b('Prepare the maps'), ', pick a map, and press ', kbd('T'), ' to send it to the table. What you prepare stays on your screen until you send it.'),
         li('rail', b('The rail on the left. '), 'Build tools on top, Play tools below. Hover a button for what it does and its key; right-click anything on the map for its menu.'),
-        li('sound', b('Sound. '), 'Options → Sound picks the speakers, one for ambience and music, one for effects. Spotify is optional and needs Premium.'),
+        li('sound', b('Sound. '), 'Settings → Sound picks the speakers, one for ambience and music, one for effects. Spotify is optional and needs Premium.'),
         li('minis', b('Keep your minis. '), 'Tokens are only for NPCs and monsters you don\'t have as miniatures. Everything else is cardboard, dice and people around the TV.')),
       h('h3', {}, 'While you play'),
       h('ul', { class: 'guide-list' },
@@ -376,9 +381,9 @@ const Guide = (() => {
       p('Everything Tablescape shows lives in one folder, the library. Put your own files into its folders, or drop them onto the map or the library drawer (', kbd('L'), '): they are copied in.'),
       root ? h('p', { class: 'guide-path' }, iconEl('folder'), h('code', {}, root), h('button', { class: 'btn small ghost', onclick: () => ts.library('open') }, 'Open')) : null,
       h('div', { class: 'guide-table' }, ...folders.map(([n, d]) => h('div', { class: 'guide-row' }, h('b', {}, n), h('span', {}, d)))),
-      p('Options → Library shows where the library is and can ', b('move'), ' it, to another disk for instance. A sync folder (OneDrive, Dropbox) works, but syncing while you play can make files busy for a moment.'),
+      p('Settings → Library shows where the library is and can ', b('move'), ' it, to another disk for instance. A sync folder (OneDrive, Dropbox) works, but syncing while you play can make files busy for a moment.'),
       h('h3', {}, 'Animated assets'),
-      p('An animated asset is prepared the first time a map uses it (the little maid runs along the top meanwhile). Options → Performance lists them.'),
+      p('An animated asset is prepared the first time a map uses it (the little maid runs along the top meanwhile). Settings → Performance lists them.'),
       h('h3', {}, 'Safety net'),
       h('ul', { class: 'guide-list' },
         li(b('Backups '), '(… on a campaign): a copy is made each time you open a campaign; the last 10 are kept.'),
@@ -397,7 +402,7 @@ const Guide = (() => {
   function helpTab() {
     const groups = [];
     try { if (typeof Play !== 'undefined' && Play.helpSections) groups.push(['Map screen', Play.helpSections()]); } catch { /* not on the map screen yet */ }
-    try { if (typeof App !== 'undefined' && App.helpSections) groups.push(['Options', App.helpSections()]); } catch { /* */ }
+    try { if (typeof App !== 'undefined' && App.helpSections) groups.push(['Campaign settings', App.helpSections('camp')], ['Tablescape settings', App.helpSections('app')]); } catch { /* */ }
     const q = h('input', { type: 'search', class: 'guide-find', placeholder: 'Find …', value: helpQuery, 'aria-label': 'Find in the help', spellcheck: 'false' });
     const list = h('div', { class: 'guide-help' });
     const draw = () => {
@@ -449,7 +454,7 @@ const Guide = (() => {
       h('h3', {}, 'Things to know'),
       h('ul', { class: 'guide-list' },
         li('A window that stops (out of memory, a graphics driver) is loaded again by itself and says so. If that happens often, the report tells why.'),
-        li('A stuttering TV: Options → Performance. The benchmark measures the map on the TV; "Graphics card vs processor" keeps the better way of drawing animations.'),
+        li('A stuttering TV: Settings → Performance. The benchmark measures the map on the TV; "Graphics card vs processor" keeps the better way of drawing animations.'),
         li('The table went dark when the TV was switched off: it comes back by itself when the TV does.'),
         li('A campaign or map shown as damaged: nothing was lost yet. A backup brings it back.')));
   }

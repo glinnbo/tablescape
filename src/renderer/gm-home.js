@@ -241,9 +241,8 @@ const Home = (() => {
 
   const MENU = [
     { id: 'players', label: 'Players', icon: 'users', run: () => drawer('players') },
-    { id: 'screens', label: 'Screens on the table', icon: 'device-tv', run: () => drawer('screens') },
-    { id: 'settings', label: 'Campaign settings', icon: 'building-castle', run: () => drawer('settings') },
-    { id: 'options', label: 'Options', icon: 'settings', run: () => App.openOptions(), gap: true },
+    { id: 'settings', label: 'Campaign settings', icon: 'building-castle', run: () => campaignSettings() },
+    { id: 'options', label: 'Tablescape settings', icon: 'settings', run: () => { closeDrawer(true); App.openOptions(); }, gap: true },
   ];
   function paintMenu(v) {
     const ids = v ? MENU.map((m) => m.id) : ['options'];
@@ -459,7 +458,17 @@ const Home = (() => {
   let tvOn = false; // Screens on the table: the TV shows the open tab's screen
   let screenTab = 'title';
   const bind = (fn) => { refs.push(fn); fn(); };
+  let ext = null; // (Beta 3.18) building a section of Campaign settings (gm.js): its bind, refill and refresh
+  const B = (fn) => (ext ? ext.bind(fn) : bind(fn));
   const C = () => S.campaign;
+  // Beta 3.18: Campaign settings is a panel like Tablescape settings (gm.js); the home opens the campaign first
+  async function campaignSettings(section) {
+    if (!(await ensureOpen())) return;
+    closeDrawer(true);
+    App.openCampaignSettings(section);
+  }
+  function see(s) { if (!document.getElementById('home') || document.getElementById('home').hidden) S = s; }
+  function screensOff() { if (tvOn) { tvOn = false; cmd('screens.preview', { which: null }); } }
   const isDrawerOpen = () => !!cur;
 
   // the frame every pop-up shares; returns its body
@@ -495,9 +504,8 @@ const Home = (() => {
     if (kind === 'check' && !S) return;
     closeDrawer(true);
     refs = [];
+    if (kind === 'screens' || kind === 'settings') { campaignSettings(kind === 'screens' ? 'screens' : 'campaign'); return; } // (Beta 3.18: in Campaign settings)
     if (kind === 'players') playersDrawer(opts);
-    else if (kind === 'screens') screensDrawer();
-    else if (kind === 'settings') settingsDrawer();
     else if (kind === 'check') checkDrawer();
     for (const b of el.menu.querySelectorAll('.hm-item')) b.classList.toggle('on', b.dataset.id === kind);
   }
@@ -557,24 +565,21 @@ const Home = (() => {
   }
 
   // ---------- Screens on the table: the title, the break, the blackout ----------
-  function screensDrawer() {
-    const { head, body } = frame('screens', 'Screens on the table');
-    head.append(h('div', { class: 'hm-dr-sub' }, 'What the TV shows between maps'));
-    const tabs = h('div', { class: 'seg seg-3 cp-tabs', role: 'tablist' });
-    const TABS = [{ v: 'title', label: 'Title', icon: 'typography' }, { v: 'brk', label: 'Break', icon: 'coffee' }, { v: 'blackout', label: 'Blackout', icon: 'moon' }];
-    const inner = h('div', { class: 'stack' });
-    const fill = () => {
-      tabs.replaceChildren(...TABS.map((t) => h('button', { class: `seg-btn ${screenTab === t.v ? 'on' : ''}`, role: 'tab', dataset: { v: t.v }, onclick: () => {
+  // Beta 3.18: a section of Campaign settings (gm.js builds the panel; E: its bind, refill, refresh)
+  function screensSection(E) {
+    const was = ext; ext = E;
+    try {
+      const TABS = [{ v: 'title', label: 'Title', icon: 'typography' }, { v: 'brk', label: 'Break', icon: 'coffee' }, { v: 'blackout', label: 'Blackout', icon: 'moon' }];
+      const tabs = h('div', { class: 'seg seg-3 cp-tabs', role: 'tablist' }, ...TABS.map((t) => h('button', { class: `seg-btn ${screenTab === t.v ? 'on' : ''}`, role: 'tab', dataset: { v: t.v }, onclick: () => {
         if (screenTab === t.v) return;
-        screenTab = t.v; refs = refs.filter((f) => !f.screens); fill();
+        screenTab = t.v;
         if (tvOn) cmd('screens.preview', { which: screenTab }); // the TV shows the screen of the open tab
+        E.refill();
       } }, iconEl(t.icon), h('span', {}, t.label))));
-      inner.replaceChildren(...(screenTab === 'brk' ? breakForm() : screenTab === 'blackout' ? blackoutForm() : titleForm()));
-    };
-    fill();
-    body.append(tabs, inner);
+      return h('div', { class: 'stack cp-screens' }, tabs, ...(screenTab === 'brk' ? breakForm() : screenTab === 'blackout' ? blackoutForm() : titleForm()));
+    } finally { ext = was; }
   }
-  const sbind = (fn) => { fn.screens = true; bind(fn); };
+  const sbind = (fn) => { fn.screens = true; B(fn); };
   const sc = (which) => C().screens[which];
   const set = (which, patch) => cmd('screens.set', { which, patch });
   function field(label, which, key, placeholder) {
@@ -643,12 +648,13 @@ const Home = (() => {
     return box;
   }
   function onTv() {
+    const E = ext;
     const b = h('button', { class: 'btn wide cp-ontv' });
     sbind(() => { b.classList.toggle('primary', !tvOn); b.replaceChildren(iconEl(tvOn ? 'eye-off' : 'eye'), tvOn ? 'Take it off the table' : 'Show it on the table'); });
     b.addEventListener('click', () => {
       tvOn = !tvOn;
       cmd('screens.preview', { which: tvOn ? screenTab : null });
-      for (const f of refs) f();
+      if (E) E.refresh(); else for (const f of refs) f();
     });
     return b;
   }
@@ -679,45 +685,43 @@ const Home = (() => {
       onTv()];
   }
 
-  // ---------- Campaign settings ----------
-  function settingsDrawer() {
-    const { head, body } = frame('settings', 'Campaign settings');
-    const sub = h('div', { class: 'hm-dr-sub' });
-    head.append(sub);
+  // ---------- Campaign settings → Campaign: rename, cover, folder, backups, export, delete (Beta 3.18: in the panel) ----------
+  let coverOpen = false; // the cover picker instead of the rows
+  function campaignSection(E) {
+    const was = ext; ext = E;
+    try { return coverOpen ? coverPicker(E) : campaignRows(); } finally { ext = was; }
+  }
+  function campaignRows() {
+    const E = ext;
+    const sub = h('div', { class: 'hm-dr-sub hm-set-sub' });
     const rowsEl = h('div', { class: 'hm-set' });
     const row = (id, icon, title, subText, run, danger) => h('button', { class: `hm-set-row ${danger ? 'danger' : ''}`, dataset: { id }, onclick: run },
       iconEl(icon), h('span', { class: 'grow hm-set-text' }, h('b', {}, title), subText ? h('span', {}, subText) : null), iconEl('chevron-right'));
-    bind(() => {
+    B(() => {
       const c = C(); if (!c) return;
       const maps = c.chapters.reduce((n, ch) => n + ch.maps.length, 0);
       sub.textContent = `${plural(c.chapters.length, 'chapter', 'chapters')} · ${plural(maps, 'map', 'maps')}`;
-      const pv = c.preview || {};
-      const coverName = pv.coverPick && pv.coverPick.name ? pv.coverPick.name : 'The first map';
+      const coverName = c.coverPick && c.coverPick.name ? c.coverPick.name : 'The first map';
       const it = items().find((x) => x.id === c.id) || { id: c.id, name: c.name, chapters: c.chapters.length, maps, lastSession: c.lastSession, folder: c.folder };
       if (!sig(rowsEl, [c.name, coverName, c.folder, maps])) return;
       rowsEl.replaceChildren(
         row('rename', 'pencil', 'Rename', c.name, () => rename({ id: c.id, name: c.name })),
-        row('cover', 'photo', 'Cover picture', coverName, coverPicker),
+        row('cover', 'photo', 'Cover picture', coverName, () => { coverOpen = true; E.refill(); }),
         row('folder', 'folder', 'Show in folder', null, () => window.ts.library('open', c.folder)),
         row('backups', 'history', 'Backups', 'A copy each time it opens; the last 10 are kept', () => earlier({ id: c.id, name: c.name })),
         row('export', 'file-export', 'Export', 'One file to share or keep', () => TransferUI.exportDialog({ id: c.id, name: c.name })),
         h('div', { class: 'hm-set-gap' }),
         row('delete', 'trash', 'Delete campaign…', 'Kept under Recently deleted until you empty it', () => askDelete(it), true));
     });
-    body.append(rowsEl);
+    return h('div', { class: 'stack hm-set-wrap' }, sub, rowsEl);
   }
   // the cover: any map of the campaign, or the first map (the default)
-  function coverPicker() {
-    if (!cur) return;
-    const { body } = cur;
+  function coverPicker(E) {
     const grid = h('div', { class: 'hm-cover-grid' });
-    const back = h('button', { class: 'btn ghost small hm-back', onclick: () => drawer('settings') }, iconEl('arrow-left'), 'Campaign settings');
-    body.replaceChildren(back, h('div', { class: 'hm-caps hm-cover-h' }, 'Cover picture'), grid);
-    refs = [];
-    bind(() => {
+    const back = h('button', { class: 'btn ghost small hm-back', onclick: () => { coverOpen = false; E.refill(); } }, iconEl('arrow-left'), 'Campaign');
+    B(() => {
       const c = C(); if (!c) return;
-      const pv = c.preview || {};
-      const chosen = pv.coverPick && pv.coverPick.path;
+      const chosen = c.coverPick && c.coverPick.path;
       const maps = c.chapters.flatMap((ch) => ch.maps).filter((m) => m.bgPath && !m.missing && m.bgKind !== 'audio');
       if (!sig(grid, [maps.map((m) => m.bgPath), chosen])) return;
       const tile = (on, label, pic, run) => h('button', { class: `hm-cover ${on ? 'on' : ''}`, onclick: run }, pic, h('span', { class: 'ellipsis' }, label));
@@ -725,6 +729,7 @@ const Home = (() => {
         tile(!chosen, 'The first map', h('div', { class: 'hm-cover-pic hm-nopic' }, iconEl('map-2')), () => cmd('campaign.cover', { path: null })),
         ...maps.map((m) => tile(chosen === m.bgPath, m.name, h('div', { class: 'hm-cover-pic' }, Thumbs.img(m.bgPath, m.bgKind, null, 'cover-img')), () => cmd('campaign.cover', { path: m.bgPath, name: m.name }))));
     });
+    return h('div', { class: 'stack' }, back, h('div', { class: 'hm-caps hm-cover-h' }, 'Cover picture'), grid);
   }
 
   // ---------- the table check: is everything ready before the players sit down ----------
@@ -809,5 +814,5 @@ const Home = (() => {
     for (const v of el.bg.querySelectorAll('video')) { if (on) v.play().catch(() => {}); else v.pause(); }
   }
 
-  return { mount, update, show, page, earlier, refresh, isDrawerOpen, closeDrawer, drawer, active };
+  return { mount, update, show, page, earlier, refresh, isDrawerOpen, closeDrawer, drawer, active, see, screensOff, screensSection, campaignSection, campaignSettings, coverBack: () => { coverOpen = false; } };
 })();

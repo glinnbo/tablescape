@@ -60,8 +60,9 @@ const App = (() => {
     Play.setActive(s.screen === 'play');
     Home.active(s.screen === 'home' || s.screen === 'campaign');
     if (s.screen === 'home' || s.screen === 'campaign') Home.update(s, prevScreen); // (Beta 3.17: one home screen for both)
-    else Play.update(s);
-    for (const f of setupRefs) f();
+    else { Play.update(s); Home.see(s); } // (Beta 3.18: Campaign settings on the maps use the home's parts)
+    if (setupEl && optScope === 'camp' && !s.campaign) closeOptions(); // (the campaign closed or was deleted)
+    refreshOptions();
     renderUpdate(s.update);
   }
 
@@ -320,23 +321,19 @@ const App = (() => {
 
   // 4.3: Options: what is set once and then stays, in one window with its sections down the side.
   // (It was the Table menu; the map tools now keep only what the map needs.)
-  const OPT_SECTIONS = [
+  // Beta 3.18: two panels alike. Tablescape settings: this PC, the TV, the speakers, how you work (for every campaign).
+  // Campaign settings: what the players see and how this group plays (kept in the campaign, it travels with it).
+  const APP_SECTIONS = [
     { id: 'tv', label: 'TV', icon: 'device-tv',
       tips: ['Black bars flickering on the TV over an animated map: Video on the TV → Drawn with the picture (or Safest), then restart.', 'Calibrate: match the frame on the TV to a bank card; then one inch on the TV is one inch.', 'Without calibrating, the size comes from the screen diagonal.',
-        'Press Esc on the TV to close the table window.', 'B switches the blackout on or off anywhere.'] },
+        'TV text scales the round, countdowns, turn order, markers and spell badges; the map keeps its size.', 'Press Esc on the TV to close the table window.', 'B switches the blackout on or off anywhere.'] },
     { id: 'picture', label: 'Picture', icon: 'brightness',
       tips: ['Each TV keeps its own picture.', 'Set the TV itself to its most natural mode (Movie or Cinema) first.', 'Gamma above 1 lifts the dark middle tones without washing out black.',
         'Reference picture: the black box should be black, not grey, and the white one white without glaring.'] },
-    { id: 'players', label: 'Seating', icon: 'users',
-      tips: ['Both long sides: everything with text shows twice, once facing each side.', 'TV text scales the round, countdowns, turn order, markers and spell badges; the map keeps its size.'] },
-    { id: 'looks', label: 'Looks', icon: 'sparkles',
-      tips: ['One style for everything the players see; any part can have its own.', 'Try on the table plays the look over the map that is there; nothing changes.', 'What the turn order shows and where the round sits: Options → Initiative.'] },
-    { id: 'init', label: 'Initiative', icon: 'swords',
-      tips: ['Hidden from the table, the turn order still runs for you, and the phones still wait for their turn.', 'Players see the round (next to the round counter) still hides it for one fight.', 'How the turn order and the banner look: Options → Looks.'] },
     { id: 'tokens', label: 'Tokens', icon: 'user-circle',
       tips: ['A token keeps its squares; only its picture is drawn bigger.',
         'One token with a picture that has a wide margin: select it → its size (M) → Bigger or Smaller.', 'Snapping off: Alt snaps a token while you drag it. Snapping on: Alt lets it go anywhere.',
-        'Compact toolbar: it gets clear when the mouse is on it.'] },
+        'Compact toolbar: it gets clear when the mouse is on it.', 'Name tags, numbers, the turn glow and shadows on the TV: Campaign settings → Tokens on the table.'] },
     { id: 'sound', label: 'Sound', icon: 'volume',
       tips: ['A speaker that is not connected (the TV switched off) falls back to the system\'s default.', 'Effects: soundboard, spell sounds, thunder, the countdown.',
         'Mute (under the table preview) fades all table sound out and back in.'] },
@@ -349,18 +346,51 @@ const App = (() => {
       tips: ['Moving copies everything to the new place (another disk, say), then Tablescape starts again from there.', 'A folder synced to the cloud works, but files can be busy for a moment while it syncs.',
         'Add the demo campaign: the newest demo comes in next to your campaigns. Yours stay as they are, an older demo too.'] },
   ];
+  const CAMP_SECTIONS = [
+    { id: 'campaign', label: 'Campaign', icon: 'building-castle',
+      tips: ['A backup is made each time the campaign opens; the last 10 are kept.', 'Export: one file with the campaign and its pictures, to share or keep. As an adventure it goes as prepared, with its looks; your remote\'s buttons, the phones\' rules and the seating stay here.',
+        'Deleted campaigns wait under Recently deleted on the home screen until you empty it.'] },
+    { id: 'screens', label: 'Screens', title: 'Screens on the table', icon: 'device-tv',
+      tips: ['Title: the TV shows it when the session starts, until the first map.', 'Break: a clock and a line of text; the music goes on.', 'Show it on the table tries the open tab on the TV.'] },
+    { id: 'looks', label: 'Looks', icon: 'sparkles',
+      tips: ['One style for everything the players see; any part can have its own.', 'Try on the table plays the look over the map that is there; nothing changes.', 'Each campaign keeps its own look; a new campaign starts like the one played last.'] },
+    { id: 'init', label: 'Initiative', icon: 'swords',
+      tips: ['Hidden from the table, the turn order still runs for you, and the phones still wait for their turn.', 'Players see the round (next to the round counter) still hides it for one fight.', 'Where the round badge sits on the TV: Tablescape settings → TV.'] },
+    { id: 'players', label: 'Players', title: 'Players at the table', icon: 'users',
+      tips: ['Both long sides: everything with text shows twice, once facing each side.', 'In a fight only the player whose turn it is moves; you can still drag any token.', 'The rest of the phones (pace, rest between steps, handing a character to a phone): Toolbox → Player phones on the maps.'] },
+    { id: 'tabletok', label: 'Tokens', title: 'Tokens on the table', icon: 'user-circle',
+      tips: ['What the players see of the tokens. Their picture size, what new tokens get and your toolbar: Tablescape settings → Tokens.'] },
+  ];
+  const scopeOf = (id) => (CAMP_SECTIONS.some((x) => x.id === id) ? 'camp' : 'app');
+  const sectionsOf = (scope) => (scope === 'camp' ? CAMP_SECTIONS : APP_SECTIONS);
   const pct = (v) => `${Math.round(v * 100)}%`;
   const optHead = (t) => h('h3', { class: 'opt-h' }, t);
   const set = () => (S && S.settings) || {};
   function optSection(id, bind) {
     const st = () => S;
     if (id === 'picture') return picturePanel(st, bind);
-    if (id === 'players') {
+    if (id === 'players') { // Beta 3.18: Campaign settings → Players at the table: the seats and the phones
+      const P = () => (S && S.players) || {};
       return h('div', { class: 'stack' },
         segCtl(bind, { label: 'Players sit on', options: [{ value: 'both', label: 'Both long sides', tip: 'Everything with text shows twice, once facing each side' }, { value: 'one', label: 'One side' }],
           get: () => set().seats || 'both', set: (v) => ts.settings({ seats: v }) }),
-        tablePanel(st, bind, 'hud'));
+        optHead('Phones'),
+        toggleCtl(bind, { label: 'Players may move their tokens', get: () => !!P().on, set: (v) => ts.players('set', { on: v }) }),
+        sliderCtl(bind, { label: 'Speed without a card', min: 5, max: 120, step: 5, fmt: (v) => `${v} ft`, get: () => P().speed || 30, set: (v) => ts.players('set', { speed: v }) }),
+        toggleCtl(bind, { label: 'A trace of the steps', get: () => P().trace !== false, set: (v) => ts.players('set', { trace: v }) }),
+        toggleCtl(bind, { label: 'Pings on the table', get: () => P().pings !== false, set: (v) => ts.players('set', { pings: v }) }));
     }
+    if (id === 'tabletok') { // Beta 3.18: Campaign settings → Tokens on the table (what the players see of them)
+      const tk = () => set().tokens || {};
+      const T = (patch) => ts.settings({ tokens: patch });
+      return h('div', { class: 'stack tok-opts' },
+        sliderCtl(bind, { label: 'Name tags', min: 0.5, max: 2.5, step: 0.05, get: () => tk().tagSize || 1, set: (v) => T({ tagSize: v }), fmt: pct }),
+        toggleCtl(bind, { label: 'Numbers on copies (Goblin 1, 2, 3)', get: () => tk().numbers !== false, set: (v) => T({ numbers: v }) }),
+        toggleCtl(bind, { label: 'Glow around whose turn it is', get: () => tk().turnGlow !== false, set: (v) => T({ turnGlow: v }) }),
+        toggleCtl(bind, { label: 'Shadow under tokens', get: () => !!tk().shadow, set: (v) => T({ shadow: v }) }));
+    }
+    if (id === 'campaign') return Home.campaignSection({ bind, refill: fillOptions, refresh: refreshOptions }); // (gm-home.js)
+    if (id === 'screens') return Home.screensSection({ bind, refill: fillOptions, refresh: refreshOptions });
     // Prototype 7: one style for the table (four looks, each with a variant in other colours); any part may have its own
     if (id === 'looks') {
       const STYLES = [
@@ -415,11 +445,10 @@ const App = (() => {
         part('talk', 'Conversation', 'The band the portraits stand in and how they come and go'),
         part('init', 'Initiative', 'The ribbon along the long edges of the TV'),
         part('round', 'New-round banner', '"Round 4" sweeping across the table'),
-        h('p', { class: 'hint' }, 'What the turn order shows, the round and its badge: ', h('button', { class: 'link-btn', onclick: () => openOptions('init') }, 'Options → Initiative')));
+        h('p', { class: 'hint' }, 'What the turn order shows, the round and its badge: ', h('button', { class: 'link-btn', onclick: () => openOptions('init') }, 'Initiative')));
     }
     // Prototype 7: everything about the turn order in one place (the Initiative panel's Options button opens this)
     if (id === 'init') {
-      const P = () => (S && S.players) || {};
       return h('div', { class: 'stack' },
         optHead('On the table'),
         toggleCtl(bind, { label: 'Initiative on the table', get: () => set().initShow !== false, set: (v) => ts.settings({ initShow: v }) }),
@@ -439,14 +468,7 @@ const App = (() => {
           { value: 'off', label: 'Off', tip: 'The players never see the round' }],
           get: () => (set().round && set().round.mode) || 'auto', set: (v) => ts.settings({ roundMode: v }) }),
         toggleCtl(bind, { label: 'Announce each new round with a banner', get: () => !set().round || set().round.banner !== false, set: (v) => ts.settings({ roundBanner: v }) }),
-        h('div', { class: 'try-row' }, h('button', { class: 'btn small ghost', 'data-tip': 'Drag the badge over a picture of the TV, its size',
-          onclick: () => { closeOptions(); if (typeof Play !== 'undefined' && document.body.dataset.screen === 'play') Play.openPop('round'); else UI.toast('Open the maps first: the badge is placed over a picture of the TV'); } }, iconEl('drag-drop-2'), 'Where the round badge sits …')),
-        optHead('The list'),
-        toggleCtl(bind, { label: 'Sort by itself when the last number is in', get: () => set().initAuto !== false, set: (v) => ts.settings({ initAutoSort: v }) }),
-        optHead('Player phones in a fight'),
-        sliderCtl(bind, { label: 'Speed without a card', min: 5, max: 120, step: 5, fmt: (v) => `${v} ft`, get: () => P().speed || 30, set: (v) => ts.players('set', { speed: v }) }),
-        toggleCtl(bind, { label: 'A trace of the steps', get: () => P().trace !== false, set: (v) => ts.players('set', { trace: v }) }),
-        h('p', { class: 'hint' }, 'In a fight only the player whose turn it is moves; you can still drag any token. How it all looks: ', h('button', { class: 'link-btn', onclick: () => openOptions('looks') }, 'Options → Looks')));
+        h('p', { class: 'hint' }, 'How it all looks: ', h('button', { class: 'link-btn', onclick: () => openOptions('looks') }, 'Looks')));
     }
     if (id === 'tokens') return tokensSection(bind);
     if (id === 'sound') return soundSection(bind);
@@ -490,7 +512,8 @@ const App = (() => {
           get: () => (hot() ? hot().shape() : '10x1'), set: (v) => { if (hot()) hot().setShape(v); refreshOptions(); } }),
         // Prototype 25: a line with a tool's keys for a few seconds when you pick it
         toggleCtl(bind, { label: 'Show a tool\'s keys when you pick it', get: () => { try { return localStorage.getItem('toolHints') !== '0'; } catch { return true; } },
-          set: (v) => { try { localStorage.setItem('toolHints', v ? '1' : '0'); } catch { /* */ } refreshOptions(); } }));
+          set: (v) => { try { localStorage.setItem('toolHints', v ? '1' : '0'); } catch { /* */ } refreshOptions(); } }),
+        toggleCtl(bind, { label: 'Initiative sorts itself when the last number is in', get: () => set().initAuto !== false, set: (v) => ts.settings({ initAutoSort: v }) }));
     }
     if (id === 'library') return libraryBox(bind);
     if (id === 'tv') {
@@ -500,6 +523,9 @@ const App = (() => {
         h('button', { class: 'btn small primary', onclick: () => ts.app('restart') }, iconEl('refresh'), 'Restart now'));
       bind(() => { restart.hidden = (set().videoPath || 'noOverlay') === (set().videoPathNow || 'noOverlay'); });
       return h('div', { class: 'stack' }, tablePanel(st, bind, 'screen'),
+        tablePanel(st, bind, 'hud'),
+        h('div', { class: 'try-row' }, h('button', { class: 'btn small ghost', 'data-tip': 'Drag the badge over a picture of the TV, its size',
+          onclick: () => { closeOptions(); if (typeof Play !== 'undefined' && document.body.dataset.screen === 'play') Play.openPop('round'); else UI.toast('Open the maps first: the badge is placed over a picture of the TV'); } }, iconEl('drag-drop-2'), 'Where the round badge sits …')),
         optHead('Video on the TV'),
         segCtl(bind, { label: 'Animated maps and overlays', options: [
           { value: 'noOverlay', label: 'Drawn with the picture', tip: 'Against flickering black bars over video maps' },
@@ -540,12 +566,7 @@ const App = (() => {
         { value: 'docked', label: 'Docked', tip: 'Always in the same place, above the hotbar' }],
         get: () => tk().card || 'compact', set: (v) => T({ card: v }) }),
       segCtl(bind, { label: 'Selection ring', options: [{ value: 'thin', label: 'Thin line' }, { value: 'glow', label: 'Soft glow' }],
-        get: () => tk().ring || 'thin', set: (v) => T({ ring: v }) }),
-      optHead('On the table'),
-      sliderCtl(bind, { label: 'Name tags', min: 0.5, max: 2.5, step: 0.05, get: () => tk().tagSize || 1, set: (v) => T({ tagSize: v }), fmt: pct }),
-      toggleCtl(bind, { label: 'Numbers on copies (Goblin 1, 2, 3)', get: () => tk().numbers !== false, set: (v) => T({ numbers: v }) }),
-      toggleCtl(bind, { label: 'Glow around whose turn it is', get: () => tk().turnGlow !== false, set: (v) => T({ turnGlow: v }) }),
-      toggleCtl(bind, { label: 'Shadow under tokens', get: () => !!tk().shadow, set: (v) => T({ shadow: v }) }));
+        get: () => tk().ring || 'thin', set: (v) => T({ ring: v }) }));
   }
   // Options → Sound: the speakers, the fight music, spell sounds (each spell look can use its own file)
   let previewAudio = null;
@@ -831,27 +852,42 @@ const App = (() => {
         h('button', { class: 'btn small', 'aria-label': `Test: ${r.label}`, 'data-tip': 'Plays a chime on this speaker', onclick: () => ts.sound('test', { which: r.which }) }, iconEl('volume'), 'Test')))));
   }
 
-  let optId = 'tv';
+  const optIds = { app: 'tv', camp: 'campaign' }; // the section open in each panel
+  let optScope = 'app';
   let optBody = null;
   let optNav = null;
   let optTitle = null;
-  function openOptions(section, flash) {
-    if (section && OPT_SECTIONS.some((x) => x.id === section)) {
-      if (optId === 'picture' && section !== 'picture' && S && S.testPicture) ts.cmd('table.test', { on: false });
-      optId = section;
+  // Tablescape settings (Ctrl ,); a section of Campaign settings opens that panel instead (Beta 3.18)
+  function openOptions(section, flash) { return openPanel(section ? scopeOf(section) : 'app', section, flash); }
+  function openCampaignSettings(section) { return openPanel('camp', section); }
+  function openPanel(scope, section, flash) {
+    if (scope === 'camp' && !(S && S.campaign)) { UI.toast('Open a campaign first'); return; }
+    if (setupEl && optScope !== scope) closeOptions();
+    optScope = scope;
+    const list = sectionsOf(scope);
+    if (section && list.some((x) => x.id === section)) {
+      if (optIds[scope] === 'picture' && section !== 'picture' && S && S.testPicture) ts.cmd('table.test', { on: false });
+      if (optIds[scope] === 'screens' && section !== 'screens') Home.screensOff();
+      optIds[scope] = section;
     }
     if (!setupEl) {
-      // Beta 3.17: Options slides in from the right like the home screen's pop-ups, its edge the orange diagonal
-      optNav = h('nav', { class: 'opt-nav', role: 'tablist', 'aria-label': 'Options' },
-        ...OPT_SECTIONS.map((x) => h('button', { class: 'opt-tab', role: 'tab', dataset: { id: x.id }, onclick: () => openOptions(x.id) }, iconEl(x.icon), h('span', {}, x.label))));
+      // Beta 3.17: it slides in from the right like the home screen's pop-ups, its edge the orange diagonal
+      const camp = scope === 'camp';
+      const name = camp ? 'Campaign settings' : 'Tablescape settings';
+      const other = h('button', { class: 'opt-other', dataset: { to: camp ? 'app' : 'camp' }, onclick: () => openPanel(camp ? 'app' : 'camp') },
+        iconEl(camp ? 'settings' : 'building-castle'), h('span', {}, camp ? 'Tablescape settings' : 'Campaign settings'));
+      optNav = h('nav', { class: 'opt-nav', role: 'tablist', 'aria-label': name },
+        ...list.map((x) => h('button', { class: 'opt-tab', role: 'tab', dataset: { id: x.id }, onclick: () => openPanel(scope, x.id) }, iconEl(x.icon), h('span', {}, x.label))),
+        other);
       optTitle = h('div', { class: 'opt-title' });
-      const optTips = UI.helpTip(() => { const sec = OPT_SECTIONS.find((x) => x.id === optId); return sec ? sec.label : 'Options'; }, () => { const sec = OPT_SECTIONS.find((x) => x.id === optId); return sec ? sec.tips : []; }); // 4.3.1
+      const secNow = () => list.find((x) => x.id === optIds[scope]);
+      const optTips = UI.helpTip(() => { const sec = secNow(); return sec ? sec.title || sec.label : name; }, () => { const sec = secNow(); return sec ? sec.tips : []; }); // 4.3.1
       optBody = h('div', { class: 'opt-body' });
-      const panel = h('div', { class: 'modal options', role: 'dialog', 'aria-label': 'Options' },
+      const panel = h('div', { class: `modal options ${camp ? 'camp' : ''}`, role: 'dialog', 'aria-label': name, dataset: { scope } },
         h('div', { class: 'opt-top' },
-          h('div', { class: 'opt-top-row' }, h('span', { class: 'hm-caps' }, 'For every campaign'),
+          h('div', { class: 'opt-top-row' }, h('span', { class: 'hm-caps opt-caption' }, camp ? S.campaign.name : 'For every campaign'),
             h('button', { class: 'icon-btn', 'aria-label': 'Close', 'data-tip': 'Close', 'data-key': 'Esc', onclick: closeOptions }, iconEl('x'))),
-          h('h2', { class: 'opt-big' }, 'Options')),
+          h('h2', { class: 'opt-big' }, name)),
         h('div', { class: 'opt-cols' },
           optNav,
           h('div', { class: 'opt-main' },
@@ -871,9 +907,10 @@ const App = (() => {
     if (!setupEl) return;
     setupRefs = [];
     const bind = (fn) => { setupRefs.push(fn); fn(); };
-    const sec = OPT_SECTIONS.find((x) => x.id === optId) || OPT_SECTIONS[0];
+    const list = sectionsOf(optScope);
+    const sec = list.find((x) => x.id === optIds[optScope]) || list[0];
     for (const b of optNav.querySelectorAll('.opt-tab')) { const on = b.dataset.id === sec.id; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
-    optTitle.replaceChildren(h('h2', {}, sec.label));
+    optTitle.replaceChildren(h('h2', {}, sec.title || sec.label));
     optBody.innerHTML = '';
     optBody.dataset.id = sec.id;
     try { optBody.append(optSection(sec.id, bind)); } catch (err) {
@@ -882,7 +919,11 @@ const App = (() => {
     }
     optBody.scrollTop = 0;
   }
-  function refreshOptions() { for (const f of setupRefs) f(); }
+  function refreshOptions() {
+    const cap = setupEl && optScope === 'camp' && S && S.campaign ? setupEl.querySelector('.opt-caption') : null; // (renamed meanwhile)
+    if (cap && cap.textContent !== S.campaign.name) cap.textContent = S.campaign.name;
+    for (const f of setupRefs) f();
+  }
   // a sound picked in the library for a spell look: its row lights up
   function flashOption(k) {
     const until = performance.now() + 1200;
@@ -907,6 +948,7 @@ const App = (() => {
     if (previewAudio) { previewAudio.pause(); previewAudio = null; }
     if (S && S.table.calibrating) ts.cmd('table.calibrate', { on: false });
     if (S && S.testPicture) ts.cmd('table.test', { on: false });
+    Home.screensOff(); Home.coverBack(); // (a screen tried on the TV from Campaign settings goes off again)
   }
 
   // ---------------------------------------------------------------------
@@ -957,8 +999,8 @@ const App = (() => {
   }, true);
 
   // (Prototype 25) the Options sections' tips for the Guide's Help page
-  const helpSections = () => OPT_SECTIONS.filter((x) => x.tips && x.tips.length).map((x) => ({ title: x.label, tips: x.tips }));
-  return { helpSections, start, tablePanel, picturePanel, soundOutPicker, openOptions, closeOptions, optionsOpen: () => !!setupEl, openTableSetup: (sec) => openOptions(sec || 'tv'),
+  const helpSections = (scope = 'app') => sectionsOf(scope).filter((x) => x.tips && x.tips.length).map((x) => ({ title: x.title || x.label, tips: x.tips }));
+  return { helpSections, start, tablePanel, picturePanel, soundOutPicker, openOptions, openCampaignSettings, closeOptions, optionsOpen: () => !!setupEl, optionsScope: () => (setupEl ? optScope : null), openTableSetup: (sec) => openOptions(sec || 'tv'),
     toggleHelp, helpOpen: () => Guide.isOpen(), get state() { return S; }, updateSlot: () => renderUpdate(), previewUpdate: (u) => renderUpdate(u), previewUpdateDone: () => updateDone() };
 })();
 

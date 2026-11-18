@@ -311,9 +311,9 @@ const Toolbox = (() => {
     const PANEL_TIPS = {
       init: ['Enter: next turn. After the last one a new round starts.', 'Players come from the home screen → Players, enemies from the tokens on this map or + Enemy.',
         'Roll enemies: d20 + bonus for every enemy without a number (a group rolls once).', 'HP: type 12, 12/20, −7 or +5.', 'Column adds HP, AC, conditions, notes or your own.',
-        'The gear opens Options → Initiative.'],
+        'The gear opens Campaign settings → Initiative.'],
       timer: ['Normal: a round dial at a short end or in the middle of the TV.', 'Dramatic: a big number in the middle, pulsing darker towards zero.', 'A running dial can still move to another end.'],
-      sound: ['Each sound plays once on the sound effects speaker (Options → Sound).', 
+      sound: ['Each sound plays once on the sound effects speaker (Settings → Sound).', 
         'Star a sound to keep it at the top.', 'Drag a sound onto the hotbar to play it with a number key.', 'Subfolders of Audio/SFX become groups.'],
       moments: ['Click to play one on the table.', 'Gas, dread, frost, madness and time stop stay until you click them again.', 'Shift + 1 to 9 play the starred ones.', 'The target button puts one where you click on the map.'],
       spotify: ['Music plays in the Spotify app, through its speaker.', 'Ctrl + 1 to 9 play the first nine moods.', 'A chapter\'s fight music can be a mood (Ambience → Combat), and so can a snapshot\'s transition.',
@@ -322,7 +322,7 @@ const Toolbox = (() => {
         'Death save: 10 or more is a success, below 10 a failure.'],
       handouts: ['Click a handout to show it on the table; click it again (or Put it away) to take it off. + adds it to what lies there. Up to 10 at once.',
         'Handout table opens a big picture of the TV: drag a handout to where it should lie, pull a corner to size it, turn it with the knob. Each handout remembers how it lay.',
-        'A handout burns in and away in the colour of your table style (Options → Table → Style).',
+        'A handout burns in and away in the colour of your table style (Campaign settings → Looks).',
         'The phone on a handout sends it to the players\' phones: everyone, or only some.',
         'List … has every handout: tick one to keep it ready here for this chapter.',
         'Shown so far keeps what the players have seen this session, to bring it back with one click.', 'Drag a handout onto the hotbar to show it with a number key.'],
@@ -331,8 +331,8 @@ const Toolbox = (() => {
       lights: ['The lamps take the colours of the TV and flash with lightning, explosions and spells.', 'Room light: warm and bright. Off: the lamps switch off. Let go: they go back to how they were.', '−20 % and +20 % work on the hotbar too (right-click them).'],
       chars: ['Only you see this.', 'HP and conditions come from the turn order; inspiration, exhaustion and death saves stay with the campaign.'],
       players: ['A player scans the join code, picks their character and moves its token with a stick on the phone.', 'Steps stop at walls, closed doors and other tokens; in a fight each moves on their own turn.',
-        'Hand a token: any token on the table (a familiar, a summoned beast) for a phone.', 'Right-click a phone: movement again, take the character away.'],
-      remote: ['Windows may ask once whether Tablescape may use the network: allow it on private networks.', 'A tablet at the table: set its Auto-Lock to Never.', 'Right-click a device in the list to choose which deck it shows.'],
+        'Hand a token: any token on the table (a familiar, a summoned beast) for a phone.', 'Right-click a phone: movement again, take the character away.', 'These rules belong to this campaign (Campaign settings → Players has the main ones).'],
+      remote: ['Windows may ask once whether Tablescape may use the network: allow it on private networks.', 'A tablet at the table: set its Auto-Lock to Never.', 'Right-click a device in the list to choose which deck it shows.', 'The buttons belong to this campaign; a new campaign starts with those of the one played last. The devices and the layout are the same everywhere.'],
     };
     const defOf = (id) => {
       if (id === 'atlas') return ctx.Atlas.def(); // (Beta 3.12: the Cartographer is a window of its own, the Map table)
@@ -916,8 +916,8 @@ const Toolbox = (() => {
 
       // ---- top: preparing / the fight ----
       // (Prototype 7) one button: Options → Initiative has the TV, the round, sorting and the phones
-      const opts = h('button', { class: 'icon-btn', 'aria-label': 'Initiative options', 'data-tip': 'Options: on the table or hidden, what it shows, the round, sorting', onclick: () => App.openOptions('init') }, iconEl('settings'));
-      const hid = I.show ? null : h('small', { class: 'ini-offtv', 'data-tip': 'The players don\'t see the turn order (Options → Initiative)' }, iconEl('eye-off'), 'not on the table');
+      const opts = h('button', { class: 'icon-btn', 'aria-label': 'Initiative settings', 'data-tip': 'Campaign settings: on the table or hidden, what it shows, the round', onclick: () => App.openOptions('init') }, iconEl('settings'));
+      const hid = I.show ? null : h('small', { class: 'ini-offtv', 'data-tip': 'The players don\'t see the turn order (Campaign settings → Initiative)' }, iconEl('eye-off'), 'not on the table');
       let top;
       if (!I.running) {
         top = h('div', { class: 'ini-top' },

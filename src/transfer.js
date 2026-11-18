@@ -246,6 +246,7 @@ function plan(dir, { kind = 'adventure', chapterId = null } = {}) {
   const chapter = chapterId ? chapters[0] : null;
   if (chapter) { out.name = `${meta.name}: ${chapter.name}`; if (!chapter.maps.includes(out.lastMapId)) out.lastMapId = chapter.maps[0] || null; }
   if (kind === 'adventure') for (const k of PERSONAL) delete out[k];
+  if (kind === 'adventure' && out.table && typeof out.table === 'object') { out.table = { ...out.table }; for (const k of ['deck', 'phones', 'seats']) delete out.table[k]; } // (Beta 3.18: the looks go along, one table's remote, phones and seats not)
   // Beta 3.11: the atlas (world and regional maps) goes with the whole campaign, not with a single chapter; as an
   // adventure, no map is found yet
   const atlas = !chapter && out.atlas && Array.isArray(out.atlas.maps) ? out.atlas.maps.filter((x) => x && x.id) : [];

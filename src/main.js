@@ -99,6 +99,89 @@ function tokenLook(t = settings.tokens || {}) {
   };
 }
 
+// Beta 3.18: what belongs to a campaign, not to Tablescape: how the table looks (Looks), the turn order and the round
+// on the TV, where the players sit and the phones' rules, the tokens as the players see them, the remote's own buttons.
+// They are kept in the campaign (meta.table) and travel with it; while it is open they are in `settings`, so all that
+// reads settings stays as it was. A campaign without them takes what is set now: the one played last.
+const CAMP_KEYS = ['tableStyle', 'looks', 'mapTransition', 'initShow', 'initCount', 'initFoes', 'roundMode', 'roundBanner', 'seats'];
+const CAMP_TOKENS = ['tagSize', 'numbers', 'turnGlow', 'shadow'];
+const CAMP_PHONES = ['on', 'pace', 'rest', 'pings', 'eyes', 'speed', 'trace'];
+let campTableOf = null; // the campaign whose values are in settings now (none: nothing is written back)
+const jcopy = (v) => JSON.parse(JSON.stringify(v));
+function campTableNow() {
+  const t = {};
+  for (const k of CAMP_KEYS) if (settings[k] !== undefined && settings[k] !== null) t[k] = jcopy(settings[k]);
+  const tk = tokenLook();
+  t.tokens = Object.fromEntries(CAMP_TOKENS.map((k) => [k, tk[k]]));
+  const pl = settings.players || {};
+  t.phones = Object.fromEntries(CAMP_PHONES.filter((k) => pl[k] !== undefined).map((k) => [k, pl[k]]));
+  const d = settings.remote && settings.remote.decks;
+  if (d && d.phone && d.tablet) t.deck = { phone: jcopy(d.phone.pages || []), tablet: jcopy(d.tablet.pages || []) };
+  return t;
+}
+// from a file (perhaps someone else's): only what Tablescape knows
+function campTableClean(t) {
+  const o = {};
+  if (TABLE_STYLES[t.tableStyle]) o.tableStyle = t.tableStyle;
+  if (t.looks && typeof t.looks === 'object') { o.looks = {}; for (const k of LOOK_PARTS) { const v = t.looks[k]; if (TABLE_STYLES[v] || v === 'style' || (k === 'map' && v === 'fade')) o.looks[k] = v; } }
+  if (TRANSITIONS.includes(t.mapTransition)) o.mapTransition = t.mapTransition;
+  if (typeof t.initShow === 'boolean') o.initShow = t.initShow;
+  if ([0, 2, 3, 4, 6].includes(t.initCount)) o.initCount = t.initCount;
+  if (t.initFoes === 'enemy' || t.initFoes === 'names') o.initFoes = t.initFoes;
+  if (ROUND_MODES.includes(t.roundMode)) o.roundMode = t.roundMode;
+  if (typeof t.roundBanner === 'boolean') o.roundBanner = t.roundBanner;
+  if (t.seats === 'one' || t.seats === 'both') o.seats = t.seats;
+  const ph = t.phones && typeof t.phones === 'object' ? t.phones : null;
+  if (ph) {
+    o.phones = {};
+    for (const k of ['on', 'pings', 'eyes', 'trace']) if (typeof ph[k] === 'boolean') o.phones[k] = ph[k];
+    if (['free', 'paused', 'group'].includes(ph.pace)) o.phones.pace = ph.pace;
+    if (Number.isFinite(ph.rest)) o.phones.rest = Math.min(60, Math.max(0, Math.round(ph.rest)));
+    if (Number.isFinite(ph.speed)) o.phones.speed = Math.min(120, Math.max(5, Math.round(ph.speed / 5) * 5));
+  }
+  return o;
+}
+function campTableApply(c) {
+  campTableOf = null;
+  if (!c) return;
+  const t = c.meta.table;
+  if (!t || typeof t !== 'object' || Array.isArray(t)) { c.meta.table = campTableNow(); store.touch(); campTableOf = c.meta.id; return; }
+  const o = campTableClean(t);
+  for (const k of CAMP_KEYS) { if (k in o) settings[k] = o[k]; else delete settings[k]; }
+  if (t.tokens && typeof t.tokens === 'object') settings.tokens = tokenLook({ ...tokenLook(), ...Object.fromEntries(CAMP_TOKENS.filter((k) => k in t.tokens).map((k) => [k, t.tokens[k]])) });
+  if (o.phones) {
+    if (!settings.players || typeof settings.players !== 'object') settings.players = {};
+    for (const k of CAMP_PHONES) { if (k in o.phones) settings.players[k] = o.phones[k]; else delete settings.players[k]; }
+  }
+  const d = settings.remote && settings.remote.decks;
+  if (d && t.deck && typeof t.deck === 'object') for (const w of ['phone', 'tablet']) if (Array.isArray(t.deck[w]) && d[w]) d[w] = deckFix({ ...d[w], pages: t.deck[w] });
+  campTableOf = c.meta.id;
+}
+// a change to one of them while a campaign is open goes into the campaign too (saveSettings calls this)
+function campTableKeep() {
+  const c = store.cur;
+  if (!c || campTableOf !== c.meta.id) return;
+  const t = campTableNow();
+  if (JSON.stringify(t) === JSON.stringify(c.meta.table)) return;
+  c.meta.table = t;
+  store.touch();
+}
+// once (Beta 3.18): every campaign gets the values set until now, so none looks different after the update
+function campTablesOnce() {
+  const t = campTableNow();
+  let n = 0;
+  for (const c of store.scan()) {
+    if (c.broken || !c.meta || c.meta.table) continue;
+    const file = path.join(c.dir, 'campaign.json');
+    const meta = readJson(file);
+    if (!meta || !meta.id || meta.table) continue;
+    meta.table = t;
+    writeJson(file, meta);
+    n++;
+  }
+  return n;
+}
+
 const state = {
   update: { status: 'off' }, // Prototype 20: updates from GitHub (setupUpdates)
   screen: 'home', // 'home' | 'campaign' (the campaign's page) | 'play'
@@ -130,7 +213,10 @@ const state = {
 };
 
 const userFile = (name) => path.join(app.getPath('userData'), name);
-function saveSettings() { writeJson(userFile('settings.json'), settings); }
+function saveSettings() {
+  try { campTableKeep(); } catch (err) { console.error('campaign settings', err); } // (Beta 3.18)
+  writeJson(userFile('settings.json'), settings);
+}
 let sizeSaveT = null; // (Prototype 12: Talk sizes, saved once the slider rests)
 
 // 4.11.3: how videos (an animated map, overlays) reach the screen on Windows. Chromium hands a playing video to the
@@ -305,6 +391,7 @@ function campaignSummary() {
     party: c.meta.party || [],
     away: (c.meta.away || []).filter((n) => (c.meta.party || []).includes(n)), // players not here today (not in Initiative)
     preview: state.screen !== 'play' ? campPreview(c.meta, c.dir, true) : null, // Beta 3.17: the home screen (not needed on the maps)
+    coverPick: c.meta.coverPick ? { path: (mapPic(c.meta.coverPick) || {}).path || null, name: c.meta.coverPick.name || null } : null, // (Beta 3.18: Campaign settings on the maps too)
     lastSession: c.meta.lastSession || 0,
     session: state.session,
     screens: screensSummary(),
@@ -2233,6 +2320,7 @@ function openCampaign(id, { backup = true } = {}) {
   if (dir && backup) { try { const b = backups.snapshot(dir); if (b) applog.log.info(`backup ${b.id} of ${b.name}`); } catch (err) { applog.log.error('backup failed', err); } }
   const c = store.open(id);
   if (!c) return { ok: false, error: String(id).startsWith('broken:') ? 'This campaign\'s file is damaged: use Backups to bring one back.' : 'Campaign not found.' };
+  campTableApply(c); // (Beta 3.18: its looks, initiative, seats, phones, tokens on the table, remote buttons)
   const ids = store.allMapIds();
   const broken = ids.filter((mid) => store.map(mid) && store.map(mid).broken);
   if (broken.length) applog.log.warn(`${broken.length} map file(s) of ${c.meta.name} could not be read: ${broken.join(', ')}`);
@@ -2252,6 +2340,7 @@ function openCampaign(id, { backup = true } = {}) {
 
 function goHome() {
   store.close();
+  campTableOf = null;
   state.timer = null;
   state.talk = null; state.handouts = []; state.handoutSeen = []; state.brk = null; state.init = null;
   initUndo = null; showDrop();
@@ -4760,7 +4849,7 @@ function askLibraryRoot() {
   const r = dialog.showMessageBoxSync({
     type: 'question', buttons: ['Use Documents', 'Choose a folder…'], defaultId: 0, cancelId: 0, noLink: true, title: 'Tablescape',
     message: 'Where should your library live?',
-    detail: `Tablescape keeps your maps, tokens, sounds and campaigns in one folder, the library.\n\nDocuments: ${def}\n\nYou can move it later under Options → Library.`,
+    detail: `Tablescape keeps your maps, tokens, sounds and campaigns in one folder, the library.\n\nDocuments: ${def}\n\nYou can move it later under Settings → Library.`,
   });
   if (r !== 1) return;
   const picked = dialog.showOpenDialogSync({ title: 'Folder for the Tablescape library', properties: ['openDirectory', 'createDirectory'], buttonLabel: 'Use this folder' });
@@ -4885,6 +4974,11 @@ function startApp() {
     delete settings.remote.deck;
   }
   for (const d of settings.remote.devices) delete d.layout; // (4.0 kept a layout per device)
+  if (!settings.campTables) { // Beta 3.18: looks, initiative, seats, phones … belong to each campaign now
+    try { const n = campTablesOnce(); applog.log.info(`campaign settings: ${n} campaign(s) got today's values`); } catch (err) { applog.log.error(`campaign settings: ${err.message || err}`); }
+    settings.campTables = true;
+    saveSettings();
+  }
   Remote = createRemote({
     cfg: () => settings.remote, save: saveSettings, log: (m) => applog.log.warn(m), label: LABEL,
     dir: path.join(__dirname, 'remote'), icons: path.join(__dirname, 'renderer', 'icons.js'), fonts: path.join(__dirname, 'renderer', 'fonts'), appIcon: ICON,

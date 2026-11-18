@@ -87,9 +87,11 @@ module.exports = (area) => {
   area.quick('the picked campaign fills the screen: name, PLAY, PREPARE THE MAPS, the menu with Options, the status line', async (t) => {
     const demo = await home(t);
     t.ok(!t.store.cur, 'nothing is open yet');
+    const camps = t.store.scan().filter((c) => !c.broken);
+    t.ok(camps.length && camps.every((c) => c.meta.table && c.meta.table.tableStyle && c.meta.table.tokens), 'every campaign got its own settings at the start (Beta 3.18)', camps.map((c) => [c.meta.name, !!c.meta.table]));
     t.ok(/PLAY/.test(await t.text('.hm-play')), 'PLAY');
     t.ok(/PREPARE\s*THE MAPS/.test(await t.text('.hm-prep')), 'PREPARE THE MAPS');
-    t.eq(await t.g(`[...document.querySelectorAll('.hm-menu .hm-item')].map((b) => b.textContent.trim())`), ['Players', 'Screens on the table', 'Campaign settings', 'Options'], 'the menu');
+    t.eq(await t.g(`[...document.querySelectorAll('.hm-menu .hm-item')].map((b) => b.textContent.trim())`), ['Players', 'Campaign settings', 'Tablescape settings'], 'the menu (Beta 3.18: Screens on the table is in Campaign settings)');
     t.eq(await t.count('.hm-status .hm-st'), 3, 'the status line: the TV, the speakers, the size');
     const [opt, st] = [await t.rect('.hm-item[data-id="options"]'), await t.rect('.hm-status')];
     t.ok(st.y - (opt.y + opt.h) >= 20, 'room between Options and the status line', { opt, st });
@@ -160,11 +162,11 @@ module.exports = (area) => {
     t.ok(!!t.state.session, 'the same session');
   });
 
-  area.quick('the pop-ups slide in from the right with the orange edge: Players, Screens, Campaign settings, the table check; Esc closes', async (t) => {
+  area.quick('the pop-ups slide in from the right with the orange edge: Players, the table check, Campaign settings; Esc closes', async (t) => {
     await t.openDemo();
     t.handle('campaign.page');
     await t.until(() => t.g(`document.body.dataset.screen === 'campaign'`), 4000, 'the home screen');
-    for (const [id, kind] of [['players', 'players'], ['screens', 'screens'], ['settings', 'settings']]) {
+    for (const [id, kind] of [['players', 'players']]) {
       await t.clickSel(`.hm-item[data-id="${id}"]`);
       await t.until(async () => (await drawerKind(t)) === kind, 3000, `the ${kind} pop-up`);
       const W = await t.g('innerWidth');
@@ -178,6 +180,24 @@ module.exports = (area) => {
     await t.until(async () => (await drawerKind(t)) === 'check', 3000, 'a click on the status line opens the table check');
     t.ok(await t.count('.hm-dr .chk-row') >= 5, 'the table check rows');
     await t.key('Escape');
+    await t.until(async () => !(await drawerKind(t)), 3000, 'the table check closes with Esc');
+    // Beta 3.18: Campaign settings is a panel like Tablescape settings, Screens on the table one of its sections
+    await t.clickSel('.hm-item[data-id="settings"]');
+    await t.until(() => t.g('App.optionsScope() === "camp"'), 3000, 'Campaign settings');
+    const W = await t.g('innerWidth');
+    await t.until(async () => { const r = await t.rect('.modal.options'); return r && Math.abs(r.x + r.w - W) < 3; }, 2000, 'Campaign settings against the right edge');
+    t.ok(await t.rect('.options-back .opt-edge line.line'), 'the orange edge');
+    await t.clickSel('.opt-tab[data-id="screens"]');
+    await t.until(() => t.count('.opt-body .cp-tabs .seg-btn'), 3000, 'Screens on the table: Title, Break, Blackout');
+    await t.clickSel('.opt-body .cp-tabs .seg-btn[data-v="brk"]');
+    await t.until(async () => (await t.count('.opt-body .cp-tv-brk')) === 1, 3000, 'the Break tab');
+    await t.clickSel('.opt-body .cp-ontv');
+    await t.until(() => t.state.brk && t.state.brk.preview, 3000, 'the break tried on the TV');
+    await t.key('Escape');
+    await t.until(async () => !(await t.g('App.optionsOpen()')), 3000, 'Campaign settings closes with Esc');
+    await t.until(() => !t.state.brk, 3000, 'and the TV leaves the break again');
+    await t.g(`App.openCampaignSettings('campaign')`); // (it opens on Campaign next time; the Break tab is remembered)
+    await t.g('App.closeOptions()');
   });
 
   area.quick('Players: several at once with commas; who is here today', async (t) => {
@@ -205,6 +225,7 @@ module.exports = (area) => {
     t.handle('campaign.page');
     await t.until(() => t.g(`document.body.dataset.screen === 'campaign'`), 4000, 'the home screen');
     await t.clickSel('.hm-item[data-id="settings"]');
+    await t.g(`App.openCampaignSettings('campaign')`);
     await t.until(() => t.rect('.hm-set-row[data-id="cover"]'), 3000, 'Campaign settings');
     t.eq(await t.g(`[...document.querySelectorAll('.hm-set-row')].map((b) => b.dataset.id)`), ['rename', 'cover', 'folder', 'backups', 'export', 'delete'], 'the rows');
     await t.clickSel('.hm-set-row[data-id="cover"]');
@@ -234,7 +255,7 @@ module.exports = (area) => {
     t.ok(listed.preview && listed.preview.cont && listed.preview.cont.id === a, 'the home knows it without opening the campaign', listed.preview);
   });
 
-  area.quick('Options slides in from the right, on the home screen and on the maps', async (t) => {
+  area.quick('Tablescape settings slides in from the right, on the home screen and on the maps', async (t) => {
     await t.openDemo();
     t.handle('campaign.page');
     await t.until(() => t.g(`document.body.dataset.screen === 'campaign'`), 4000, 'the home screen');
@@ -242,7 +263,7 @@ module.exports = (area) => {
     await t.until(() => t.g('App.optionsOpen()'), 3000, 'Options open');
     const look = async () => t.g(`(() => { const p = document.querySelector('.modal.options').getBoundingClientRect(); return { right: Math.round(p.right), w: innerWidth, top: Math.round(p.top), edge: !!document.querySelector('.options-back .opt-edge'), title: document.querySelector('.opt-big').textContent }; })()`);
     let l = await t.until(async () => { const x = await look(); return Math.abs(x.right - x.w) < 3 && x; }, 2000, 'Options against the right edge');
-    t.ok(l.top === 0 && l.edge && l.title === 'Options', 'on the home screen', l);
+    t.ok(l.top === 0 && l.edge && l.title === 'Tablescape settings', 'on the home screen', l);
     await t.key('Escape');
     await t.until(async () => !(await t.g('App.optionsOpen()')), 3000, 'closed');
     t.handle('campaign.play');

@@ -58,15 +58,15 @@ const Bench = (() => {
     if ((list || []).length === 2 && list[0].label === 'videos') {
       const [a, b] = list;
       const ra = a.motion && a.motion.tv; const rb = b.motion && b.motion.tv;
-      return `Benchmark: animations on the TV as videos ${ra && ra.count ? `${ra.ratio} %` : '–'}, baked ${rb && rb.count ? `${rb.ratio} %` : '–'} of their speed (Options → Performance)`;
+      return `Benchmark: animations on the TV as videos ${ra && ra.count ? `${ra.ratio} %` : '–'}, baked ${rb && rb.count ? `${rb.ratio} %` : '–'} of their speed (Settings → Performance)`;
     }
     if ((list || []).length === 2 && list[0].label === 'gpu') { // Beta 1: drawn by the graphics card, then the processor; the better one stays
       const [a, b] = list;
       const st = (x) => (x.tv ? `${x.tv.fps} fps, ${x.tv.stutters} stutter${x.tv.stutters === 1 ? '' : 's'}` : 'no answer');
-      return `Benchmark: graphics card ${st(a)}; processor ${st(b)}. ${picked === 'gpu' ? 'The graphics card' : 'The processor'} draws the animations from now on (Options → Performance).`;
+      return `Benchmark: graphics card ${st(a)}; processor ${st(b)}. ${picked === 'gpu' ? 'The graphics card' : 'The processor'} draws the animations from now on (Settings → Performance).`;
     }
     const mo = r.motion && r.motion.tv;
-    return `Benchmark: the TV ${r.tv ? `${r.tv.fps} fps` : 'did not answer'}${mo && mo.count ? ` · animations ${mo.ratio} % of their speed` : ''} · processor ${pct(r.cpu && r.cpu.all)} (Options → Performance)`;
+    return `Benchmark: the TV ${r.tv ? `${r.tv.fps} fps` : 'did not answer'}${mo && mo.count ? ` · animations ${mo.ratio} % of their speed` : ''} · processor ${pct(r.cpu && r.cpu.all)} (Settings → Performance)`;
   }
   return {
     setInfo: (fn) => { info = fn; },

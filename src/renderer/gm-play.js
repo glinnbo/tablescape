@@ -203,7 +203,7 @@ const Play = (() => {
       { id: 'talk', icon: 'messages', label: 'Conversation', short: 'Converse', key: 'O', pop: true, tip: 'NPC portraits rise out of a band on the table' }] },
     'spacer',
     { group: 'end', items: [{ id: 'library', icon: 'photo', label: 'Library', key: 'L', tip: 'Maps, tokens, overlays and sounds' },
-      { id: 'home', icon: 'home', label: 'Campaign', tip: 'The home screen: players, screens, table check' }, { id: 'table', icon: 'settings', label: 'Options', key: 'Ctrl ,', tip: 'The TV, its picture, seating, sound, performance, this screen, the library' },
+      { id: 'home', icon: 'home', label: 'Campaign', tip: 'The home screen: players, campaign settings, table check' }, { id: 'table', icon: 'settings', label: 'Settings', key: 'Ctrl ,', tip: 'Tablescape settings: the TV, its picture, tokens, sound, performance, this screen, the library. Campaign settings are one click further' },
       { id: 'help', icon: 'keyboard', label: 'Guide', key: '?', tip: 'First evening, keys, what\'s new, report a problem' }] },
   ];
   const BUILD = new Set(['map', 'asset', 'fx', 'walls', 'grid', 'layers', 'sound']);
@@ -368,7 +368,7 @@ const Play = (() => {
       h('div', { class: 'fps-ask-text' }, iconEl('gauge'),
         h('span', {}, h('b', {}, `The TV is stuttering (${fps} fps).`), ` Switch ${name} to ${next === 'medium' ? 'Medium' : 'Low'} effects?`, heavy ? h('small', {}, `Heaviest here: ${heavy}`) : null)),
       h('div', { class: 'fps-ask-btns' },
-        h('button', { class: 'btn small primary', onclick: () => { ts.settings({ mapQuality: { mapId, level: next } }); done(); toast(`${name} plays with ${next === 'medium' ? 'Medium' : 'Low'} effects (Options → Performance)`); } }, `Switch to ${next === 'medium' ? 'Medium' : 'Low'}`),
+        h('button', { class: 'btn small primary', onclick: () => { ts.settings({ mapQuality: { mapId, level: next } }); done(); toast(`${name} plays with ${next === 'medium' ? 'Medium' : 'Low'} effects (Settings → Performance)`); } }, `Switch to ${next === 'medium' ? 'Medium' : 'Low'}`),
         h('button', { class: 'btn small ghost', onclick: () => { fpsSnooze.add(mapId); done(); } }, 'Not now')));
     const done = () => { box.remove(); ui.fpsAsk = null; fpsLog.length = 0; };
     els.tctl.after(box);
@@ -650,7 +650,7 @@ const Play = (() => {
       walled() ? 'Line of sight: they see what the walls allow.' : 'No walls (or line of sight off): they reveal a circle around them.',
       'What they revealed stays revealed, also when you remove the party.', 'A split group: Another party.'],
     spell: ['Click the map to cast; drag to aim a cone, line or cube.', 'Ctrl + wheel turns the area before you place it (Shift: small steps).', '+ and − change the size in 5 ft steps.',
-      'Shift snaps the aim to 15°, Alt skips the grid.', 'Right-click a placed area for its options; H hides it from the players.', 'Drag a spell onto the hotbar to cast it with a number key.', 'Speakers and spell sounds: Options → Sound.'],
+      'Shift snaps the aim to 15°, Alt skips the grid.', 'Right-click a placed area for its options; H hides it from the players.', 'Drag a spell onto the hotbar to cast it with a number key.', 'Speakers and spell sounds: Settings → Sound.'],
     asset: ['Click to stamp, drag to scatter.', 'Click a placed asset to select it; Shift + click or Shift + drag selects several.', 'Drag to move, Ctrl + wheel to turn, [ and ] to resize.',
       'A picked asset has a frame: pull a side to make it flat or long, a corner to size it, the knob to turn it (Shift: steps of 15°).',
       'Assets lie under tokens and only react while this tool is on.'],
@@ -659,8 +659,8 @@ const Play = (() => {
     sound: () => [...({
       chapter: ['It plays on every map of this chapter that has no sounds of its own.'],
       map: ['A map with its own sounds replaces the chapter ambience while it is on the table.', 'A video map\'s own sound has its row here too.'],
-      combat: ['Fight music fades in over the ambience and out again when the fight ends.', 'Whether it starts and ends with Initiative: Options → Sound.', 'Music from Audio/Music fits well; a Spotify mood works too (Toolbox → Spotify).'],
-    }[ui.soundTab] || []), 'Speakers and spell sounds: Options → Sound. Mute is under the table preview.'],
+      combat: ['Fight music fades in over the ambience and out again when the fight ends.', 'Whether it starts and ends with Initiative: Settings → Sound.', 'Music from Audio/Music fits well; a Spotify mood works too (Toolbox → Spotify).'],
+    }[ui.soundTab] || []), 'Speakers and spell sounds: Settings → Sound. Mute is under the table preview.'],
     token: ['Click the map to drop one, click again for more.', 'Drag a token to move it; right-click it for its options.', 'List … has every token: click to pick one up, tick to keep it ready here.',
       'Ctrl + D duplicates the selected token; Alt while dragging places it without snapping.'],
     point: () => [...({
@@ -681,7 +681,7 @@ const Play = (() => {
     notes: ['Click the map to pin a note only you see, e.g. "Silver key opens this door".', 'Drag a note to move it.'],
     timer: ['Normal: a round dial at a short end or in the middle of the TV.', 'Dramatic: a big number in the middle, pulsing darker towards zero.', 'A running dial can still move to another end.'],
     talk: ['Click a portrait to bring it in, click it again to take it out. The newest one stands in front.', 'With players on both long sides, the far side gets its own copy.',
-      'List … has every portrait: click to bring one in, tick to keep it ready here.', 'The mirror button turns a portrait to face the other way.', 'The look of the band: Options → Looks.'],
+      'List … has every portrait: click to bring one in, tick to keep it ready here.', 'The mirror button turns a portrait to face the other way.', 'The look of the band: Campaign settings → Looks.'],
     toolbox: ['P and D switch the map tools, X is the marker.', 'Right-click a panel to pin it to the rail or put it on the hotbar.'],
     round: ['Drag the badge over the picture of the TV.', 'With players on both long sides, the second badge follows, turned towards the far side.'],
   };
@@ -1939,7 +1939,7 @@ const Play = (() => {
               { kind: 'wide', tip: S.table.open ? 'Without starting a fight in Initiative' : 'Plays on the table: open the table first' }), doHot('fight')));
           }
           if (sound().fighting) box.append(hint('Playing now: the ambience waits quietly underneath.'));
-          box.append(h('button', { class: 'btn ghost small opt-link', onclick: () => App.openOptions('sound') }, iconEl('settings'), S.settings.fightAuto ? 'Options: starts with Initiative' : 'Options: does not start with Initiative'));
+          box.append(h('button', { class: 'btn ghost small opt-link', onclick: () => App.openOptions('sound') }, iconEl('settings'), S.settings.fightAuto ? 'Settings: starts with Initiative' : 'Settings: does not start with Initiative'));
         }
         box.append(btn(a ? 'Choose another' : kind === 'fight' ? 'Choose fight music' : 'Choose ambience', kind === 'fight' ? 'swords' : 'music',
           () => Drawer.open({ filter: 'sounds', purpose: kind, back: { pop: 'sound', tab: kind === 'fight' ? 'combat' : 'chapter' } }), { kind: 'wide' }));
@@ -2225,7 +2225,7 @@ const Play = (() => {
       const grip = h('span', { class: 'tc-grip', 'data-tip': 'Drag to make the preview bigger or smaller', 'aria-label': 'Preview size' }, iconEl('arrows-diagonal'));
       grip.addEventListener('pointerdown', previewDrag);
       c.append(
-        h('div', { class: 'tc-shot' }, img, grip, h('span', { class: 'tc-fps', 'data-tip': 'Frames per second on the TV. Low? Try lighter effects in Options → Performance' })),
+        h('div', { class: 'tc-shot' }, img, grip, h('span', { class: 'tc-fps', 'data-tip': 'Frames per second on the TV. Low? Try lighter effects in Settings → Performance' })),
         h('div', { class: 'tc-status' }, h('span', { class: 'dot' }), h('span', { class: 'tc-text ellipsis' }),
           h('button', { class: 'icon-btn small tc-title-off', 'aria-label': 'Take the title off the table', 'data-tip': 'Take the title off the table (sending a map does it too)', onclick: () => cmd('title.show', { on: false }) }, iconEl('x'))),
         h('div', { class: 'tc-btns' },
@@ -2597,7 +2597,7 @@ const Play = (() => {
     })), '-', { header: `Its picture: ${pctOf(own)} of its squares` },
     { icon: 'minus', label: `Smaller (${pctOf(Math.max(0.5, own - 0.1))})`, action: () => setPic(Math.max(0.5, own - 0.1)) },
     { icon: 'plus', label: `Bigger (${pctOf(Math.min(2, own + 0.1))})`, action: () => setPic(Math.min(2, own + 0.1)) },
-    { icon: own === 1 ? 'check' : null, checked: own === 1, label: `As set in Options → Tokens (${pctOf(1)})`, action: () => setPic(1) }]);
+    { icon: own === 1 ? 'check' : null, checked: own === 1, label: `As set in Settings → Tokens (${pctOf(1)})`, action: () => setPic(1) }]);
   }
   // a token that changes size keeps sitting on the grid
   const snapFor = (l, size) => Geom.snap(grid(), l.x, l.y, size);
