@@ -13,10 +13,12 @@ const Trees = (() => {
   const DATA = typeof TREE_DATA === 'object' ? TREE_DATA : { order: [], variants: {} };
   const DIR = new URL('trees/', document.baseURI).href;
   const variant = (id) => DATA.variants[id] || null;
-  // the bottom layer of a tree of that size: its picture's width and height (the tree's box on the map)
+  // the layer that gives a tree of that size its box on the map: its bottom layer, or the one its tree.json names
+  // (Beta 3.21: the palm's widest crown sits near the top); its picture's width and height
+  function footprint(v, base) { const fp = v.footprintLayer; return fp != null && fp >= base && fp < v.layers.length ? fp : base; }
   function boxOf(tree) {
     const v = tree && variant(tree.v);
-    const L = v && (v.layers[tree.base] || v.layers[0]);
+    const L = v && (v.layers[footprint(v, tree.base || 0)] || v.layers[0]);
     return L ? { w: L.w, h: L.h } : null;
   }
 
@@ -26,7 +28,27 @@ const Trees = (() => {
     return m && variant(m[1]) ? { v: m[1], size: m[2] } : null;
   }
   const CELLS = { large: 4, medium: 3, small: 2 };
-  const cells = (p) => { const t = ofPath(p); return t ? CELLS[t.size] || 3 : null; };
+  // Beta 3.21: a kind's own number of squares for a size (mushrooms are smaller than trees), and the sizes it has
+  const squares = (id, size) => { const v = variant(id); const s = v && v.sizes.find((x) => x.id === size); return (s && s.squares) || CELLS[size] || 3; };
+  const SIZES = ['small', 'medium', 'large'];
+  const sizesOf = (id) => { const v = variant(id); return v ? SIZES.filter((k) => v.sizes.some((x) => x.id === k)) : []; };
+  const cells = (p) => { const t = ofPath(p); return t ? squares(t.v, t.size) : null; };
+  // the still picture of a kind and size: its address in this window, and its library name (what a map keeps)
+  const stillUrl = (id, size) => `${DIR}${id}/still-${size}.webp`;
+  const relOf = (id, size) => { const v = variant(id); return v ? `Assets/Living trees/${v.label} ${size}.webp` : null; };
+  // the kinds by group (Trees, Bushes, Mushrooms), in the order they are listed
+  function groups() {
+    const out = []; const at = new Map();
+    for (const id of DATA.order) {
+      const g = (variant(id) && variant(id).group) || 'Trees';
+      if (!at.has(g)) { at.set(g, { name: g, ids: [] }); out.push(at.get(g)); }
+      at.get(g).ids.push(id);
+    }
+    const rank = (g) => { const i = (DATA.groups || []).indexOf(g.name); return i < 0 ? 99 : i; };
+    return out.sort((a, b) => rank(a) - rank(b));
+  }
+  // how far a kind may be turned (degrees each way): the pictures have a little light baked in from one side
+  const turnOf = (id) => { const v = variant(id); return Math.min(180, (v && v.variation && v.variation.rotation) || 180); };
 
   // ---------- can this PC draw them? ----------
   // Only with a real graphics card: drawn by the processor (no acceleration, a remote desktop) a single tree costs more
@@ -181,7 +203,7 @@ const Trees = (() => {
   const settled = (a, b) => !!a && Math.abs(((((b.dir - a.dir) % 360) + 540) % 360) - 180) < 0.2 && ['strength', 'lean', 'branches', 'rustle'].every((k) => Math.abs(a[k] - b[k]) < 0.004);
 
   return {
-    DATA, variant, boxOf, ofPath, cells, supported, level, windOf, ease, settled, fromStrength, CALM, STORM,
+    DATA, variant, boxOf, ofPath, cells, squares, sizesOf, SIZES, stillUrl, relOf, groups, turnOf, supported, level, windOf, ease, settled, fromStrength, CALM, STORM,
     onChange: (f) => { listeners.add(f); return () => listeners.delete(f); },
     // the self-test: draw them without a graphics card too (true), or never (false: the still pictures)
     allowSoft(on) { soft = !!on; broken = false; changed(); },

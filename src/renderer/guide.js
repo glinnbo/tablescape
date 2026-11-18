@@ -23,6 +23,12 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.21', [
+      'Assets has two tabs: Library (your own pictures and animations) and Living (trees, bushes and mushrooms that move in the wind)',
+      'Living shows every kind as a picture: Trees, Bushes, Mushrooms. Pick Small, Medium, Large or Mixed; each one you stamp is turned a little differently',
+      'Nine new kinds: cherry, palm, three dead trees, a feathery shrub and three mushrooms',
+      'The wind in the trees and the Storm moved from Effects → Weather to the bottom of Assets → Living',
+    ]],
     ['Beta 3.20', [
       'Living trees: trees that move in the wind. Library → Assets → Living trees has seven kinds in three sizes; stamp them like any asset, or paint a forest with Scatter. Every tree looks a little different, and the shuffle button on its card gives it another look',
       'They start above the tokens: on the table a crown opens where a token stands under it',

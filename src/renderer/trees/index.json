@@ -9,7 +9,8 @@
     "large",
     "medium",
     "small"
-   ]
+   ],
+   "group": "Trees"
   },
   {
    "id": "autumn_orange",
@@ -19,7 +20,8 @@
     "large",
     "medium",
     "small"
-   ]
+   ],
+   "group": "Trees"
   },
   {
    "id": "dark_green_clumps",
@@ -29,7 +31,8 @@
     "large",
     "medium",
     "small"
-   ]
+   ],
+   "group": "Trees"
   },
   {
    "id": "light_green",
@@ -39,7 +42,8 @@
     "large",
     "medium",
     "small"
-   ]
+   ],
+   "group": "Trees"
   },
   {
    "id": "pine",
@@ -49,7 +53,30 @@
     "large",
     "medium",
     "small"
-   ]
+   ],
+   "group": "Trees"
+  },
+  {
+   "id": "cherry_blossom",
+   "label": "Cherry (pink)",
+   "layers": 5,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ],
+   "group": "Trees"
+  },
+  {
+   "id": "palm",
+   "label": "Palm",
+   "layers": 6,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ],
+   "group": "Trees"
   },
   {
    "id": "frosted_white",
@@ -59,7 +86,8 @@
     "large",
     "medium",
     "small"
-   ]
+   ],
+   "group": "Trees"
   },
   {
    "id": "frost_blue",
@@ -69,7 +97,89 @@
     "large",
     "medium",
     "small"
-   ]
+   ],
+   "group": "Trees"
+  },
+  {
+   "id": "dead_tree_brown",
+   "label": "Dead tree (brown)",
+   "layers": 5,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ],
+   "group": "Trees"
+  },
+  {
+   "id": "dead_tree_grey",
+   "label": "Dead tree (grey)",
+   "layers": 5,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ],
+   "group": "Trees"
+  },
+  {
+   "id": "dead_tree_rust",
+   "label": "Dead tree (rust)",
+   "layers": 4,
+   "sizes": [
+    "large",
+    "medium"
+   ],
+   "group": "Trees"
+  },
+  {
+   "id": "shrub_feathery",
+   "label": "Feathery shrub",
+   "layers": 6,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ],
+   "group": "Bushes"
+  },
+  {
+   "id": "fungus_teal",
+   "label": "Shelf fungus (teal)",
+   "layers": 5,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ],
+   "group": "Mushrooms"
+  },
+  {
+   "id": "fungus_pale",
+   "label": "Pale cap fungus",
+   "layers": 6,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ],
+   "group": "Mushrooms"
+  },
+  {
+   "id": "fungus_brown",
+   "label": "Shelf fungus (brown)",
+   "layers": 5,
+   "sizes": [
+    "large",
+    "medium",
+    "small"
+   ],
+   "group": "Mushrooms"
   }
+ ],
+ "groups": [
+  "Trees",
+  "Bushes",
+  "Mushrooms"
  ]
 }

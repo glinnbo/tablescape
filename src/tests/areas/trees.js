@@ -24,11 +24,17 @@ module.exports = (area) => {
     await K.g('Trees.allowSoft(true)'); await K.t('Trees.allowSoft(true)');
   });
 
-  area.quick('the library has the living trees under Assets: seven kinds in three sizes, part of the app', async (t) => {
+  area.quick('the living kinds come with the app: sixteen of them in three groups, each in its sizes, known by name', async (t) => {
     const list = t.lib('assets').filter((x) => x.builtin);
-    t.eq(list.length, 21, 'living trees in the library');
+    t.eq(list.length, 47, 'every kind in every size it has (the rust dead tree has no small one)');
     t.ok(list.every((x) => x.rel.startsWith('Assets/Living trees/') && x.tree && fs.existsSync(x.path) && x.thumb), 'each with its still picture', list[0]);
-    t.eq([...new Set(list.map((x) => x.tree.v))].length, 7, 'kinds');
+    t.eq([...new Set(list.map((x) => x.tree.v))].length, 16, 'kinds');
+    t.eq(await t.g('Trees.groups().map((g) => g.name + " " + g.ids.length).join(", ")'), 'Trees 12, Bushes 1, Mushrooms 3', 'by group');
+    t.eq(await t.g('[Trees.squares("fungus_pale", "large"), Trees.squares("fungus_pale", "small"), Trees.squares("oak_dark_green", "medium"), Trees.squares("shrub_feathery", "large")].join()'), '2,1,3,2.5', 'each kind its own squares');
+    t.eq(await t.g('Trees.sizesOf("dead_tree_rust").join()'), 'medium,large', 'sizes a kind has');
+    // the palm: its widest crown sits near the top, and that crown is its box (and its still picture)
+    const palm = await t.g('(() => { const v = Trees.variant("palm"); return { box: Trees.boxOf({ v: "palm", base: 0 }), w4: v.layers[4].w, w0: v.layers[0].w, fp: v.footprintLayer }; })()');
+    t.ok(palm.fp === 4 && palm.box.w === palm.w4 && palm.w4 > palm.w0 * 2, 'the palm is as wide as its widest crown', palm);
     t.eq(L.toRef(still('Pine small')).rel, 'Assets/Living trees/Pine small.webp', 'known by its name, wherever the app lies');
     t.ok(!path.relative(L.root, still('Pine small')).startsWith('Assets'), 'not a file of the library folder');
   });
@@ -120,47 +126,97 @@ module.exports = (area) => {
     t.eq((await t.g('Play.hotActions().filter((a) => a.ref === "storm").length')), 1, 'Storm is among the hotbar\'s actions');
   }, { ms: 60000 });
 
-  area.quick('your tools: a tree brush takes four, three or two squares; the card gives Another look and leaves Mirror out; the Wind section shows while the map has trees', async (t) => {
+  area.quick('Assets → Living: the kinds as tiles by group, Small to Large or mixed, each placed turned at random; Another look; the wind lives here, no longer under Weather or in the library', async (t) => {
     await clear(t);
     t.gm().webContents.focus();
+    const gs = mapNow(t).grid.size;
+    // no Wind under Effects → Weather any more
     await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'weather'; Play.openPop('fx')`);
-    await t.until(() => t.count('.wind-box'), 4000, 'the weather panel');
-    t.ok(await t.g(`document.querySelector('.wind-box').hidden`), 'no Wind section on a map without trees');
-    const items = t.lib('assets').filter((x) => x.builtin);
-    const it = items.find((x) => x.name === 'Autumn (orange) medium');
+    await t.until(() => t.count('#pop .wx-add'), 4000, 'the weather panel');
+    t.eq(await t.count('#pop .wind-box'), 0, 'no Wind section under Weather');
+    // the library: no Living trees folder (the Cartographer still finds them there)
     await t.g(`Play.Drawer.open({ cat: 'assets' })`);
-    await t.until(() => t.findText('span', 'Living trees'), 6000, 'the Living trees folder');
+    await t.until(() => t.findText('#drawer span', 'Nature'), 6000, 'the library\'s Assets');
+    t.ok(!(await t.findText('#drawer span', 'Living trees')), 'no Living trees folder in the library');
     await t.key('Escape');
-    await t.g(`Play.setTool('asset')`);
-    await t.g(`Play.ui.brush = null`);
-    const far = mapNow(t).layers.filter((l) => l.role === 'token').sort((p, q) => q.x - p.x)[0]; // (clear of the panel on the left)
-    await t.cmd('layer.add', { path: it.path, role: 'asset', x: far.x - 3 * mapNow(t).grid.size, y: far.y + 2 * mapNow(t).grid.size, w: 2 * mapNow(t).grid.size });
-    const id = trees(t)[0].id; const seed = trees(t)[0].tree.seed;
-    await t.g(`Play.openPop('asset')`);
+    // the Assets panel: Library | Living
+    await t.g(`Play.setTool('asset'); Play.openPop('asset')`);
+    await t.until(() => t.count('#pop .asset-tabs'), 4000, 'the tabs');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .asset-tabs .seg-btn')].map((b) => b.textContent).join('|')`), 'Library|Living', 'Library | Living');
+    await t.clickSel('#pop .asset-tabs [data-v="living"]');
+    await t.until(() => t.count('#pop .living-tiles .tile'), 4000, 'the Living tab');
+    t.eq(await t.count('#pop .living-tiles .tile'), 16, 'every kind as a tile');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .living-group')].map((x) => x.textContent).join()`), 'Trees,Bushes,Mushrooms', 'by group');
+    const pick = await t.g(`(() => { const b = document.querySelector('#pop .living-pick'); return { h: b.clientHeight, all: b.scrollHeight }; })()`);
+    t.ok(pick.h < 240 && pick.all > pick.h + 100, 'two rows show, the rest scrolls', pick);
+    t.ok(await t.count('#pop .wind-box') && !(await t.g(`document.querySelector('#pop .wind-box').hidden`)), 'the wind at the bottom, also before the map has a tree');
+    t.ok(await t.findText('#pop .wind-box', 'Follows the weather') && await t.findText('#pop .wind-box button', 'Storm'), 'Follows the weather, and Storm');
+    t.ok(await t.g(`[...document.querySelectorAll('#pop .wind-box .compass')].every((x) => !x.offsetParent)`), 'no direction to set while it follows the weather');
+    t.handle('wind.set', { auto: false });
+    await t.until(() => t.g(`[...document.querySelectorAll('#pop .wind-box .compass')].some((x) => x.offsetParent)`), 4000, 'your own wind: a direction and a strength');
+    t.handle('wind.set', { auto: true });
+    // free spots on the map, well apart, clear of the tokens and the panel
+    const spots = await t.g(`(() => {
+      const v = Play.view(); const pop = document.getElementById('pop').getBoundingClientRect();
+      const toClient = (p) => { const q = v.mapToTable(p.x, p.y); const d = document.createElement('div'); d.style.cssText = 'position:absolute;width:0;height:0;left:' + q.x * v.ppi + 'px;top:' + q.y * v.ppi + 'px'; v.marks.appendChild(d); const r = d.getBoundingClientRect(); d.remove(); return { x: r.x, y: r.y }; };
+      const m = Play.state().map; const g = m.grid.size; const toks = m.layers.filter((l) => l.role === 'token');
+      const a = v.toMap(pop.right + 60, 140); const b = v.toMap(innerWidth - 60, innerHeight - 220);
+      const out = [];
+      for (let y = Math.min(a.y, b.y) + g; y < Math.max(a.y, b.y) - g && out.length < 8; y += 5 * g) {
+        for (let x = Math.min(a.x, b.x) + g; x < Math.max(a.x, b.x) - g && out.length < 8; x += 5 * g) {
+          if (toks.some((k) => Math.hypot(k.x - x, k.y - y) < 2.5 * g)) continue;
+          const c = toClient({ x, y }); if (c.x > pop.right + 30 && c.x < innerWidth - 30 && c.y > 100 && c.y < innerHeight - 160) out.push({ x, y, cx: c.x, cy: c.y });
+        }
+      }
+      return out;
+    })()`);
+    t.ok(spots.length >= 7, 'room on the map', spots.length);
+    // a tile may lie below the first two rows: scrolled into view, then clicked
+    const tile = async (v) => { await t.g(`document.querySelector('#pop .living-tiles [data-v="${v}"]').scrollIntoView({ block: 'nearest' })`); await t.clickSel(`#pop .living-tiles [data-v="${v}"]`); };
+    // Pine, Small: two squares
+    await tile('pine');
+    await t.clickSel('#pop .living-sizes [data-v="small"]');
+    t.ok(await t.findText('#pop .ctl-slider', '2 squares'), 'Small: two squares');
+    await t.click(spots[0].cx, spots[0].cy);
+    const pine = await t.until(() => trees(t).find((l) => l.tree.v === 'pine'), 5000, 'a pine placed by a click');
+    t.ok(Math.abs(pine.w - 2 * gs) < 0.01 && /Pine small/.test(pine.rel) && Math.abs(pine.rotation) <= 40, 'small, turned no more than a pine may', pine);
+    // a mushroom: its own squares; the rust dead tree has no small one
+    await tile('fungus_pale');
+    await t.clickSel('#pop .living-sizes [data-v="large"]');
+    t.ok(await t.findText('#pop .ctl-slider', '2 squares'), 'a large mushroom: two squares');
+    await tile('dead_tree_rust');
+    t.ok(await t.g(`document.querySelector('#pop .living-sizes [data-v="small"]').disabled`), 'no Small for the rust dead tree');
+    // Oak, Mixed: each one a size of its own, each turned its own way
+    await tile('oak_dark_green');
+    await t.clickSel('#pop .living-sizes [data-v="mixed"]');
+    for (const p of spots.slice(1, 7)) { await t.click(p.cx, p.cy); await new Promise((r) => setTimeout(r, 120)); }
+    const oaks = await t.until(() => { const l = trees(t).filter((x) => x.tree.v === 'oak_dark_green'); return l.length === 6 && l; }, 6000, 'six oaks');
+    const ws = [...new Set(oaks.map((l) => Math.round(l.w / gs)))];
+    t.ok(ws.length >= 2 && ws.every((w) => [2, 3, 4].includes(w)), 'mixed sizes', ws);
+    t.ok(new Set(oaks.map((l) => l.rotation)).size >= 4 && oaks.every((l) => Math.abs(l.rotation) <= 70), 'each turned its own way, within what an oak allows', oaks.map((l) => l.rotation));
+    // a placed tree selected: Another look in the panel, no Height, Shadow or Mirror, no Mirror on its card
+    const id = oaks[0].id; const seed = oaks[0].tree.seed;
     const r = await t.until(() => t.rect(`.sv-asset[data-id="${id}"] .sv-treebox`), 6000, 'the tree\'s box');
     await t.click(r.cx, r.cy);
-    await t.until(() => t.count('.sel-card [data-tip^="Another look"], .card [data-tip^="Another look"], [data-tip^="Another look"]'), 5000, 'the card');
+    await t.until(() => t.g(`[...document.querySelectorAll('#pop .look .btn')].some((b) => b.offsetParent && /Another look/.test(b.textContent))`), 5000, 'Another look in the panel');
     t.eq(await t.count('[data-tip="Mirror"]'), 0, 'no Mirror for a tree');
     t.ok(await t.g(`[...document.querySelectorAll('.look .ctl-label')].filter((x) => x.offsetParent && /^(Height|Shadow|Mirror)$/.test(x.textContent)).length === 0`), 'no Height, Shadow or Mirror in its look');
-    t.ok(await t.g(`[...document.querySelectorAll('.look .ctl-label')].some((x) => x.offsetParent && x.textContent === 'Hue')`), 'Hue and Darken stay');
+    t.ok(await t.g(`['Hue', 'Darken', 'Turn'].every((k) => [...document.querySelectorAll('.look .ctl-label')].some((x) => x.offsetParent && x.textContent === k))`), 'Hue, Darken and Turn for it');
     t.eq(await t.count('.sv-gizmo.no-sides'), 1, 'its frame: corners and the knob');
-    await t.clickSel('[data-tip^="Another look"]');
-    await t.until(() => trees(t)[0].tree.seed !== seed, 4000, 'another look');
-    // the brush: its size by the tree's size
-    for (const [name, n] of [['Pine large', 4], ['Pine medium', 3], ['Pine small', 2]]) {
-      const b = items.find((x) => x.name === name);
-      await t.g(`Play.hotRun({ kind: 'asset', ref: ${JSON.stringify({ path: b.path, rel: b.rel, name: b.name })}, label: ${JSON.stringify(b.name)} })`);
-      await t.until(async () => (await t.g('Play.ui.assetCells')) === n && (await t.g('Play.ui.brush && Play.ui.brush.name')) === name, 5000, `${name}: ${n} squares`);
-    }
-    await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'weather'; Play.openPop('fx')`);
-    await t.until(async () => (await t.count('.wind-box')) && !(await t.g(`document.querySelector('.wind-box').hidden`)), 5000, 'the Wind section, now that the map has a tree');
-    t.ok(await t.findText('.wind-box', 'Follows the weather') && await t.findText('.wind-box button', 'Storm'), 'Follows the weather, and Storm');
-    t.ok(await t.g(`[...document.querySelectorAll('.wind-box .compass')].every((x) => !x.offsetParent)`), 'no direction to set while it follows the weather');
-    t.handle('wind.set', { auto: false });
-    await t.until(() => t.g(`[...document.querySelectorAll('.wind-box .compass')].some((x) => x.offsetParent)`), 4000, 'your own wind: a direction and a strength');
-    t.handle('wind.set', { auto: true });
+    t.eq(await t.g(`document.querySelector('#pop .living-tiles .tile.on').dataset.v`), 'oak_dark_green', 'the tiles stay on what you place next');
+    await t.clickText('#pop .look .btn', 'Another look');
+    await t.until(() => trees(t).find((l) => l.id === id).tree.seed !== seed, 4000, 'another look');
+    // a living tree from the hotbar: the Living tab picks it
+    const b = t.lib('assets').find((x) => x.builtin && x.name === 'Palm medium');
+    await t.g(`Play.hotRun({ kind: 'asset', ref: ${JSON.stringify({ path: b.path, rel: b.rel, name: b.name })}, label: ${JSON.stringify(b.name)} })`);
+    await t.until(async () => (await t.g('Play.ui.assetTab + " " + Play.ui.living.v + " " + Play.ui.living.size')) === 'living palm medium', 5000, 'the palm, medium, picked');
+    // the Library tab keeps its own pick
+    await t.g(`document.getElementById('pop').scrollTop = 0`);
+    await t.clickSel('#pop .asset-tabs [data-v="library"]');
+    await t.until(() => t.count('#pop .brush-row'), 4000, 'the Library tab');
+    t.eq(await t.count('#pop .living-tiles, #pop .wind-box'), 0, 'no trees and no wind there');
     await t.g('Play.closePop()'); await t.g(`Play.setTool('select')`);
-  }, { ms: 90000 });
+  }, { ms: 120000 });
 
   area.quick('without a graphics card the trees are still pictures, like any asset', async (t) => {
     await clear(t);

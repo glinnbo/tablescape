@@ -1,0 +1,119 @@
+{
+ "id": "fungus_brown",
+ "label": "Shelf fungus (brown)",
+ "layers": [
+  {
+   "file": "layer0.webp",
+   "w": 1015,
+   "h": 1040,
+   "cx": 508.5,
+   "cy": 517.5,
+   "radius": 514.8
+  },
+  {
+   "file": "layer1.webp",
+   "w": 841,
+   "h": 952,
+   "cx": 415.2,
+   "cy": 473.5,
+   "radius": 506.9
+  },
+  {
+   "file": "layer2.webp",
+   "w": 779,
+   "h": 698,
+   "cx": 392.7,
+   "cy": 353.0,
+   "radius": 381.5
+  },
+  {
+   "file": "layer3.webp",
+   "w": 346,
+   "h": 396,
+   "cx": 165.8,
+   "cy": 200.5,
+   "radius": 195.5
+  },
+  {
+   "file": "layer4.webp",
+   "w": 240,
+   "h": 240,
+   "cx": 117.4,
+   "cy": 120.4,
+   "radius": 113.0
+  }
+ ],
+ "sizes": [
+  {
+   "id": "large",
+   "base": 0,
+   "squares": 2
+  },
+  {
+   "id": "medium",
+   "base": 1,
+   "squares": 1.5
+  },
+  {
+   "id": "small",
+   "base": 2,
+   "squares": 1
+  }
+ ],
+ "sway": {
+  "topAmplitude": 0.004,
+  "period": 4.5,
+  "lag": 0.3,
+  "cross": 0.2,
+  "twist": 0.002
+ },
+ "branches": {
+  "layerTurn": 0.002,
+  "period": 5.2,
+  "sectorTurn": 0.002,
+  "lobes": 1.7,
+  "speed": 0.1
+ },
+ "rustle": {
+  "amount": 0.0002,
+  "scale": 0.012,
+  "speed": 0.3,
+  "light": 0.015
+ },
+ "lean": {
+  "top": 0.06,
+  "curve": 1.6,
+  "ease": 1.4,
+  "period": 2.8,
+  "periodTop": 1.35,
+  "damping": 0.6,
+  "dampingStorm": 0.45,
+  "gustVar": 0.2,
+  "gustVarWind": 0.3,
+  "gustRate": 0.33,
+  "maxBend": 0.08
+ },
+ "shadow": {
+  "layerOffset": 0.012,
+  "groundOffset": 0.04,
+  "blur": 0.015,
+  "layerAlpha": 0.55,
+  "groundAlpha": 0.5
+ },
+ "variation": {
+  "rotation": 180,
+  "mirror": true,
+  "scale": 0.06,
+  "offset": 0.04,
+  "hue": 4,
+  "saturation": 0.08,
+  "brightness": 0.06,
+  "layerHue": 2,
+  "layerBrightness": 0.03,
+  "heightLight": 0.06,
+  "heightWarm": 0.0,
+  "patchHue": 3,
+  "patchBrightness": 0.04,
+  "swap": []
+ }
+}

@@ -176,7 +176,9 @@ const LibraryDrawer = (() => {
     // Cancel or Esc: back to that menu without picking anything
     function cancel() { done(null); }
     async function reload() {
-      items = await window.ts.library('list');
+      // (Beta 3.21: the living trees are picked in the Assets panel's Living tab; here only for the Cartographer's maps)
+      const lt = !!(ui.drawer && ui.drawer.purpose === 'atlasAsset');
+      items = (await window.ts.library('list')).filter((it) => lt || !(it.builtin && it.tree));
       trees.clear();
       loaded = true;
       render();

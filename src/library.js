@@ -250,6 +250,7 @@ function touchRecent(absPath) {
 // Stored in campaign files as { path, rel }: rel (relative to the library)
 // wins when the file exists there, so a library can move drives or computers.
 function toRef(absPath) {
+  if (BUILTIN.has(absPath)) absPath = BUILTIN.get(absPath).path; // (Beta 3.21: a living tree named by its library name, as the Assets panel's Living tab does)
   const p = path.resolve(absPath);
   const b = BUILTIN_AT.get(p);
   if (b) return { path: p, name: b.name, rel: b.rel };
@@ -270,7 +271,8 @@ function resolveRef(ref) {
   return ref.path;
 }
 // ---------- Beta 3.20: what comes with the app (the living trees) ----------
-// They are not files of the library folder: they lie with the app, are listed under Assets → Living trees, and a
+// They are not files of the library folder: they lie with the app, are picked in the Assets panel's Living tab (Beta
+// 3.21; the library lists them only for the Cartographer, under Assets → Living trees), and a
 // reference to one is kept by that name (rel), so it is found on any PC and after any update. A living tree on a map
 // is an asset whose picture is the tree's still picture; what makes it live is its "tree" (variant, size, seed).
 const BUILTIN = new Map(); // rel → { rel, path, name, tree: { v, size, base } }

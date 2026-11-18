@@ -1,7 +1,7 @@
 /* tree-wind.js — layered top-down trees that move in the wind.
  *
  * The engine of the living trees (Beta 3.20), as it came with the approved preview. Changed for Tablescape only where
- * marked "Tablescape:": a plain script instead of an ES module (the windows load scripts from disk), mip levels on
+ * marked "Tablescape:" (and "footprintLayer" for the palm, from the second tree package): a plain script instead of an ES module (the windows load scripts from disk), mip levels on
  * WebGL 2 (a tree is often drawn much smaller than its pictures: without them the leaves glitter), shadow pictures at
  * half their size (they are blurred: the same look for a quarter of the memory), and an asset's own colour turn and
  * darkening on top of the tree's variation.
@@ -27,7 +27,8 @@
  *     tw.update(dtSeconds, trees);
  *     tw.draw(trees, { width, height, matrix: [a, b, c, d, e, f] });
  *   tree object: { id, variant, x, y, size, rotation = 0, seed = 0, base = 0, opacity = 1 }
- *     x/y/size are map units; size = width of the tree's bottom layer; rotation in radians;
+ *     x/y/size are map units; size = width of the tree's footprint layer: the bottom layer, or the layer
+ *     tree.json names in "footprintLayer" (a palm whose widest crown sits near the top); rotation in radians;
  *     base = index of the bottom layer (0 = full tree; higher = younger/smaller tree)
  *   view.matrix maps map units to canvas pixels: px = a*x + c*y + e, py = b*x + d*y + f
  */
@@ -175,10 +176,11 @@ class TreeWind {
 
   /** Register a variant from an already-parsed tree.json and loaded images (same order as cfg.layers). */
   addVariant(cfg, images) {
-    const baseW = cfg.layers[0].w;
+    const fpI = cfg.footprintLayer ?? 0;               // the ground-shadow layer gets the softer blur
+    const baseW = cfg.layers[fpI].w;
     const layers = cfg.layers.map((L, i) => {
       const img = images[i];
-      const blur = baseW*cfg.shadow.blur*(i === 0 ? 1.8 : 1);
+      const blur = baseW*cfg.shadow.blur*(i === fpI ? 1.8 : 1);
       return { ...L, tex: this._texture(img), sh: this._shadowTexture(img, blur) };
     });
     const v = { ...cfg, variation: { ...VARIATION_DEFAULTS, ...(cfg.variation || {}) }, layers };
@@ -306,6 +308,13 @@ class TreeWind {
              rot: sw.twist*W.strength*k*Math.sin(w*0.8*t - ph + 0.5)*gustEnv(t, seed + 4) + turn };
   }
 
+  /** Layer slot that defines the tree's size and casts the ground shadow: tree.json "footprintLayer"
+   *  (when the tree starts at or below it), else the bottom layer of this size. */
+  footprintSlot(tree, v) {
+    const base = tree.base || 0, fp = v.footprintLayer;
+    return (fp != null && fp >= base && fp < v.layers.length) ? fp : base;
+  }
+
   /* ---------- drawing ---------- */
   /** Draw trees in the given order (sort them yourself, e.g. small/back first).
    *  view = { width, height, matrix:[a,b,c,d,e,f] }  (canvas pixels; matrix maps map units -> canvas px) */
@@ -337,7 +346,8 @@ class TreeWind {
     const gl = this.gl, U = this._u, W = this.wind, sd = v.shadow;
     const base = tree.base || 0, n = v.layers.length;
     const look = this.lookOf(tree, v);
-    const baseL = v.layers[look.slots[base].img];
+    const fp = this.footprintSlot(tree, v);
+    const baseL = v.layers[look.slots[fp].img];       // the footprint layer (bottom layer unless footprintLayer)
     const scale = tree.size/baseL.w;                  // map units per texture px
     const rot0 = tree.rotation || 0, alpha = tree.opacity ?? 1, seed = tree.seed || 0;
     gl.uniform1f(U.uTreeScale, scale);
@@ -362,7 +372,7 @@ class TreeWind {
       gl.uniform1f(U.uFlip, S.flip);
       gl.uniform1f(U.uScale, scale*S.scl);
       if (this.shadows) {
-        const isGround = i === base;
+        const isGround = i === fp;                    // the footprint layer shades the ground (and what lies under it)
         const dd = tree.size*(isGround ? sd.groundOffset : sd.layerOffset*(1 + (i - base)*0.25));
         const follow = isGround ? 0.6 : 1;
         gl.bindTexture(gl.TEXTURE_2D, L.sh.tex);

@@ -1,0 +1,116 @@
+{
+ "id": "cherry_blossom",
+ "label": "Cherry (pink)",
+ "layers": [
+  {
+   "file": "layer0.webp",
+   "w": 1044,
+   "h": 1100,
+   "cx": 526.2,
+   "cy": 575.9,
+   "radius": 566.8
+  },
+  {
+   "file": "layer1.webp",
+   "w": 752,
+   "h": 628,
+   "cx": 361.2,
+   "cy": 320.0,
+   "radius": 377.3
+  },
+  {
+   "file": "layer2.webp",
+   "w": 405,
+   "h": 434,
+   "cx": 202.3,
+   "cy": 203.0,
+   "radius": 233.0
+  },
+  {
+   "file": "layer3.webp",
+   "w": 287,
+   "h": 234,
+   "cx": 145.1,
+   "cy": 118.9,
+   "radius": 131.8
+  },
+  {
+   "file": "layer4.webp",
+   "w": 185,
+   "h": 157,
+   "cx": 94.3,
+   "cy": 79.7,
+   "radius": 81.8
+  }
+ ],
+ "sizes": [
+  {
+   "id": "large",
+   "base": 0
+  },
+  {
+   "id": "medium",
+   "base": 1
+  },
+  {
+   "id": "small",
+   "base": 2
+  }
+ ],
+ "sway": {
+  "topAmplitude": 0.016,
+  "period": 3.6,
+  "lag": 0.55,
+  "cross": 0.28,
+  "twist": 0.01
+ },
+ "branches": {
+  "layerTurn": 0.012,
+  "period": 5.2,
+  "sectorTurn": 0.032,
+  "lobes": 1.7,
+  "speed": 0.22
+ },
+ "rustle": {
+  "amount": 0.0045,
+  "scale": 0.012,
+  "speed": 0.55,
+  "light": 0.08
+ },
+ "lean": {
+  "top": 0.425,
+  "curve": 1.6,
+  "ease": 1.4,
+  "period": 2.2,
+  "periodTop": 1.35,
+  "damping": 0.34,
+  "dampingStorm": 0.16,
+  "gustVar": 0.35,
+  "gustVarWind": 0.6,
+  "gustRate": 0.33,
+  "maxBend": 0.6
+ },
+ "shadow": {
+  "layerOffset": 0.01,
+  "groundOffset": 0.055,
+  "blur": 0.022,
+  "layerAlpha": 0.5,
+  "groundAlpha": 0.55
+ },
+ "variation": {
+  "rotation": 40,
+  "mirror": false,
+  "scale": 0.05,
+  "offset": 0.03,
+  "hue": 3,
+  "saturation": 0.08,
+  "brightness": 0.06,
+  "layerHue": 1.5,
+  "layerBrightness": 0.03,
+  "heightLight": 0.08,
+  "heightWarm": 0.02,
+  "patchHue": 3,
+  "patchBrightness": 0.04,
+  "swap": []
+ }
+}

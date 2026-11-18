@@ -1,0 +1,127 @@
+{
+ "id": "fungus_pale",
+ "label": "Pale cap fungus",
+ "layers": [
+  {
+   "file": "layer0.webp",
+   "w": 957,
+   "h": 982,
+   "cx": 476.8,
+   "cy": 493.1,
+   "radius": 480.0
+  },
+  {
+   "file": "layer1.webp",
+   "w": 712,
+   "h": 752,
+   "cx": 357.0,
+   "cy": 378.4,
+   "radius": 366.1
+  },
+  {
+   "file": "layer2.webp",
+   "w": 557,
+   "h": 577,
+   "cx": 276.5,
+   "cy": 287.3,
+   "radius": 274.3
+  },
+  {
+   "file": "layer3.webp",
+   "w": 370,
+   "h": 389,
+   "cx": 182.0,
+   "cy": 194.8,
+   "radius": 180.8
+  },
+  {
+   "file": "layer4.webp",
+   "w": 256,
+   "h": 251,
+   "cx": 127.3,
+   "cy": 125.0,
+   "radius": 114.2
+  },
+  {
+   "file": "layer5.webp",
+   "w": 161,
+   "h": 172,
+   "cx": 80.0,
+   "cy": 85.6,
+   "radius": 71.7
+  }
+ ],
+ "sizes": [
+  {
+   "id": "large",
+   "base": 0,
+   "squares": 2
+  },
+  {
+   "id": "medium",
+   "base": 1,
+   "squares": 1.5
+  },
+  {
+   "id": "small",
+   "base": 2,
+   "squares": 1
+  }
+ ],
+ "sway": {
+  "topAmplitude": 0.004,
+  "period": 4.5,
+  "lag": 0.3,
+  "cross": 0.2,
+  "twist": 0.002
+ },
+ "branches": {
+  "layerTurn": 0.002,
+  "period": 5.2,
+  "sectorTurn": 0.002,
+  "lobes": 1.7,
+  "speed": 0.1
+ },
+ "rustle": {
+  "amount": 0.0002,
+  "scale": 0.012,
+  "speed": 0.3,
+  "light": 0.015
+ },
+ "lean": {
+  "top": 0.06,
+  "curve": 1.6,
+  "ease": 1.4,
+  "period": 2.8,
+  "periodTop": 1.35,
+  "damping": 0.6,
+  "dampingStorm": 0.45,
+  "gustVar": 0.2,
+  "gustVarWind": 0.3,
+  "gustRate": 0.33,
+  "maxBend": 0.08
+ },
+ "shadow": {
+  "layerOffset": 0.012,
+  "groundOffset": 0.04,
+  "blur": 0.015,
+  "layerAlpha": 0.55,
+  "groundAlpha": 0.5
+ },
+ "variation": {
+  "rotation": 180,
+  "mirror": true,
+  "scale": 0.06,
+  "offset": 0.04,
+  "hue": 2,
+  "saturation": 0.05,
+  "brightness": 0.06,
+  "layerHue": 2,
+  "layerBrightness": 0.03,
+  "heightLight": 0.06,
+  "heightWarm": 0.0,
+  "patchHue": 3,
+  "patchBrightness": 0.04,
+  "swap": []
+ }
+}

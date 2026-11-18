@@ -3807,3 +3807,12 @@ body.gm .sv-trees-over { opacity: 0.7; } /* (above the tokens: see-through on yo
 .sv-gizmo.no-sides .sv-grip.side { display: none; }
 .wind-box { padding: 10px 12px; border: 1px solid var(--line, rgba(255, 255, 255, 0.08)); border-radius: 10px; background: rgba(255, 255, 255, 0.025); }
 .wind-box .wind-now { margin: 0; }
+/* Beta 3.21: Assets → Library | Living. The living kinds as picture tiles by group; two rows show, the rest scroll */
+.asset-tabs .seg-btn { padding: 8px 10px; font-weight: 600; }
+.living-pick { max-height: 226px; overflow-y: auto; margin-right: -6px; padding-right: 6px; scrollbar-gutter: stable; }
+.living-group { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); margin: 2px 0 5px; }
+.living-tiles + .living-group { margin-top: 10px; }
+.living-tiles .tile { padding: 5px 2px 6px; gap: 3px; min-height: 0; min-width: 0; }
+.living-tiles .tile img { width: 48px; height: 48px; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45)); pointer-events: none; }
+.living-tiles .tile span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; font-size: 10.5px; }
+.living-sizes .seg-btn:disabled { opacity: 0.35; cursor: default; }

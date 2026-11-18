@@ -24,6 +24,11 @@ const Play = (() => {
     // assets tool
     brush: null, assetMode: 'stamp', assetCells: 2, assetRot: 0, scatterIn: 3, scatterGap: 1.2, scatterTurn: true, scatterVary: 0.25, selAsset: null, selAssets: [],
     assetLook: { opacity: 1, dark: 0, shadow: false, flip: false, stretch: 1, hue: 0 }, // the next asset you stamp
+    // Beta 3.21: the panel's two tabs (your library's pictures and animations | the living trees, bushes and mushrooms);
+    // the Living tab's pick (kind, size or 'mixed', and how much bigger or smaller than that size's squares), its look,
+    // and the next one it places (its size when mixed, and its turn: random, within what the kind allows)
+    assetTab: (() => { try { return localStorage.getItem('assetTab') === 'living' ? 'living' : 'library'; } catch { return 'library'; } })(),
+    living: { v: null, size: 'large', scale: 1 }, livingLook: { opacity: 1, dark: 0, hue: 0 }, livingNext: null,
     // spells tool
     spell: { name: 'Fireball', shape: 'sphere', size: 20, width: 5, skin: 'fire', mode: 'burst', squares: true, count: false, color: null, duration: null },
     spellAngle: 0, spellQuery: '', recent: [], aimFrom: null,
@@ -637,7 +642,7 @@ const Play = (() => {
         ? ['Click the map to place a light, or click a token so it carries the light.', 'The party\'s own light is set in Play → Party marker (U).']
         : ['Darkness covers the whole map; lights, torches and campfires shine through it.', 'Remember lit areas: what the light reached stays dimly visible.', 'Day, Dusk, Night and Cave work on the hotbar and the button deck too.'],
       weather: ['Weather covers the whole table and stays put when you move the map.', 'With lightning in the mix, the Lightning button flashes it whenever you like.', 'Save a mix to use it on other maps.',
-        'Living trees take their wind from the weather: where it blows and how hard. Switch "Follows the weather" off to set the wind yourself; Storm (also a hotbar button) blows until you click it again.'],
+        'The living trees take their wind from the weather. Their own wind and the Storm are under Assets → Living.'],
     }[ui.fxMode] || [])],
     walls: () => [({
       wall: 'Click from corner to corner; double-click, Enter or right-click ends the line. Alt places freely.',
@@ -652,7 +657,10 @@ const Play = (() => {
       'What they revealed stays revealed, also when you remove the party.', 'A split group: Another party.'],
     spell: ['Click the map to cast; drag to aim a cone, line or cube.', 'Ctrl + wheel turns the area before you place it (Shift: small steps).', '+ and − change the size in 5 ft steps.',
       'Shift snaps the aim to 15°, Alt skips the grid.', 'Right-click a placed area for its options; H hides it from the players.', 'Drag a spell onto the hotbar to cast it with a number key.', 'Speakers and spell sounds: Settings → Sound.'],
-    asset: ['Click to stamp, drag to scatter.', 'Living trees (Library → Assets → Living trees) move in the wind. Every one looks a little different; the shuffle button gives one another look. Scatter paints a forest.', 'Click a placed asset to select it; Shift + click or Shift + drag selects several.', 'Drag to move, Ctrl + wheel to turn, [ and ] to resize.',
+    asset: ['Click to stamp, drag to scatter.', 'Library: your own pictures and animations. Living: trees, bushes and mushrooms that move in the wind.',
+      'Every living tree looks a little different and is turned a little differently; Another look gives a selected one a new look. Mixed sizes and Scatter paint a forest.',
+      'The wind in the trees follows the weather. Switch "Follows the weather" off to set it yourself; Storm (also a hotbar button) blows until you click it again.',
+      'Click a placed asset to select it; Shift + click or Shift + drag selects several.', 'Drag to move, Ctrl + wheel to turn, [ and ] to resize.',
       'A picked asset has a frame: pull a side to make it flat or long, a corner to size it, the knob to turn it (Shift: steps of 15°).',
       'Assets lie under tokens and only react while this tool is on.'],
     layers: ['Click a row to select it on the map; H hides it from the players.', 'Delete removes what is selected; Ctrl + Z brings it back.'],
@@ -1469,7 +1477,6 @@ const Play = (() => {
     return [
       h('div', { class: 'ctl-label' }, 'Mixes'),
       presets,
-      ...(o.plain ? [] : [windSection()]), // (Beta 3.20: only while the map has living trees)
       h('div', { class: 'ctl-label' }, 'Single layers: click to switch on or off'),
       add,
       h('div', { class: 'ctl-label' }, 'In this mix (click one to change it)'),
@@ -1487,8 +1494,8 @@ const Play = (() => {
       }, { tip: 'Keep this mix to use on other maps' })),
     ];
   }
-  // Beta 3.20: the wind in the living trees (shown while the map has any). It follows the weather unless you set your
-  // own: where it blows and how hard; the rest (how far they lean, branches, leaves) comes from that, or by hand.
+  // Beta 3.20: the wind in the living trees (Beta 3.21: at the bottom of Assets → Living). It follows the weather unless
+  // you set your own: where it blows and how hard; the rest (how far they lean, branches, leaves) comes from that, or by hand.
   function windSection() {
     const W = () => map().wind || { auto: true };
     const now = () => Trees.windOf(map());
@@ -1513,7 +1520,6 @@ const Play = (() => {
       row(line, storm),
       toggle({ label: 'Follows the weather', get: () => W().auto !== false, set: (v) => { const w = now(); cmd('wind.set', v ? { auto: true } : { auto: false, dir: Math.round(w.dir), ...(W().storm ? {} : { strength: round(w.strength, 2), lean: round(w.lean, 2), branches: round(w.branches, 2), rustle: round(w.rustle, 2) }) }); } }),
       own, fine);
-    bind(() => { box.hidden = !map().layers.some((l) => l.tree); });
     return box;
   }
   function wxDetail(L, def, local, o = {}) {
@@ -3286,7 +3292,7 @@ const Play = (() => {
     const m = S && S.map;
     switch (it.kind) {
       case 'token': return ui.tool === 'token' && ui.tok && ui.tok.brush && ui.tok.brush.path === r.path;
-      case 'asset': return ui.tool === 'asset' && ui.brush && ui.brush.path === r.path;
+      case 'asset': { const tr = Trees.ofPath(r.path); return ui.tool === 'asset' && (tr ? ui.assetTab === 'living' && livingPick().v === tr.v && ui.living.size === tr.size : ui.assetTab === 'library' && !!ui.brush && ui.brush.path === r.path); }
       case 'portrait': return !!(S.talk && S.talk.cast.some((x) => x.path === r.path));
       case 'handout': return (S.handouts || []).some((x) => x.path === r.path);
       case 'overlay': return !!(m && m.layers.some((l) => l.role === 'overlay' && l.path === r.path));
@@ -3818,7 +3824,7 @@ const Play = (() => {
   function updateBrushCursor() {
     if (!brushCursor) { brushCursor = h('div', { class: 'brush-cursor' }); view.marks.appendChild(brushCursor); }
     const fog = ui.tool === 'fog' && ui.fogShape === 'brush' && !(drag && drag.kind === 'rect');
-    const paint = (ui.tool === 'fx' && ui.fxMode === 'paint') || (ui.tool === 'asset' && ui.assetMode === 'scatter' && ui.brush);
+    const paint = (ui.tool === 'fx' && ui.fxMode === 'paint') || (ui.tool === 'asset' && ui.assetMode === 'scatter' && !!activeBrush());
     const show = (fog || paint) && lastPointer && !ui.align && S && S.map;
     brushCursor.style.display = show ? '' : 'none';
     if (!show) return;
@@ -4051,7 +4057,7 @@ const Play = (() => {
       } else if (drag.kind === 'scatter') {
         drag.acc += Math.hypot(pt.x - drag.last.x, pt.y - drag.last.y);
         drag.last = pt;
-        const gap = Math.max(0.2, ui.assetCells * grid().size * ui.scatterGap);
+        const gap = Math.max(0.2, (ui.assetTab === 'living' ? livingCells() : ui.assetCells) * grid().size * ui.scatterGap);
         while (drag.acc >= gap) { drag.acc -= gap; scatterAt(pt, drag.key); }
       }
       updateAssetGhost();
@@ -4155,6 +4161,7 @@ const Play = (() => {
       }
       const a = over || (ui.selAsset && layer(ui.selAsset));
       if (a) { if (ui.selAsset !== a.id) selectAsset(a.id); send(`turn-${a.id}`, 'layer.update', { id: a.id, rotation: stepTurn(a.rotation, dir, step) }); }
+      else if (ui.assetTab === 'living') { const nx = livingNext(); const t = Trees.turnOf(livingPick().v); nx.a = clamp(nx.a + (dir * step * 180) / t, -180, 180); updateAssetGhost(); showReadout(e, Math.round(livingBrush().rot)); return; }
       else { ui.assetRot = stepTurn(ui.assetRot, dir, step); updateAssetGhost(); }
       showReadout(e, a ? stepTurn(a.rotation, dir, step) : ui.assetRot);
       return;
@@ -4232,6 +4239,9 @@ const Play = (() => {
 
   // ---------- assets: stamp, scatter, select ----------
   function setBrush(it) {
+    const tr = Trees.ofPath(it.path); // (Beta 3.21: a living tree, from the hotbar: the Living tab picks it)
+    if (tr) { pickLiving({ v: tr.v, size: tr.size }); if (ui.tool !== 'asset') setTool('asset'); openPop('asset'); return; }
+    if (ui.assetTab !== 'library') setAssetTab('library');
     const url = it.url || UI.pathToUrl(it.path);
     ui.brush = { path: it.path, name: it.name, kind: it.kind, url };
     ui.recentBrushes = [ui.brush, ...(ui.recentBrushes || []).filter((b) => b.path !== it.path)].slice(0, 8);
@@ -4247,18 +4257,70 @@ const Play = (() => {
     if (ui.tool !== 'asset') setTool('asset');
     if (popId !== 'asset') openPop('asset'); else refreshPop();
   }
-  function stampAsset(pt, rotation, scale, key) {
-    const b = ui.brush;
+  // ---------- Beta 3.21: the Living tab (trees, bushes, mushrooms that come with the app) ----------
+  function setAssetTab(tab) {
+    ui.assetTab = tab === 'living' ? 'living' : 'library';
+    try { localStorage.setItem('assetTab', ui.assetTab); } catch {}
+  }
+  // what is picked, made valid (a kind that exists, a size it has)
+  function livingPick() {
+    const L = ui.living;
+    if (!Trees.variant(L.v)) L.v = Trees.DATA.order[0] || null;
+    const has = L.v ? Trees.sizesOf(L.v) : [];
+    if (L.size !== 'mixed' && !has.includes(L.size)) L.size = has.includes('large') ? 'large' : has[has.length - 1] || 'large';
+    return L;
+  }
+  function pickLiving(p) {
+    setAssetTab('living');
+    Object.assign(ui.living, p, 'size' in p ? { scale: 1 } : {});
+    rollLiving();
+  }
+  // the next one: its size (one of the kind's at random when mixed) and its turn (-180 … 180, made to fit the kind on placing)
+  function rollLiving() {
+    const L = livingPick(); const has = L.v ? Trees.sizesOf(L.v) : [];
+    ui.livingNext = { v: L.v, size: L.size === 'mixed' ? has[Math.floor(Math.random() * has.length)] || 'large' : L.size, a: Math.round(Math.random() * 360 - 180) };
+    return ui.livingNext;
+  }
+  function livingNext() {
+    const L = livingPick(); const n = ui.livingNext;
+    return n && n.v === L.v && (L.size === 'mixed' ? Trees.sizesOf(L.v).includes(n.size) : n.size === L.size) ? n : rollLiving();
+  }
+  // as a brush: what layer.add gets (the still picture's library name), how many squares, the turn it will have
+  function livingBrush(n = livingNext()) {
+    const v = Trees.variant(n.v);
+    if (!v) return null;
+    return { path: Trees.relOf(n.v, n.size), name: `${v.label} ${n.size}`, kind: 'image', url: Trees.stillUrl(n.v, n.size), tree: true,
+      cells: Trees.squares(n.v, n.size) * ui.living.scale, a: n.a, rot: (n.a * Trees.turnOf(n.v)) / 180 };
+  }
+  // the squares of the picked size (for mixed: the middle one), for the slider and the scatter spacing
+  function livingCells() {
+    const L = livingPick(); if (!L.v) return 3;
+    const has = Trees.sizesOf(L.v);
+    const sz = L.size === 'mixed' ? (has.includes('medium') ? 'medium' : has[0]) : L.size;
+    return Trees.squares(L.v, sz) * L.scale;
+  }
+  function livingResize(dir) {
+    const L = livingPick();
+    if (L.size === 'mixed') L.scale = clamp(round(L.scale + dir * 0.1, 2), 0.5, 2);
+    else { const sq = Trees.squares(L.v, L.size); L.scale = clamp(Math.round(sq * L.scale * 4 + dir) / 4, 0.25, 8) / sq; }
+  }
+  const activeBrush = () => (ui.assetTab === 'living' ? livingBrush() : ui.brush);
+  const nextLook = () => (ui.assetTab === 'living' ? { ...ui.livingLook, shadow: false, flip: false, stretch: 1 } : ui.assetLook);
+
+  function stampAsset(pt, rotation, scale, key, b = activeBrush()) {
     if (!b) return null;
-    const L = ui.assetLook;
-    return cmd('layer.add', { path: b.path, role: 'asset', x: pt.x, y: pt.y, w: round(ui.assetCells * grid().size * scale, 3), rotation: normAngle(rotation), opacity: L.opacity, dark: L.dark, shadow: L.shadow, flip: L.flip, stretch: L.stretch || 1, hue: L.hue || 0, coalesce: key });
+    const L = nextLook();
+    const cells = b.tree ? b.cells : ui.assetCells;
+    return cmd('layer.add', { path: b.path, role: 'asset', x: pt.x, y: pt.y, w: round(cells * grid().size * scale, 3), rotation: normAngle(rotation), opacity: L.opacity, dark: L.dark, shadow: L.shadow, flip: L.flip, stretch: L.stretch || 1, hue: L.hue || 0, coalesce: key });
   }
   function scatterAt(pt, key) {
     const R = ui.scatterIn / 2 / zoom();
     const a = Math.random() * Math.PI * 2; const d = Math.sqrt(Math.random()) * R;
     const at = { x: pt.x + Math.cos(a) * d, y: pt.y + Math.sin(a) * d };
+    const vary = 1 + (Math.random() * 2 - 1) * ui.scatterVary;
+    if (ui.assetTab === 'living') { const n = rollLiving(); stampAsset(at, n.a, vary, key, livingBrush(n)); rollLiving(); return; } // (always turned at random)
     const rot = ui.scatterTurn ? Math.random() * 360 : ui.assetRot;
-    stampAsset(at, rot, 1 + (Math.random() * 2 - 1) * ui.scatterVary, key);
+    stampAsset(at, rot, vary, key);
   }
   // one or several selected assets (Shift + click adds one, Shift + drag selects with a box)
   function setAssetSelection(ids) {
@@ -4352,7 +4414,8 @@ const Play = (() => {
       return;
     }
     if (ui.selAssets.length) { selectAsset(null); return; }
-    if (!ui.brush) { toast('Pick an asset in the library first.'); Drawer.open({ cat: 'assets', purpose: 'brush', back: { pop: 'asset', tool: 'asset' } }); return; }
+    if (ui.assetTab === 'living' && ui.assetMode === 'stamp') { const b = livingBrush(); if (b) { stampAsset(pt, b.a, 1, `stamp-${Date.now()}`, b); rollLiving(); updateAssetGhost(); } return; }
+    if (ui.assetTab === 'library' && !ui.brush) { toast('Pick an asset in the library first.'); Drawer.open({ cat: 'assets', purpose: 'brush', back: { pop: 'asset', tool: 'asset' } }); return; }
     if (ui.assetMode === 'stamp') { stampAsset(pt, ui.assetRot, 1, `stamp-${Date.now()}`); return; }
     const key = `scatter-${Date.now()}`;
     drag = { kind: 'scatter', key, last: pt, acc: 0 };
@@ -4402,18 +4465,18 @@ const Play = (() => {
     if (!view) return;
     if (dropGhost) { placeDropGhost(); return; }
     const hovering = lastPointer && !!assetElAt(lastPointer.x, lastPointer.y);
-    const show = ui.tool === 'asset' && ui.brush && ui.assetMode === 'stamp' && lastPointer && S && S.map && !ui.selAsset && !hovering && !(drag && drag.kind === 'assetmove');
+    const b = ui.tool === 'asset' ? activeBrush() : null;
+    const show = b && ui.assetMode === 'stamp' && lastPointer && S && S.map && !ui.selAsset && !hovering && !(drag && drag.kind === 'assetmove');
     if (!show) { hideGhost(); return; }
-    const g = ghostMedia(ui.brush.url, ui.brush.kind);
+    const g = ghostMedia(b.url, b.kind);
     if (g.bad) { hideGhost(); return; }
     const p = view.toTable(lastPointer.x, lastPointer.y);
-    const w = ui.assetCells * grid().size * zoom() * view.ppi;
-    const tree = !!Trees.cells(ui.brush.path);
-    const L = tree ? { ...ui.assetLook, flip: false, stretch: 1 } : ui.assetLook; // (a living tree keeps its shape)
+    const w = (b.tree ? b.cells : ui.assetCells) * grid().size * zoom() * view.ppi;
+    const L = nextLook(); // (a living tree keeps its shape)
     g.el.classList.remove('is-token');
     showGhost(g, {
       left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${w}px`, height: 'auto', opacity: String(0.5 * L.opacity),
-      transform: `translate(-50%, -50%) rotate(${ui.assetRot}deg) scale(${L.flip ? -1 : 1}, ${L.stretch || 1})`, filter: `${L.hue ? `hue-rotate(${L.hue}deg) ` : ''}${L.dark > 0 ? `brightness(${1 - L.dark})` : ''}`,
+      transform: `translate(-50%, -50%) rotate(${b.tree ? b.rot : ui.assetRot}deg) scale(${L.flip ? -1 : 1}, ${L.stretch || 1})`, filter: `${L.hue ? `hue-rotate(${L.hue}deg) ` : ''}${L.dark > 0 ? `brightness(${1 - L.dark})` : ''}`,
     });
   }
   // the size a drop gives it (placeAsset: 256 pixels a square), a token on the square it snaps to (dropAsset)
@@ -4522,14 +4585,19 @@ const Play = (() => {
       head.append(...[h('span', { class: 'grow' }, list.length ? (list.length === 1 ? UI.wrapName(list[0].name, '', 'b') : h('b', {}, `${list.length} selected`)) : 'Look of the next one you place'),
         list.length ? h('button', { class: 'btn ghost small', onclick: () => setAssetSelection([]) }, iconEl('x'), 'Done') : null].filter(Boolean));
     });
-    const get = (k, d) => { const list = sel(); return list.length ? (list[0][k] ?? d) : ui.assetLook[k]; };
+    const next = () => (ui.assetTab === 'living' ? ui.livingLook : ui.assetLook); // (Beta 3.21: each tab its own)
+    const get = (k, d) => { const list = sel(); return list.length ? (list[0][k] ?? d) : (next()[k] ?? d); };
     const set = (k, v, key) => {
       const list = sel();
-      if (!list.length) { ui.assetLook[k] = v; updateAssetGhost(); refreshPop(); return; }
+      if (!list.length) { next()[k] = v; updateAssetGhost(); refreshPop(); return; }
       const patches = list.map((a) => ({ id: a.id, [k]: v }));
       if (key) send(key, 'layer.many', { patches }); else cmd('layer.many', { patches });
     };
     const lockBox = h('div', {}, toggle({ label: 'Locked (clicks go through it)', get: () => false, set: (v) => { if (v) lockAssets(sel()); } }));
+    const turn = slider({ label: 'Turn', min: -180, max: 180, step: 5,
+      get: () => { const list = sel(); return list.length ? (list[0].rotation || 0) : ui.assetRot; },
+      set: (v, k) => { const list = sel(); if (list.length) send(k, 'layer.many', { patches: list.map((a) => ({ id: a.id, rotation: v })) }); else { ui.assetRot = v; updateAssetGhost(); } }, fmt: (v) => `${v}°` });
+    bind(() => { turn.hidden = !sel().length && ui.assetTab === 'living'; });
     bind(() => { lockBox.hidden = !sel().length; });
     // Beta 3.10: flat or long (also for several at once, and for the next one placed). The slider runs evenly from a
     // quarter to four times the picture's own height, with 100 % in the middle; the frame's sides go further.
@@ -4539,15 +4607,16 @@ const Play = (() => {
         set: (u, k) => set('stretch', Math.abs(u) < 0.04 ? 1 : round(2 ** u, 3), k), fmt: (u) => pct(Math.abs(u) < 0.04 ? 1 : 2 ** u) }),
       toggle({ label: 'Shadow', get: () => get('shadow', false), set: (v) => set('shadow', v) }),
       toggle({ label: 'Mirror', get: () => get('flip', false), set: (v) => set('flip', v) }));
-    bind(() => { const list = sel(); shape.hidden = list.length ? list.every((a) => a.tree) : !!(ui.brush && Trees.cells(ui.brush.path)); });
-    return h('div', { class: 'stack look' }, head,
+    bind(() => { const list = sel(); shape.hidden = list.length ? list.every((a) => a.tree) : ui.assetTab === 'living'; });
+    // Beta 3.21: a selected living tree: another look right here; the next one placed turns at random (no Turn for it)
+    const another = row(btn('Another look', 'arrows-shuffle', () => { const ids = sel().filter((a) => a.tree).map((a) => a.id); if (ids.length) cmd('layer.reroll', { ids }); }, { tip: 'A different tree of the same kind' }));
+    bind(() => { another.hidden = !sel().some((a) => a.tree); });
+    return h('div', { class: 'stack look' }, head, another,
       slider({ label: 'Opacity', min: 0.1, max: 1, step: 0.05, get: () => get('opacity', 1), set: (v, k) => set('opacity', v, k), fmt: pct }),
       slider({ label: 'Darken', min: 0, max: 0.8, step: 0.05, get: () => get('dark', 0), set: (v, k) => set('dark', v, k), fmt: (v) => (v < 0.01 ? 'Off' : pct(v)) }),
       // Beta 3.10: its colours turned round the colour wheel (a red banner made blue, green leaves made autumn)
       slider({ label: 'Hue', min: -180, max: 180, step: 5, get: () => get('hue', 0) || 0, set: (v, k) => set('hue', v, k), fmt: (v) => (v ? `${v > 0 ? '+' : ''}${v}°` : 'Off') }),
-      slider({ label: 'Turn', min: -180, max: 180, step: 5,
-        get: () => { const list = sel(); return list.length ? (list[0].rotation || 0) : ui.assetRot; },
-        set: (v, k) => { const list = sel(); if (list.length) send(k, 'layer.many', { patches: list.map((a) => ({ id: a.id, rotation: v })) }); else { ui.assetRot = v; updateAssetGhost(); } }, fmt: (v) => `${v}°` }),
+      turn,
       shape,
       lockBox);
   }
@@ -4591,11 +4660,12 @@ const Play = (() => {
       recent.hidden = list.length < 2;
       for (const b of list) recent.append(h('button', { class: `brush-pick ${ui.brush && ui.brush.path === b.path ? 'on' : ''}`, 'data-tip': b.name, 'aria-label': b.name, onclick: () => setBrush(b) }, Thumbs.img(b.path, b.kind)));
     });
+    const live = ui.assetTab === 'living';
     const scatterBox = h('div', { class: 'stack' },
       slider({ label: 'Brush size', min: 1, max: 12, step: 0.5, get: () => ui.scatterIn, set: (v) => { ui.scatterIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` }),
       slider({ label: 'Spacing', min: 0.4, max: 3, step: 0.05, get: () => ui.scatterGap, set: (v) => { ui.scatterGap = v; }, fmt: (v) => (v < 0.8 ? 'Dense' : v > 1.8 ? 'Sparse' : 'Normal') }),
       slider({ label: 'Size varies', min: 0, max: 0.6, step: 0.05, get: () => ui.scatterVary, set: (v) => { ui.scatterVary = v; }, fmt: (v) => `±${Math.round(v * 100)}%` }),
-      toggle({ label: 'Random turn', get: () => ui.scatterTurn, set: (v) => { ui.scatterTurn = v; } }));
+      live ? null : toggle({ label: 'Random turn', get: () => ui.scatterTurn, set: (v) => { ui.scatterTurn = v; } })); // (living ones always turn at random)
     bind(() => { scatterBox.hidden = ui.assetMode !== 'scatter'; });
     const unlock = h('div', { class: 'ctl-row' });
     bind(() => {
@@ -4606,14 +4676,61 @@ const Play = (() => {
       unlock.hidden = !locked.length;
       if (locked.length) unlock.append(h('span', { class: 'grow hint' }, `${locked.length} locked`), btn('Unlock all', 'lock-open', () => { const ls = map().layers.filter((l) => l.role === 'asset' && l.locked); cmd('layer.many', { patches: ls.map((l) => ({ id: l.id, locked: false })) }); }));
     });
+    // Beta 3.21: two tabs: your library's pictures and animations, and the living trees, bushes and mushrooms
+    const tabs = seg({ cls: 'asset-tabs', options: [
+      { value: 'library', label: 'Library', icon: 'photo', tip: 'Your own pictures and animations' },
+      { value: 'living', label: 'Living', icon: 'plant', tip: 'Trees, bushes and mushrooms that move in the wind' }],
+    get: () => ui.assetTab, set: (v) => { setAssetTab(v); if (v === 'living') rollLiving(); openPop('asset'); updateBrushCursor(); updateAssetGhost(); } });
+    const mode = seg({ options: [{ value: 'stamp', label: 'Stamp', icon: 'pointer', tip: 'One per click' }, { value: 'scatter', label: 'Scatter', icon: 'spray', tip: 'Drag to paint many, turned and sized at random' }],
+      get: () => ui.assetMode, set: (v) => { ui.assetMode = v; refreshPop(); updateBrushCursor(); updateAssetGhost(); } });
+    const sq = (v) => `${v} ${v === 1 ? 'square' : 'squares'}`;
+    if (live) {
+      livingPick();
+      // the size: Small, Medium, Large (each kind's own squares) or a mix; the slider fine-tunes it
+      const sizes = seg({ cls: 'seg-4 living-sizes', options: [
+        { value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }, { value: 'mixed', label: 'Mixed', tip: 'Each one small, medium or large, at random' }],
+      get: () => ui.living.size, set: (v) => { if (v !== 'mixed' && !Trees.sizesOf(livingPick().v).includes(v)) return; pickLiving({ size: v }); refreshPop(); updateAssetGhost(); } });
+      bind(() => { const has = Trees.sizesOf(livingPick().v); for (const b of sizes.children) { const no = b.dataset.v !== 'mixed' && !has.includes(b.dataset.v); b.disabled = no; b.dataset.tip = no ? 'This kind does not come in that size' : b.dataset.v === 'mixed' ? 'Each one small, medium or large, at random' : ''; } });
+      const fine = h('div', {});
+      bind(() => {
+        const mixed = ui.living.size === 'mixed';
+        if (fine.dataset.m === String(mixed) && fine.firstChild) return;
+        fine.dataset.m = String(mixed);
+        fine.replaceChildren(mixed
+          ? slider({ label: 'Size', min: 0.5, max: 2, step: 0.05, get: () => ui.living.scale, set: (v) => { ui.living.scale = v; updateAssetGhost(); }, fmt: pct })
+          : slider({ label: 'Size', min: 0.25, max: 8, step: 0.25, get: () => round(livingCells() * 4, 0) / 4,
+            set: (v) => { const L = livingPick(); ui.living.scale = v / Trees.squares(L.v, L.size); updateAssetGhost(); }, fmt: sq }));
+      });
+      return h('div', { class: 'stack' }, tabs, livingPicker(), sizes, mode, fine, scatterBox, assetLookSection(), sep(), windSection(), unlock);
+    }
     return h('div', { class: 'stack' },
-      brushRow, recent,
-      seg({ options: [{ value: 'stamp', label: 'Stamp', icon: 'pointer', tip: 'One per click' }, { value: 'scatter', label: 'Scatter', icon: 'spray', tip: 'Drag to paint many, turned and sized at random' }],
-        get: () => ui.assetMode, set: (v) => { ui.assetMode = v; refreshPop(); updateBrushCursor(); updateAssetGhost(); } }),
-      slider({ label: 'Size', min: 0.25, max: 8, step: 0.25, get: () => ui.assetCells, set: (v) => { ui.assetCells = v; updateAssetGhost(); }, fmt: (v) => `${v} ${v === 1 ? 'square' : 'squares'}` }),
+      tabs, brushRow, recent, mode,
+      slider({ label: 'Size', min: 0.25, max: 8, step: 0.25, get: () => ui.assetCells, set: (v) => { ui.assetCells = v; updateAssetGhost(); }, fmt: sq }),
       scatterBox,
       assetLookSection(),
       unlock);
+  }
+  // Beta 3.21: the kinds as picture tiles, by group (Trees, Bushes, Mushrooms); two rows show, the rest scroll
+  function livingPicker() {
+    const groups = Trees.groups();
+    const box = h('div', { class: 'living-pick' });
+    for (const g of groups) {
+      if (groups.length > 1) box.append(h('div', { class: 'living-group' }, g.name));
+      box.append(h('div', { class: 'tiles living-tiles' }, ...g.ids.map((id) => {
+        const v = Trees.variant(id); const has = Trees.sizesOf(id);
+        return h('button', { class: 'tile', dataset: { v: id }, 'aria-label': v.label, 'data-tip': v.label,
+          onclick: () => { pickLiving({ v: id }); refreshPop(); updateAssetGhost(); },
+        }, h('img', { src: Trees.stillUrl(id, has.includes('medium') ? 'medium' : has[0]), alt: '', draggable: false }), h('span', {}, v.label));
+      })));
+    }
+    bind(() => { const v = livingPick().v; for (const b of box.querySelectorAll('.tile')) b.classList.toggle('on', b.dataset.v === v); });
+    // the picked one in view (it may lie below the first two rows)
+    requestAnimationFrame(() => {
+      const on = box.querySelector('.tile.on'); if (!on) return;
+      const top = on.offsetTop - box.offsetTop; const bot = top + on.offsetHeight;
+      if (top < box.scrollTop || bot > box.scrollTop + box.clientHeight) box.scrollTop = Math.max(0, top - 24);
+    });
+    return box;
   }
 
   function flushBrush(d = drag) {
@@ -4937,6 +5054,7 @@ const Play = (() => {
             const a = ui.selAsset && layer(ui.selAsset);
             if (ui.selAssets.length > 1) cmd('layer.many', { patches: ui.selAssets.map(layer).filter(Boolean).map((x) => ({ id: x.id, w: round(x.w * (k === ']' ? 1.15 : 1 / 1.15), 3) })), coalesce: 'size-many' });
             else if (a) cmd('layer.update', { id: a.id, w: round(a.w * (k === ']' ? 1.15 : 1 / 1.15), 3), coalesce: `size-${a.id}` });
+            else if (ui.assetTab === 'living') { livingResize(k === ']' ? 1 : -1); updateAssetGhost(); }
             else { ui.assetCells = clamp(ui.assetCells + (k === ']' ? 0.25 : -0.25), 0.25, 8); updateAssetGhost(); }
           } else if (ui.tool === 'fx') { ui.paintIn = clamp(ui.paintIn + (k === ']' ? 0.5 : -0.5), 0.5, 8); }
           else ui.brushIn = clamp(ui.brushIn + (k === ']' ? 0.5 : -0.5), 0.5, 8);
