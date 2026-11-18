@@ -23,6 +23,13 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.19', [
+      'The home screen menu is one list: Play (glowing), Prepare the maps, Players, Campaign settings, Tablescape settings. One marker: the mouse moves it, the arrow keys go on from there, Enter starts what is marked',
+      'TV ready, Speakers and Calibrated left the home screen: they are in Tablescape settings → Table check. While something needs a look, Tablescape settings has an orange dot',
+      'In a tall window the campaign sits in the middle, between the top and the campaigns along the bottom',
+      'The arrow keys go through the sections of Campaign settings and Tablescape settings',
+      'Conversation with players on both sides: both portraits show the same way. A portrait taller than the room between the two bands is made smaller, so no head goes under the other side\'s band',
+    ]],
     ['Beta 3.18', [
       'Campaign settings and Tablescape settings. Campaign settings (on the home screen, or the link under the sections of Settings) has the campaign itself, Screens on the table, Looks, Initiative, Players at the table and Tokens on the table. Tablescape settings (the old Options; Settings on the map screen) has the TV, its picture, tokens, sound, performance, this screen and the library',
       'Each campaign keeps its own look, how initiative and the round show, where the players sit, the phones\' rules, how tokens look on the table and the remote\'s buttons. Your campaigns keep what they had; a new campaign starts like the one played last',

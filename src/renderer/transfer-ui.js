@@ -43,7 +43,7 @@ const TransferUI = (() => {
   }
   function closeRing() { if (ring) { ring.back.remove(); ring = null; } }
   function onProgress(e) {
-    if (!ring) return;
+    if (!ring || ring.back.classList.contains('done')) return; // (a late progress line must not cover the result)
     const k = e.totalBytes > 0 ? Math.min(1, e.bytes / e.totalBytes) : e.total ? e.done / e.total : 0;
     ring.arc.style.strokeDashoffset = `${ring.C * (1 - k)}`;
     ring.pct.textContent = `${Math.floor(k * 100)}%`;

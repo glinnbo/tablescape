@@ -83,8 +83,8 @@ module.exports = (area) => {
     const listed = (t.handle('campaign.list').campaigns || []).filter((c) => c.broken);
     t.ok(listed.length === 1 && listed[0].backups >= 1, 'it is listed as damaged, with an earlier version', listed);
     await t.clickSel('.hm-slot.broken'); // (Beta 3.17: picked, it offers its backups where PLAY is)
-    await t.until(async () => /BACKUPS/.test(await t.text('.hm-play')), 3000, 'BACKUPS instead of PLAY');
-    await t.clickSel('.hm-play');
+    await t.until(async () => (await t.text('.hm-item[data-id="backups"]')) === 'Backups', 3000, 'Backups instead of Play');
+    await t.clickSel('.hm-item[data-id="backups"]');
     await t.until(async () => (await t.count('.modal .dlg-row')) >= 1, 4000, 'its earlier versions');
     await t.clickText('.modal .dlg-btns .btn, .modal .dlg-row .btn', 'Restore');
     await t.until(() => (t.handle('campaign.list').campaigns || []).some((c) => c.name === 'Half written' && !c.broken), 6000, 'the campaign to be whole again');

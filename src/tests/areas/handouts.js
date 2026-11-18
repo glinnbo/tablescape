@@ -69,7 +69,7 @@ module.exports = (area) => {
       const out = [...document.querySelectorAll('.tv-talk .talk-npc')].map((n) => {
         const r = n.getBoundingClientRect(); const x = r.left + r.width / 2; const y = r.top + r.height / 2;
         const all = document.elementsFromPoint(x, y);
-        return { far: !!n.closest('.talk-side.far'), npc: all.findIndex((e) => e.closest('.talk-npc')), ho: all.findIndex((e) => e.closest('.tv-handout')) };
+        return { far: !!n.closest('.far'), npc: all.findIndex((e) => e.closest('.talk-npc')), ho: all.findIndex((e) => e.closest('.tv-handout')) };
       });
       st.remove();
       return out;

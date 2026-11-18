@@ -2,7 +2,7 @@
 'use strict';
 
 // Beta 3.18: two panels, Tablescape settings (for every campaign) and Campaign settings (kept in the campaign)
-const SECTIONS = [['tv', 'TV'], ['picture', 'Picture'], ['tokens', 'Tokens'], ['sound', 'Sound'], ['perf', 'Performance'], ['screen', 'This screen'], ['library', 'Library']];
+const SECTIONS = [['check', 'Table check'], ['tv', 'TV'], ['picture', 'Picture'], ['tokens', 'Tokens'], ['sound', 'Sound'], ['perf', 'Performance'], ['screen', 'This screen'], ['library', 'Library']];
 const CAMP = [['campaign', 'Campaign'], ['screens', 'Screens'], ['looks', 'Looks'], ['init', 'Initiative'], ['players', 'Players'], ['tabletok', 'Tokens']];
 
 module.exports = (area) => {
@@ -137,6 +137,33 @@ module.exports = (area) => {
       await t.send();
     }
     t.eq(t.settings.tableStyle, was.tableStyle || 'ink', 'the demo as it was');
+  });
+
+  // Beta 3.19: up and down go through the sections of both panels (a slider keeps its arrows)
+  area.quick('the arrow keys go through the sections; a slider keeps them', async (t) => {
+    const on = () => t.g(`(document.querySelector('.opt-tab.on') || {}).dataset.id`);
+    await t.g(`App.openOptions('tv')`);
+    await t.until(async () => (await on()) === 'tv', 3000, 'TV');
+    t.gm().webContents.focus();
+    await t.g(`document.activeElement && document.activeElement.blur()`);
+    await t.key('Down');
+    await t.until(async () => (await on()) === 'picture', 2000, 'down: Picture');
+    await t.key('Up'); await t.key('Up');
+    await t.until(async () => (await on()) === 'check', 2000, 'up twice: Table check');
+    await t.key('Up');
+    await t.until(async () => (await on()) === 'library', 2000, 'and round to the last');
+    await t.g(`App.openOptions('screen')`);
+    await t.until(async () => (await on()) === 'screen', 2000, 'This screen');
+    await t.g(`document.querySelector('.opt-body input[type="range"]').focus()`);
+    await t.key('Down');
+    await t.sleep(300);
+    t.eq(await on(), 'screen', 'a slider with the focus keeps the arrows');
+    await t.g(`document.activeElement && document.activeElement.blur()`);
+    await t.g(`App.openCampaignSettings('looks')`);
+    await t.until(async () => (await on()) === 'looks', 2000, 'Campaign settings → Looks');
+    await t.key('Down');
+    await t.until(async () => (await on()) === 'init', 2000, 'down: Initiative');
+    await t.g('App.closeOptions()');
   });
 
   area.quick('Esc closes Options', async (t) => {

@@ -141,15 +141,17 @@ const TableOverlays = (() => {
   function mount(root) {
     const stage = document.getElementById('table-stage');
     const talkEl = el('div', 'tv-talk');
+    // Beta 3.19: three layers for both sides: what stands behind, the portraits, the bands. A tall portrait reaches into
+    // the other side's band; the bands now lie over both sides' portraits alike (the near side's used to stand over
+    // the far band while the far side's went under the near band)
+    const layer = (s, kind, child) => { const l = el('div', `talk-layer ${kind} ${s}`); l.append(child); return l; };
     const sides = ['near', 'far'].map((s) => {
       const side = el('div', `talk-side ${s}`);
       const back = el('div', 'talk-back'); // Prototype 27: what stands behind the portraits (the forest's tall trees)
-      const cast = el('div', 'talk-cast');
-      const ink = el('div', 'talk-ink');
-      side.append(back, cast, ink);
-      talkEl.append(side);
-      return { side, back, cast, ink, nodes: new Map() };
+      side.append(back);
+      return { s, side, back, cast: el('div', 'talk-cast'), ink: el('div', 'talk-ink'), nodes: new Map() };
     });
+    talkEl.append(...sides.map((x) => x.side), ...sides.map((x) => layer(x.s, 'castl', x.cast)), ...sides.map((x) => layer(x.s, 'inkl', x.ink)));
     const handoutEl = el('div', 'tv-handout');
     const hItems = new Map(); // Prototype 26: several handouts at once; path → { el, faces: [{ f, img }], one, data }
     const breakEl = el('div', 'tv-break');
@@ -267,7 +269,10 @@ const TableOverlays = (() => {
       const margin = geom.W * 0.04;
       for (const s of sides) {
         const list = talk.cast.map((c) => s.nodes.get(c.path)).filter(Boolean);
-        const hs = list.map((n) => Math.round(H * ((n.c && n.c.scale) || 1))); // (Prototype 12: each one's own size)
+        // (Prototype 12: each one's own size. Beta 3.19: with players on both sides no taller than the room between the
+        // two bands, so no head goes under the other side's band)
+        const most = seats === 'both' ? Math.round(geom.H * 0.86) : Infinity;
+        const hs = list.map((n) => Math.min(most, Math.round(H * ((n.c && n.c.scale) || 1))));
         const widths = list.map((n, i) => (n.img.naturalWidth ? (hs[i] * n.img.naturalWidth) / n.img.naturalHeight : hs[i] * 0.8));
         const order = list.map((n, i) => i).reverse(); // front first
         const pos = new Array(list.length);
@@ -660,7 +665,7 @@ void main() {
 
     // ---------- everything at once, from the table state ----------
     function set(s, view) {
-      seats = s.seats === 'one' ? 'one' : 'both';
+      if ((s.seats === 'one' ? 'one' : 'both') !== seats) { seats = s.seats === 'one' ? 'one' : 'both'; if (talk) layout(); }
       root.classList.toggle('one-side', seats === 'one');
       if (view) {
         const k = Math.min(innerWidth / view.world.w, innerHeight / view.world.h);

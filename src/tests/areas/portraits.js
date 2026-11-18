@@ -23,6 +23,28 @@ module.exports = (area) => {
     await t.until(async () => !(await talk(t)), 5000, 'the portrait to leave the TV');
   });
 
+  // Beta 3.19: with players on both sides, a big portrait stays clear of the other side's band, on both sides alike
+  area.quick('both sides: a big portrait stays below the other side\'s band; the bands lie over both sides\' portraits', async (t) => {
+    const p = faces(t)[0];
+    t.eq(t.settings.seats || 'both', 'both', 'players on both sides');
+    if (t.state.talk) await t.cmd('talk.off', {});
+    await t.cmd('talk.size', { path: p.path, scale: 2 });
+    await t.g(`window.ts.settings({ talk: { size: 0.7 } })`);
+    try {
+      await t.cmd('talk.toggle', { path: p.path });
+      const look = () => t.t(`(() => { const n = [...document.querySelectorAll('.tv-talk .talk-npc:not(.out)')]; const z = (sel) => +getComputedStyle(document.querySelector(sel)).zIndex;
+        return { n: n.length, far: n.filter((x) => x.closest('.far')).length, hs: n.map((x) => x.getBoundingClientRect().height), H: innerHeight, cast: z('.talk-layer.castl.far'), ink: z('.talk-layer.inkl.near') }; })()`);
+      const r = await t.until(async () => { const x = await look(); return x.n === 2 && x.hs.every((hh) => hh > 50) && x; }, 5000, 'the portrait on both sides');
+      t.eq(r.far, 1, 'one copy for the far side');
+      t.ok(r.hs.every((hh) => hh <= r.H * 0.87) && Math.abs(r.hs[0] - r.hs[1]) < 2, 'both no taller than the room between the bands, the same size', r);
+      t.ok(r.ink > r.cast, 'the near band lies over the far side\'s portrait as the far band over the near one', r);
+    } finally {
+      await t.cmd('talk.off', {});
+      await t.cmd('talk.size', { path: p.path, scale: 1 });
+      await t.g(`window.ts.settings({ talk: { size: 0.34 } })`);
+    }
+  });
+
   area.deep('two portraits stand together; ending the talk clears the TV', async (t) => {
     const list = faces(t);
     t.ok(list.length >= 2, 'the library has two portraits', list.length);

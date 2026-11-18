@@ -60,11 +60,8 @@ const Home = (() => {
     el.name = h('h1', { class: 'hm-name' });
     el.meta = h('div', { class: 'hm-meta' });
     el.party = h('div', { class: 'hm-party' });
-    el.play = h('button', { class: 'hm-big hm-play hm-nav', onclick: () => play() });
-    el.prep = h('button', { class: 'hm-big hm-prep hm-nav', onclick: () => prepare() });
-    el.menu = h('nav', { class: 'hm-menu', 'aria-label': 'Campaign' });
-    el.status = h('div', { class: 'hm-status' });
-    const left = h('div', { class: 'hm-left' }, el.label, el.name, el.meta, el.party, h('div', { class: 'hm-btns' }, el.play, el.prep), el.menu, el.status);
+    el.menu = h('nav', { class: 'hm-menu', 'aria-label': 'Campaign' }); // (Beta 3.19: Play and Prepare the maps are lines of it)
+    const left = h('div', { class: 'hm-left' }, el.label, el.name, el.meta, el.party, el.menu);
 
     // the right: Continue, the latest maps
     el.right = h('aside', { class: 'hm-right' });
@@ -99,7 +96,7 @@ const Home = (() => {
     const openId = s.campaign ? s.campaign.id : null;
     const entering = prevScreen !== 'home' && prevScreen !== 'campaign';
     if (openId && (entering || !was || !was.campaign || was.campaign.id !== openId)) selId = openId;
-    if (entering) { devices = null; loadDevices(); arrive(); }
+    if (entering) { devices = null; navSel = null; loadDevices(); arrive(); }
     if (entering || !list || (was && was.campaign && s.campaign && was.campaign.name !== s.campaign.name) || (!!openId !== !!(list && list.open)) || (list && openId && list.open !== openId)) refresh();
     paint();
   }
@@ -181,13 +178,7 @@ const Home = (() => {
       el.name.textContent = 'No campaign yet';
       el.meta.textContent = 'Start one, or bring one in from a .tablescape file.';
       el.party.replaceChildren();
-      el.play.replaceChildren(iconEl('plus'), h('span', {}, 'NEW CAMPAIGN'));
-      el.play.onclick = create;
-      el.prep.hidden = false;
-      el.prep.replaceChildren(iconEl('file-import'), h('span', {}, 'IMPORT'));
-      el.prep.onclick = () => TransferUI.importPick();
       paintMenu(null);
-      paintStatus();
       return;
     }
     el.label.textContent = 'Campaign';
@@ -195,26 +186,12 @@ const Home = (() => {
     if (v.broken) {
       el.meta.textContent = 'This campaign\'s file is damaged';
       el.party.replaceChildren();
-      el.play.replaceChildren(iconEl('history'), h('span', {}, 'BACKUPS'));
-      el.play.onclick = () => earlier(v.item);
-      el.prep.hidden = true;
-      paintMenu(null);
-      paintStatus();
+      paintMenu(v);
       return;
     }
     el.meta.textContent = [v.lastSession ? `Last played ${ago(v.lastSession)}` : 'Not played yet', plural(v.players, 'player', 'players'), plural(v.maps, 'map', 'maps')].join(' · ');
     paintParty(v);
-    if (sig(el.play, ['play', !!v.session])) {
-      el.play.replaceChildren(iconEl('player-play'), v.session ? h('span', { class: 'two' }, h('span', {}, 'BACK TO'), h('span', {}, 'THE TABLE')) : h('span', {}, 'PLAY'));
-      el.play.classList.toggle('back', !!v.session);
-      el.play.dataset.tip = v.session ? 'The maps, as you left them' : 'Start the session: the title shows on the table until you send the first map (T)';
-    }
-    el.play.onclick = () => play();
-    el.prep.onclick = () => prepare();
-    el.prep.hidden = !!v.session;
-    if (sig(el.prep, 'prep')) { el.prep.replaceChildren(iconEl('map-2'), h('span', { class: 'two' }, h('span', {}, 'PREPARE'), h('span', {}, 'THE MAPS'))); el.prep.dataset.tip = 'Open the maps without starting: the table stays as it is'; }
     paintMenu(v);
-    paintStatus();
   }
 
   // a long name gets smaller type until it fits on one line
@@ -239,34 +216,58 @@ const Home = (() => {
     el.party.replaceChildren(...faces);
   }
 
-  const MENU = [
-    { id: 'players', label: 'Players', icon: 'users', run: () => drawer('players') },
-    { id: 'settings', label: 'Campaign settings', icon: 'building-castle', run: () => campaignSettings() },
-    { id: 'options', label: 'Tablescape settings', icon: 'settings', run: () => { closeDrawer(true); App.openOptions(); }, gap: true },
-  ];
+  // Beta 3.19: one list like a game's menu, Play first and glowing; the mouse and the arrow keys move one marker
+  let navSel = null; // the id of the marked line
+  const openSettings = () => { closeDrawer(true); App.openOptions(problems().length ? 'check' : undefined); };
+  function menuItems(v) {
+    const settingsLine = { id: 'options', label: 'Tablescape settings', run: openSettings, gap: true };
+    if (!v) return [{ id: 'new', label: 'New campaign', run: create, main: true }, { id: 'import', label: 'Import', run: () => TransferUI.importPick(), tip: 'A .tablescape file from another DM or another PC' }, settingsLine];
+    if (v.broken) return [{ id: 'backups', label: 'Backups', run: () => earlier(v.item), main: true, tip: 'This campaign\'s file is damaged: bring back a backup' }, settingsLine];
+    return [
+      { id: 'play', label: v.session ? 'Back to the table' : 'Play', run: () => play(), main: true, tip: v.session ? 'The maps, as you left them' : 'Start the session: the title shows on the table until you send the first map (T)' },
+      ...(v.session ? [] : [{ id: 'prep', label: 'Prepare the maps', run: () => prepare(), tip: 'Open the maps without starting: the table stays as it is' }]),
+      { id: 'players', label: 'Players', run: () => drawer('players') },
+      { id: 'settings', label: 'Campaign settings', run: () => campaignSettings() },
+      settingsLine,
+    ];
+  }
   function paintMenu(v) {
-    const ids = v ? MENU.map((m) => m.id) : ['options'];
-    if (!sig(el.menu, ids)) return;
-    el.menu.replaceChildren(...MENU.filter((m) => ids.includes(m.id)).map((m) => h('button', { class: `hm-item hm-nav ${m.gap && ids.length > 1 ? 'gap' : ''}`, dataset: { id: m.id }, onclick: m.run },
-      iconEl(m.icon), h('span', {}, m.label))));
+    const list = menuItems(v);
+    if (sig(el.menu, list.map((m) => [m.id, m.label, m.tip || '']))) {
+      el.menu.replaceChildren(...list.map((m) => h('button', { class: `hm-item hm-nav ${m.main ? 'main' : ''} ${m.gap ? 'gap' : ''}`, dataset: { id: m.id }, 'data-tip': m.tip || null,
+        onpointerenter: () => mark(m.id) }, h('span', {}, m.label))));
+    }
+    for (const b of el.menu.children) { const m = list.find((x) => x.id === b.dataset.id); if (m) b.onclick = () => { mark(m.id); m.run(); }; } // (they change with the campaign)
+    mark(list.some((m) => m.id === navSel) ? navSel : list[0].id);
+    paintDot();
+  }
+  function mark(id) {
+    navSel = id;
+    for (const b of el.menu.querySelectorAll('.hm-item')) b.classList.toggle('sel', b.dataset.id === id);
   }
 
-  // is the table ready: the TV, the speakers, one inch is one inch. A click: the whole table check.
+  // is the table ready (the TV, the speakers, one inch is one inch): the whole check is in Tablescape settings; the
+  // home shows a dot on Tablescape settings while something needs a look (Beta 3.19: no status line any more)
   function statusRows() {
     if (!S || !S.view) return [];
     const v = S.view; const st = S.settings || {};
     const known = (id) => !id || !devices || devices.some((x) => x.id === id);
     return [
-      S.table && S.table.open ? (v.windowed ? { state: 'warn', text: 'Table in a window' } : { state: 'ok', text: 'TV ready' }) : { state: 'warn', text: 'Table window closed' },
+      S.table && S.table.open ? (v.windowed ? { state: 'warn', text: 'Table in a window' } : { state: 'ok', text: 'TV ready' }) : { state: 'off', text: 'Table window closed' }, // (Play opens it)
       known(st.soundOut) && (st.fxOut == null || known(st.fxOut)) ? { state: 'ok', text: 'Speakers' } : { state: 'warn', text: 'A speaker is missing' },
       v.calibrated ? { state: 'ok', text: 'Calibrated' } : { state: 'warn', text: 'Not calibrated' },
     ];
   }
-  function paintStatus() {
-    const rows = statusRows();
-    if (!sig(el.status, rows)) return;
-    el.status.replaceChildren(...rows.map((r) => h('button', { class: `hm-st ${r.state}`, 'data-tip': 'The table check', onclick: () => drawer('check') },
-      iconEl(r.state === 'ok' ? 'circle-check' : 'alert-triangle'), h('span', {}, r.text))));
+  const problems = () => statusRows().filter((r) => r.state === 'warn').map((r) => r.text);
+  function paintDot() {
+    const b = el.menu.querySelector('.hm-item[data-id="options"]');
+    if (!b) return;
+    const p = problems();
+    let dot = b.querySelector('.hm-dot');
+    if (p.length && !dot) { dot = h('i', { class: 'hm-dot', 'aria-hidden': 'true' }); b.append(dot); } else if (!p.length && dot) dot.remove();
+    const tip = p.length ? `Table check: ${p.join(' · ')}` : null;
+    if ((b.dataset.tip || null) !== tip) { if (tip) b.dataset.tip = tip; else delete b.dataset.tip; }
+    b.classList.toggle('warn', !!p.length);
   }
 
   function picEl(pic, cls) {
@@ -500,14 +501,13 @@ const Home = (() => {
     return svg;
   }
   async function drawer(kind, opts = {}) {
-    if (kind !== 'check' && !(await ensureOpen())) return;
-    if (kind === 'check' && !S) return;
+    if (kind === 'check') { closeDrawer(true); App.openOptions('check'); return; } // (Beta 3.19: Tablescape settings → Table check)
+    if (!(await ensureOpen())) return;
     closeDrawer(true);
     refs = [];
     if (kind === 'screens' || kind === 'settings') { campaignSettings(kind === 'screens' ? 'screens' : 'campaign'); return; } // (Beta 3.18: in Campaign settings)
     if (kind === 'players') playersDrawer(opts);
-    else if (kind === 'check') checkDrawer();
-    for (const b of el.menu.querySelectorAll('.hm-item')) b.classList.toggle('on', b.dataset.id === kind);
+    if (el.menu.querySelector(`.hm-item[data-id="${kind}"]`)) mark(kind);
   }
   function closeDrawer(quick) {
     if (!cur) return;
@@ -515,7 +515,6 @@ const Home = (() => {
     const { back } = cur;
     cur = null;
     refs = [];
-    for (const b of el.menu.querySelectorAll('.hm-item')) b.classList.remove('on');
     if (quick) { back.remove(); return; }
     back.classList.add('out');
     setTimeout(() => back.remove(), 220);
@@ -733,10 +732,16 @@ const Home = (() => {
   }
 
   // ---------- the table check: is everything ready before the players sit down ----------
-  function checkDrawer() {
-    const { body } = frame('check', 'Table check');
+  // Beta 3.19: Tablescape settings → Table check (gm.js builds the panel; E: its bind, refill, refresh)
+  function checkSection(E) {
+    const was = ext; ext = E;
+    try { return checkBody(E); } finally { ext = was; }
+  }
+  function checkBody(E) {
     const listEl = h('div', { class: 'chk-list' });
-    bind(() => {
+    const again = async () => { await loadDevices(); E.refresh(); };
+    again();
+    B(() => {
       const rows = checks();
       if (!sig(listEl, rows.map((r) => [r.id, r.state, r.text, r.sub]))) return;
       listEl.replaceChildren(...rows.map((r) => h('div', { class: `chk-row ${r.state}`, dataset: { id: r.id } },
@@ -744,10 +749,10 @@ const Home = (() => {
         h('div', { class: 'grow chk-text' }, h('b', {}, r.text), r.sub ? h('span', {}, r.sub) : null),
         r.action ? h('button', { class: 'btn small', onclick: r.action.fn }, r.action.icon ? iconEl(r.action.icon) : null, r.action.label) : null)));
     });
-    body.append(listEl, h('div', { class: 'ctl-row' }, h('button', { class: 'btn small ghost', onclick: loadDevices, 'data-tip': 'Look for the speakers again' }, iconEl('refresh'), 'Check again')));
+    return h('div', { class: 'stack' }, listEl, h('div', { class: 'ctl-row' }, h('button', { class: 'btn small ghost', onclick: again, 'data-tip': 'Look for the speakers again' }, iconEl('refresh'), 'Check again')));
   }
   function checks() {
-    const s = S; const c = s.campaign; const st = s.settings || {}; const v = s.view;
+    const s = S; const c = s.screen !== 'home' ? s.campaign : null; const st = s.settings || {}; const v = s.view;
     const rows = [];
     const d = v.displays.find((x) => x.id === v.playerDisplayId);
     const tvName = d ? d.name.replace(/ – this screen$/, '') : 'the TV';
@@ -776,7 +781,7 @@ const Home = (() => {
       const here = c.party.filter((n) => !(c.away || []).includes(n)).length;
       rows.push(c.party.length
         ? { id: 'players', state: 'ok', text: `${here} of ${plural(c.party.length, 'player', 'players')} here today` }
-        : { id: 'players', state: 'off', text: 'No players yet', sub: 'Players: add them there', action: { label: 'Players', icon: 'users', fn: () => drawer('players', { focusAdd: true }) } });
+        : { id: 'players', state: 'off', text: 'No players yet', sub: 'Players: add them there', action: s.screen === 'play' ? null : { label: 'Players', icon: 'users', fn: () => { App.closeOptions(); drawer('players', { focusAdd: true }); } } });
     }
     return rows;
   }
@@ -791,12 +796,18 @@ const Home = (() => {
     if (cur || e.ctrlKey || e.altKey || e.metaKey || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable))) return;
     if (document.querySelector('.modal-back') || (window.App && App.optionsOpen && App.optionsOpen()) || (window.Guide && Guide.isOpen()) || UI.menuOpen()) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      const nav = [...el.stage.querySelectorAll('.hm-nav')].filter((b) => !b.hidden && b.offsetParent);
+      const nav = [...el.menu.querySelectorAll('.hm-item')].filter((b) => !b.hidden && b.offsetParent);
       if (!nav.length) return;
       e.preventDefault();
-      const i = nav.indexOf(document.activeElement);
+      const i = nav.findIndex((b) => b.dataset.id === navSel);
       const n = i < 0 ? 0 : (i + (e.key === 'ArrowDown' ? 1 : -1) + nav.length) % nav.length;
-      nav[n].focus();
+      mark(nav[n].dataset.id);
+      nav[n].focus({ preventScroll: true });
+    } else if ((e.key === 'Enter' || e.key === ' ') && !(t && t.tagName === 'BUTTON' && !t.classList.contains('hm-item'))) {
+      const b = el.menu.querySelector(`.hm-item[data-id="${navSel}"]`);
+      if (!b) return;
+      e.preventDefault();
+      b.click();
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       const all = items();
       if (!all.length) return;
@@ -814,5 +825,5 @@ const Home = (() => {
     for (const v of el.bg.querySelectorAll('video')) { if (on) v.play().catch(() => {}); else v.pause(); }
   }
 
-  return { mount, update, show, page, earlier, refresh, isDrawerOpen, closeDrawer, drawer, active, see, screensOff, screensSection, campaignSection, campaignSettings, coverBack: () => { coverOpen = false; } };
+  return { mount, update, show, page, earlier, refresh, isDrawerOpen, closeDrawer, drawer, active, see, screensOff, screensSection, campaignSection, campaignSettings, checkSection, coverBack: () => { coverOpen = false; } };
 })();

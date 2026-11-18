@@ -324,6 +324,8 @@ const App = (() => {
   // Beta 3.18: two panels alike. Tablescape settings: this PC, the TV, the speakers, how you work (for every campaign).
   // Campaign settings: what the players see and how this group plays (kept in the campaign, it travels with it).
   const APP_SECTIONS = [
+    { id: 'check', label: 'Table check', icon: 'checklist', // (Beta 3.19: was the status line on the home screen)
+      tips: ['Is the table ready: the TV, one inch is one inch, the speakers, Spotify, missing files, the players here today.', 'While something needs a look, Tablescape settings on the home screen has an orange dot.', 'Check again looks for the speakers once more (a TV switched on later).'] },
     { id: 'tv', label: 'TV', icon: 'device-tv',
       tips: ['Black bars flickering on the TV over an animated map: Video on the TV → Drawn with the picture (or Safest), then restart.', 'Calibrate: match the frame on the TV to a bank card; then one inch on the TV is one inch.', 'Without calibrating, the size comes from the screen diagonal.',
         'TV text scales the round, countdowns, turn order, markers and spell badges; the map keeps its size.', 'Press Esc on the TV to close the table window.', 'B switches the blackout on or off anywhere.'] },
@@ -390,6 +392,7 @@ const App = (() => {
         toggleCtl(bind, { label: 'Shadow under tokens', get: () => !!tk().shadow, set: (v) => T({ shadow: v }) }));
     }
     if (id === 'campaign') return Home.campaignSection({ bind, refill: fillOptions, refresh: refreshOptions }); // (gm-home.js)
+    if (id === 'check') return Home.checkSection({ bind, refill: fillOptions, refresh: refreshOptions });
     if (id === 'screens') return Home.screensSection({ bind, refill: fillOptions, refresh: refreshOptions });
     // Prototype 7: one style for the table (four looks, each with a variant in other colours); any part may have its own
     if (id === 'looks') {
@@ -852,7 +855,7 @@ const App = (() => {
         h('button', { class: 'btn small', 'aria-label': `Test: ${r.label}`, 'data-tip': 'Plays a chime on this speaker', onclick: () => ts.sound('test', { which: r.which }) }, iconEl('volume'), 'Test')))));
   }
 
-  const optIds = { app: 'tv', camp: 'campaign' }; // the section open in each panel
+  const optIds = { app: 'check', camp: 'campaign' }; // the section open in each panel
   let optScope = 'app';
   let optBody = null;
   let optNav = null;
@@ -984,6 +987,21 @@ const App = (() => {
       e.preventDefault(); e.stopImmediatePropagation();
       if (setupEl) closeOptions(); else openOptions();
       return;
+    }
+    // Beta 3.19: up and down go through the sections (not in a field, a list or a slider, which keep their arrows)
+    if (setupEl && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      const backs = document.querySelectorAll('.modal-back');
+      const tg = e.target;
+      const field = tg && (/INPUT|TEXTAREA|SELECT/.test(tg.tagName || '') || tg.isContentEditable);
+      if (backs[backs.length - 1] === setupEl && !field && !UI.menuOpen()) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        const list = sectionsOf(optScope);
+        const i = Math.max(0, list.findIndex((x) => x.id === optIds[optScope]));
+        const n = (i + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length;
+        if (document.activeElement && setupEl.contains(document.activeElement)) document.activeElement.blur();
+        openPanel(optScope, list[n].id);
+        return;
+      }
     }
     // Esc closes Options wherever the focus is (not while a dialog sits on top of it)
     if (setupEl && e.key === 'Escape') {

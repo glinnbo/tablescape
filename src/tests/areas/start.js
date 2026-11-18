@@ -84,24 +84,31 @@ module.exports = (area) => {
     t.state.update = { status: 'idle' }; t.broadcast();
   });
 
-  area.quick('the picked campaign fills the screen: name, PLAY, PREPARE THE MAPS, the menu with Options, the status line', async (t) => {
+  area.quick('the picked campaign fills the screen: name, the menu with Play first; a dot on Tablescape settings while the table check has something', async (t) => {
     const demo = await home(t);
     t.ok(!t.store.cur, 'nothing is open yet');
     const camps = t.store.scan().filter((c) => !c.broken);
     t.ok(camps.length && camps.every((c) => c.meta.table && c.meta.table.tableStyle && c.meta.table.tokens), 'every campaign got its own settings at the start (Beta 3.18)', camps.map((c) => [c.meta.name, !!c.meta.table]));
-    t.ok(/PLAY/.test(await t.text('.hm-play')), 'PLAY');
-    t.ok(/PREPARE\s*THE MAPS/.test(await t.text('.hm-prep')), 'PREPARE THE MAPS');
-    t.eq(await t.g(`[...document.querySelectorAll('.hm-menu .hm-item')].map((b) => b.textContent.trim())`), ['Players', 'Campaign settings', 'Tablescape settings'], 'the menu (Beta 3.18: Screens on the table is in Campaign settings)');
-    t.eq(await t.count('.hm-status .hm-st'), 3, 'the status line: the TV, the speakers, the size');
-    const [opt, st] = [await t.rect('.hm-item[data-id="options"]'), await t.rect('.hm-status')];
-    t.ok(st.y - (opt.y + opt.h) >= 20, 'room between Options and the status line', { opt, st });
+    t.eq(await t.g(`[...document.querySelectorAll('.hm-menu .hm-item')].map((b) => b.textContent.trim())`), ['Play', 'Prepare the maps', 'Players', 'Campaign settings', 'Tablescape settings'], 'the menu (Beta 3.19: Play and Prepare the maps are lines of it)');
+    const look = await t.g(`(() => { const p = document.querySelector('.hm-item[data-id="play"]'); const q = document.querySelector('.hm-item[data-id="players"]'); const cs = (e) => getComputedStyle(e);
+      return { same: cs(p).fontSize === cs(q).fontSize, glow: cs(p).textShadow !== 'none', marked: [...document.querySelectorAll('.hm-item.sel')].map((b) => b.dataset.id) }; })()`);
+    t.ok(look.same && look.glow, 'Play: the same size, glowing', look);
+    t.eq(look.marked, ['play'], 'Play is marked when the screen opens');
+    t.eq(await t.count('.hm-status, .hm-big'), 0, 'no status line, no big buttons');
+    // the self-test's table is a window and not calibrated: Tablescape settings says so with a dot, and opens on the table check
+    t.ok(await t.count('.hm-item[data-id="options"] .hm-dot') === 1 && /Not calibrated/.test(await t.g(`document.querySelector('.hm-item[data-id="options"]').dataset.tip || ''`)), 'the dot on Tablescape settings, its tip says what');
+    await t.clickSel('.hm-item[data-id="options"]');
+    await t.until(async () => (await t.g(`App.optionsScope() === 'app' && (document.querySelector('.opt-tab.on') || {}).dataset.id`)) === 'check', 3000, 'Tablescape settings on the table check');
+    await t.until(async () => (await t.count('.opt-body .chk-row')) >= 5, 3000, 'its rows');
+    t.ok(/Not calibrated/.test(await t.text('.opt-body .chk-row[data-id="size"]')), 'the size row says it');
+    await t.g('App.closeOptions()');
     t.ok(/maps?/.test(await t.text('.hm-meta')), 'the line under the name', await t.text('.hm-meta'));
     t.eq(t.settings.lastCampaignId, demo.id, 'the pick is remembered for the next start');
   });
 
-  area.quick('PREPARE THE MAPS opens the picked campaign on its maps', async (t) => {
+  area.quick('Prepare the maps opens the picked campaign on its maps', async (t) => {
     await home(t);
-    await t.clickSel('.hm-prep');
+    await t.clickSel('.hm-item[data-id="prep"]');
     await t.until(() => t.state.screen === 'play', 5000, 'the maps');
     t.ok(t.store.allMapIds().length >= 2, 'the demo campaign has its maps', t.store.allMapIds().length);
     t.ok(!t.state.session, 'no session started');
@@ -141,23 +148,34 @@ module.exports = (area) => {
     await t.g(`document.activeElement && document.activeElement.blur()`);
     await t.key(i > 0 ? 'Left' : 'Right');
     await t.until(async () => (await t.g(`(document.querySelector('.hm-slot.on') || {}).dataset.id`)) === ids[i > 0 ? i - 1 : i + 1], 3000, 'the arrow key picks the next campaign');
+    const marked = () => t.g(`[...document.querySelectorAll('.hm-item.sel')].map((b) => b.dataset.id)`);
+    t.eq(await marked(), ['play'], 'Play is marked');
     await t.key('Down');
-    t.ok(await t.g(`document.activeElement && document.activeElement.classList.contains('hm-play')`), 'the down arrow starts at PLAY');
-    await t.key('Down');
-    t.ok(await t.g(`document.activeElement && document.activeElement.classList.contains('hm-prep')`), 'then PREPARE THE MAPS');
+    t.eq(await marked(), ['prep'], 'the down arrow: Prepare the maps');
+    // Beta 3.19: one marker: the mouse moves it, the keys go on from there (no second highlight under the mouse)
+    const r = await t.rect('.hm-item[data-id="settings"]');
+    t.gm().webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(r.cx), y: Math.round(r.cy) });
+    await t.until(async () => JSON.stringify(await marked()) === '["settings"]', 2000, 'the mouse moves the marker');
+    await t.key('Up');
+    t.eq(await marked(), ['players'], 'the up arrow goes on from where the mouse put it');
+    const lit = await t.g(`[...document.querySelectorAll('.hm-item')].filter((b) => getComputedStyle(b, '::before').content !== 'none').map((b) => b.dataset.id)`);
+    t.eq(lit, ['players'], 'one diamond, even with the mouse on another line');
+    t.gm().webContents.sendInputEvent({ type: 'mouseMove', x: 5, y: 5 });
     await home(t);
     t.eq(t.settings.lastCampaignId, demo.id, 'the demo is picked again');
   });
 
-  area.quick('PLAY starts the session of the picked campaign: the title on the TV, then BACK TO THE TABLE', async (t) => {
+  area.quick('Play (or Enter) starts the session of the picked campaign: the title on the TV, then Back to the table', async (t) => {
     await home(t);
-    await t.clickSel('.hm-play');
+    await t.g(`document.activeElement && document.activeElement.blur()`);
+    while ((await t.g(`(document.querySelector('.hm-item.sel') || {}).dataset.id`)) !== 'play') await t.key('Up'); // (the marker stays where it was left)
+    await t.key('Enter');
     await t.until(() => t.state.screen === 'play' && !!t.state.session, 6000, 'the session');
     t.ok(!!t.state.title, 'the title on the table');
     t.handle('campaign.page');
-    await t.until(async () => /BACK TO\s*THE TABLE/.test(await t.text('.hm-play')), 3000, 'BACK TO THE TABLE');
-    t.ok(await t.g(`document.querySelector('.hm-prep').hidden`), 'PREPARE THE MAPS hides while a session runs');
-    await t.clickSel('.hm-play');
+    await t.until(async () => (await t.text('.hm-item[data-id="play"]')) === 'Back to the table', 3000, 'Back to the table');
+    t.eq(await t.count('.hm-item[data-id="prep"]'), 0, 'Prepare the maps is not there while a session runs');
+    await t.clickSel('.hm-item[data-id="play"]');
     await t.until(() => t.state.screen === 'play', 4000, 'back on the maps');
     t.ok(!!t.state.session, 'the same session');
   });
@@ -172,15 +190,11 @@ module.exports = (area) => {
       const W = await t.g('innerWidth');
       await t.until(async () => { const r = await t.rect('.hm-dr'); return r && Math.abs(r.x + r.w - W) < 3; }, 2000, `${kind}: against the right edge`);
       t.ok(await t.rect('.hm-dr-edge line.line'), `${kind}: the orange edge`);
-      t.ok(await t.g(`document.querySelector('.hm-item[data-id="${id}"]').classList.contains('on')`), `${kind}: marked in the menu`);
+      t.ok(await t.g(`document.querySelector('.hm-item[data-id="${id}"]').classList.contains('sel')`), `${kind}: marked in the menu`);
       await t.key('Escape');
       await t.until(async () => !(await drawerKind(t)), 3000, `${kind} closes with Esc`);
     }
-    await t.clickSel('.hm-st');
-    await t.until(async () => (await drawerKind(t)) === 'check', 3000, 'a click on the status line opens the table check');
-    t.ok(await t.count('.hm-dr .chk-row') >= 5, 'the table check rows');
-    await t.key('Escape');
-    await t.until(async () => !(await drawerKind(t)), 3000, 'the table check closes with Esc');
+
     // Beta 3.18: Campaign settings is a panel like Tablescape settings, Screens on the table one of its sections
     await t.clickSel('.hm-item[data-id="settings"]');
     await t.until(() => t.g('App.optionsScope() === "camp"'), 3000, 'Campaign settings');
@@ -282,9 +296,26 @@ module.exports = (area) => {
       win.setContentSize(1100, 680);
       await t.sleep(700);
       const r = await t.g(`(() => { const inView = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return b.left >= -1 && b.top >= -1 && b.right <= innerWidth + 1 && b.bottom <= innerHeight + 1; };
-        return { hs: +getComputedStyle(document.getElementById('home')).getPropertyValue('--hs'), play: inView('.hm-play'), options: inView('.hm-item[data-id="options"]'), status: inView('.hm-status'), slot: inView('.hm-slot.on'), right: inView('.hm-right'), top: inView('.hm-actions') }; })()`);
+        return { hs: +getComputedStyle(document.getElementById('home')).getPropertyValue('--hs'), play: inView('.hm-item[data-id="play"]'), options: inView('.hm-item[data-id="options"]'), slot: inView('.hm-slot.on'), right: inView('.hm-right'), top: inView('.hm-actions') }; })()`);
       t.ok(r.hs > 0.6 && r.hs < 0.8, 'scaled down', r);
-      t.ok(r.play && r.options && r.status && r.slot && r.right && r.top, 'all in view', r);
+      t.ok(r.play && r.options && r.slot && r.right && r.top, 'all in view', r);
+    } finally { win.setContentSize(was[0], was[1]); await t.sleep(400); }
+  });
+
+  // Beta 3.19: a tall window: the top at the top, the campaigns at the bottom, the campaign itself in the middle
+  area.quick('a tall window: the campaign sits in the middle between the top and the campaigns', async (t) => {
+    await home(t);
+    const win = t.gm();
+    const was = win.getContentSize();
+    try {
+      win.setContentSize(1300, 1225);
+      await t.sleep(800);
+      const r = await t.g(`(() => { const b = (sel) => document.querySelector(sel).getBoundingClientRect();
+        const top = b('.hm-top'); const main = b('.hm-main'); const foot = b('.hm-foot'); const left = b('.hm-left'); const right = b('.hm-right');
+        return { above: Math.round(main.top - top.bottom), below: Math.round(foot.top - main.bottom), tops: Math.round(Math.abs(left.top - right.top)), footEnd: Math.round(innerHeight - foot.bottom) }; })()`);
+      t.ok(r.above > 150 && Math.abs(r.above - r.below) < 40, 'as much room above as below', r);
+      t.ok(r.tops < 4, 'both columns start at the same height', r);
+      t.ok(r.footEnd < 60, 'the campaigns stay at the bottom', r);
     } finally { win.setContentSize(was[0], was[1]); await t.sleep(400); }
   });
 };
