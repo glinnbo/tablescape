@@ -304,6 +304,7 @@ function campaignSummary() {
     })),
     party: c.meta.party || [],
     away: (c.meta.away || []).filter((n) => (c.meta.party || []).includes(n)), // players not here today (not in Initiative)
+    preview: state.screen !== 'play' ? campPreview(c.meta, c.dir, true) : null, // Beta 3.17: the home screen (not needed on the maps)
     lastSession: c.meta.lastSession || 0,
     session: state.session,
     screens: screensSummary(),
@@ -2268,7 +2269,56 @@ function setEdit(id) {
   if (!store.map(id) || store.isAtlas(id)) return; // (Beta 3.12: world and regional maps are worked on in the Map table, never here)
   state.editMapId = id;
   store.cur.meta.lastMapId = id;
+  pushRecent(id);
   store.touch();
+}
+
+// Beta 3.17: the home screen. A campaign's latest maps (opened or sent, newest first) and the one that was on the table
+// when you stopped (Continue); kept in campaign.json, so the home shows them without opening the campaign.
+const RECENT_MAX = 8;
+function pushRecent(id, live) {
+  const c = store.cur; const m = store.map(id);
+  if (!c || !m || store.isAtlas(id)) return;
+  const bg = m.bg && m.bg.path ? { path: m.bg.path, rel: m.bg.rel || null, kind: m.bg.kind || null } : null;
+  c.meta.recent = [{ id, name: m.name, bg }, ...(c.meta.recent || []).filter((r) => r && r.id !== id)].slice(0, RECENT_MAX);
+  if (live) c.meta.lastLive = id;
+}
+// a party member's face from a campaign's file alone (the open campaign uses charFace)
+function metaFace(meta, name) {
+  const ch = ((meta && meta.characters) || {})[name] || {};
+  return charFile(ch.portrait) || charFile(meta && meta.faces && meta.faces[name]) || charFile(ch.sprite) || portraitIndex().get(faceNorm(name)) || charFile(ch.token) || null;
+}
+const fileUrl = (f) => (f ? pathToFileURL(f).href : null);
+function mapPic(bg) {
+  const f = bg ? library.resolveRef(bg) : null;
+  if (!f || !fs.existsSync(f)) return null;
+  return { path: f, kind: bg.kind || library.kindOf(f) || 'image', thumb: library.thumbUrl(f) };
+}
+// what the home shows of a campaign: the party, Continue, the latest maps, the cover. live: the open campaign (names,
+// faces and maps as they are now, not as last saved)
+function campPreview(meta, dir, live) {
+  const away = new Set(meta.away || []);
+  const party = (meta.party || []).map((name) => ({ name, away: away.has(name), face: fileUrl(live ? charFace(name) : metaFace(meta, name)) }));
+  let recent = (meta.recent || []).filter((r) => r && r.id);
+  if (live) {
+    recent = recent.filter((r) => store.map(r.id) && !store.isAtlas(r.id)).map((r) => { const m = store.map(r.id); return { id: r.id, name: m.name, bg: m.bg && m.bg.path ? { path: m.bg.path, rel: m.bg.rel || null, kind: m.bg.kind || null } : null }; });
+    if (!recent.length) { // (a campaign from before 3.17: its maps in order)
+      recent = store.allMapIds().filter((id) => !store.isAtlas(id)).map((id) => store.map(id)).filter((m) => m && !m.broken).slice(0, 5)
+        .map((m) => ({ id: m.id, name: m.name, bg: m.bg && m.bg.path ? { path: m.bg.path, rel: m.bg.rel || null, kind: m.bg.kind || null } : null }));
+    }
+  } else if (!recent.length && meta.lastMapId && dir) {
+    try { const m = JSON.parse(fs.readFileSync(path.join(dir, 'maps', `${meta.lastMapId}.json`), 'utf8')); recent = [{ id: meta.lastMapId, name: m.name, bg: m.bg && m.bg.path ? { path: m.bg.path, rel: m.bg.rel || null, kind: m.bg.kind || null } : null }]; } catch {}
+  }
+  const maps = recent.map((r) => ({ id: r.id, name: r.name, pic: mapPic(r.bg) }));
+  const contId = meta.lastLive && maps.some((m) => m.id === meta.lastLive) ? meta.lastLive : maps[0] ? maps[0].id : null;
+  const cont = maps.find((m) => m.id === contId) || null;
+  if (cont) cont.live = meta.lastLive === cont.id; // (on the table when you stopped, or only the last one opened)
+  let cover = null;
+  const pick = meta.coverPick ? mapPic(meta.coverPick) : null;
+  if (pick) cover = pick;
+  else if (live) { const first = store.allMapIds().map((id) => store.map(id)).find((m) => m && m.bg && m.bg.path && !store.isAtlas(m.id)); cover = first ? mapPic(first.bg) : null; }
+  else cover = meta.cover ? mapPic(meta.cover) : null;
+  return { party, cont, recent: maps.filter((m) => m !== cont).slice(0, 4), cover, coverPick: meta.coverPick ? { path: pick ? pick.path : null, name: meta.coverPick.name || null } : null };
 }
 
 // 4.4: the map moving (a drag, Alt + wheel): only the new place goes to the TV while it moves; your screen shows it
@@ -2471,6 +2521,7 @@ function handle(type, p = {}) {
       if (store.isAtlas(id)) return atlasShow(id, p); // (Beta 3.11: a world or regional map goes over the battlemap)
       state.atlas = null; // (a battlemap sent to the table takes the world map off it)
       state.liveMapId = id;
+      pushRecent(id, true); store.touch(); // (Beta 3.17: Continue on the home screen)
       state.blackout = false;
       state.title = null; // the session's title gives way to the first map
       tip('sent');
@@ -3572,8 +3623,22 @@ function handle(type, p = {}) {
     }
 
     // ----- campaigns -----
-    case 'campaign.list':
-      return { ok: true, campaigns: store.list(), lastId: settings.lastCampaignId, deleted: store.deleted().length };
+    case 'campaign.list': // Beta 3.17: with what the home screen shows of each (party, Continue, latest maps, cover)
+      return { ok: true, open: store.cur ? store.cur.meta.id : null, lastId: settings.lastCampaignId, deleted: store.deleted().length,
+        campaigns: store.list().map(({ meta, ...c }) => ({ ...c, preview: meta && !c.broken ? campPreview(meta, c.folder, false) : null })) };
+    // Beta 3.17: the campaign picked on the home screen (it opens only when it is played or changed)
+    case 'campaign.select':
+      if (p.id && store.findDir(p.id)) { settings.lastCampaignId = p.id; saveSettings(); }
+      return { ok: true };
+    // Beta 3.17: the cover (the home's background, the campaign's card): a picture chosen, or none (the first map)
+    case 'campaign.cover': {
+      if (!store.cur) return { ok: false };
+      if (p.path) { const r = library.toRef(p.path); store.cur.meta.coverPick = { path: r.path, rel: r.rel || null, kind: library.kindOf(p.path) || 'image', name: p.name || path.parse(p.path).name }; }
+      else delete store.cur.meta.coverPick;
+      store.touch();
+      broadcast();
+      return { ok: true };
+    }
     // recently deleted campaigns (2.4): in the library's trash until it is emptied
     case 'campaign.deleted':
       return { ok: true, list: store.deleted() };
@@ -3599,6 +3664,7 @@ function handle(type, p = {}) {
       return r;
     }
     case 'campaign.open': {
+      if (store.cur && store.cur.meta.id !== p.id) goHome(); // (Beta 3.17: from one campaign straight to another: the first one's session ends)
       const r = openCampaign(p.id);
       broadcast();
       return r;
@@ -3784,6 +3850,10 @@ ipcMain.handle('transfer', async (e, action, p = {}) => {
         return await Transfer.inspect(r.filePaths[0]);
       }
       case 'inspect': return await Transfer.inspect(String(p.file || ''));
+      case 'demo': // (Beta 3.17: Options → Library → Add the demo campaign, for anyone who wants the newest demo or deleted theirs)
+        if (!fs.existsSync(DEMO_PKG)) return { ok: false, error: 'The demo campaign is not part of this install.' };
+        p = { file: DEMO_PKG };
+      // falls through
       case 'import': {
         if (transferJob) return { ok: false, error: 'Another export or import is running.' };
         transferJob = { cancel: false };
@@ -3838,7 +3908,7 @@ ipcMain.handle('sound', async (e, action, arg = {}) => {
 let lastMissingSig = '';
 ipcMain.handle('app', async (e, action, arg = {}) => {
   switch (action) {
-    case 'about': return { version: PKG.version, label: LABEL, electron: process.versions.electron, log: applog.file, update: state.update };
+    case 'about': return { version: PKG.version, label: LABEL, electron: process.versions.electron, log: applog.file, update: state.update, test: !!TEST_DIR };
     case 'update.check': return checkUpdates(true); // Prototype 20
     case 'whatsnew': { // Prototype 21: the first start of a new version (after an update): What's new opens once
       const prev = settings.lastVersion; const cur = PKG.version;

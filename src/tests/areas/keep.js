@@ -20,7 +20,7 @@ module.exports = (area) => {
     const id = t.store.cur.meta.id;
     t.store.flush();
     t.handle('campaign.home');
-    await t.until(() => t.g(`document.body.dataset.screen === 'home'`), 5000, 'the start screen');
+    await t.until(() => t.g(`document.body.dataset.screen === 'home'`), 5000, 'the home screen');
     t.handle('campaign.open', { id });
     t.handle('campaign.play');
     await t.until(() => t.g(`document.body.dataset.screen === 'play' && !!Play.state().map`), 8000, 'the campaign to open again');
@@ -85,7 +85,7 @@ module.exports = (area) => {
   });
 
   // Beta 3.1: the demo a new user gets (demo/Demo.tablescape), imported into a library of its own so the test library stays as it is
-  area.quick('the demo package imports: the maid\'s cottage with its maps, characters and pictures', async (t) => {
+  area.quick('the demo package imports: the maid\'s cottage with its maps, the test atlas, characters and pictures', async (t) => {
     const fs = require('fs'); const path = require('path'); const os = require('os');
     const library = require('../../library'); const Transfer = require('../../transfer');
     const pkg = path.join(__dirname, '..', '..', '..', 'demo', 'Demo.tablescape');
@@ -97,15 +97,23 @@ module.exports = (area) => {
       const camps = path.join(tmp, 'library', 'Campaigns');
       const out = await Transfer.importFrom(pkg, camps);
       t.ok(out && out.ok, 'imported', out);
-      t.eq(out.maps, 3, 'its maps');
+      t.eq(out.maps, 7, 'its maps');
       const dir = fs.readdirSync(camps).map((d) => path.join(camps, d)).find((d) => fs.existsSync(path.join(d, 'campaign.json')));
       const meta = JSON.parse(fs.readFileSync(path.join(dir, 'campaign.json'), 'utf8'));
-      t.ok(/^Demo:/.test(meta.name), 'the start screen knows it as the demo', meta.name);
+      t.ok(/^Demo:/.test(meta.name), 'the home screen knows it as the demo', meta.name);
       t.ok(!meta.lastSession, 'not played yet');
       t.ok(meta.characters && meta.characters['The Little Maid'], 'the Little Maid is in the party', Object.keys(meta.characters || {}));
       const maps = fs.readdirSync(path.join(dir, 'maps')).map((f) => JSON.parse(fs.readFileSync(path.join(dir, 'maps', f), 'utf8')));
-      t.eq(maps.map((m) => m.name).sort(), ['Calm Cottage', 'Nighttime Cottage', 'Scene Example'], 'the maps');
+      t.eq(maps.map((m) => m.name).sort(), ['Calm Cottage', 'Fort Haspin', 'Nighttime Cottage', 'Scene Example', 'Stresstest', 'The River Crossing', 'Worldmap'], 'the maps');
       for (const m of maps) t.ok(m.bg && m.bg.path && fs.existsSync(m.bg.path), `${m.name}: its picture is in the library`, m.bg);
+      for (const m of maps) for (const l of m.layers || []) if (l.rel) t.ok(l.path && fs.existsSync(l.path), `${m.name}: ${l.name} is in the library`, l);
+      // Beta 3.17: the test atlas (world, region, city), each picture placed as it fills the default table, so its places stay on it
+      const byId = Object.fromEntries(maps.map((m) => [m.id, m]));
+      t.eq(((meta.atlas && meta.atlas.maps) || []).map((a) => byId[a.id] && byId[a.id].name).sort(), ['Fort Haspin', 'The River Crossing', 'Worldmap'], 'the atlas maps');
+      t.eq(byId[meta.atlas.world] && byId[meta.atlas.world].name, 'Worldmap', 'the world map');
+      for (const m of maps) t.ok(m.bg.scale > 0 && m.bg.nw > 0 && m.bg.nw <= 3840 && m.bg.nh <= 3840, `${m.name}: placed, at most 4K`, m.bg);
+      t.eq(byId[meta.lastMapId] && byId[meta.lastMapId].name, 'Calm Cottage', 'a new user starts on the first map');
+      t.ok(!/Handout shown/.test((meta.notes && meta.notes.text) || ''), 'no session log from the maker', meta.notes);
       const chPortrait = meta.characters['The Little Maid'].portrait;
       t.ok(chPortrait && chPortrait.path && fs.existsSync(chPortrait.path), 'the maid\'s portrait is in the library', chPortrait);
     } finally {

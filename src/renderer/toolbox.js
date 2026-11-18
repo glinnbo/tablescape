@@ -309,7 +309,7 @@ const Toolbox = (() => {
     const panelInfo = (id) => PANELS.find((x) => x.id === id) || null;
     // 4.3.1: each panel's handy things behind the "?" in its title bar
     const PANEL_TIPS = {
-      init: ['Enter: next turn. After the last one a new round starts.', 'Players come from the campaign page, enemies from the tokens on this map or + Enemy.',
+      init: ['Enter: next turn. After the last one a new round starts.', 'Players come from the home screen → Players, enemies from the tokens on this map or + Enemy.',
         'Roll enemies: d20 + bonus for every enemy without a number (a group rolls once).', 'HP: type 12, 12/20, −7 or +5.', 'Column adds HP, AC, conditions, notes or your own.',
         'The gear opens Options → Initiative.'],
       timer: ['Normal: a round dial at a short end or in the middle of the TV.', 'Dramatic: a big number in the middle, pulsing darker towards zero.', 'A running dial can still move to another end.'],
@@ -960,7 +960,7 @@ const Toolbox = (() => {
           for (const e of list) table.append(entryRow(I, e, tpl, curIds.has(e.id), true));
         } else table.append(entryRow(I, list[0], tpl, curIds.has(list[0].id), false));
       }
-      if (!I.entries.length) table.append(c().hint('Nobody yet. Players come from the campaign page, enemies from tokens or + Enemy.'));
+      if (!I.entries.length) table.append(c().hint('Nobody yet. Players come from the home screen → Players, enemies from tokens or + Enemy.'));
 
       // ---- under the list ----
       const foot = h('div', { class: 'ini-foot' });

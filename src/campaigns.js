@@ -95,6 +95,7 @@ class CampaignStore {
           coverThumb: coverPath ? library.thumbUrl(coverPath) : null,
           coverKind: coverPath ? library.kindOf(coverPath) : null,
           folder: dir,
+          meta, // (Beta 3.17: main.js reads the home screen's preview from it, then drops it)
         };
       })
       .sort((a, b) => b.updated - a.updated);
@@ -187,7 +188,8 @@ class CampaignStore {
       if (c.metaDirty) {
         c.meta.updated = Date.now();
         const firstWithBg = this.allMapIds().map((id) => c.maps.get(id)).find((m) => m && m.bg);
-        c.meta.cover = firstWithBg ? { path: firstWithBg.bg.path, rel: firstWithBg.bg.rel } : null;
+        const pick = c.meta.coverPick ? library.resolveRef(c.meta.coverPick) : null; // (Beta 3.17: a cover chosen in Campaign settings)
+        c.meta.cover = pick && fs.existsSync(pick) ? { path: c.meta.coverPick.path, rel: c.meta.coverPick.rel } : firstWithBg ? { path: firstWithBg.bg.path, rel: firstWithBg.bg.rel } : null;
         const last = c.maps.get(c.meta.lastMapId);
         c.meta.lastMapName = last ? last.name : null;
         const lastCh = last ? this.chapterOf(last.id) : null;

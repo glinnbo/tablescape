@@ -23,6 +23,12 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.17', [
+      'A new home screen, like a game\'s main menu: your campaigns along the bottom, the one you pick in big letters with its party, Play, Prepare the maps, Continue and its latest maps. Players, Screens on the table, Campaign settings (now with a cover picture) and the table check slide in from the right',
+      'Options slide in from the right too, the same panel everywhere',
+      'Tablescape starts with a short, still title. A key or a click skips it',
+      'A new demo: the maid\'s cottage now comes with a world, a region and a city in the Cartographer, and a busy map to see what your computer can do. New installs start with it; anyone can add it in Options → Library → Add the demo campaign (your campaigns stay as they are, an older demo too)',
+    ]],
     ['Beta 3.16', [
       'Handouts lie under a conversation: the portraits on both sides of the table, their band, the turn order and the other screens on the TV now stay in front of them (on the far side the portraits used to disappear behind a handout)',
       'The page on GitHub tells more about what Tablescape does, with pictures of the Cartographer, handouts and initiative',
@@ -343,7 +349,7 @@ const Guide = (() => {
       h('ul', { class: 'guide-checks' },
         li('screens', b('Two screens. '), 'Tablescape runs on your laptop; the table shows on a TV lying flat (or a projector). ', b('Options → TV'), ' picks the TV and opens the table there. With one screen only, the table opens as a window, so you can try everything.'),
         li('inch', b('One inch is one inch. '), 'Hold a bank card against the TV and match the outline (Options → TV → Calibrate). The grid then fits your miniatures: one square is one inch.'),
-        li('campaign', b('A campaign has chapters, chapters have maps. '), 'Open the demo campaign, press ', b('Prepare the maps'), ', pick a map, and press ', kbd('T'), ' to send it to the table. What you prepare stays on your screen until you send it.'),
+        li('campaign', b('A campaign has chapters, chapters have maps. '), 'Pick the demo campaign on the home screen, press ', b('Prepare the maps'), ', pick a map, and press ', kbd('T'), ' to send it to the table. What you prepare stays on your screen until you send it.'),
         li('rail', b('The rail on the left. '), 'Build tools on top, Play tools below. Hover a button for what it does and its key; right-click anything on the map for its menu.'),
         li('sound', b('Sound. '), 'Options → Sound picks the speakers, one for ambience and music, one for effects. Spotify is optional and needs Premium.'),
         li('minis', b('Keep your minis. '), 'Tokens are only for NPCs and monsters you don\'t have as miniatures. Everything else is cardboard, dice and people around the TV.')),
@@ -376,8 +382,8 @@ const Guide = (() => {
       h('h3', {}, 'Safety net'),
       h('ul', { class: 'guide-list' },
         li(b('Backups '), '(… on a campaign): a copy is made each time you open a campaign; the last 10 are kept.'),
-        li(b('Recently deleted '), 'on the start screen keeps deleted campaigns until you empty it.'),
-        li(b('Missing files '), 'are listed on the campaign page when a map, token or sound moved; one click finds it again.')));
+        li(b('Recently deleted '), 'on the home screen keeps deleted campaigns until you empty it.'),
+        li(b('Missing files '), 'are listed in the table check (home screen, the line under the menu) when a map, token or sound moved; open its map to find it again.')));
   }
 
   function keysTab() {
@@ -504,7 +510,7 @@ const Guide = (() => {
     const ver = h('span', { class: 'help-ver' });
     // Prototype 20: the version, and updates from GitHub
     const upd = h('button', { class: 'link-btn help-upd' });
-    const UPD = { idle: 'Check for updates', latest: 'Up to date · check again', checking: 'Checking …', available: 'Update available: see the start screen', downloading: 'Downloading the update …', ready: 'Update ready: restart on the start screen', error: 'Update check failed · try again', off: '' };
+    const UPD = { idle: 'Check for updates', latest: 'Up to date · check again', checking: 'Checking …', available: 'Update available: see the home screen', downloading: 'Downloading the update …', ready: 'Update ready: restart on the start screen', error: 'Update check failed · try again', off: '' };
     const showUpd = (u) => { const st = (u && u.status) || 'off'; upd.hidden = st === 'off'; upd.textContent = UPD[st] || ''; upd.dataset.tip = st === 'error' && u.error ? u.error : ''; };
     upd.onclick = async () => { const r = await ts.app('update.check'); if (r && !r.ok && r.error) UI.toast(r.error); setTimeout(() => ts.app('about').then((a) => a && showUpd(a.update)).catch(() => {}), 2500); };
     ts.app('about').then((a) => { if (a) { ver.textContent = `Tablescape ${a.label} (${a.version})`; showUpd(a.update); } }).catch(() => {});

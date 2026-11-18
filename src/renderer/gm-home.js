@@ -1,19 +1,24 @@
-// Start screen and the campaign's page.
-//   Start screen   continue the last campaign, or pick one; a campaign opens on its page, not on the maps
-//   Campaign page  Start session (the title on the TV, then the maps), Prepare the maps (the TV stays dark);
-//                  the players and who is here today (only they join Initiative); the campaign's screens on
-//                  the TV (the title, the break, the blackout); a table check before you start
+// The home screen (Beta 3.17): one screen like a game's main menu, for all campaigns.
+//   The picked campaign fills it: its name, its party, PLAY and PREPARE THE MAPS, a menu (Players, Screens on the table,
+//   Campaign settings, Options), a line that says whether the table is ready, Continue and the latest maps on the
+//   right, its cover map drifting slowly behind. The other campaigns wait as slots along the bottom.
+//   Picking a slot only shows that campaign; it opens when it is played or changed. Players, Screens, Campaign
+//   settings and the table check slide in from the right, their edge the orange diagonal.
+//   The layout is drawn for 1500 x 880 and scaled to the window, like a game.
 'use strict';
 
 const Home = (() => {
-  const { h, iconEl, Thumbs, toast, openMenu, askText, relTime, dialog } = UI;
+  const { h, iconEl, Thumbs, toast, openMenu, askText, dialog } = UI;
   const cmd = (type, payload) => window.ts.cmd(type, payload);
-  let root;
-  let renderedFor = '';
-
-  function mount(el) {
-    root = el;
-  }
+  const W0 = 1500; const H0 = 900; // the size the screen is drawn for
+  let root = null;
+  let S = null; // the GM state
+  let list = null; // campaign.list: the campaigns with what the home shows of each
+  let listBusy = null;
+  let selId = null; // the campaign picked on the home screen (opens only when played or changed)
+  let about = null;
+  let devices = null; // the speakers the sound window knows (the status line and the table check)
+  const el = {};
 
   // "today", "yesterday", "3 days ago"
   function ago(ts) {
@@ -26,170 +31,378 @@ const Home = (() => {
     return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   }
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-  function sessionsLine(c) {
-    const parts = [c.lastSession ? `Last played ${ago(c.lastSession)}` : 'Not played yet'];
-    if (c.players) parts.push(plural(c.players, 'player', 'players'));
-    return parts.join(' · ');
+  const fileUrl = (p) => (window.ts.fileUrl ? window.ts.fileUrl(p) : UI.pathToUrl(p));
+  const sig = (node, v) => { const s = JSON.stringify(v); if (node.dataset.sig === s) return false; node.dataset.sig = s; return true; };
+
+  // =====================================================================
+  // The frame: built once
+  // =====================================================================
+  function mount(elRoot) {
+    root = elRoot;
+    root.classList.add('hm');
+    el.bg = h('div', { class: 'hm-bg', 'aria-hidden': 'true' });
+    el.shade = h('div', { class: 'hm-shade', 'aria-hidden': 'true' });
+
+    // the top: the name with the release under it; on the right updates, Tutorial, Guide, Library, Discord, Ko-fi
+    el.release = h('span', { class: 'release' });
+    const top = h('header', { class: 'hm-top' },
+      h('div', { class: 'hm-brand' }, h('h1', { class: 'wordmark' }, 'Tablescape'), el.release),
+      h('div', { class: 'hm-actions' },
+        h('div', { class: 'upd-slot' }),
+        h('button', { class: 'btn hm-tb', 'data-tip': 'A guided first evening', onclick: () => toast('The tutorial is coming soon.', { ms: 2600 }) }, iconEl('compass'), 'Tutorial'),
+        h('button', { class: 'btn hm-tb', 'data-tip': 'Guide: first evening, keys, what\'s new, report a problem (?)', onclick: () => Guide.open('start') }, iconEl('book'), 'Guide'),
+        h('button', { class: 'btn hm-tb', 'data-tip': 'Open the folder with your maps, tokens and effects', onclick: () => window.ts.library('open') }, iconEl('folder'), 'Library'),
+        h('button', { class: 'btn hm-tb hm-ic', 'aria-label': 'Discord', 'data-tip': 'Tablescape on Discord: help, bug reports, ideas, news', onclick: () => window.ts.app('link.open', { to: 'discord' }) }, iconEl('logo-discord')),
+        h('button', { class: 'btn hm-tb hm-ic', 'aria-label': 'Ko-fi', 'data-tip': 'Support Tablescape on Ko-fi', onclick: () => window.ts.app('link.open', { to: 'kofi' }) }, iconEl('logo-kofi'))));
+
+    // the left: the campaign
+    el.label = h('div', { class: 'hm-label' }, 'Campaign');
+    el.name = h('h1', { class: 'hm-name' });
+    el.meta = h('div', { class: 'hm-meta' });
+    el.party = h('div', { class: 'hm-party' });
+    el.play = h('button', { class: 'hm-big hm-play hm-nav', onclick: () => play() });
+    el.prep = h('button', { class: 'hm-big hm-prep hm-nav', onclick: () => prepare() });
+    el.menu = h('nav', { class: 'hm-menu', 'aria-label': 'Campaign' });
+    el.status = h('div', { class: 'hm-status' });
+    const left = h('div', { class: 'hm-left' }, el.label, el.name, el.meta, el.party, h('div', { class: 'hm-btns' }, el.play, el.prep), el.menu, el.status);
+
+    // the right: Continue, the latest maps
+    el.right = h('aside', { class: 'hm-right' });
+
+    // the bottom: the campaigns
+    el.slots = h('div', { class: 'hm-slots', role: 'listbox', 'aria-label': 'Campaigns' });
+    el.deleted = h('button', { class: 'btn ghost small hm-deleted', onclick: recentlyDeleted });
+    const foot = h('footer', { class: 'hm-foot' }, el.slots, el.deleted);
+
+    el.drawers = h('div', { class: 'hm-drawers' });
+    el.stage = h('div', { class: 'hm-stage' }, top, h('div', { class: 'hm-main' }, left, el.right), foot, el.drawers);
+    root.append(el.bg, el.shade, el.stage);
+    fit();
+    window.addEventListener('resize', fit);
+    window.addEventListener('keydown', onKey, true);
+    window.ts.app('about').then((a) => { about = a; el.release.textContent = a ? a.label : ''; }).catch(() => {});
+  }
+  // scaled to the window like a game: drawn for W0 x H0; a wider or taller window gets more room, not bigger type
+  function fit() {
+    if (!root) return;
+    const s = Math.min(window.innerWidth / W0, window.innerHeight / H0);
+    root.style.setProperty('--hs', String(Math.max(0.4, s)));
   }
 
   // =====================================================================
-  // Start screen
+  // State
   // =====================================================================
-  async function show(force) {
-    const res = await cmd('campaign.list');
-    const tips = await window.ts.app('tips').catch(() => null);
-    const about = await window.ts.app('about').catch(() => null);
-    const sig = JSON.stringify([res.campaigns.map((c) => [c.id, c.name, c.updated, c.coverThumb, c.lastSession, c.players, c.broken, c.backups]), tips, res.deleted]);
-    if (!force && sig === renderedFor && root.childElementCount && !pageFor) return;
-    renderedFor = sig;
-    pageFor = null;
-    render(res.campaigns, res.lastId, tips, about, res.deleted || 0);
+  // gm.js: on the home screen (no campaign open) and on a campaign's page (one open)
+  function update(s, prevScreen) {
+    const was = S;
+    S = s;
+    const openId = s.campaign ? s.campaign.id : null;
+    const entering = prevScreen !== 'home' && prevScreen !== 'campaign';
+    if (openId && (entering || !was || !was.campaign || was.campaign.id !== openId)) selId = openId;
+    if (entering) { devices = null; loadDevices(); arrive(); }
+    if (entering || !list || (was && was.campaign && s.campaign && was.campaign.name !== s.campaign.name) || (!!openId !== !!(list && list.open)) || (list && openId && list.open !== openId)) refresh();
+    paint();
+  }
+  // (kept for transfer-ui.js and older callers: the list again, e.g. after an import)
+  function show() { refresh(); }
+  function page(s) { update(s, S && S.screen); }
+  async function refresh() {
+    if (listBusy) return listBusy;
+    listBusy = cmd('campaign.list').then((r) => { list = r && r.ok ? r : list; listBusy = null; paint(); return list; }).catch(() => { listBusy = null; });
+    return listBusy;
+  }
+  async function loadDevices() {
+    devices = (await window.ts.sound('devices').catch(() => null)) || null;
+    paint();
+  }
+  // a slow fade in each time the home screen comes back (from the maps, after the splash)
+  function arrive() {
+    if (!root) return;
+    root.classList.remove('hm-arrive'); void root.offsetWidth; root.classList.add('hm-arrive');
+    setTimeout(fitName, 0);
   }
 
-  function cover(c, cls) {
-    if (!c.coverPath) return h('div', { class: `${cls} cover-empty` }, iconEl('map-2'));
-    return h('div', { class: cls }, Thumbs.img(c.coverPath, c.coverKind, c.coverThumb, 'cover-img'));
+  const items = () => (list && list.campaigns) || [];
+  function selItem() {
+    const all = items();
+    return all.find((c) => c.id === selId) || all.find((c) => list && c.id === list.lastId && !c.broken) || all.find((c) => !c.broken) || all[0] || null;
   }
-
-  // three first steps, ticked off as they are done; gone once all are done or dismissed
-  function firstSteps(tips, hasDemo) {
-    if (!tips || tips.hidden || (tips.tv && tips.calib && tips.sent)) return null;
-    const step = (done, title, text, action) => h('li', { class: `fs-step ${done ? 'done' : ''}` },
-      iconEl(done ? 'circle-check' : 'circle'), h('div', {}, h('b', {}, title), h('span', {}, text)), done || !action ? null : action);
-    return h('section', { class: 'first-steps' },
-      h('div', { class: 'fs-head' }, h('h2', {}, 'First steps'),
-        h('button', { class: 'icon-btn', 'aria-label': 'Hide the first steps', 'data-tip': 'Hide', onclick: async () => { await window.ts.app('tips.hide'); show(true); } }, iconEl('x'))),
-      h('ol', {},
-        step(tips.tv, 'Open the table on your TV', 'Options → TV: pick the TV; the table window opens full screen on it.', h('button', { class: 'btn small', onclick: () => App.openOptions('tv') }, iconEl('device-tv'), 'Choose the TV')),
-        step(tips.calib, 'Make one inch one inch', 'Hold a bank card against the TV and match the outline, so the grid fits your miniatures.', h('button', { class: 'btn small', onclick: () => App.openOptions('tv') }, iconEl('credit-card'), 'Calibrate')),
-        step(tips.sent, 'Send a map to the table', `Open ${hasDemo ? 'the demo campaign' : 'a campaign'} below, then Prepare the maps, pick a map and press T (Send to table).`, null)));
-  }
-  function header(about, back) {
-    return h('header', { class: 'home-head' },
-      back ? h('div', { class: 'cp-headl' }, h('button', { class: 'btn ghost back-btn', onclick: back, 'data-tip': 'All your campaigns' }, iconEl('arrow-left'), 'Campaigns'))
-        : h('h1', { class: 'wordmark' }, 'Tablescape', about ? h('span', { class: 'release' }, about.label) : null),
-      h('div', { class: 'home-actions' },
-        // Beta 3.0: the community and the tip jar, on the start screen only (never on the map screen)
-        h('button', { class: 'btn ghost home-link', 'data-tip': 'Tablescape on Discord: help, bug reports, ideas, news', onclick: () => window.ts.app('link.open', { to: 'discord' }) }, iconEl('logo-discord'), 'Discord'),
-        h('button', { class: 'btn ghost home-link', 'data-tip': 'Support Tablescape on Ko-fi', onclick: () => window.ts.app('link.open', { to: 'kofi' }) }, iconEl('logo-kofi'), 'Toss a coin'),
-        h('span', { class: 'home-sep', 'aria-hidden': 'true' }),
-        h('button', { class: 'btn ghost', 'data-tip': 'Guide: first evening, keys, what\'s new, report a problem (?)', onclick: () => Guide.open('start') }, iconEl('book'), 'Guide'),
-        h('button', { class: 'btn ghost', 'data-tip': 'Open the folder with your maps, tokens and effects', onclick: () => window.ts.library('open') }, iconEl('folder'), 'Library folder'),
-        h('button', { class: 'btn ghost', 'data-tip': 'The TV and its size, picture, sound, performance (Ctrl ,)', onclick: () => App.openOptions() }, iconEl('settings'), 'Options')),
-      // Prototype 21: updates. Beta 3.0: in a row of their own under the title, only while there is something to say
-      // (beside the title they pushed the buttons off a smaller window)
-      h('div', { class: 'upd-slot' }));
-  }
-  function render(list, lastId, tips, about, deletedN = 0) {
-    setTimeout(() => { if (window.App && App.updateSlot) App.updateSlot(); }, 0); // (Prototype 21: the update display into the new header)
-    root.innerHTML = '';
-    root.classList.remove('on-page');
-    const last = list.find((c) => c.id === lastId) || null;
-    const parts = [header(about)];
-    const fs = firstSteps(tips, list.some((c) => /^Demo:/.test(c.name || '')));
-    if (fs) parts.push(fs);
-
-    if (last) {
-      parts.push(h('div', { class: 'hero', role: 'button', tabindex: '0', onclick: () => open(last.id), onkeydown: (e) => { if (e.key === 'Enter') open(last.id); } },
-        cover(last, 'hero-bg'), h('div', { class: 'hero-shade' }),
-        h('div', { class: 'hero-text' },
-          h('span', { class: 'hero-label' }, 'Continue'),
-          h('span', { class: 'hero-name' }, last.name),
-          h('span', { class: 'hero-meta' }, sessionsLine(last)),
-          h('span', { class: 'btn primary hero-btn' }, iconEl('player-play'), 'Open the campaign'))));
+  const isOpen = (id) => !!(S && S.campaign && S.campaign.id === id);
+  // the picked campaign as the home shows it: from the open campaign while it is open (live), else from the list
+  function view() {
+    const it = selItem();
+    if (!it) return null;
+    if (isOpen(it.id)) {
+      const c = S.campaign;
+      return { id: c.id, item: it, live: true, broken: false, name: c.name, lastSession: c.lastSession, chapters: c.chapters.length,
+        maps: c.chapters.reduce((n, ch) => n + ch.maps.length, 0), players: c.party.length, session: c.session, pv: c.preview || it.preview || {} };
     }
+    return { id: it.id, item: it, live: false, broken: !!it.broken, name: it.name, lastSession: it.lastSession, chapters: it.chapters, maps: it.maps,
+      players: it.players, session: null, pv: it.preview || {} };
+  }
 
-    const grid = h('div', { class: 'camp-grid' });
-    for (const c of list) {
-      if (c.broken) { grid.append(brokenTile(c)); continue; }
-      const more = h('button', {
-        class: 'icon-btn camp-more', 'aria-label': `More for ${c.name}`, 'data-tip': 'More',
-        onclick: (e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); campaignMenu(c, r.left, r.bottom + 4); },
-      }, iconEl('dots'));
-      grid.append(h('div', {
-        class: 'camp', tabindex: '0', role: 'button', dataset: { id: c.id },
-        onclick: () => open(c.id),
-        onkeydown: (e) => { if (e.key === 'Enter') open(c.id); },
+  // =====================================================================
+  // Painting
+  // =====================================================================
+  function paint() {
+    if (!root || !list) return;
+    const v = view();
+    root.classList.toggle('hm-empty', !v);
+    paintBg(v);
+    paintLeft(v);
+    paintRight(v);
+    paintSlots(v);
+    for (const f of refs) f();
+    if (window.App && App.updateSlot) App.updateSlot();
+  }
+
+  // the cover map behind it all, full size, drifting slowly; a new campaign's fades in over the last
+  function paintBg(v) {
+    const pic = v && v.pv && v.pv.cover;
+    const key = pic ? pic.path : '';
+    if (el.bg.dataset.key === key) return;
+    el.bg.dataset.key = key;
+    for (const old of [...el.bg.children]) { old.classList.add('out'); setTimeout(() => old.remove(), 900); }
+    if (!pic) return;
+    const url = fileUrl(pic.path);
+    const node = pic.kind === 'video'
+      ? h('video', { class: 'hm-pic', src: url, autoplay: true, muted: true, loop: true, playsinline: true })
+      : h('img', { class: 'hm-pic', src: url, alt: '', draggable: 'false' });
+    if (node.tagName === 'VIDEO') { node.muted = true; node.play().catch(() => {}); }
+    const done = () => node.classList.add('in');
+    node.addEventListener(pic.kind === 'video' ? 'loadeddata' : 'load', done, { once: true });
+    node.addEventListener('error', () => node.remove(), { once: true });
+    el.bg.append(node);
+  }
+
+  function paintLeft(v) {
+    if (!v) {
+      el.label.textContent = 'Tablescape';
+      el.name.textContent = 'No campaign yet';
+      el.meta.textContent = 'Start one, or bring one in from a .tablescape file.';
+      el.party.replaceChildren();
+      el.play.replaceChildren(iconEl('plus'), h('span', {}, 'NEW CAMPAIGN'));
+      el.play.onclick = create;
+      el.prep.hidden = false;
+      el.prep.replaceChildren(iconEl('file-import'), h('span', {}, 'IMPORT'));
+      el.prep.onclick = () => TransferUI.importPick();
+      paintMenu(null);
+      paintStatus();
+      return;
+    }
+    el.label.textContent = 'Campaign';
+    if (el.name.textContent !== v.name) { el.name.textContent = v.name; fitName(); }
+    if (v.broken) {
+      el.meta.textContent = 'This campaign\'s file is damaged';
+      el.party.replaceChildren();
+      el.play.replaceChildren(iconEl('history'), h('span', {}, 'BACKUPS'));
+      el.play.onclick = () => earlier(v.item);
+      el.prep.hidden = true;
+      paintMenu(null);
+      paintStatus();
+      return;
+    }
+    el.meta.textContent = [v.lastSession ? `Last played ${ago(v.lastSession)}` : 'Not played yet', plural(v.players, 'player', 'players'), plural(v.maps, 'map', 'maps')].join(' · ');
+    paintParty(v);
+    if (sig(el.play, ['play', !!v.session])) {
+      el.play.replaceChildren(iconEl('player-play'), v.session ? h('span', { class: 'two' }, h('span', {}, 'BACK TO'), h('span', {}, 'THE TABLE')) : h('span', {}, 'PLAY'));
+      el.play.classList.toggle('back', !!v.session);
+      el.play.dataset.tip = v.session ? 'The maps, as you left them' : 'Start the session: the title shows on the table until you send the first map (T)';
+    }
+    el.play.onclick = () => play();
+    el.prep.onclick = () => prepare();
+    el.prep.hidden = !!v.session;
+    if (sig(el.prep, 'prep')) { el.prep.replaceChildren(iconEl('map-2'), h('span', { class: 'two' }, h('span', {}, 'PREPARE'), h('span', {}, 'THE MAPS'))); el.prep.dataset.tip = 'Open the maps without starting: the table stays as it is'; }
+    paintMenu(v);
+    paintStatus();
+  }
+
+  // a long name gets smaller type until it fits on one line
+  function fitName() {
+    el.name.style.fontSize = '';
+    requestAnimationFrame(() => {
+      if (!el.name.clientWidth) return; // (hidden: fitted when the home comes back)
+      let px = 80;
+      while (px > 46 && el.name.scrollWidth > el.name.clientWidth + 1) { px -= 4; el.name.style.fontSize = `${px}px`; }
+    });
+  }
+
+  function paintParty(v) {
+    const party = (v.pv && v.pv.party) || [];
+    if (!sig(el.party, [v.id, party])) return;
+    const MAX = 8;
+    const faces = party.slice(0, MAX).map((p) => h('button', { class: `hm-pc ${p.away ? 'away' : ''}`, 'data-tip': p.away ? `${p.name}: not here today` : p.name, onclick: () => drawer('players') },
+      p.face ? h('img', { src: p.face, alt: '', draggable: 'false' }) : h('span', { class: 'hm-pc-initial' }, (p.name || '?').slice(0, 1).toUpperCase()),
+      h('span', { class: 'hm-pc-name' }, p.name)));
+    if (party.length > MAX) faces.push(h('button', { class: 'hm-pc more', onclick: () => drawer('players') }, h('span', { class: 'hm-pc-initial' }, `+${party.length - MAX}`), h('span', { class: 'hm-pc-name' }, 'more')));
+    faces.push(h('button', { class: 'hm-pc add', 'data-tip': 'Add a player character', onclick: () => drawer('players', { focusAdd: true }) }, h('span', { class: 'hm-pc-initial' }, iconEl('plus')), h('span', { class: 'hm-pc-name' }, 'Add')));
+    el.party.replaceChildren(...faces);
+  }
+
+  const MENU = [
+    { id: 'players', label: 'Players', icon: 'users', run: () => drawer('players') },
+    { id: 'screens', label: 'Screens on the table', icon: 'device-tv', run: () => drawer('screens') },
+    { id: 'settings', label: 'Campaign settings', icon: 'building-castle', run: () => drawer('settings') },
+    { id: 'options', label: 'Options', icon: 'settings', run: () => App.openOptions(), gap: true },
+  ];
+  function paintMenu(v) {
+    const ids = v ? MENU.map((m) => m.id) : ['options'];
+    if (!sig(el.menu, ids)) return;
+    el.menu.replaceChildren(...MENU.filter((m) => ids.includes(m.id)).map((m) => h('button', { class: `hm-item hm-nav ${m.gap && ids.length > 1 ? 'gap' : ''}`, dataset: { id: m.id }, onclick: m.run },
+      iconEl(m.icon), h('span', {}, m.label))));
+  }
+
+  // is the table ready: the TV, the speakers, one inch is one inch. A click: the whole table check.
+  function statusRows() {
+    if (!S || !S.view) return [];
+    const v = S.view; const st = S.settings || {};
+    const known = (id) => !id || !devices || devices.some((x) => x.id === id);
+    return [
+      S.table && S.table.open ? (v.windowed ? { state: 'warn', text: 'Table in a window' } : { state: 'ok', text: 'TV ready' }) : { state: 'warn', text: 'Table window closed' },
+      known(st.soundOut) && (st.fxOut == null || known(st.fxOut)) ? { state: 'ok', text: 'Speakers' } : { state: 'warn', text: 'A speaker is missing' },
+      v.calibrated ? { state: 'ok', text: 'Calibrated' } : { state: 'warn', text: 'Not calibrated' },
+    ];
+  }
+  function paintStatus() {
+    const rows = statusRows();
+    if (!sig(el.status, rows)) return;
+    el.status.replaceChildren(...rows.map((r) => h('button', { class: `hm-st ${r.state}`, 'data-tip': 'The table check', onclick: () => drawer('check') },
+      iconEl(r.state === 'ok' ? 'circle-check' : 'alert-triangle'), h('span', {}, r.text))));
+  }
+
+  function picEl(pic, cls) {
+    if (!pic) return h('div', { class: `${cls} hm-nopic` }, iconEl('map-2'));
+    return h('div', { class: cls }, Thumbs.img(pic.path, pic.kind, pic.thumb, 'cover-img'));
+  }
+  function paintRight(v) {
+    const pv = (v && !v.broken && v.pv) || {};
+    if (!sig(el.right, [v && v.id, pv.cont, pv.recent, v && v.maps])) return;
+    const parts = [];
+    if (pv.cont) {
+      parts.push(h('div', { class: 'hm-caps' }, 'Continue'),
+        h('button', { class: 'hm-cont', onclick: () => openMap(pv.cont.id) }, picEl(pv.cont.pic, 'hm-cont-pic'),
+          h('span', { class: 'hm-cont-text' }, h('b', {}, pv.cont.name), h('span', {}, pv.cont.live ? 'On the table when you stopped' : 'Last opened'))));
+    }
+    if (pv.recent && pv.recent.length) {
+      parts.push(h('div', { class: 'hm-caps' }, 'Latest maps'),
+        ...pv.recent.map((m) => h('button', { class: 'hm-recent', onclick: () => openMap(m.id) }, picEl(m.pic, 'hm-recent-pic'), h('span', { class: 'ellipsis' }, m.name))));
+    }
+    if (parts.length && v && v.maps) parts.push(h('button', { class: 'hm-all', onclick: () => prepare() }, `All ${plural(v.maps, 'map', 'maps')}`, iconEl('chevron-right')));
+    el.right.replaceChildren(...parts);
+  }
+
+  function paintSlots(v) {
+    const all = items();
+    const deletedN = (list && list.deleted) || 0;
+    el.deleted.hidden = !deletedN;
+    el.deleted.replaceChildren(iconEl('trash'), `Recently deleted (${deletedN})`);
+    const openName = S && S.campaign ? S.campaign.name : null;
+    const cov = (c) => (isOpen(c.id) && v && v.id === c.id ? (v.pv && v.pv.cover) : c.coverPath ? { path: c.coverPath, kind: c.coverKind, thumb: c.coverThumb } : null);
+    if (!sig(el.slots, [all.map((c) => [c.id, isOpen(c.id) ? openName : c.name, c.broken, cov(c)]), v && v.id])) return;
+    const slots = all.map((c) => {
+      const on = !!v && c.id === v.id;
+      const pic = cov(c);
+      return h('button', {
+        class: `hm-slot ${on ? 'on' : ''} ${c.broken ? 'broken' : ''}`, role: 'option', 'aria-selected': String(on), dataset: { id: c.id },
+        onclick: () => pick(c.id), ondblclick: () => { if (!c.broken) play(); },
         oncontextmenu: (e) => { e.preventDefault(); campaignMenu(c, e.clientX, e.clientY); },
       },
-      h('div', { class: 'camp-top' }, cover(c, 'camp-cover'), h('span', { class: 'camp-name' }, c.name)),
-      h('div', { class: 'camp-text' },
-        h('span', { class: 'camp-meta' }, sessionsLine(c)),
-        h('span', { class: 'camp-meta faint' }, `${plural(c.chapters, 'chapter', 'chapters')}, ${plural(c.maps, 'map', 'maps')} · ${relTime(c.updated)}`)),
-      more));
-    }
-    grid.append(h('button', { class: 'camp camp-new', onclick: create }, iconEl('plus'), h('span', {}, 'New campaign')),
-      h('button', { class: 'camp camp-new camp-import', onclick: () => TransferUI.importPick(), 'data-tip': 'A .tablescape file from another DM or another PC' }, iconEl('file-import'), h('span', {}, 'Import a campaign'))); // 4.6
-
-    parts.push(h('section', { class: 'home-section' }, h('h2', {}, 'Campaigns'), grid,
-      deletedN ? h('button', { class: 'btn ghost small del-link', onclick: recentlyDeleted }, iconEl('trash'), `Recently deleted (${deletedN})`) : null));
-    root.append(h('div', { class: 'home-inner' }, ...parts));
+      c.broken ? h('div', { class: 'hm-slot-pic hm-nopic' }, iconEl('alert-triangle')) : picEl(pic, 'hm-slot-pic'),
+      h('span', { class: 'hm-slot-name' }, isOpen(c.id) && openName ? openName : c.name));
+    });
+    slots.push(h('button', { class: 'hm-slot new', onclick: create }, iconEl('plus'), h('span', {}, 'New')),
+      h('button', { class: 'hm-slot new', onclick: () => TransferUI.importPick(), 'data-tip': 'A .tablescape file from another DM or another PC' }, iconEl('file-import'), h('span', {}, 'Import')));
+    el.slots.replaceChildren(...slots);
+    const on = el.slots.querySelector('.hm-slot.on');
+    if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
-  // Beta 1: a campaign whose campaign.json can't be read any more: its backups are still there
-  function brokenTile(c) {
-    const more = h('button', {
-      class: 'icon-btn camp-more', 'aria-label': `More for ${c.name}`, 'data-tip': 'More',
-      onclick: (e) => {
-        e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect();
-        openMenu(r.left, r.bottom + 4, [
-          { icon: 'history', label: 'Backups…', action: () => earlier(c) },
-          { icon: 'folder', label: 'Show the folder', action: () => window.ts.app('folder.show', { path: c.folder }) },
-        ]);
-      },
-    }, iconEl('dots'));
-    return h('div', {
-      class: 'camp camp-broken', tabindex: '0', role: 'button', dataset: { id: c.id }, 'data-tip': 'Its campaign.json could not be read (half written, or changed by hand)',
-      onclick: () => earlier(c), onkeydown: (e) => { if (e.key === 'Enter') earlier(c); },
-    },
-    h('div', { class: 'camp-top' }, h('div', { class: 'camp-cover cover-empty' }, iconEl('alert-triangle')), h('span', { class: 'camp-name' }, c.name)),
-    h('div', { class: 'camp-text' },
-      h('span', { class: 'camp-meta' }, 'This campaign\'s file is damaged'),
-      h('span', { class: 'camp-meta faint' }, c.backups ? `${plural(c.backups, 'earlier version', 'earlier versions')} kept: click to bring one back` : 'No earlier versions kept')),
-    more);
+  // =====================================================================
+  // Actions
+  // =====================================================================
+  function pick(id) {
+    if (list && list.lastId !== id) { list.lastId = id; cmd('campaign.select', { id }); } // (remembered for the next start)
+    if (selId === id && view() && view().id === id) return;
+    selId = id;
+    closeDrawer();
+    paint();
   }
-
-  async function open(id) {
-    const r = await UI.withLoader('Opening the campaign …', () => cmd('campaign.open', { id }));
-    if (!r.ok) toast(r.error || 'That campaign could not be opened.', { kind: 'error' });
+  // the picked campaign opens (another one open closes first: its session ends)
+  async function ensureOpen() {
+    const v = view();
+    if (!v || v.broken) return false;
+    if (isOpen(v.id)) return true;
+    const ending = S && S.campaign && S.campaign.session ? S.campaign.name : null;
+    const r = await UI.withLoader('Opening the campaign …', () => cmd('campaign.open', { id: v.id }));
+    if (!r || !r.ok) { toast((r && r.error) || 'That campaign could not be opened.', { kind: 'error' }); return false; }
+    for (let i = 0; i < 40 && !isOpen(v.id); i++) await new Promise((res) => setTimeout(res, 50)); // (its state is on its way)
+    if (ending) toast(`The session of ${ending} has ended`, { ms: 3500 });
+    return isOpen(v.id);
   }
-
+  async function play() {
+    const v = view();
+    if (!v || v.broken) return;
+    if (v.session) { cmd('campaign.play'); return; }
+    if (!(await ensureOpen())) return;
+    const r = await cmd('session.start');
+    if (r && r.ok && r.label) toast(r.label, { ms: 5000 });
+  }
+  async function prepare() {
+    if (!(await ensureOpen())) return;
+    cmd('campaign.play');
+  }
+  async function openMap(id) {
+    if (!(await ensureOpen())) return;
+    await cmd('edit.open', { id });
+    cmd('campaign.play');
+  }
   async function create() {
     const name = await askText('Name your campaign', '', { ok: 'Create campaign', placeholder: 'Curse of the Ashen Crown' });
     if (!name) return;
     await cmd('campaign.create', { name });
+    refresh();
   }
 
   function campaignMenu(c, x, y) {
+    if (c.broken) {
+      openMenu(x, y, [
+        { icon: 'history', label: 'Backups…', action: () => earlier(c) },
+        { icon: 'folder', label: 'Show the folder', action: () => window.ts.app('folder.show', { path: c.folder }) },
+      ]);
+      return;
+    }
     openMenu(x, y, [
-      { icon: 'player-play', label: 'Open', action: () => open(c.id) },
-      { icon: 'pencil', label: 'Rename', action: async () => {
-        const name = await askText('Rename campaign', c.name);
-        if (name) { await cmd('campaign.rename', { id: c.id, name }); show(true); }
-      } },
+      { icon: 'player-play', label: 'Play', action: () => { pick(c.id); play(); } },
+      { icon: 'pencil', label: 'Rename', action: () => rename(c) },
       { icon: 'folder', label: 'Show in folder', action: () => window.ts.library('open', c.folder) },
       { icon: 'history', label: 'Backups…', action: () => earlier(c) },
-      { icon: 'file-export', label: 'Export…', action: () => TransferUI.exportDialog(c) }, // 4.6
+      { icon: 'file-export', label: 'Export…', action: () => TransferUI.exportDialog(c) },
       '-',
       { icon: 'trash', label: 'Delete…', danger: true, action: () => askDelete(c) },
     ]);
   }
+  async function rename(c) {
+    const cur = isOpen(c.id) ? S.campaign.name : c.name;
+    const name = await askText('Rename campaign', cur);
+    if (name && name !== cur) { await cmd('campaign.rename', { id: c.id, name }); refresh(); }
+  }
 
-  // 2.4: deleting asks first (the little maid is worried); a deleted campaign waits under Recently deleted
+  // deleting asks first (the little maid is worried); a deleted campaign waits under Recently deleted
   function askDelete(c) {
     const keep = h('button', { class: 'btn primary', onclick: () => dlg.close() }, 'Keep it');
     const del = h('button', { class: 'btn danger', onclick: async () => {
       dlg.close();
+      closeDrawer();
       const r = await cmd('campaign.delete', { id: c.id });
-      show(true);
-      if (r.ok) toast(`${c.name} deleted`, { undo: async () => { await cmd(r.undo.type, r.undo.payload); show(true); } });
+      if (selId === c.id) selId = null;
+      await refresh();
+      if (r.ok) toast(`${c.name} deleted`, { undo: async () => { await cmd(r.undo.type, r.undo.payload); selId = c.id; refresh(); } });
     } }, iconEl('trash'), 'Delete');
     const dlg = UI.dialog(`Delete ${c.name}?`, h('div', { class: 'del-ask' },
       h('p', { class: 'del-what' }, `${plural(c.chapters, 'chapter', 'chapters')}, ${plural(c.maps, 'map', 'maps')} · ${c.lastSession ? `last played ${ago(c.lastSession)}` : 'not played yet'}`),
       h('p', { class: 'faint' }, 'Your library files stay. The campaign waits under Recently deleted.'),
       h('div', { class: 'modal-actions' }, del, keep)), { onClose: null });
     dlg.el.classList.add('del-dialog');
-    // 2.5: the little maid stands beside it, worried; question marks rise above her like bubbles
     dlg.el.append(h('div', { class: 'del-maid-box', 'aria-hidden': 'true' },
       h('img', { class: 'del-maid', src: 'maid-worried.webp', alt: '' }),
       ...[1, 2, 3].map((i) => h('span', { class: `del-q q${i}` }, '?'))));
@@ -201,16 +414,16 @@ const Home = (() => {
     const dlg = UI.dialog('Recently deleted', UI.loader('Looking …'), { wide: true });
     const fill = async () => {
       const r = await cmd('campaign.deleted');
-      const list = (r && r.list) || [];
+      const rows = (r && r.list) || [];
       dlg.body.innerHTML = '';
-      if (!list.length) { dlg.body.append(h('p', { class: 'hint' }, 'Nothing here.')); return; }
-      dlg.body.append(h('div', { class: 'del-list' }, ...list.map((d) => h('div', { class: 'del-row' },
+      if (!rows.length) { dlg.body.append(h('p', { class: 'hint' }, 'Nothing here.')); return; }
+      dlg.body.append(h('div', { class: 'del-list' }, ...rows.map((d) => h('div', { class: 'del-row' },
         h('div', { class: 'grow' }, h('b', {}, d.name), h('span', { class: 'faint' }, `${plural(d.chapters, 'chapter', 'chapters')}, ${plural(d.maps, 'map', 'maps')} · deleted ${ago(d.deleted)}`)),
-        h('button', { class: 'btn small primary', onclick: async () => { const x = await cmd('campaign.undelete', { key: d.key }); if (x.ok) toast(`${d.name} is back`); show(true); fill(); } }, iconEl('restore'), 'Restore'),
+        h('button', { class: 'btn small primary', onclick: async () => { const x = await cmd('campaign.undelete', { key: d.key }); if (x.ok) { toast(`${d.name} is back`); if (x.id) selId = x.id; } refresh(); fill(); } }, iconEl('restore'), 'Restore'),
         h('button', { class: 'btn small danger', 'data-tip': 'Delete it for good: this cannot be undone', onclick: async (e) => {
           const b = e.currentTarget;
           if (!b.classList.contains('sure')) { b.classList.add('sure'); b.lastChild.textContent = 'Sure? Delete for good'; return; }
-          await cmd('campaign.purge', { key: d.key }); show(true); fill();
+          await cmd('campaign.purge', { key: d.key }); refresh(); fill();
         } }, iconEl('trash'), h('span', {}, 'Delete for good'))))),
         h('p', { class: 'hint' }, 'Kept in the library folder under .cache/trash.'));
     };
@@ -220,11 +433,11 @@ const Home = (() => {
   // backups made each time the campaign was opened; restoring keeps a copy of the current state first
   async function earlier(c) {
     const dlg = dialog(`Backups of ${c.name}`, UI.loader('Looking …'), { wide: true });
-    const list = await window.ts.app('backups.list', { id: c.id });
+    const rows = await window.ts.app('backups.list', { id: c.id });
     dlg.body.innerHTML = '';
-    if (!list.length) { dlg.body.append(h('div', { class: 'dlg-empty' }, 'No backups yet. One is made each time you open the campaign.')); return; }
+    if (!rows.length) { dlg.body.append(h('div', { class: 'dlg-empty' }, 'No backups yet. One is made each time you open the campaign.')); return; }
     dlg.body.append(h('div', { class: 'hint' }, 'A copy is made each time you open the campaign; the last 10 are kept. Restoring keeps a copy of how it is now.'));
-    for (const b of list) {
+    for (const b of rows) {
       const when = new Date(b.made).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
       dlg.body.append(h('div', { class: 'dlg-row' },
         h('div', { class: 'dlg-title' }, iconEl('history'), h('span', { class: 'grow' }, when), b.label ? h('span', { class: 'dlg-sub' }, b.label) : null),
@@ -232,132 +445,97 @@ const Home = (() => {
         h('div', { class: 'dlg-btns' }, h('button', { class: 'btn small', onclick: async () => {
           const r = await window.ts.app('backups.restore', { id: c.id, backup: b.id });
           dlg.close();
-          if (r && r.ok) { toast(`${c.name} is back to ${when}. The version before is kept under Backups.`, { ms: 7000 }); show(true); } else toast((r && r.error) || 'That did not work.', { kind: 'error' });
+          closeDrawer();
+          if (r && r.ok) { toast(`${c.name} is back to ${when}. The version before is kept under Backups.`, { ms: 7000 }); refresh(); } else toast((r && r.error) || 'That did not work.', { kind: 'error' });
         } }, iconEl('restore'), 'Restore this version'))));
     }
   }
 
   // =====================================================================
-  // The campaign's page
+  // The pop-ups: they slide in from the right, the orange diagonal their edge
   // =====================================================================
-  let pageFor = null; // the campaign id the page was built for
-  let refs = [];
-  let S = null;
-  let devices = null; // the speakers the sound window knows (for the table check)
+  let cur = null; // { kind, back }
+  let refs = []; // the open pop-up's binds, run on every state
+  let tvOn = false; // Screens on the table: the TV shows the open tab's screen
   let screenTab = 'title';
   const bind = (fn) => { refs.push(fn); fn(); };
   const C = () => S.campaign;
+  const isDrawerOpen = () => !!cur;
 
-  function page(s, force) {
-    S = s;
-    if (!s.campaign) return;
-    if (force || pageFor !== s.campaign.id || !root.querySelector('.cp')) buildPage();
-    for (const f of refs) f();
+  // the frame every pop-up shares; returns its body
+  function frame(kind, title, wide) {
+    const close = h('button', { class: 'icon-btn hm-dr-x', 'aria-label': 'Close', 'data-tip': 'Close', 'data-key': 'Esc', onclick: () => closeDrawer() }, iconEl('x'));
+    const head = h('div', { class: 'hm-dr-head' },
+      h('div', { class: 'hm-dr-top' }, h('span', { class: 'hm-caps' }, S && S.campaign ? S.campaign.name : ''), close),
+      h('h2', { class: 'hm-dr-title' }, title));
+    const body = h('div', { class: 'hm-dr-body' });
+    const panel = h('div', { class: `hm-dr ${wide ? 'wide' : ''}`, role: 'dialog', 'aria-label': title, dataset: { kind } }, head, body);
+    const back = h('div', { class: 'hm-dr-back', onpointerdown: (e) => { if (e.target === back) closeDrawer(); } },
+      edge(), panel);
+    el.drawers.replaceChildren(back);
+    cur = { kind, back, head, body };
+    return { head, body };
   }
-
-  async function loadDevices() {
-    devices = (await window.ts.sound('devices').catch(() => null)) || null;
-    for (const f of refs) f();
+  // the orange line along the panel's slanted edge
+  function edge() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'hm-dr-edge');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const cls of ['glow', 'line']) {
+      const l = document.createElementNS(ns, 'line');
+      l.setAttribute('x1', '90'); l.setAttribute('y1', '0'); l.setAttribute('x2', '0'); l.setAttribute('y2', '100%');
+      l.setAttribute('class', cls);
+      svg.append(l);
+    }
+    return svg;
   }
-
-  function buildPage() {
-    pageFor = S.campaign.id;
-    tvOn = false;
-    renderedFor = '';
+  async function drawer(kind, opts = {}) {
+    if (kind !== 'check' && !(await ensureOpen())) return;
+    if (kind === 'check' && !S) return;
+    closeDrawer(true);
     refs = [];
-    root.innerHTML = '';
-    root.classList.add('on-page');
-    loadDevices();
-
-    // ---------- the top: cover, name, sessions, Start session ----------
-    const bg = h('div', { class: 'cp-hero-bg' });
-    bind(() => {
-      const c = C();
-      const m = c.chapters.flatMap((ch) => ch.maps).find((x) => x.bgPath && !x.missing && x.bgKind !== 'audio');
-      const key = m ? m.bgPath : '';
-      if (bg.dataset.key === key) return;
-      bg.dataset.key = key;
-      bg.replaceChildren(...(m ? [Thumbs.img(m.bgPath, m.bgKind, null, 'cover-img')] : []));
-    });
-    const name = h('h1', { class: 'cp-name' });
-    const meta = h('div', { class: 'cp-meta' });
-    bind(() => {
-      const c = C();
-      name.textContent = c.name;
-      const maps = c.chapters.reduce((n, ch) => n + ch.maps.length, 0);
-      const parts = [c.lastSession ? `Last played ${ago(c.lastSession)}` : 'Not played yet'];
-      parts.push(`${plural(c.chapters.length, 'chapter', 'chapters')}, ${plural(maps, 'map', 'maps')}`);
-      meta.textContent = parts.join(' · ');
-    });
-    const start = h('button', { class: 'btn primary big cp-start', onclick: startOrBack });
-    const prep = h('button', { class: 'btn big cp-prep', onclick: () => cmd('campaign.play'), 'data-tip': 'Open the maps without starting: the table stays as it is' }, iconEl('map-2'), 'Prepare the maps');
-    const running = h('span', { class: 'cp-running' });
-    bind(() => {
-      const c = C();
-      start.replaceChildren(iconEl('player-play'), c.session ? 'Back to the table' : 'Start session');
-      start.dataset.tip = c.session ? 'The maps, as you left them' : 'The title shows on the table until you send the first map (T)';
-      prep.hidden = !!c.session;
-      running.hidden = !c.session;
-      if (c.session) running.textContent = `The session is running, since ${new Date(c.session.started).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
-    });
-    const nameMenu = h('button', { class: 'icon-btn cp-more', 'aria-label': 'More for this campaign', 'data-tip': 'Rename, folder, earlier versions, export', onclick: (e) => {
-      const r = e.currentTarget.getBoundingClientRect();
-      const c = C();
-      openMenu(r.left, r.bottom + 4, [
-        { icon: 'pencil', label: 'Rename', action: async () => { const n = await askText('Rename campaign', c.name); if (n) await cmd('campaign.rename', { id: c.id, name: n }); } },
-        { icon: 'folder', label: 'Show in folder', action: () => window.ts.library('open', c.folder) },
-        { icon: 'history', label: 'Backups…', action: () => earlier({ id: c.id, name: c.name }) },
-        { icon: 'file-export', label: 'Export…', action: () => TransferUI.exportDialog({ id: c.id, name: c.name }) }, // 4.6
-      ]);
-    } }, iconEl('dots'));
-    const hero = h('section', { class: 'cp-hero' }, bg, h('div', { class: 'cp-hero-shade' }),
-      h('div', { class: 'cp-hero-text' },
-        h('span', { class: 'cp-label' }, 'Campaign'),
-        h('div', { class: 'cp-name-row' }, name, nameMenu),
-        meta,
-        h('div', { class: 'cp-actions' }, start, prep, running)));
-
-    const cols = h('div', { class: 'cp-cols' }, playersCard(), screensCard(), checkCard());
-    root.append(h('div', { class: 'home-inner cp' }, header(null, () => cmd('campaign.home')), hero, cols));
-    if (window.App && App.updateSlot) App.updateSlot(); // (Prototype 21)
+    if (kind === 'players') playersDrawer(opts);
+    else if (kind === 'screens') screensDrawer();
+    else if (kind === 'settings') settingsDrawer();
+    else if (kind === 'check') checkDrawer();
+    for (const b of el.menu.querySelectorAll('.hm-item')) b.classList.toggle('on', b.dataset.id === kind);
   }
-  async function startOrBack() {
-    if (C().session) { cmd('campaign.play'); return; }
-    const r = await cmd('session.start');
-    if (r && r.ok && r.label) toast(r.label, { ms: 5000 });
+  function closeDrawer(quick) {
+    if (!cur) return;
+    if (tvOn) { tvOn = false; cmd('screens.preview', { which: null }); }
+    const { back } = cur;
+    cur = null;
+    refs = [];
+    for (const b of el.menu.querySelectorAll('.hm-item')) b.classList.remove('on');
+    if (quick) { back.remove(); return; }
+    back.classList.add('out');
+    setTimeout(() => back.remove(), 220);
   }
 
-  function card(icon, title, ...kids) {
-    const head = h('div', { class: 'cp-card-head' }, iconEl(icon), h('h2', {}, title));
-    return { el: h('section', { class: 'cp-card' }, head, ...kids), head };
-  }
-
-  // ---------- players: who plays, who is here today ----------
-  function playersCard() {
-    const count = h('span', { class: 'cp-count' });
-    const list = h('div', { class: 'pl-list' });
+  // ---------- Players: who plays, who is here today ----------
+  function playersDrawer(opts) {
+    const { head, body } = frame('players', 'Players');
+    const count = h('div', { class: 'hm-dr-sub' });
+    head.append(count);
+    const rows = h('div', { class: 'hm-pl' });
     bind(() => {
-      const c = C();
+      const c = C(); if (!c) return;
       const away = new Set(c.away || []);
-      const sig = JSON.stringify([c.party, c.away]);
-      count.textContent = c.party.length ? `${c.party.length - c.party.filter((n) => away.has(n)).length} of ${c.party.length} here` : '';
-      if (list.dataset.sig === sig) return;
-      list.dataset.sig = sig;
-      list.innerHTML = '';
-      if (!c.party.length) list.append(h('p', { class: 'hint' }, 'No players yet. Add them once: they join Initiative by themselves.'));
-      for (const n of c.party) {
+      count.textContent = c.party.length ? `${c.party.length - c.party.filter((n) => away.has(n)).length} of ${c.party.length} here today` : 'No players yet';
+      const faces = Object.fromEntries((S.chars || []).map((x) => [x.name, x.face]));
+      if (!sig(rows, [c.party, c.away, faces])) return;
+      rows.replaceChildren(...c.party.map((n) => {
         const here = !away.has(n);
-        list.append(h('div', { class: `pl-row ${here ? '' : 'away'}`, dataset: { name: n } },
-          h('button', { class: `pl-here ${here ? 'on' : ''}`, role: 'switch', 'aria-checked': String(here), 'aria-label': `${n} is here today`, 'data-tip': here ? 'Here today (click: not here today)' : 'Not here today (click: here)', onclick: () => cmd('party.away', { name: n, away: here }) },
-            iconEl(here ? 'user-check' : 'user-off')),
-          h('span', { class: 'grow ellipsis pl-name' }, n),
-          here ? null : h('span', { class: 'pl-tag' }, 'not here today'),
+        return h('div', { class: `hm-pl-row ${here ? '' : 'away'}`, dataset: { name: n } },
+          faces[n] ? h('img', { class: 'hm-pl-face', src: faces[n], alt: '' }) : h('span', { class: 'hm-pl-face hm-pc-initial' }, n.slice(0, 1).toUpperCase()),
+          h('div', { class: 'grow hm-pl-text' }, h('b', { class: 'pl-name' }, n), h('span', {}, here ? 'Here today' : 'Not here today')),
+          h('button', { class: `hm-switch pl-here ${here ? 'on' : ''}`, role: 'switch', 'aria-checked': String(here), 'aria-label': `${n} is here today`, 'data-tip': here ? 'Here today (click: not here today)' : 'Not here today (click: here)', onclick: () => cmd('party.away', { name: n, away: here }) }, h('i')),
           h('button', { class: 'icon-btn', 'aria-label': `Character card of ${n}`, 'data-tip': 'Character card', onclick: () => Characters.openEditor({ state: () => S, name: n }) }, iconEl('id-badge-2')),
-          h('button', { class: 'icon-btn', 'aria-label': `Rename ${n}`, 'data-tip': 'Rename', onclick: async () => { const v = await askText('Rename player', n); if (v && v.trim() !== n) { const r = await cmd('char.rename', { from: n, to: v }); if (r && r.error) toast(r.error, { kind: 'error' }); } } }, iconEl('pencil')),
-          h('button', { class: 'icon-btn', 'aria-label': `Remove ${n}`, 'data-tip': 'Remove from the campaign', onclick: () => removePlayer(n) }, iconEl('x'))));
-      }
+          h('button', { class: 'icon-btn faint-btn', 'aria-label': `Rename ${n}`, 'data-tip': 'Rename', onclick: async () => { const nv = await askText('Rename player', n); if (nv && nv.trim() !== n) { const r = await cmd('char.rename', { from: n, to: nv }); if (r && r.error) toast(r.error, { kind: 'error' }); } } }, iconEl('pencil')),
+          h('button', { class: 'icon-btn faint-btn', 'aria-label': `Remove ${n}`, 'data-tip': 'Remove from the campaign', onclick: () => removePlayer(n) }, iconEl('x')));
+      }));
     });
-    // 4.3.1: asks first (a player has a card and settings now)
     function removePlayer(n) {
       const dlg = UI.dialog(`Remove ${n}?`, h('div', { class: 'stack' },
         h('p', {}, `${n} leaves this campaign.`),
@@ -366,42 +544,43 @@ const Home = (() => {
           h('button', { class: 'btn', onclick: () => dlg.close() }, 'Keep'),
           h('button', { class: 'btn danger', onclick: () => { dlg.close(); cmd('party.set', { names: C().party.filter((x) => x !== n) }); } }, iconEl('trash'), `Remove ${n}`))));
     }
+    // several at once, with commas: "Ayla, Bo, Cy"
     const add = h('input', { type: 'text', class: 'pl-add', placeholder: 'Add a player character', 'aria-label': 'New player', spellcheck: 'false' });
-    const addIt = () => { const v = add.value.trim(); if (!v) return; cmd('party.set', { names: [...C().party, v] }); add.value = ''; };
-    add.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addIt(); } });
-    const k = card('users', 'Players', list,
-      h('div', { class: 'ctl-row' }, add, h('button', { class: 'btn', onclick: addIt }, iconEl('plus'), 'Add')),
-      h('p', { class: 'hint' }, 'Those here today join Initiative by themselves.'));
-    k.head.append(count);
-    return k.el;
+    const addIt = () => {
+      const names = add.value.split(',').map((x) => x.trim()).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i && !C().party.includes(x));
+      if (!names.length) { add.value = ''; return; }
+      cmd('party.set', { names: [...C().party, ...names] }); add.value = '';
+    };
+    add.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addIt(); } e.stopPropagation(); });
+    body.append(rows, h('div', { class: 'hm-pl-add' }, add, h('button', { class: 'btn', onclick: addIt }, iconEl('plus'), 'Add')));
+    if (opts.focusAdd) setTimeout(() => add.focus(), 60);
   }
 
-  // ---------- screens: the title, the break, the blackout ----------
-  function screensCard() {
+  // ---------- Screens on the table: the title, the break, the blackout ----------
+  function screensDrawer() {
+    const { head, body } = frame('screens', 'Screens on the table');
+    head.append(h('div', { class: 'hm-dr-sub' }, 'What the TV shows between maps'));
     const tabs = h('div', { class: 'seg seg-3 cp-tabs', role: 'tablist' });
     const TABS = [{ v: 'title', label: 'Title', icon: 'typography' }, { v: 'brk', label: 'Break', icon: 'coffee' }, { v: 'blackout', label: 'Blackout', icon: 'moon' }];
-    const body = h('div', { class: 'stack' });
+    const inner = h('div', { class: 'stack' });
     const fill = () => {
       tabs.replaceChildren(...TABS.map((t) => h('button', { class: `seg-btn ${screenTab === t.v ? 'on' : ''}`, role: 'tab', dataset: { v: t.v }, onclick: () => {
         if (screenTab === t.v) return;
         screenTab = t.v; refs = refs.filter((f) => !f.screens); fill();
         if (tvOn) cmd('screens.preview', { which: screenTab }); // the TV shows the screen of the open tab
       } }, iconEl(t.icon), h('span', {}, t.label))));
-      body.replaceChildren(...(screenTab === 'brk' ? breakForm() : screenTab === 'blackout' ? blackoutForm() : titleForm()));
+      inner.replaceChildren(...(screenTab === 'brk' ? breakForm() : screenTab === 'blackout' ? blackoutForm() : titleForm()));
     };
     fill();
-    return card('device-tv', 'Screens on the table', tabs, body).el;
+    body.append(tabs, inner);
   }
-  // "Show it on the TV": the TV shows the screen of the open tab (only that one) until it is switched off or the
-  // page is left
-  let tvOn = false;
-  // binds that belong to the current screens tab (dropped when the tab changes)
   const sbind = (fn) => { fn.screens = true; bind(fn); };
   const sc = (which) => C().screens[which];
   const set = (which, patch) => cmd('screens.set', { which, patch });
   function field(label, which, key, placeholder) {
-    const input = h('input', { type: 'text', spellcheck: 'false', 'aria-label': label, dataset: { k: key }, onchange: (e) => set(which, { [key]: e.target.value }), onkeydown: (e) => { if (e.key === 'Enter') e.target.blur(); } });
+    const input = h('input', { type: 'text', spellcheck: 'false', 'aria-label': label, dataset: { k: key }, onchange: (e) => set(which, { [key]: e.target.value }), onkeydown: (e) => { if (e.key === 'Enter') e.target.blur(); e.stopPropagation(); } });
     sbind(() => {
+      if (!C()) return;
       if (document.activeElement !== input) input.value = sc(which)[key] || '';
       input.placeholder = typeof placeholder === 'function' ? placeholder() : placeholder;
     });
@@ -410,7 +589,7 @@ const Home = (() => {
   function segField(label, which, key, options) {
     const wrap = h('div', { class: `seg seg-${options.length}`, role: 'radiogroup', 'aria-label': label, dataset: { k: key } },
       ...options.map((o) => h('button', { class: 'seg-btn', role: 'radio', dataset: { v: o.value }, 'data-tip': o.tip || null, onclick: () => set(which, { [key]: o.value }) }, h('span', {}, o.label))));
-    sbind(() => { const v = sc(which)[key]; for (const b of wrap.children) { b.classList.toggle('on', b.dataset.v === v); b.setAttribute('aria-checked', String(b.dataset.v === v)); } });
+    sbind(() => { if (!C()) return; const v = sc(which)[key]; for (const b of wrap.children) { b.classList.toggle('on', b.dataset.v === v); b.setAttribute('aria-checked', String(b.dataset.v === v)); } });
     return h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, label), wrap);
   }
   // a picture: the little maid (the default), none, one of this campaign's maps, or one from the PC (copied into the library)
@@ -418,26 +597,24 @@ const Home = (() => {
   function pictureField(which, extra) {
     const sel = h('select', { 'aria-label': 'Picture', class: 'cp-pic', onchange: (e) => {
       const v = e.target.value;
-      if (v === '__pick') { e.target.value = picValue(sc(which).pic); pick(which); return; }
+      if (v === '__pick') { e.target.value = picValue(sc(which).pic); pickPic(which); return; }
       set(which, v === '__none' ? { pic: 'none' } : v ? { pic: { path: v }, ...(extra || {}) } : { pic: null, ...(extra || {}) });
     } });
     sbind(() => {
-      const c = C();
-      const cur = sc(which).pic;
+      const c = C(); if (!c) return;
+      const cur0 = sc(which).pic;
       const maps = c.chapters.flatMap((ch) => ch.maps).filter((m) => m.bgPath && !m.missing);
-      const sig = JSON.stringify([maps.map((m) => m.bgPath), picValue(cur)]);
-      if (sel.dataset.sig === sig) return;
-      sel.dataset.sig = sig;
+      if (!sig(sel, [maps.map((m) => m.bgPath), picValue(cur0)])) return;
       sel.innerHTML = '';
       sel.append(h('option', { value: '' }, 'The little maid (default)'), h('option', { value: '__none' }, 'No picture'));
-      if (cur && cur.path && !maps.some((m) => m.bgPath === cur.path)) sel.append(h('option', { value: cur.path }, `${cur.name}${cur.missing ? ' (file missing)' : ''}`));
+      if (cur0 && cur0.path && !maps.some((m) => m.bgPath === cur0.path)) sel.append(h('option', { value: cur0.path }, `${cur0.name}${cur0.missing ? ' (file missing)' : ''}`));
       if (maps.length) sel.append(h('optgroup', { label: 'This campaign\'s maps' }, ...maps.map((m) => h('option', { value: m.bgPath }, m.name))));
       sel.append(h('option', { value: '__pick' }, 'A picture from the PC …'));
-      sel.value = picValue(cur);
+      sel.value = picValue(cur0);
     });
     return h('label', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Picture'), sel);
   }
-  async function pick(which) {
+  async function pickPic(which) {
     const r = await cmd('screens.pick', { which });
     if (r && !r.ok && r.error) toast(r.error, { kind: 'error' });
   }
@@ -445,13 +622,10 @@ const Home = (() => {
   function preview(which) {
     const box = h('div', { class: `cp-tv cp-tv-${which}` });
     sbind(() => {
-      const c = C();
+      const c = C(); if (!c) return;
       const x = sc(which);
-      const sig = JSON.stringify([which, x, c.name]);
-      if (box.dataset.sig === sig) return;
-      box.dataset.sig = sig;
+      if (!sig(box, [which, x, c.name])) return;
       box.innerHTML = '';
-      // a small copy only (a big map as a full picture here made the page slow)
       const pic = (p) => (!p || p.none || p.missing ? null : p.builtin ? h('img', { class: 'cp-tv-pic fit', src: p.small, alt: '' }) : Thumbs.img(p.path, p.kind, null, 'cp-tv-pic cover-img'));
       if (which === 'title') {
         box.append(pic(x.pic) || h('span'), h('div', { class: 'cp-tv-veil' }),
@@ -459,7 +633,7 @@ const Home = (() => {
       } else if (which === 'brk') {
         box.dataset.bg = x.bg;
         box.append(x.bg === 'picture' ? pic(x.pic) || h('span') : x.bg === 'map' ? h('div', { class: 'cp-tv-map' }) : h('span'), h('div', { class: 'cp-tv-veil' }),
-          h('div', { class: 'cp-tv-dial' }, h('b', {}, '9:41'), h('span', {}, x.label.trim() || 'Break')), x.text.trim() ? h('div', { class: 'cp-tv-note' }, x.text.trim()) : ''); // (append would write "null")
+          h('div', { class: 'cp-tv-dial' }, h('b', {}, '9:41'), h('span', {}, x.label.trim() || 'Break')), x.text.trim() ? h('div', { class: 'cp-tv-note' }, x.text.trim()) : '');
       } else {
         box.dataset.style = x.style;
         box.append(x.style === 'picture' ? pic(x.pic) || h('span') : h('span'),
@@ -483,50 +657,89 @@ const Home = (() => {
       field('Title', 'title', 'title', () => C().name),
       field('Line under it', 'title', 'sub', 'Nothing (or: Chapter 2, The Sunken Keep)'),
       pictureField('title'),
-      onTv(),
-      h('p', { class: 'hint' }, 'Shown on the table from Start session until you send the first map.')];
+      onTv()];
   }
   function breakForm() {
     const picRow = pictureField('brk', { bg: 'picture' });
-    sbind(() => { picRow.hidden = sc('brk').bg !== 'picture'; });
+    sbind(() => { if (C()) picRow.hidden = sc('brk').bg !== 'picture'; });
     return [preview('brk'),
       field('On the dial', 'brk', 'label', 'Break'),
       field('A line of text', 'brk', 'text', 'Snacks are in the kitchen'),
       segField('Behind it', 'brk', 'bg', [{ value: 'map', label: 'Blurred map' }, { value: 'picture', label: 'Picture' }, { value: 'dark', label: 'Dark' }]),
       picRow,
-      onTv(),
-      h('p', { class: 'hint' }, 'At the table: Toolbox → Break, 5 to 30 minutes.')];
+      onTv()];
   }
   function blackoutForm() {
     const picRow = pictureField('blackout', { style: 'picture' });
-    sbind(() => { picRow.hidden = sc('blackout').style !== 'picture'; });
+    sbind(() => { if (C()) picRow.hidden = sc('blackout').style !== 'picture'; });
     return [preview('blackout'),
       segField('Looks like', 'blackout', 'style', [{ value: 'black', label: 'Black' }, { value: 'title', label: 'Campaign name', tip: 'The campaign\'s name, faintly' }, { value: 'picture', label: 'Dark picture' }]),
       field('A line of text', 'blackout', 'text', 'Nothing (or: We\'ll be right back)'),
       picRow,
-      onTv(),
-      h('p', { class: 'hint' }, 'At the table: B or the Blackout button under the table preview.')];
+      onTv()];
   }
 
-  // ---------- table check: is everything ready before the players sit down ----------
-  function checkCard() {
-    const list = h('div', { class: 'chk-list' });
+  // ---------- Campaign settings ----------
+  function settingsDrawer() {
+    const { head, body } = frame('settings', 'Campaign settings');
+    const sub = h('div', { class: 'hm-dr-sub' });
+    head.append(sub);
+    const rowsEl = h('div', { class: 'hm-set' });
+    const row = (id, icon, title, subText, run, danger) => h('button', { class: `hm-set-row ${danger ? 'danger' : ''}`, dataset: { id }, onclick: run },
+      iconEl(icon), h('span', { class: 'grow hm-set-text' }, h('b', {}, title), subText ? h('span', {}, subText) : null), iconEl('chevron-right'));
+    bind(() => {
+      const c = C(); if (!c) return;
+      const maps = c.chapters.reduce((n, ch) => n + ch.maps.length, 0);
+      sub.textContent = `${plural(c.chapters.length, 'chapter', 'chapters')} · ${plural(maps, 'map', 'maps')}`;
+      const pv = c.preview || {};
+      const coverName = pv.coverPick && pv.coverPick.name ? pv.coverPick.name : 'The first map';
+      const it = items().find((x) => x.id === c.id) || { id: c.id, name: c.name, chapters: c.chapters.length, maps, lastSession: c.lastSession, folder: c.folder };
+      if (!sig(rowsEl, [c.name, coverName, c.folder, maps])) return;
+      rowsEl.replaceChildren(
+        row('rename', 'pencil', 'Rename', c.name, () => rename({ id: c.id, name: c.name })),
+        row('cover', 'photo', 'Cover picture', coverName, coverPicker),
+        row('folder', 'folder', 'Show in folder', null, () => window.ts.library('open', c.folder)),
+        row('backups', 'history', 'Backups', 'A copy each time it opens; the last 10 are kept', () => earlier({ id: c.id, name: c.name })),
+        row('export', 'file-export', 'Export', 'One file to share or keep', () => TransferUI.exportDialog({ id: c.id, name: c.name })),
+        h('div', { class: 'hm-set-gap' }),
+        row('delete', 'trash', 'Delete campaign…', 'Kept under Recently deleted until you empty it', () => askDelete(it), true));
+    });
+    body.append(rowsEl);
+  }
+  // the cover: any map of the campaign, or the first map (the default)
+  function coverPicker() {
+    if (!cur) return;
+    const { body } = cur;
+    const grid = h('div', { class: 'hm-cover-grid' });
+    const back = h('button', { class: 'btn ghost small hm-back', onclick: () => drawer('settings') }, iconEl('arrow-left'), 'Campaign settings');
+    body.replaceChildren(back, h('div', { class: 'hm-caps hm-cover-h' }, 'Cover picture'), grid);
+    refs = [];
+    bind(() => {
+      const c = C(); if (!c) return;
+      const pv = c.preview || {};
+      const chosen = pv.coverPick && pv.coverPick.path;
+      const maps = c.chapters.flatMap((ch) => ch.maps).filter((m) => m.bgPath && !m.missing && m.bgKind !== 'audio');
+      if (!sig(grid, [maps.map((m) => m.bgPath), chosen])) return;
+      const tile = (on, label, pic, run) => h('button', { class: `hm-cover ${on ? 'on' : ''}`, onclick: run }, pic, h('span', { class: 'ellipsis' }, label));
+      grid.replaceChildren(
+        tile(!chosen, 'The first map', h('div', { class: 'hm-cover-pic hm-nopic' }, iconEl('map-2')), () => cmd('campaign.cover', { path: null })),
+        ...maps.map((m) => tile(chosen === m.bgPath, m.name, h('div', { class: 'hm-cover-pic' }, Thumbs.img(m.bgPath, m.bgKind, null, 'cover-img')), () => cmd('campaign.cover', { path: m.bgPath, name: m.name }))));
+    });
+  }
+
+  // ---------- the table check: is everything ready before the players sit down ----------
+  function checkDrawer() {
+    const { body } = frame('check', 'Table check');
+    const listEl = h('div', { class: 'chk-list' });
     bind(() => {
       const rows = checks();
-      const sig = JSON.stringify(rows.map((r) => [r.id, r.state, r.text, r.sub]));
-      if (list.dataset.sig === sig) return;
-      list.dataset.sig = sig;
-      list.innerHTML = '';
-      for (const r of rows) {
-        list.append(h('div', { class: `chk-row ${r.state}`, dataset: { id: r.id } },
-          iconEl(r.state === 'ok' ? 'circle-check' : r.state === 'warn' ? 'alert-triangle' : 'circle-dashed'),
-          h('div', { class: 'grow chk-text' }, h('b', {}, r.text), r.sub ? h('span', {}, r.sub) : null),
-          r.action ? h('button', { class: 'btn small', onclick: r.action.fn }, r.action.icon ? iconEl(r.action.icon) : null, r.action.label) : null));
-      }
+      if (!sig(listEl, rows.map((r) => [r.id, r.state, r.text, r.sub]))) return;
+      listEl.replaceChildren(...rows.map((r) => h('div', { class: `chk-row ${r.state}`, dataset: { id: r.id } },
+        iconEl(r.state === 'ok' ? 'circle-check' : r.state === 'warn' ? 'alert-triangle' : 'circle-dashed'),
+        h('div', { class: 'grow chk-text' }, h('b', {}, r.text), r.sub ? h('span', {}, r.sub) : null),
+        r.action ? h('button', { class: 'btn small', onclick: r.action.fn }, r.action.icon ? iconEl(r.action.icon) : null, r.action.label) : null)));
     });
-    const k = card('checklist', 'Table check', list,
-      h('div', { class: 'ctl-row' }, h('button', { class: 'btn small ghost', onclick: loadDevices, 'data-tip': 'Look for the speakers again' }, iconEl('refresh'), 'Check again')));
-    return k.el;
+    body.append(listEl, h('div', { class: 'ctl-row' }, h('button', { class: 'btn small ghost', onclick: loadDevices, 'data-tip': 'Look for the speakers again' }, iconEl('refresh'), 'Check again')));
   }
   function checks() {
     const s = S; const c = s.campaign; const st = s.settings || {}; const v = s.view;
@@ -549,17 +762,52 @@ const Home = (() => {
     rows.push(sp.linked
       ? { id: 'spotify', state: 'ok', text: `Spotify: linked${sp.user ? ` as ${sp.user}` : ''}`, sub: sp.deviceName ? `Plays on ${sp.deviceName}` : 'Plays on the Spotify app that is open' }
       : { id: 'spotify', state: 'off', text: 'Spotify: not linked', sub: 'Optional: Toolbox → Spotify' });
-    let missing = 0;
-    for (const ch of c.chapters) { missing += ch.maps.filter((m) => m.missing).length; if (ch.ambience && ch.ambience.missing) missing++; if (ch.fight && ch.fight.missing) missing++; }
-    rows.push(missing
-      ? { id: 'files', state: 'warn', text: `${plural(missing, 'file is', 'files are')} missing`, sub: 'Open its map to find it again' }
-      : { id: 'files', state: 'ok', text: 'All maps and sounds are there' });
-    const here = c.party.filter((n) => !(c.away || []).includes(n)).length;
-    rows.push(c.party.length
-      ? { id: 'players', state: 'ok', text: `${here} of ${plural(c.party.length, 'player', 'players')} here today` }
-      : { id: 'players', state: 'off', text: 'No players yet', sub: 'Add them on the left' });
+    if (c) {
+      let missing = 0;
+      for (const ch of c.chapters) { missing += ch.maps.filter((m) => m.missing).length; if (ch.ambience && ch.ambience.missing) missing++; if (ch.fight && ch.fight.missing) missing++; }
+      rows.push(missing
+        ? { id: 'files', state: 'warn', text: `${plural(missing, 'file is', 'files are')} missing`, sub: 'Open its map to find it again' }
+        : { id: 'files', state: 'ok', text: 'All maps and sounds are there' });
+      const here = c.party.filter((n) => !(c.away || []).includes(n)).length;
+      rows.push(c.party.length
+        ? { id: 'players', state: 'ok', text: `${here} of ${plural(c.party.length, 'player', 'players')} here today` }
+        : { id: 'players', state: 'off', text: 'No players yet', sub: 'Players: add them there', action: { label: 'Players', icon: 'users', fn: () => drawer('players', { focusAdd: true }) } });
+    }
     return rows;
   }
 
-  return { mount, show, page, earlier };
+  // =====================================================================
+  // Keys, like a game's menu: up and down through PLAY … Options, left and right through the campaigns, Esc closes
+  // =====================================================================
+  function onKey(e) {
+    if (!root || root.hidden || !S || (S.screen !== 'home' && S.screen !== 'campaign')) return;
+    if (e.key === 'Escape' && cur && !document.querySelector('.modal-back') && !(window.App && App.optionsOpen && App.optionsOpen()) && !(window.Guide && Guide.isOpen())) { e.preventDefault(); e.stopImmediatePropagation(); closeDrawer(); return; }
+    const t = e.target;
+    if (cur || e.ctrlKey || e.altKey || e.metaKey || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable))) return;
+    if (document.querySelector('.modal-back') || (window.App && App.optionsOpen && App.optionsOpen()) || (window.Guide && Guide.isOpen()) || UI.menuOpen()) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const nav = [...el.stage.querySelectorAll('.hm-nav')].filter((b) => !b.hidden && b.offsetParent);
+      if (!nav.length) return;
+      e.preventDefault();
+      const i = nav.indexOf(document.activeElement);
+      const n = i < 0 ? 0 : (i + (e.key === 'ArrowDown' ? 1 : -1) + nav.length) % nav.length;
+      nav[n].focus();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const all = items();
+      if (!all.length) return;
+      e.preventDefault();
+      const v = view();
+      const i = Math.max(0, all.findIndex((c) => v && c.id === v.id));
+      const n = Math.min(all.length - 1, Math.max(0, i + (e.key === 'ArrowRight' ? 1 : -1)));
+      if (n !== i) pick(all[n].id);
+    }
+  }
+
+  // a video cover rests while the maps are open (the home is hidden then)
+  function active(on) {
+    if (!el.bg) return;
+    for (const v of el.bg.querySelectorAll('video')) { if (on) v.play().catch(() => {}); else v.pause(); }
+  }
+
+  return { mount, update, show, page, earlier, refresh, isDrawerOpen, closeDrawer, drawer, active };
 })();

@@ -24,11 +24,31 @@ const App = (() => {
     TransferUI.start(); // 4.6: export and import, a .tablescape file opened with Tablescape
     AnimPill.start(); AnimBaker.start(); // 2.3: animated assets baked in the background, the maid shows it
     apply(await ts.state());
-    const boot = document.getElementById('boot');
-    if (boot) { boot.classList.add('gone'); setTimeout(() => boot.remove(), 400); }
+    await splash();
     // Prototype 21: just updated: What's new opens once
     ts.app('whatsnew').then((r) => { if (r && r.show) updateDone(); }).catch(() => {});
     window.__tsReady = true; // used by the self-test
+  }
+
+  // Beta 3.17: the start. The name stands still on its own for a moment, then fades out and the home fades in. A click
+  // or a key skips it; a slow start keeps it until the GM screen is ready. (Not in the self-test.)
+  async function splash() {
+    const boot = document.getElementById('boot');
+    if (!boot) return;
+    const about = await ts.app('about').catch(() => null);
+    if (!(about && about.test)) {
+      const until = (window.__bootAt || 0) + 2000; // (0.5 s to fade in, then 1.5 s still)
+      await new Promise((res) => {
+        const done = () => { clearTimeout(tm); window.removeEventListener('keydown', skip, true); window.removeEventListener('pointerdown', skip, true); res(); };
+        const skip = (e) => { e.preventDefault(); e.stopPropagation(); done(); };
+        const tm = setTimeout(done, Math.max(0, until - performance.now()));
+        window.addEventListener('keydown', skip, true);
+        window.addEventListener('pointerdown', skip, true);
+      });
+    }
+    boot.classList.add('gone');
+    document.body.classList.add('after-splash');
+    setTimeout(() => boot.remove(), 600);
   }
 
   function apply(s) {
@@ -38,8 +58,8 @@ const App = (() => {
     document.getElementById('home').hidden = s.screen !== 'home' && s.screen !== 'campaign';
     document.getElementById('play').hidden = s.screen !== 'play';
     Play.setActive(s.screen === 'play');
-    if (s.screen === 'home') { Home.show(prevScreen !== 'home'); }
-    else if (s.screen === 'campaign') Home.page(s, prevScreen !== 'campaign');
+    Home.active(s.screen === 'home' || s.screen === 'campaign');
+    if (s.screen === 'home' || s.screen === 'campaign') Home.update(s, prevScreen); // (Beta 3.17: one home screen for both)
     else Play.update(s);
     for (const f of setupRefs) f();
     renderUpdate(s.update);
@@ -232,9 +252,12 @@ const App = (() => {
       if (!r || r.canceled) return;
       if (!r.ok) { UI.toast(r.error || 'That did not work.', { kind: 'error' }); return; }
     } }, iconEl('folder'), 'Move the library…');
-    return h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Your library (maps, tokens, sounds, campaigns)'),
-      h('div', { class: 'ctl-row' }, pathEl, h('button', { class: 'btn small ghost', onclick: () => ts.library('open') }, 'Open')),
-      h('div', { class: 'ctl-row' }, move));
+    const demo = h('button', { class: 'btn small opt-demo', onclick: () => TransferUI.importDemo() }, iconEl('plus'), 'Add the demo campaign');
+    return h('div', { class: 'stack' },
+      h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Your library (maps, tokens, sounds, campaigns)'),
+        h('div', { class: 'ctl-row' }, pathEl, h('button', { class: 'btn small ghost', onclick: () => ts.library('open') }, 'Open')),
+        h('div', { class: 'ctl-row' }, move)),
+      h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Demo campaign'), h('div', { class: 'ctl-row' }, demo)));
   }
 
   // small controls for Options (the play screen has its own set; these work on the start screen too)
@@ -323,7 +346,8 @@ const App = (() => {
     { id: 'screen', label: 'This screen', icon: 'device-desktop',
       tips: ['Ctrl + and Ctrl − change the size anywhere, Ctrl 0 goes back to 100%. The TV stays as it is.', 'Hotbar: a row, two rows or a column. Right-click the hotbar for the same.', 'Drag the hotbar by its grip to put it anywhere; a double-click on the grip puts it back.'] },
     { id: 'library', label: 'Library', icon: 'folder',
-      tips: ['Moving copies everything to the new place (another disk, say), then Tablescape starts again from there.', 'A folder synced to the cloud works, but files can be busy for a moment while it syncs.'] },
+      tips: ['Moving copies everything to the new place (another disk, say), then Tablescape starts again from there.', 'A folder synced to the cloud works, but files can be busy for a moment while it syncs.',
+        'Add the demo campaign: the newest demo comes in next to your campaigns. Yours stay as they are, an older demo too.'] },
   ];
   const pct = (v) => `${Math.round(v * 100)}%`;
   const optHead = (t) => h('h3', { class: 'opt-h' }, t);
@@ -817,18 +841,27 @@ const App = (() => {
       optId = section;
     }
     if (!setupEl) {
+      // Beta 3.17: Options slides in from the right like the home screen's pop-ups, its edge the orange diagonal
       optNav = h('nav', { class: 'opt-nav', role: 'tablist', 'aria-label': 'Options' },
-        h('div', { class: 'opt-brand' }, iconEl('settings'), h('span', {}, 'Options')),
         ...OPT_SECTIONS.map((x) => h('button', { class: 'opt-tab', role: 'tab', dataset: { id: x.id }, onclick: () => openOptions(x.id) }, iconEl(x.icon), h('span', {}, x.label))));
       optTitle = h('div', { class: 'opt-title' });
       const optTips = UI.helpTip(() => { const sec = OPT_SECTIONS.find((x) => x.id === optId); return sec ? sec.label : 'Options'; }, () => { const sec = OPT_SECTIONS.find((x) => x.id === optId); return sec ? sec.tips : []; }); // 4.3.1
       optBody = h('div', { class: 'opt-body' });
       const panel = h('div', { class: 'modal options', role: 'dialog', 'aria-label': 'Options' },
-        optNav,
-        h('div', { class: 'opt-main' },
-          h('div', { class: 'opt-headrow' }, optTitle, optTips, h('button', { class: 'icon-btn', 'aria-label': 'Close', 'data-tip': 'Close', 'data-key': 'Esc', onclick: closeOptions }, iconEl('x'))),
-          optBody));
-      setupEl = h('div', { class: 'modal-back options-back', onpointerdown: (e) => { if (e.target === setupEl) closeOptions(); } }, panel);
+        h('div', { class: 'opt-top' },
+          h('div', { class: 'opt-top-row' }, h('span', { class: 'hm-caps' }, 'For every campaign'),
+            h('button', { class: 'icon-btn', 'aria-label': 'Close', 'data-tip': 'Close', 'data-key': 'Esc', onclick: closeOptions }, iconEl('x'))),
+          h('h2', { class: 'opt-big' }, 'Options')),
+        h('div', { class: 'opt-cols' },
+          optNav,
+          h('div', { class: 'opt-main' },
+            h('div', { class: 'opt-headrow' }, optTitle, optTips),
+            optBody)));
+      const ns = 'http://www.w3.org/2000/svg';
+      const edgeSvg = document.createElementNS(ns, 'svg');
+      edgeSvg.setAttribute('class', 'hm-dr-edge opt-edge'); edgeSvg.setAttribute('aria-hidden', 'true');
+      for (const cls of ['glow', 'line']) { const l = document.createElementNS(ns, 'line'); l.setAttribute('x1', '90'); l.setAttribute('y1', '0'); l.setAttribute('x2', '0'); l.setAttribute('y2', '100%'); l.setAttribute('class', cls); edgeSvg.append(l); }
+      setupEl = h('div', { class: 'modal-back options-back', onpointerdown: (e) => { if (e.target === setupEl) closeOptions(); } }, edgeSvg, panel);
       document.body.append(setupEl);
     }
     fillOptions();

@@ -42,6 +42,33 @@ module.exports = (area) => {
     await t.until(() => t.settings.gmAnim === v0, 3000, 'the setting to go back');
   });
 
+  // Beta 3.17: the demo a new install starts with, for anyone who wants the newest one (or deleted theirs)
+  area.quick('Library → Add the demo campaign brings the demo in next to the other campaigns', async (t) => {
+    const fs = require('fs'); const path = require('path');
+    const root = require('../../library').root;
+    const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'Campaigns' ? [] : walk(path.join(d, e.name))) : [path.join(d, e.name)]));
+    const before = new Set(walk(root));
+    const ids0 = new Set(t.store.list().map((c) => c.id));
+    let added = null;
+    try {
+      await t.g(`App.openOptions('library')`);
+      await t.until(() => t.findText('.opt-body', 'Add the demo campaign'), 3000, 'the button');
+      await t.clickText('.opt-body button', 'Add the demo campaign');
+      await t.until(() => t.g(`!!document.querySelector('.tr-back.done')`), 30000, 'the demo to be unpacked');
+      added = t.store.list().find((c) => !ids0.has(c.id));
+      t.ok(added && /^Demo: the maid's cottage/.test(added.name), 'a new demo campaign', added && added.name);
+      t.ok(/Imported/.test(await t.text('.tr-back .tr-title')) && /7 maps/.test(await t.text('.tr-back .tr-line')), 'it says so', await t.text('.tr-back'));
+      await t.clickText('.tr-back .tr-actions button', 'Done');
+      await t.until(async () => !(await t.g(`!!document.querySelector('.tr-back')`)), 3000, 'the ring to close');
+      t.ok(await t.g('App.optionsOpen()'), 'Options stay open');
+    } finally {
+      // what it brought goes again, so the later areas find the library as it was
+      if (added) { const dir = t.store.findDir(added.id); if (dir) fs.rmSync(dir, { recursive: true, force: true }); }
+      for (const f of walk(root)) if (!before.has(f)) fs.rmSync(f, { force: true });
+      await t.g(`Home.refresh()`);
+    }
+  });
+
   area.quick('Esc closes Options', async (t) => {
     await t.g(`App.openOptions('tv')`);
     await t.until(() => t.g('App.optionsOpen()'), 3000, 'Options');

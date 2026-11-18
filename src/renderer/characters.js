@@ -66,7 +66,7 @@ const Characters = (() => {
     const S = () => o.state();
     const chars = () => S().chars || [];
     let name = o.name || (chars()[0] && chars()[0].name);
-    if (!name) { toast('Add a player first (campaign page → Players)'); return null; }
+    if (!name) { toast('Add a player first (home screen → Players)'); return null; }
     const body = h('div', { class: 'ch-ed' });
     const d = dialog('Character card', body, { wide: true });
     d.el.classList.add('ch-dlg');
@@ -196,7 +196,7 @@ const Characters = (() => {
         if (list.dataset.sig === sig) return;
         list.dataset.sig = sig;
         const here = cs.filter((c) => c.here);
-        list.replaceChildren(...(here.length ? here.map(cardEl) : [h('p', { class: 'hint' }, cs.length ? 'Nobody is here today (campaign page → Players).' : 'No players yet: add them on the campaign page (Players), then fill in their cards.')]));
+        list.replaceChildren(...(here.length ? here.map(cardEl) : [h('p', { class: 'hint' }, cs.length ? 'Nobody is here today (home screen → Players).' : 'No players yet: add them on the campaign page (Players), then fill in their cards.')]));
         const gone = cs.filter((c) => !c.here);
         away.replaceChildren(...(gone.length ? [h('span', { class: 'hint' }, 'Not here today: '), ...gone.map((c) => h('button', { class: 'link-btn', onclick: () => openEditor({ state: S, name: c.name }) }, c.name))] : []));
         if (check.on) {
@@ -211,7 +211,7 @@ const Characters = (() => {
         gather,
         h('div', { class: 'ch-check' }, h('span', { class: 'ctl-label' }, 'Passive check'), kinds, h('label', { class: 'ch-dc' }, 'DC', dc), onBtn),
         list, away,
-        ctx.ctl.row(ctx.ctl.btn('Character cards …', 'id-badge-2', () => openEditor({ state: S }), { kind: 'small', tip: 'Fill in or change the cards (also on the campaign page)' })));
+        ctx.ctl.row(ctx.ctl.btn('Character cards …', 'id-badge-2', () => openEditor({ state: S }), { kind: 'small', tip: 'Fill in or change the cards (also on the home screen → Players)' })));
     }
     return { buildPanel };
   }

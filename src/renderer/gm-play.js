@@ -203,7 +203,7 @@ const Play = (() => {
       { id: 'talk', icon: 'messages', label: 'Conversation', short: 'Converse', key: 'O', pop: true, tip: 'NPC portraits rise out of a band on the table' }] },
     'spacer',
     { group: 'end', items: [{ id: 'library', icon: 'photo', label: 'Library', key: 'L', tip: 'Maps, tokens, overlays and sounds' },
-      { id: 'home', icon: 'home', label: 'Campaign', tip: 'The campaign page: players, screens, table check' }, { id: 'table', icon: 'settings', label: 'Options', key: 'Ctrl ,', tip: 'The TV, its picture, seating, sound, performance, this screen, the library' },
+      { id: 'home', icon: 'home', label: 'Campaign', tip: 'The home screen: players, screens, table check' }, { id: 'table', icon: 'settings', label: 'Options', key: 'Ctrl ,', tip: 'The TV, its picture, seating, sound, performance, this screen, the library' },
       { id: 'help', icon: 'keyboard', label: 'Guide', key: '?', tip: 'First evening, keys, what\'s new, report a problem' }] },
   ];
   const BUILD = new Set(['map', 'asset', 'fx', 'walls', 'grid', 'layers', 'sound']);

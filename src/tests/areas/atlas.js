@@ -46,7 +46,7 @@ module.exports = (area) => {
     // closed and opened again
     const id = t.store.cur.meta.id; const dir = t.store.cur.dir;
     t.handle('campaign.home');
-    await t.until(() => t.g(`document.body.dataset.screen === 'home'`), 5000, 'the start screen');
+    await t.until(() => t.g(`document.body.dataset.screen === 'home'`), 5000, 'the home screen');
     t.ok(fs.existsSync(path.join(dir, 'maps', `${world}.json`)), 'its file is kept');
     t.handle('campaign.open', { id }); t.handle('campaign.play');
     await t.until(() => t.g(`document.body.dataset.screen === 'play' && !!Play.state().map`), 8000, 'the campaign to open again');

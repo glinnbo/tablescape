@@ -133,17 +133,25 @@ const TransferUI = (() => {
     async function run() {
       dlg.close();
       showRing(`Unpacking ${info.name}`);
-      const r = await T('import', { file: info.file });
-      if (r && r.cancelled) { closeRing(); toast('Stopped: nothing was kept', { ms: 2200 }); return; }
-      if (!r || !r.ok) { closeRing(); toast((r && r.error) || 'The import did not work.', { kind: 'error' }); return; }
-      const notes = [plural(r.maps, 'map', 'maps'), plural(r.files, 'file', 'files')];
-      if (r.reused) notes.push(`${r.reused} ${r.reused === 1 ? 'was' : 'were'} already in your library`);
-      if (r.renamed) notes.push(`${r.renamed} renamed (a different file had the name)`);
-      ringDone('Imported', `${r.name} · ${notes.join(' · ')}`, [
-        h('button', { class: 'btn', onclick: () => { closeRing(); Home.show(true); } }, 'Done'),
-        h('button', { class: 'btn primary', onclick: async () => { closeRing(); await window.ts.cmd('campaign.open', { id: r.id }); } }, iconEl('player-play'), 'Open the campaign')]);
-      Home.show(true);
+      imported(await T('import', { file: info.file }));
     }
+  }
+  // Beta 3.17: Options → Library → Add the demo campaign (the one a new install starts with)
+  async function importDemo() {
+    if (ring) return;
+    showRing('Unpacking the demo campaign');
+    imported(await T('demo'));
+  }
+  function imported(r) {
+    if (r && r.cancelled) { closeRing(); toast('Stopped: nothing was kept', { ms: 2200 }); return; }
+    if (!r || !r.ok) { closeRing(); toast((r && r.error) || 'The import did not work.', { kind: 'error' }); return; }
+    const notes = [plural(r.maps, 'map', 'maps'), plural(r.files, 'file', 'files')];
+    if (r.reused) notes.push(`${r.reused} ${r.reused === 1 ? 'was' : 'were'} already in your library`);
+    if (r.renamed) notes.push(`${r.renamed} renamed (a different file had the name)`);
+    ringDone('Imported', `${r.name} · ${notes.join(' · ')}`, [
+      h('button', { class: 'btn', onclick: () => { closeRing(); Home.show(true); } }, 'Done'),
+      h('button', { class: 'btn primary', onclick: async () => { closeRing(); await window.ts.cmd('campaign.open', { id: r.id }); } }, iconEl('player-play'), 'Open the campaign')]);
+    Home.show(true);
   }
 
   function start() {
@@ -154,5 +162,5 @@ const TransferUI = (() => {
     });
     T('pending').then((r) => { if (r && r.file) importFile(r.file); }).catch(() => {});
   }
-  return { start, exportDialog, importPick, importFile };
+  return { start, exportDialog, importPick, importFile, importDemo };
 })();

@@ -70,7 +70,7 @@ Everything else waits in the Toolbox until you open it:
 
 1. Download **Tablescape-Setup-….exe** from the [latest release](https://github.com/glinnbo/tablescape/releases/latest) (under **Assets**).
 2. Run it. The installer isn't signed yet, so Windows may say *"Windows protected your PC"*: click **More info → Run anyway**.
-3. Tablescape opens with a demo campaign. The **First steps** on the start screen walk you through it: pick the TV, match the grid to your miniatures with a bank card, send a map to the table.
+3. Tablescape opens on its home screen with a demo campaign. Under **Options → TV**, pick the TV and match the grid to your miniatures with a bank card. Then **Prepare the maps**, pick a map and press **T** to send it to the table.
 
 New versions come by themselves: Tablescape asks before it installs one. It needs Windows 10 or 11 and a second screen; phones and tablets join over your own Wi-Fi.
 

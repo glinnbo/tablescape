@@ -11,7 +11,7 @@ module.exports = (area) => {
   const reopen = async (t, id) => {
     t.store.flush();
     t.handle('campaign.home');
-    await t.until(() => t.g(`document.body.dataset.screen === 'home'`), 5000, 'the start screen');
+    await t.until(() => t.g(`document.body.dataset.screen === 'home'`), 5000, 'the home screen');
     t.handle('campaign.open', { id }); t.handle('campaign.play');
     await t.until(() => t.g(`document.body.dataset.screen === 'play' && !!Play.state() && !!Play.state().map`), 8000, 'the campaign to open again');
     await t.sleep(300);
@@ -79,10 +79,12 @@ module.exports = (area) => {
     fs.writeFileSync(path.join(bdir, '.backups', '2026-01-01 120000', 'campaign.json'), JSON.stringify({ app: 'tablescape', version: 2, id: 'c_half', name: 'Half written', chapters: [{ id: 'ch1', name: 'One', maps: [] }] }));
     fs.writeFileSync(path.join(bdir, '.backups', '2026-01-01 120000', 'backup.json'), JSON.stringify({ made: Date.now() - 5000, hash: 'h', name: 'Half written', chapters: 1, maps: 0, files: 1 }));
     t.handle('campaign.home');
-    await t.until(() => t.rect('.camp-broken'), 6000, 'the damaged campaign on the start screen');
+    await t.until(() => t.rect('.hm-slot.broken'), 6000, 'the damaged campaign among the campaigns on the home screen');
     const listed = (t.handle('campaign.list').campaigns || []).filter((c) => c.broken);
     t.ok(listed.length === 1 && listed[0].backups >= 1, 'it is listed as damaged, with an earlier version', listed);
-    await t.clickSel('.camp-broken');
+    await t.clickSel('.hm-slot.broken'); // (Beta 3.17: picked, it offers its backups where PLAY is)
+    await t.until(async () => /BACKUPS/.test(await t.text('.hm-play')), 3000, 'BACKUPS instead of PLAY');
+    await t.clickSel('.hm-play');
     await t.until(async () => (await t.count('.modal .dlg-row')) >= 1, 4000, 'its earlier versions');
     await t.clickText('.modal .dlg-btns .btn, .modal .dlg-row .btn', 'Restore');
     await t.until(() => (t.handle('campaign.list').campaigns || []).some((c) => c.name === 'Half written' && !c.broken), 6000, 'the campaign to be whole again');

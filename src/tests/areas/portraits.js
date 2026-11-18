@@ -1,8 +1,8 @@
-// Portraits (NPCs on the TV) and the campaign page
+// Portraits (NPCs on the TV) and the home screen
 'use strict';
 
 module.exports = (area) => {
-  area.title('Conversation and the campaign page');
+  area.title('Conversation and the home screen');
   area.before(async (K) => { await K.openDemo(); await K.send(); });
 
   const talk = async (t) => ((await t.tvDebug()).over || {}).talk;
@@ -35,15 +35,15 @@ module.exports = (area) => {
     await t.until(async () => !(await talk(t)), 5000, 'the TV to be clear');
   });
 
-  area.deep('portraits need the table: from the campaign page the app says so instead of showing one', async (t) => {
+  area.deep('portraits need the table: from the home screen the app says so instead of showing one', async (t) => {
     t.handle('campaign.page');
-    await t.until(() => t.state.screen === 'campaign', 4000, 'the campaign page');
+    await t.until(() => t.state.screen === 'campaign', 4000, 'the home screen');
     const r = t.handle('talk.toggle', { path: faces(t)[0].path });
     t.ok(r.ok === false && /Start the table first/.test(r.error || ''), 'the app says to start the table first', r);
     await t.openDemo();
   });
 
-  area.deep('the campaign page: a player marked as not here today is left out of the turn order', async (t) => {
+  area.deep('the home screen: a player marked as not here today is left out of the turn order', async (t) => {
     await t.cmd('party.set', { names: ['Ayla', 'Bo', 'Cy'] });
     await t.cmd('party.away', { name: 'Cy', away: true });
     t.has(t.store.cur.meta.away || [], 'Cy', 'who is away');
@@ -54,10 +54,10 @@ module.exports = (area) => {
     t.handle('init.clear', {});
   });
 
-  area.deep('Start session opens the maps and shows the title on the TV; the page lists the party', async (t) => {
+  area.deep('Start session opens the maps and shows the title on the TV; the home screen lists the party', async (t) => {
     await t.cmd('party.set', { names: ['Ayla', 'Bo'] });
     t.handle('campaign.page');
-    await t.until(() => t.g(`document.body.dataset.screen === 'campaign'`), 4000, 'the campaign page');
+    await t.until(() => t.g(`document.body.dataset.screen === 'campaign'`), 4000, 'the home screen');
     const text = await t.g(`document.body.textContent`);
     t.ok(/Ayla/.test(text) && /Bo/.test(text), 'the page names the players');
     const r = await t.cmd('session.start', {});
