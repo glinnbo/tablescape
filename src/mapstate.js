@@ -54,8 +54,15 @@ const OS_SHAPES = ['rect', 'poly', 'round', 'path', 'brush'];
 // Beta 3.25: ground drawn into an Oldschool map (the Draw tool's Ground): the picture shows the pool, an effect of the
 // same kind (fx, key os) makes it move
 const GROUND_KINDS = ['water', 'lava', 'acid', 'darkness', 'swamp'];
-// Beta 3.26: how a floor mixes into the floor already there (stone by stone, a soft fade, or not), over mixW squares
-const MIX_KINDS = ['stones', 'soft', 'off'];
+// Beta 3.27: how a floor mixes into the floor already there, by opacity alone: mixW squares wide (0: not at all), the
+// line made uneven by mixU (0–1), squares pushed in or out along the grid by mixT (0–1). (3.26's 'stones' / 'soft'
+// become the defaults; 'off' stays off.)
+const MIX_DEFAULT = { mixW: 1.5, mixU: 0.5, mixT: 0.5 };
+function mixOf(it) {
+  const legacy = typeof it.mix === 'string' && it.mixU === undefined;
+  if (legacy) return { mixW: it.mix === 'off' ? 0 : MIX_DEFAULT.mixW, mixU: MIX_DEFAULT.mixU, mixT: MIX_DEFAULT.mixT };
+  return { mixW: Math.round(osNum(it.mixW, MIX_DEFAULT.mixW, 0, 3) * 2) / 2, mixU: r3(osNum(it.mixU, MIX_DEFAULT.mixU, 0, 1)), mixT: r3(osNum(it.mixT, MIX_DEFAULT.mixT, 0, 1)) };
+}
 function defaultOs() { return { v: 1, items: [], doors: [], sun: 135, shadows: 'short', sight: true }; } // (Beta 3.25: the depth view of 3.23 is gone; shadows)
 const SHADOW_KINDS = ['short', 'long', 'off'];
 const osNum = (v, d, a, b) => { const x = Number(v); return Number.isFinite(x) ? Math.min(b, Math.max(a, x)) : d; };
@@ -69,7 +76,8 @@ function cleanOsItem(it) {
   const pts = ptsOf(it.pts);
   if (kind === 'paint') { // (Beta 3.26) a floor painted into the floors under a brush
     if (pts.length < 1) return null;
-    return { id, kind, shape: 'brush', pts, r: r3(osNum(it.r, 0.75, 0.05, 50)), tile: refOf(it.tile), mix: MIX_KINDS.includes(it.mix) && it.mix !== 'off' ? it.mix : 'stones' };
+    const m = mixOf(it);
+    return { id, kind, shape: 'brush', pts, r: r3(osNum(it.r, 0.75, 0.05, 50)), tile: refOf(it.tile), mixU: m.mixU, mixT: m.mixT };
   }
   if (kind === 'ground') {
     const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'rect';
@@ -84,8 +92,7 @@ function cleanOsItem(it) {
     const out = { id, kind, shape, pts, r: r3(osNum(it.r, 0.5, 0.05, 50)) };
     if (kind === 'area') {
       Object.assign(out, { tile: refOf(it.tile), edge: OS_EDGES.includes(it.edge) ? it.edge : 'walls', mat: typeof it.mat === 'string' ? it.mat : 'stone_wall', level: Math.round(osNum(it.level, 0, -3, 3)) });
-      out.mix = MIX_KINDS.includes(it.mix) ? it.mix : 'stones'; // (Beta 3.26)
-      out.mixW = Math.round(osNum(it.mixW, 1, 0.5, 3) * 2) / 2;
+      Object.assign(out, mixOf(it)); // (Beta 3.27)
     }
     return out;
   }
@@ -1055,7 +1062,8 @@ function apply(map, type, p, media) {
       if (!map.os) return { changed: null };
       const i = map.os.items.findIndex((x) => x.id === p.id);
       if (i < 0) return { changed: null };
-      const next = cleanOsItem({ ...map.os.items[i], ...pick(p, ['tile', 'edge', 'mat', 'level', 'pts', 'r', 'w', 'h', 'round', 'dir', 'preset', 'mix', 'mixW']), id: p.id });
+      const mixing = 'mixW' in p || 'mixU' in p || 'mixT' in p ? { mix: undefined } : {}; // (a 3.26 floor set anew)
+      const next = cleanOsItem({ ...map.os.items[i], ...mixing, ...pick(p, ['tile', 'edge', 'mat', 'level', 'pts', 'r', 'w', 'h', 'round', 'dir', 'preset', 'mixW', 'mixU', 'mixT']), id: p.id });
       if (!next) return { changed: null };
       map.os.items[i] = next;
       syncGround(map);

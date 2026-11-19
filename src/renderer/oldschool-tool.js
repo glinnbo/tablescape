@@ -52,10 +52,10 @@ const OldschoolTool = (() => {
     const first = Oldschool.FLOORS[0];
     const prefs = {
       tool: 'room', snap: 'sq', level: 0, width: 1, brush: 1.5, erase: 'box', edge: 'walls', mats: { ...Oldschool.DEFAULT_MAT },
-      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box', mix: 'stones', mixW: 1, floorHow: 'click',
+      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box', mixW: 1.5, mixU: 0.5, mixT: 0.5, floorHow: 'click',
       floor: first ? { rel: Oldschool.relOf(first) } : null,
     };
-    try { const saved = JSON.parse(localStorage.getItem('osPrefs') || '{}'); Object.assign(prefs, saved, { mats: { ...prefs.mats, ...(saved.mats || {}) }, line: { ...prefs.line, ...(saved.line || {}) }, pillar: { ...prefs.pillar, ...(saved.pillar || {}) } }); } catch {}
+    try { const saved = JSON.parse(localStorage.getItem('osPrefs') || '{}'); if ('mix' in saved && !('mixU' in saved)) { delete saved.mix; delete saved.mixW; } Object.assign(prefs, saved, { mats: { ...prefs.mats, ...(saved.mats || {}) }, line: { ...prefs.line, ...(saved.line || {}) }, pillar: { ...prefs.pillar, ...(saved.pillar || {}) } }); } catch {}
     ui.os = { ...prefs, poly: null };
     const O = ui.os;
     const save = () => { try { const { poly, ...keep } = O; void poly; localStorage.setItem('osPrefs', JSON.stringify(keep)); } catch {} };
@@ -85,7 +85,7 @@ const OldschoolTool = (() => {
     const snapCorr = (p, free) => (free || O.snap === 'free' ? snapCorner(p, true) : O.width % 2 === 1 ? snapCenter(p) : snapCorner(p));
 
     // ---------- what a new floor gets ----------
-    const areaLook = () => ({ tile: O.floor, edge: O.edge, mat: O.edge === 'ledge' ? 'stone_wall' : O.mats[O.edge] || Oldschool.DEFAULT_MAT[O.edge], level: O.level, mix: O.mix, mixW: O.mixW });
+    const areaLook = () => ({ tile: O.floor, edge: O.edge, mat: O.edge === 'ledge' ? 'stone_wall' : O.mats[O.edge] || Oldschool.DEFAULT_MAT[O.edge], level: O.level, mixW: O.mixW, mixU: O.mixU, mixT: O.mixT });
     function add(item, label) {
       if (!map() || !map().os) return;
       pending.push({ ...item, at: Date.now() });
@@ -169,7 +169,7 @@ const OldschoolTool = (() => {
       } else if (d.kind === 'ospath') {
         add({ kind: d.cut ? 'cut' : 'area', shape: 'path', pts: d.pts, r: (O.width * g()) / 2, ...(d.cut ? {} : areaLook()) });
       } else if (d.kind === 'osbrush' && d.paint) { // (Beta 3.26) the picked floor painted into the floors under the brush
-        add({ kind: 'paint', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r, tile: O.floor, mix: O.mix === 'soft' ? 'soft' : 'stones' });
+        add({ kind: 'paint', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r, tile: O.floor, mixU: O.mixU, mixT: O.mixT });
       } else if (d.kind === 'osbrush' && d.ground) {
         add({ kind: 'ground', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r, preset: d.ground });
       } else if (d.kind === 'osbrush') {
@@ -636,12 +636,15 @@ const OldschoolTool = (() => {
         h('div', { class: 'ctl-label' }, 'Edge'), edgeSeg, edgeMat,
         sep(), light, h('div', { class: 'ctl-label' }, 'Shadows'), shadows, sight, st);
     }
-    // Beta 3.26: how a new floor (or a paint stroke) mixes into the floor already there
-    function mixCtl(withOff) {
-      const { slider, seg } = c();
-      const opts = [{ value: 'stones', label: 'Stones' }, { value: 'soft', label: 'Soft' }, ...(withOff ? [{ value: 'off', label: 'Off' }] : [])];
-      const out = [h('div', { class: 'ctl-label' }, 'Mix'), seg({ cls: 'os-mix', options: opts, get: () => (!withOff && O.mix === 'off' ? 'stones' : O.mix), set: (v) => { O.mix = v; save(); ctx.refreshPop(); } })];
-      if (withOff && O.mix !== 'off') out.push(slider({ label: 'Mix width', min: 0.5, max: 3, step: 0.5, get: () => O.mixW, set: (v) => { O.mixW = v; save(); }, fmt: (v) => `${v} square${v === 1 ? '' : 's'}` }));
+    // Beta 3.27: how a new floor (or a paint stroke) mixes into the floor already there, by opacity: its width (a floor;
+    // 0: not at all), how uneven the line is, how much the squares along it are pushed in or out
+    function mixCtl(withWidth) {
+      const { slider } = c();
+      const pct = (v) => (v ? `${Math.round(v * 100)} %` : 'none');
+      const out = [];
+      if (withWidth) out.push(slider({ label: 'Mix width', min: 0, max: 3, step: 0.5, get: () => O.mixW, set: (v) => { O.mixW = v; save(); }, fmt: (v) => (v ? `${v} square${v === 1 ? '' : 's'}` : 'off') }));
+      out.push(slider({ label: 'Uneven', min: 0, max: 1, step: 0.05, get: () => O.mixU, set: (v) => { O.mixU = v; save(); }, fmt: pct }));
+      out.push(slider({ label: 'Tiled', min: 0, max: 1, step: 0.05, get: () => O.mixT, set: (v) => { O.mixT = v; save(); }, fmt: pct }));
       return out;
     }
     function matPicker(get, set, ids) {

@@ -24,6 +24,10 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.27', [
+      'Oldschool maps: floors mix by opacity alone, as three rules: a soft line where the floors meet (Mix width, ½ to 3 squares; 0 is off), the line made uneven (Uneven), and near it squares that show more or less of the new floor along the grid (Tiled). A new floor starts at 1½ squares, uneven and tiled at a half; floors from 3.26 take that too',
+      'Floor → Paint uses the same rules (Uneven, Tiled) with the brush\'s size',
+    ]],
     ['Beta 3.26', [
       'Oldschool maps: floors mix. Where a new floor meets one that is already there, they change stone by stone (the squares near the edge are one or the other, a few half overgrown, the rougher texture on top), over one square by default. In the Draw panel: Mix Stones, Soft (a fade) or Off, and its width (½ to 3 squares)',
       'Floor → Paint: paint the picked floor into the floors under the brush (stone by stone or soft), for patches of grass, sand or rubble; it adds no floor and changes no walls',
