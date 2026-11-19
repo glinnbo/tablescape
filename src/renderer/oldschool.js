@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // (2.6) and darker corners of what it raised (stairs count as floor); a wall line or pillar only its shadows and corners
   const HALO = 6.6; const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 15; // (15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 16; // (16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -681,11 +681,11 @@ void main(){
 
   // ---------- Beta 3.27: floors that mix into the floor already there, by opacity alone ----------
   // Glinn's three rules, as one opacity mask for the new floor: (1) a soft line, 0 to 100 % across the edge as drawn,
-  // over w dots (a paint stroke: its rim); (2) the line made uneven: a slow wave moves it in and out (mixU); (3) near the
-  // line each square gets a push of its own (some show more of the new floor, some less), changing softly at the grid
-  // lines (mixT). All three are slow and smooth, so the mask is worked out at 8 dots a square and stretched. Where there
-  // was no floor, a new floor is laid as drawn (a paint stroke adds none). In squares from the grid's origin: the base
-  // and the sharp tiles agree.
+  // over w dots (a paint stroke: its rim); (2) the line made uneven: a slow wave moves it in and out (mixU); (3) Tiled
+  // (mixT; Beta 3.30, measured from his goal picture): near the line every square keeps the old floor as a soft patch
+  // of its own, and the new floor runs along the joints between them. The mask is worked out at 16 dots a square and
+  // stretched. Where there was no floor, a new floor is laid as drawn (a paint stroke adds none). In squares from the
+  // grid's origin: the base and the sharp tiles agree.
   const h2 = (x, y) => { const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return v - Math.floor(v); };
   const vnoise = (x, y) => {
     const i = Math.floor(x); const j = Math.floor(y); let fx = x - i; let fy = y - j; fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
@@ -704,8 +704,9 @@ void main(){
     const x0 = Math.max(0, bx0); const y0 = Math.max(0, by0); const x1 = Math.min(W, bx1); const y1 = Math.min(H, by1);
     if (x1 <= x0 || y1 <= y0) return;
     const mk = (cw, ch) => { const c = document.createElement('canvas'); c.width = Math.max(1, cw); c.height = Math.max(1, ch); return c; };
-    // the mask, coarse: 8 dots a square, on the grid (so every tile and the base sample the same places)
-    const ds = P / 8; const pd = Math.ceil(pad / ds) + 1;
+    // the mask, coarse: 16 dots a square (Beta 3.30: the patches' soft edges and the joints need them), on the grid, so
+    // every tile and the base sample the same places; with room around it for the squares' middles
+    const DQ = 16; const ds = P / DQ; const pd = Math.ceil((pad + 0.6 * P) / ds) + 1;
     const lx0 = org[0] + (Math.floor((x0 - org[0]) / ds) - pd) * ds; const ly0 = org[1] + (Math.floor((y0 - org[1]) / ds) - pd) * ds;
     const nw = Math.ceil((x1 - lx0) / ds) + pd + 1; const nh = Math.ceil((y1 - ly0) / ds) + pd + 1;
     // (1) the soft line: of the floor around a place (the floor there and the new one), how much is new. So the line runs
@@ -725,69 +726,65 @@ void main(){
     const fd = Fb.getContext('2d', CPU).getImageData(0, 0, nw, nh).data;
     const bg = Hb.getContext('2d', CPU); const Bc = Hb;
     const img = bg.getImageData(0, 0, nw, nh); const d = img.data;
-    const N = nw * nh; const AL0 = new Float32Array(N); const BE = new Float32Array(N); const BJ = new Float32Array(N); // (the mask before rule 3; how near the line, for squares and, reaching further, for joints)
-    for (let v = 0; v < nh; v++) {
-      const gy = (ly0 + (v + 0.5) * ds - org[1]) / P;
-      for (let u = 0; u < nw; u++) {
-        const i = v * nw + u; const gx = (lx0 + (u + 0.5) * ds - org[0]) / P;
-        const f = fd[i * 4 + 3] / 255; const s0 = f > 0.02 ? Math.min(1, d[i * 4 + 3] / 255 / f) : 0;
-        // (2) the line, uneven: a slow wave (two scales) moves it in and out (Beta 3.29: within the soft band only, so
-        // the floors stay whole away from it)
-        const wave = (vnoise(gx / 2.4 + 3.1, gy / 2.4 + 7.7) - 0.5) * 2 + (vnoise(gx / 0.9 + 1.3, gy / 0.9 + 4.2) - 0.5) * 0.6;
-        const e0 = Math.min(1, Math.max(0, s0 + wave * U * 0.42 * Math.min(1, 10 * s0 * (1 - s0))));
-        AL0[i] = Math.min(1, Math.max(0, (e0 - 0.5) * 1.25 + 0.5));
-        BE[i] = Math.min(1, 4 * e0 * (1 - e0) * 1.6); // (1 on the line as it shows, 0 away from it)
+    const N = nw * nh; const S0 = new Float32Array(N); // (1) of the floor around each place, how much is new
+    for (let i = 0; i < N; i++) { const f = fd[i * 4 + 3] / 255; S0[i] = f > 0.02 ? Math.min(1, d[i * 4 + 3] / 255 / f) : 0; }
+    const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+    const ss = (a0, b0, x) => { const t = clamp((x - a0) / (b0 - a0), 0, 1); return t * t * (3 - 2 * t); };
+    const waveAt = (gx, gy) => (vnoise(gx / 2.4 + 3.1, gy / 2.4 + 7.7) - 0.5) * 2 + (vnoise(gx / 0.9 + 1.3, gy / 0.9 + 4.2) - 0.5) * 0.6;
+    // the mask's dots lie on the grid: dot u is the (kx + u)th sixteenth of a square from the grid's origin
+    const kx = Math.round((lx0 - org[0]) / ds); const ky = Math.round((ly0 - org[1]) / ds);
+    const T2 = Math.min(1, 2 * Tl);
+    // (3) Beta 3.30, measured from Glinn's goal picture. Near the line every square keeps the old floor as a soft patch
+    // of its own: how far it reaches toward the new floor (most a little, some are eaten into: the new floor's whole
+    // squares; Uneven moves them with the wave) and how opaque it is where the new floor already rules. The new floor
+    // runs along the joints between the patches, here strongly, there not at all.
+    const c0 = Math.floor(kx / DQ) - 1; const r0 = Math.floor(ky / DQ) - 1;
+    const cols = Math.floor((kx + nw - 1) / DQ) + 1 - c0 + 1; const rows = Math.floor((ky + nh - 1) / DQ) + 1 - r0 + 1;
+    const SA = new Float32Array(cols * rows).fill(1); const SS = new Float32Array(cols * rows);
+    if (T2 > 0) {
+      for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+        const sx = c0 + cx; const sy = r0 + cy;
+        const u = clamp(sx * DQ + DQ / 2 - kx, 0, nw - 1); const v = clamp(sy * DQ + DQ / 2 - ky, 0, nh - 1);
+        const co = 1 - S0[v * nw + u]; // (the old floor's share at the square's middle)
+        const r1 = h2(sx + 0.37, sy + 0.71); const r2 = h2(sx + 0.91, sy + 0.17); const r3 = h2(sx + 0.13, sy + 0.29);
+        const sh = (r3 < 0.1 + 0.5 * Tl ? 0.3 + 0.35 * r1 : (r1 - 0.5) * 0.1) - clamp(waveAt(sx + 0.5, sy + 0.5) * U * 0.25, -0.12, 0.12);
+        SS[cy * cols + cx] = clamp(sh, -0.08, 0.62); // (within these the floors stay whole away from the line)
+        SA[cy * cols + cx] = 1 - (1 - ss(0.35, 0.6, co)) * clamp(1.4 * Tl * r2, 0, 1);
       }
     }
-    // the joints reach about a square further than the band, into the floors on either side (fading with the distance):
-    // the band, grown softly (a maximum weighted by distance, row by row, then column by column)
-    {
-      const RJ = 8; const span = Math.ceil(RJ * 1.5); const wt = []; for (let o = -span; o <= span; o++) wt.push(Math.exp(-((o / RJ) ** 2)));
-      const tmp = new Float32Array(N);
-      for (let v = 0; v < nh; v++) for (let u = 0; u < nw; u++) { let m = 0; for (let o = -span; o <= span; o++) { const uu = u + o; if (uu < 0 || uu >= nw) continue; const x = BE[v * nw + uu] * wt[o + span]; if (x > m) m = x; } tmp[v * nw + u] = m; }
-      for (let v = 0; v < nh; v++) for (let u = 0; u < nw; u++) { let m = 0; for (let o = -span; o <= span; o++) { const vv = v + o; if (vv < 0 || vv >= nh) continue; const x = tmp[vv * nw + u] * wt[o + span]; if (x > m) m = x; } BJ[v * nw + u] = m; }
-    }
-    // (3) Beta 3.29, Glinn's two patterns near the line, as many as Tiled says: whole squares that fill with the other
-    // floor (mostly full, some half: "purple"), and the joints, soft glows of the other floor along the grid lines that
-    // fade out across and along them and add up where they meet ("green")
-    const at = (gx, gy) => { const u = Math.round((org[0] + gx * P - lx0) / ds - 0.5); const v = Math.round((org[1] + gy * P - ly0) / ds - 0.5); return u < 0 || v < 0 || u >= nw || v >= nh ? -1 : v * nw + u; };
-    const segs = new Map();
-    const joint = (vert, X, Y) => { // the joint from grid corner X, Y one square down (vert) or right: its glow, + new, - old
-      const key = `${vert ? 'v' : 'h'}${X},${Y}`; let a = segs.get(key);
-      if (a !== undefined) return a;
-      a = 0;
-      const j = at(vert ? X : X + 0.5, vert ? Y + 0.5 : Y);
-      if (j >= 0 && BJ[j] > 0.02 && h2(X * 1.31 + (vert ? 0.17 : 0.59), Y * 0.87 + (vert ? 0.43 : 0.11)) < Tl * 0.9 * BJ[j]) {
-        const st = (0.65 + 0.35 * h2(X + 0.61, Y + (vert ? 0.83 : 0.27))) * (0.6 + 0.4 * Tl) * (0.4 + 0.6 * BJ[j]);
-        a = AL0[j] < 0.5 ? st : -st;
-      }
-      segs.set(key, a); return a;
-    };
-    const SG = 0.22; // (across: about a third of a square each side)
-    const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-    const cap = (t) => ss(-0.35, 0.25, t) * (1 - ss(0.75, 1.35, t)); // (along: soft past its ends, so joints that meet add up)
+    const JS = 0.09; const EB = 0.186; // (a joint's half width in squares; how much a square's edge dot takes from its neighbour)
     for (let v = 0; v < nh; v++) {
-      const gy = (ly0 + (v + 0.5) * ds - org[1]) / P;
+      const qy = ky + v; const gy = (qy + 0.5) / DQ; const sy = Math.floor(qy / DQ); const my = qy - sy * DQ; const cy = sy - r0;
+      const ny = my === 0 ? -1 : my === DQ - 1 ? 1 : 0; const ry = Math.round(gy); const dyj = Math.abs(gy - ry);
       for (let u = 0; u < nw; u++) {
-        const i = v * nw + u; const gx = (lx0 + (u + 0.5) * ds - org[0]) / P;
-        let al = AL0[i];
-        if (Tl > 0) {
-          const sx = Math.floor(gx); const sy = Math.floor(gy);
-          const c = at(sx + 0.5, sy + 0.5);
-          if (c >= 0 && h2(sx + 0.13, sy + 0.29) < Tl * 0.5 * BE[c]) { // purple: the square fills
-            const fill = h2(sx + 0.37, sy + 0.71) < 0.7 ? 1 : 0.5;
-            al = AL0[c] < 0.5 ? Math.max(al, fill) : Math.min(al, 1 - fill);
+        const i = v * nw + u; const s0 = S0[i];
+        let al;
+        if (s0 <= 0) al = 0; else if (s0 >= 0.996) al = 1; // (away from the line: the floors as they are)
+        else {
+          const qx = kx + u; const gx = (qx + 0.5) / DQ; const sx = Math.floor(qx / DQ); const mx = qx - sx * DQ; const cx = sx - c0;
+          // (2) the line, uneven: a slow wave (two scales) moves it in and out, within the soft band
+          const e0 = clamp(s0 + waveAt(gx, gy) * U * 0.42 * Math.min(1, 10 * s0 * (1 - s0)), 0, 1);
+          al = clamp((e0 - 0.5) * 1.25 + 0.5, 0, 1);
+          if (T2 > 0) {
+            // this square's patch (a little of its neighbour's at its very edge: soft across the joints)
+            const nx = mx === 0 ? -1 : mx === DQ - 1 ? 1 : 0; const j0 = cy * cols + cx;
+            let pa = SA[j0]; let ps = SS[j0];
+            if (nx) { pa += (SA[j0 + nx] - pa) * EB; ps += (SS[j0 + nx] - ps) * EB; }
+            if (ny) {
+              let qa = SA[j0 + ny * cols]; let qs = SS[j0 + ny * cols];
+              if (nx) { qa += (SA[j0 + ny * cols + nx] - qa) * EB; qs += (SS[j0 + ny * cols + nx] - qs) * EB; }
+              pa += (qa - pa) * EB; ps += (qs - ps) * EB;
+            }
+            const o = 1 - s0;
+            let old = pa * ss(0.1 + ps, 0.3 + ps, o + (vnoise(gx / 0.3 + 5.1, gy / 0.3 + 2.3) - 0.5) * 0.05);
+            if (old > 0.003) { // the new floor along the joints
+              const rx = Math.round(gx); const dxj = Math.abs(gx - rx); let jl = 0;
+              if (dxj < 0.3) { const sv = ss(0.15, 0.55, vnoise(rx * 7.3 + 1.7, gy / 1.1 + rx * 3.1)); if (sv > 0) jl = sv * Math.exp(-((dxj / (JS * (0.8 + 0.6 * vnoise(rx * 3.3, gy / 1.7)))) ** 2)); }
+              if (dyj < 0.3) { const sv = ss(0.15, 0.55, vnoise(gx / 1.1 + ry * 3.1, ry * 7.3 + 1.7)); if (sv > 0) jl = Math.max(jl, sv * Math.exp(-((dyj / (JS * (0.8 + 0.6 * vnoise(gx / 1.7, ry * 3.3)))) ** 2))); }
+              old *= 1 - jl * Math.min(1, 12 * o * (1 - o)) * (0.6 + 0.4 * Tl);
+            }
+            al = (1 - T2) * al + T2 * (1 - old);
           }
-          let gp = 0; let gn = 0; // green: the joints around
-          for (let X = sx; X <= sx + 1; X++) {
-            const acr = Math.exp(-((gx - X) ** 2) / (SG * SG)); if (acr < 0.01) continue;
-            for (let Y = sy - 1; Y <= sy + 1; Y++) { const a = joint(true, X, Y); if (a) { const w = a * acr * cap(gy - Y); if (w > 0) gp += w; else gn -= w; } }
-          }
-          for (let Y = sy; Y <= sy + 1; Y++) {
-            const acr = Math.exp(-((gy - Y) ** 2) / (SG * SG)); if (acr < 0.01) continue;
-            for (let X = sx - 1; X <= sx + 1; X++) { const a = joint(false, X, Y); if (a) { const w = a * acr * cap(gx - X); if (w > 0) gp += w; else gn -= w; } }
-          }
-          al = 1 - (1 - al) * (1 - Math.min(1, gp)); al *= 1 - Math.min(1, gn);
         }
         d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = 255; d[i * 4 + 3] = Math.round(al * 255);
       }
@@ -797,7 +794,7 @@ void main(){
     const ww = x1 - x0; const hh = y1 - y0;
     const A = mk(ww, hh); const ag = A.getContext('2d');
     ag.imageSmoothingEnabled = true; ag.imageSmoothingQuality = 'high';
-    const Bs = mk(nw, nh); { const sg = Bs.getContext('2d'); sg.filter = 'blur(0.6px)'; sg.drawImage(Bc, 0, 0); sg.filter = 'none'; }
+    const Bs = mk(nw, nh); { const sg = Bs.getContext('2d'); sg.filter = 'blur(0.4px)'; sg.drawImage(Bc, 0, 0); sg.filter = 'none'; }
     ag.drawImage(Bs, lx0 - x0, ly0 - y0, nw * ds, nh * ds);
     // the new floor through the mask, over the floor that is there
     const nf = mk(ww, hh); const ng = nf.getContext('2d'); ng.translate(-x0, -y0); ng.fillStyle = pat; ng.fillRect(x0, y0, ww, hh); ng.setTransform(1, 0, 0, 1, 0, 0);

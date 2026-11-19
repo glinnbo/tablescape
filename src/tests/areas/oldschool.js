@@ -27,9 +27,10 @@ module.exports = (area) => {
     await K.g('Oldschool.noSharp = true'); // (software graphics here: the sharp tiles only where they are the point)
   });
 
-  area.quick('the tiles come with the app: twelve floors in Library → Tiles, five materials for walls, rock and cliffs', async (t) => {
+  area.quick('the tiles come with the app: 49 floors in Library → Tiles (Beta 3.30: 37 more), five materials for walls, rock and cliffs', async (t) => {
     const list = t.lib('tiles').filter((x) => x.builtin);
-    t.eq(list.length, 12, 'floors in the library');
+    t.eq(list.length, 49, 'floors in the library');
+    t.eq(L.tileOf({ rel: 'Tiles/Tablescape/Grassy flagstones.webp' }).squares, 7, 'a new one, known by name');
     t.ok(list.every((x) => x.rel.startsWith('Tiles/Tablescape/') && fs.existsSync(x.path) && x.thumb && x.squares > 0), 'each with its picture, a small one and its squares', list[0]);
     t.ok(!list.some((x) => /stone_wall|hedge|Mossy rock/i.test(x.name)), 'the materials are not floors', list.map((x) => x.name));
     t.eq(await t.g('Oldschool.MATERIALS.map((m) => m.label).join()'), 'Stone,Dark stone,Hedge,Rock,Mossy rock', 'materials');

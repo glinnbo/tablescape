@@ -38,6 +38,44 @@ TILES = [
     ('glowing_blue', 'Glowing blue', 'floor', 12),
     ('dark_teal_embers', 'Dark teal embers', 'floor', 10),
     ('lava_runes', 'Lava runes', 'floor', 8),
+    # (Beta 3.30: Glinn's next set, to become a pack later)
+    ('sandstone_tiles', 'Sandstone tiles', 'floor', 6),
+    ('white_stone', 'White stone', 'floor', 4),
+    ('fieldstone', 'Fieldstone', 'floor', 6),
+    ('gravel_cobbles', 'Gravel cobbles', 'floor', 6),
+    ('mossy_cobbles', 'Mossy cobbles', 'floor', 6),
+    ('mossy_flagstones', 'Mossy flagstones', 'floor', 8),
+    ('grassy_flagstones', 'Grassy flagstones', 'floor', 7),
+    ('overgrown_flagstones', 'Overgrown flagstones', 'floor', 8),
+    ('grass_and_dirt', 'Grass and dirt', 'floor', 4),
+    ('bone_tiles', 'Bone tiles', 'floor', 6),
+    ('checkerboard', 'Checkerboard', 'floor', 8),
+    ('dark_marble', 'Dark marble', 'floor', 6),
+    ('white_marble', 'White marble', 'floor', 4),
+    ('teal_glass', 'Teal glass', 'floor', 6),
+    ('wood_panels', 'Wood panels', 'floor', 4),
+    ('parquet_panels', 'Parquet panels', 'floor', 3),
+    ('iron_plates', 'Iron plates', 'floor', 4),
+    ('rusted_plates', 'Rusted plates', 'floor', 4),
+    ('scrap_plates', 'Scrap plates', 'floor', 10),
+    ('meadow', 'Meadow', 'floor', 4),
+    ('sandy_floor', 'Sandy floor', 'floor', 4),
+    ('snowfield', 'Snowfield', 'floor', 4),
+    ('snow_blocks', 'Snow blocks', 'floor', 4),
+    ('frosted_tiles', 'Frosted tiles', 'floor', 4),
+    ('ice_blocks', 'Ice blocks', 'floor', 6),
+    ('clear_water', 'Clear water', 'floor', 6),
+    ('blue_pool', 'Blue pool', 'floor', 6),
+    ('lagoon', 'Lagoon', 'floor', 8),
+    ('deep_sea', 'Deep sea', 'floor', 8),
+    ('lava_field', 'Lava field', 'floor', 6),
+    ('lava_veins', 'Lava veins', 'floor', 4),
+    ('burning_blocks', 'Burning blocks', 'floor', 4),
+    ('bloody_black_stone', 'Bloody black stone', 'floor', 8),
+    ('bloody_slate', 'Bloody slate', 'floor', 8),
+    ('bloody_grey_stone', 'Bloody grey stone', 'floor', 6),
+    ('bloody_checkerboard', 'Bloody checkerboard', 'floor', 8),
+    ('bloody_planks', 'Bloody planks', 'floor', 8),
     # what walls, rock and cliffs are made of
     ('stone_wall', 'Stone', 'material', 4),
     ('dark_stone_wall', 'Dark stone', 'material', 5),
@@ -79,7 +117,7 @@ def main():
     for tid, label, kind, squares in TILES:
         big = os.path.join(OUT, f'{tid}.webp')
         small = os.path.join(OUT, f'{tid}-small.webp')
-        if src:
+        if src and os.path.exists(os.path.join(src, f'{tid}.png')):  # (only those whose picture is given are made again)
             im = Image.open(os.path.join(src, f'{tid}.png')).convert('RGB')
             im.resize((BIG, BIG), Image.LANCZOS).save(big, 'WEBP', quality=82, method=6)
             im.resize((SMALL, SMALL), Image.LANCZOS).save(small, 'WEBP', quality=80, method=6)

@@ -24,6 +24,10 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.30', [
+      'Oldschool maps, mixing made new (Tiled): near the line every square keeps the old floor as a soft patch of its own, some reaching further, some see-through, some already gone, and the floor you draw runs along the joints between them. No more ring of dotted tiles; away from the line both floors stay whole',
+      'Oldschool maps: 37 new floor tiles in Library → Tiles and the Draw panel: stone and cobbles, mossy and grassy flagstones, marble, checkerboards, bone, teal glass, wood and parquet panels, iron and rusted plates, meadow, sand, snow and ice, clear water, a pool, a lagoon, the deep sea, three kinds of lava and five bloodstained floors',
+    ]],
     ['Beta 3.29', [
       'Oldschool maps: Fade goes outward: what you draw stays whole, and its floor carries on for a square and a half beyond your line, fading softly into the dark',
       'Floors mix in three steps: a soft blend, made uneven, then (Tiled) whole squares near the line that fill with the other floor, and soft glows of the other floor along the joints, stronger where they meet',
