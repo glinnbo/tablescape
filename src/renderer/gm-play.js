@@ -184,11 +184,12 @@ const Play = (() => {
   // =====================================================================
   // Undo and redo on top; two groups: building the map (prep) and playing on it (at the table); library, campaigns, table and keys below.
   // Prototype 5: with one of these in hand the map shows whole, lit and with its effects, also beyond the TV's edge
-  const WIDE_TOOLS = ['map', 'fx', 'asset', 'walls', 'notes'];
+  const WIDE_TOOLS = ['oldschool', 'map', 'fx', 'asset', 'walls', 'notes'];
   const wideFor = (t) => WIDE_TOOLS.includes(t) && !(S && S.settings && S.settings.buildWide === false);
   const RAIL = [
     { group: 'history' },
     { group: 'build', title: 'Build', fold: true, items: [
+      { id: 'oldschool', icon: 'pencil', label: 'Draw', tool: true, pop: true, tip: 'Draw this map: rooms, corridors, caves, walls and doors' }, // (Beta 3.22: only on Oldschool maps)
       { id: 'map', icon: 'map-2', label: 'Map', key: 'M', tool: true, pop: true, tip: 'Move and scale the map; its brightness, contrast and colours' },
       { id: 'grid', icon: 'grid-4x4', label: 'Grid', pop: true, tip: 'Grid shape, size and tilt (G shows or hides it)' },
       { id: 'fx', icon: 'flame', label: 'Effects', key: 'E', tool: true, pop: true, tip: 'Torches, mist, lights, darkness and weather' },
@@ -211,7 +212,7 @@ const Play = (() => {
       { id: 'home', icon: 'home', label: 'Campaign', tip: 'The home screen: players, campaign settings, table check' }, { id: 'table', icon: 'settings', label: 'Settings', key: 'Ctrl ,', tip: 'Tablescape settings: the TV, its picture, tokens, sound, performance, this screen, the library. Campaign settings are one click further' },
       { id: 'help', icon: 'keyboard', label: 'Guide', key: '?', tip: 'First evening, keys, what\'s new, report a problem' }] },
   ];
-  const BUILD = new Set(['map', 'asset', 'fx', 'walls', 'grid', 'layers', 'sound']);
+  const BUILD = new Set(['oldschool', 'map', 'asset', 'fx', 'walls', 'grid', 'layers', 'sound']);
   // Beta 3.2: the Build tools stay open unless you fold them; folded, they stay folded (on every map, also after a
   // restart) until you open them again. (Before, they folded by themselves while the map was on the table.)
   let buildFold = false;
@@ -304,6 +305,7 @@ const Play = (() => {
     view.on('render', () => { placeFrame(); placeCard(); updateBrushCursor(); });
     view.on('broken', () => { renderRoster(true); refreshPop(); checkMissingSoon(); });
     view.on('render', () => updateAssetGhost());
+    view.on('render', () => OS.redraw()); // (Beta 3.22) the Draw tool's preview follows the view
     view.on('render', () => { const hud = $('.tc-hud', els.tctl); if (hud && S) Tools.renderHud(hud); });
     // a new background is fitted to the table once, then stays put; with a grid (in its name or printed on it)
     // it arrives at real size instead: one square, one inch on the table
@@ -430,6 +432,7 @@ const Play = (() => {
     if (ui.selFx && !fxOf(ui.selFx)) { ui.selFx = null; view.selectFx(null); }
     if (ui.selAssets.some((id) => !layer(id))) setAssetSelection(ui.selAssets.filter((id) => layer(id) && !layer(id).locked));
     Tools.update();
+    OS.update(); // (Beta 3.22) an Oldschool map: its picture made again when the drawing changed
     if (ui.selSpell && !spellOf(ui.selSpell)) { ui.selSpell = null; view.selectSpell(null); }
     view.setSelected(ui.selected);
     renderShow(s);
@@ -508,6 +511,7 @@ const Play = (() => {
   function setTool(t, opts = {}) {
     // 4.8: the Map tool in hand: both screens keep the fog ready for a move
     if ((t === 'map') !== (ui.tool === 'map')) { if (view) view.prepareMove(t === 'map'); cmd('move.prepare', { on: t === 'map' }); }
+    if (t !== 'oldschool') OS.cancel(); // (Beta 3.22: a shape half drawn goes)
     ui.tool = t;
     if (t === 'fog' && opts.mode) ui.fogMode = opts.mode;
     document.body.dataset.tool = t;
@@ -576,6 +580,8 @@ const Play = (() => {
     }
   }
   function renderRail() {
+    const osBtn = els.rail.querySelector('.rail-btn[data-id="oldschool"]'); // (Beta 3.22: only on Oldschool maps)
+    if (osBtn) osBtn.hidden = !(S && S.map && S.map.os);
     for (const b of els.rail.querySelectorAll('.rail-btn')) {
       if (b.closest('.rail-pins')) continue; // (renderPins: their own open and running state)
       const id = b.dataset.id;
@@ -632,6 +638,13 @@ const Play = (() => {
     'Drag any of these onto the hotbar, or right-click one.'];
   const walled = () => !!(map() && map().walls.length && map().vision.on);
   const TIPS = {
+    // Beta 3.22: drawing an Oldschool map
+    oldschool: ['Pick a tool, a floor and an edge, then draw on the grid. Tiles and walls appear as you draw; the picture is finished a moment later.',
+      'Room and Round: drag (Shift: square, circle). Shape: click the corners; click the first again, double-click, Enter or right-click closes it.',
+      'Alt with a floor tool erases instead. Erase also takes wall lines, pillars and doors away. Ctrl + Z brings anything back.',
+      'Edges: Walls are built around the floor; Rock carves rooms out of stone; Ledge and Cliff drop into darkness, and one can see across them.',
+      'Raised and Lower make platforms and pits; Stairs climb toward where you drag. Doors sit on grid lines: click one again to take it away.',
+      'Your own tiles go into the library\'s Tiles section; the first time you use one, you say how many squares it spans. Drag a tile from the library onto a floor to give it that tile.'],
     map: ['Drag the map to move it; Alt + wheel scales it. Fog, grid, tokens and effects move with it.', 
       'Colours change the picture and its assets only. Each map keeps its own.', 'Hold "original" to compare, here and on the table.',
       'Right-drag or Space-drag moves your view; F fits it to the table, Shift + F shows everything.'],
@@ -739,6 +752,7 @@ const Play = (() => {
   }
   // Prototype 25: one line with what you cannot guess, shown for a few seconds when a tool is picked (Options → This screen)
   const TOOL_HINTS = {
+    oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', corridor: 'Drag along the grid', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', floor: 'Click a floor to give it the picked tile', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a grid line · again: the door goes' }[ui.os && ui.os.tool] || ''),
     map: 'Drag moves the map · Alt + wheel scales it · Space-drag moves your view',
     fx: () => ({ place: 'Click places it · drag its marker to move it · right-click for more', paint: '[ and ] change the brush size', light: 'Click the map or a token to place a light', weather: '' }[ui.fxMode] || ''),
     asset: 'Click stamps · drag scatters · Ctrl + wheel turns · [ and ] resize · Shift + click selects several',
@@ -773,6 +787,7 @@ const Play = (() => {
     fog: { title: 'Fog of war', icon: 'cloud-fog', build: buildFogPop, tips: FOG_TIPS },
     fx: { title: 'Effects', icon: 'flame', build: buildFxPop, tips: TIPS.fx },
     walls: { title: 'Walls and doors', icon: 'wall', build: () => Walls.buildPop(), tips: TIPS.walls },
+    oldschool: { title: 'Draw', icon: 'pencil', build: () => OS.buildPop(), tips: TIPS.oldschool }, // (Beta 3.22)
     party: { title: 'Party marker', icon: 'users-group', build: () => Party.buildPop(), tips: TIPS.party },
     spell: { title: 'Spells', icon: 'wand', build: buildSpellPop, tips: TIPS.spell },
     asset: { title: 'Assets', icon: 'trees', build: buildAssetPop, tips: TIPS.asset },
@@ -2069,7 +2084,7 @@ const Play = (() => {
       ch.maps.forEach((m, i) => strip.append(mapTile(m, i, ch)));
       const add = h('button', {
         class: 'map-tile add-tile', 'data-tip': 'Add a map to this chapter (or drop picture files here)', 'data-tip-side': 'top',
-        onclick: () => Drawer.open({ filter: 'maps', purpose: 'newMap', chapterId: ch.id }),
+        onclick: (e) => addMapMenu(e.currentTarget, ch.id),
       }, h('span', { class: 'tile-thumb' }, iconEl('plus')), h('span', { class: 'tile-name' }, 'Add map'));
       add.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); e.stopPropagation(); add.classList.add('drop-ok'); } });
       add.addEventListener('dragleave', () => add.classList.remove('drop-ok'));
@@ -2119,10 +2134,28 @@ const Play = (() => {
     renderRoster(true);
   }
 
+  // Beta 3.22: Add map → a picture from the library, or an Oldschool map drawn on the grid
+  function addMapMenu(anchor, chapterId) {
+    const r = anchor ? anchor.getBoundingClientRect() : { left: innerWidth / 2 - 100, top: innerHeight / 2, bottom: innerHeight / 2 };
+    const items = [
+      { icon: 'photo', label: 'From the library', action: () => Drawer.open({ filter: 'maps', purpose: 'newMap', chapterId }) },
+      { icon: 'pencil', label: 'Oldschool map (draw it)', action: () => newOldschool(chapterId) },
+    ];
+    openMenu(r.left, r.top - 8 - items.length * 38, items);
+  }
+  async function newOldschool(chapterId) {
+    const res = await cmd('map.add', { chapterId, oldschool: true });
+    if (!res || !res.ok) return;
+    // main opens the new map; its state comes a moment later
+    for (let i = 0; i < 40 && !(S.map && S.map.id === res.id); i++) await new Promise((ok) => setTimeout(ok, 50));
+    setTool('oldschool');
+    openPop('oldschool');
+  }
   function mapTile(m, i, ch) {
     const live = S.table.liveMapId === m.id;
     const edit = S.editMapId === m.id;
-    const thumb = h('span', { class: 'tile-thumb' }, m.bgPath ? Thumbs.img(m.bgPath, m.bgKind) : iconEl('map-2'));
+    const thumb = h('span', { class: 'tile-thumb' }, m.bgPath ? Thumbs.img(m.bgPath, m.bgKind) : iconEl(m.drawn ? 'pencil' : 'map-2'));
+    if (m.drawn && m.bgPath) thumb.append(h('span', { class: 'drawn-chip', 'aria-label': 'Drawn (Oldschool map)' }, iconEl('pencil'))); // (Beta 3.22)
     if (live) thumb.append(h('span', { class: `tile-badge ${S.table.blackout ? 'black' : ''}` }, S.table.blackout ? 'Blacked out' : 'On table'));
     if (m.missing) thumb.append(h('span', { class: 'tile-badge warn' }, 'File missing'));
     // snapshots: a camera with how many; click opens its timeline
@@ -2476,7 +2509,7 @@ const Play = (() => {
   function renderEmpty() {
     const e = els.empty;
     const m = S && S.map;
-    if (!S || !S.campaign || (m && m.bg && !m.broken)) { e.className = ''; e.innerHTML = ''; return; }
+    if (!S || !S.campaign || (m && (m.bg || m.os) && !m.broken)) { e.className = ''; e.innerHTML = ''; return; } // (Beta 3.22: a drawn map has no picture until something is drawn)
     e.className = 'on';
     e.innerHTML = '';
     if (m && m.broken) { // Beta 1: the map's file could not be read; nothing is written over it until you decide
@@ -2496,7 +2529,7 @@ const Play = (() => {
       h('p', {}, m ? 'Pick a map from your library, or drop an image or video file here.' : 'Add the first map for this chapter.'),
       h('div', { class: 'ctl-row' },
         m ? btn('Open library', 'photo', () => Drawer.open({ filter: 'maps', purpose: 'replace' }), { kind: 'primary', key: 'L' })
-          : btn('Add map', 'plus', () => Drawer.open({ filter: 'maps', purpose: 'newMap', chapterId: viewChapter() && viewChapter().id }), { kind: 'primary' }),
+          : btn('Add map', 'plus', (ev) => addMapMenu(ev && ev.currentTarget, viewChapter() && viewChapter().id), { kind: 'primary' }),
         m ? btn('Choose a file', 'folder', async () => { const r = await ts.library('import', { cat: 'maps' }); if (r && r.ok && r.items[0]) cmd('bg.set', { path: r.items[0].path }); }, { tip: 'Pick a map anywhere on this computer: it is copied into the library' }) : null)));
   }
 
@@ -3608,6 +3641,7 @@ const Play = (() => {
     ui, get els() { return els; }, cmd, undoable, ready: Ready,
     state: () => S, closePop: () => closePop(), renderRail: () => renderRail(), viewChapter: () => viewChapter(),
     viewCenter: () => viewCenter(), anchorFor, placeToken, placeAsset, setBrush: (it) => setBrush(it), setTokenBrush: (it) => Tools.setTokenBrush(it),
+    useTile: (it) => OS.useTile(it), // (Beta 3.22)
     atlasAsset: (it, at) => AtlasP.addAsset(it, at), // Beta 3.12
     talkToggle: (it) => TB.talkToggle(it),
     returnTo: (back, key) => returnTo(back, key),
@@ -3793,6 +3827,13 @@ const Play = (() => {
     ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
     refreshPop: () => refreshPop(), reopen: () => { if (popId === 'party') openPop('party'); }, viewCenter: () => viewCenter(),
   });
+  // Beta 3.22: the Draw tool of Oldschool maps
+  const OS = OldschoolTool.create({
+    ui, cmd, send, state: () => S, view: () => view,
+    ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
+    refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), setTool: (t) => setTool(t),
+    openLibrary: () => Drawer.open({ cat: 'tiles', purpose: 'tile', back: { pop: 'oldschool', tool: 'oldschool' } }),
+  });
   const Walls = WallsTool.create({
     ui, cmd, undoable, send, pending, state: () => S, view: () => view, popId: () => popId,
     ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
@@ -3866,6 +3907,7 @@ const Play = (() => {
       const pt = view.toMap(e.clientX, e.clientY);
       if (e.button === 2) {
         if (ui.tool === 'walls' && Walls.chainActive()) { Walls.endChain(); return; } // right-click ends a line of walls
+        if (ui.tool === 'oldschool' && OS.rightClick()) return; // (Beta 3.22) right-click closes a shape
         drag = { kind: 'right', x: e.clientX, y: e.clientY, moved: false, target: e.target }; return;
       }
       if (e.button === 1 || (e.button === 0 && spaceDown)) { drag = { kind: 'pan', x: e.clientX, y: e.clientY }; document.body.classList.add('panning'); return; }
@@ -3964,6 +4006,9 @@ const Play = (() => {
         case 'walls':
           drag = Walls.pointerDown(e, pt);
           break;
+        case 'oldschool':
+          drag = OS.pointerDown(e, pt);
+          break;
         case 'party':
           drag = Party.pointerDown(e, pt);
           break;
@@ -3991,11 +4036,12 @@ const Play = (() => {
       const pt = S && S.map ? view.toMap(e.clientX, e.clientY) : null;
       if (!drag) {
         if (pt && ui.tool === 'spell' && !ui.align) updateGhost(pt, { alt: e.altKey, shift: e.shiftKey, token: ui.spell.shape === 'aura' ? tokenUnder(e.clientX, e.clientY) : null });
-        if (pt && !ui.align) { Tools.hover(e, pt); Walls.hover(e, pt); Party.hover(e, pt); if (ui.tool === 'fog') fogHover(pt); }
+        if (pt && !ui.align) { Tools.hover(e, pt); Walls.hover(e, pt); Party.hover(e, pt); OS.hover(e, pt); if (ui.tool === 'fog') fogHover(pt); }
         return;
       }
       if (Tools.owns(drag.kind)) { Tools.pointerMove(drag, e, pt); return; }
       if (Walls.owns(drag.kind)) { Walls.pointerMove(drag, e, pt); return; }
+      if (OS.owns(drag.kind)) { OS.pointerMove(drag, e, pt); return; }
       if (Party.owns(drag.kind)) { Party.pointerMove(drag, e, pt); return; }
       if (drag.kind === 'right') {
         if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6) { drag.moved = true; document.body.classList.add('panning'); }
@@ -4077,6 +4123,7 @@ const Play = (() => {
       if (d.kind === 'right' && !d.moved && e.type === 'pointerup') openRadial(e.clientX, e.clientY, d.target);
       else if (Tools.owns(d.kind)) Tools.pointerUp(d, e, pt);
       else if (Walls.owns(d.kind)) Walls.pointerUp(d, e, pt);
+      else if (OS.owns(d.kind)) OS.pointerUp(d, e, pt);
       else if (Party.owns(d.kind)) Party.pointerUp(d, e, pt);
       else if (d.kind === 'token') {
         pending.delete(d.key);
@@ -4125,9 +4172,10 @@ const Play = (() => {
     };
     vp.addEventListener('pointerup', end);
     vp.addEventListener('pointercancel', end);
-    vp.addEventListener('pointerleave', () => { lastPointer = null; updateBrushCursor(); updateAssetGhost(); Tools.leave(); Walls.leave(); Party.leave(); if (ui.tool === 'spell' && !ui.aimFrom && !drag) view.setGhost(null); });
+    vp.addEventListener('pointerleave', () => { lastPointer = null; updateBrushCursor(); updateAssetGhost(); Tools.leave(); Walls.leave(); Party.leave(); OS.leave(); if (ui.tool === 'spell' && !ui.aimFrom && !drag) view.setGhost(null); });
     vp.addEventListener('dblclick', (e) => {
       if (ui.tool === 'fog' && ui.fogShape === 'area') { finishArea(); return; }
+      if (ui.tool === 'oldschool') { OS.dblClick(); return; }
       if (ui.tool !== 'select' || e.target.closest('.sv-token') || !S.map) return;
       ts.ping({ mapId: S.editMapId, ...view.toMap(e.clientX, e.clientY) });
     });
@@ -4823,6 +4871,7 @@ const Play = (() => {
       if (!S || !S.map) return;
       const pt = view.toMap(e.clientX, e.clientY);
       const asset = parseAsset(e.dataTransfer);
+      if (asset && asset.role === 'tile') { OS.dropTile(asset, pt); return; } // (Beta 3.22) a floor tile onto a drawn floor
       if (asset) { dropAsset(asset.path, asset.kind, asset.role, pt, asset.name); return; }
       for (const f of [...e.dataTransfer.files]) {
         const p = ts.pathForFile(f);
@@ -5101,7 +5150,7 @@ const Play = (() => {
     offTable: () => [...offTable().entries()].map(([id, o]) => ({ id, ...o })), fitAll, aimMoment, Show, get TB() { return TB; }, get Floats() { return Floats; }, get Atlas() { return AtlasP; },
     simFps: (r) => { const n = typeof r === 'number' ? r : r.fps; ui.tableFps = n; ui.fpsSimAt = Date.now(); fpsWatch(n, r.hitches || 0, r.heavy || null); }, bigPreview, setPreviewWidth,
     openRadial, startAlign, finishAlign, alignGrid, castAt, cast, spellFromPointer, setSpell, pickSpell, oneInch, fitView, selectFx: (id) => selectFx(id),
-    get Snaps() { return Snaps; }, get Hot() { return Hot; }, captureMap, hotRun, hotLive: (it) => hotLive(it), pinnable: (id) => !UNPINNED.has(id),
+    get Snaps() { return Snaps; }, get Hot() { return Hot; }, get OS() { return OS; }, captureMap, hotRun, hotLive: (it) => hotLive(it), pinnable: (id) => !UNPINNED.has(id),
     hotActions: () => Object.keys(DO_HOT).map((k) => doHot(k)), // (for the self-test: every single action)
     holdBake: (on) => { bakeHeld = !!on; if (!on && S && S.map) maybeBakeFog(S.map); },
     tokPref: (k) => Tools.tokPref(k), setTokPref: (k, v) => Tools.setTokPref(k, v), // 4.10: Options → Tokens

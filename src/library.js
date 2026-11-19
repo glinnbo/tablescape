@@ -24,6 +24,7 @@ const FOLDERS = [
   'Portraits',
   'Party',
   'Handouts',
+  'Tiles', // (Beta 3.22) floor tiles for Oldschool maps
   'Tables',
   'Packs',
   'Campaigns',
@@ -93,7 +94,7 @@ function ensureLibrary(root, demoDir) {
   ROOT = root;
   for (const f of FOLDERS) fs.mkdirSync(path.join(root, f), { recursive: true });
   const readme = path.join(root, 'README.txt');
-  if (!fs.existsSync(readme) || !fs.readFileSync(readme, 'utf8').includes('Party  ')) {
+  if (!fs.existsSync(readme) || !fs.readFileSync(readme, 'utf8').includes('Tiles  ')) {
     fs.writeFileSync(readme, [
       'Tablescape library',
       '',
@@ -107,6 +108,7 @@ function ensureLibrary(root, demoDir) {
       '  Portraits         NPC busts for the Portraits tool (png with a transparent background works best)',
       '  Party             the players\' characters: portraits, cut-outs, map tokens (their cards pick from here)',
       '  Handouts          letters, notes, sketches to show on the table',
+      '  Tiles             seamless floor pictures for Oldschool maps (how many squares one spans is asked once)',
       '  Tables            tables for the wheel of luck (.txt, .csv, .md), for every campaign',
       '  Packs             creator downloads, kept as they come',
       '  Campaigns         your campaigns (made by the app)',
@@ -134,6 +136,7 @@ function sectionOf(rel) {
 // Which library category a file belongs to: maps, tokens, assets, overlays or sounds.
 // Packs keep their own folder layout, so their files are sorted by their names.
 const PACK_HINTS = [
+  ['tiles', /\b(tiles?|textures?|floors?|seamless)\b/i],
   ['portraits', /\b(portraits?|busts?|sprites?)\b/i],
   ['handouts', /\b(handouts?|letters?|documents?|scrolls?|notes?)\b/i],
   ['tokens', /\b(tokens?|npcs?|creatures?|monsters?|minis?|characters?)\b/i],
@@ -152,6 +155,7 @@ function categoryOf(rel, kind) {
   if (top === 'Portraits') return 'portraits';
   if (top === 'Party') return 'party'; // 4.7: the players' characters: portraits, Talk sprites, tokens
   if (top === 'Handouts') return 'handouts';
+  if (top === 'Tiles') return 'tiles'; // (Beta 3.22) floors for Oldschool maps
   const words = rel.replace(/[_\-./()]+/g, ' ');
   for (const [cat, re] of PACK_HINTS) if (re.test(words)) return cat;
   if (kind === 'video' && WEATHER_WORDS.test(words)) return 'overlays';
@@ -202,11 +206,12 @@ function listLibrary(root = ROOT) {
         fav: fav.has(rel),
         recent: meta.recent.indexOf(rel),
         thumb: thumb && fs.existsSync(thumb) ? pathToFileURL(thumb).href : null,
+        ...(parts[0] === 'Tiles' ? { squares: meta.tiles[rel] || null } : {}),
       });
     }
   };
   walk(root, 0);
-  if (root === ROOT) items.push(...builtinItems(meta)); // (Beta 3.20: the living trees, under Assets)
+  if (root === ROOT) items.push(...builtinItems(meta), ...builtinTileItems(meta)); // (Beta 3.20: the living trees, under Assets; 3.22: the tiles)
   return items;
 }
 
@@ -215,8 +220,8 @@ const metaFile = () => path.join(ROOT, '.cache', 'library.json');
 function readMeta() {
   try {
     const m = JSON.parse(fs.readFileSync(metaFile(), 'utf8'));
-    return { favs: Array.isArray(m.favs) ? m.favs : [], recent: Array.isArray(m.recent) ? m.recent : [] };
-  } catch { return { favs: [], recent: [] }; }
+    return { favs: Array.isArray(m.favs) ? m.favs : [], recent: Array.isArray(m.recent) ? m.recent : [], tiles: m.tiles && typeof m.tiles === 'object' ? m.tiles : {} };
+  } catch { return { favs: [], recent: [], tiles: {} }; }
 }
 function writeMeta(m) {
   try { fs.mkdirSync(path.dirname(metaFile()), { recursive: true }); fs.writeFileSync(metaFile(), JSON.stringify(m)); } catch {}
@@ -228,6 +233,16 @@ function setFavourite(absPath, on) {
   const m = readMeta();
   m.favs = m.favs.filter((x) => x !== rel);
   if (on) m.favs.unshift(rel);
+  writeMeta(m);
+  return true;
+}
+// Beta 3.22: how many squares a tile of the library spans (set once, the first time it is used on an Oldschool map)
+function setTileSquares(absPath, squares) {
+  const rel = relOf(absPath);
+  const n = Math.round(Number(squares) * 4) / 4;
+  if (!rel || !(n >= 0.5 && n <= 64)) return false;
+  const m = readMeta();
+  m.tiles[rel] = n;
   writeMeta(m);
   return true;
 }
@@ -297,12 +312,34 @@ loadBuiltin();
 function treeOf(ref) {
   if (!ref) return null;
   const e = (ref.rel && BUILTIN.get(ref.rel)) || (ref.path && BUILTIN_AT.get(path.resolve(ref.path))) || null;
-  return e ? { ...e.tree, turn: e.turn } : null;
+  return e && e.tree ? { ...e.tree, turn: e.turn } : null; // (Beta 3.22: the tiles are built in too, and no trees)
 }
 const isBuiltin = (rel) => BUILTIN.has(rel);
+// ---------- Beta 3.22: the tiles that come with the app (Oldschool maps) ----------
+// Floors are listed under Tiles/Tablescape; materials (what walls, rock and cliffs are made of) are known by the same
+// kind of name but not listed. Like the living trees they lie with the app and are kept by name.
+const TILE_FOLDER = 'Tiles/Tablescape';
+function loadTiles() {
+  let data = null;
+  try { data = require('./renderer/tile-data'); } catch { return; }
+  const dir = path.join(__dirname, 'renderer', 'tiles');
+  for (const t of data.tiles) {
+    const e = { rel: `${TILE_FOLDER}/${t.label}.webp`, path: path.join(dir, t.file), name: t.label, small: path.join(dir, t.small), tile: { id: t.id, kind: t.kind, squares: t.squares } };
+    BUILTIN.set(e.rel, e); BUILTIN_AT.set(e.path, e);
+  }
+}
+loadTiles();
+const tileOf = (ref) => { const e = ref && ((ref.rel && BUILTIN.get(ref.rel)) || (ref.path && BUILTIN_AT.get(path.resolve(ref.path)))); return e && e.tile ? { ...e.tile } : null; };
+function builtinTileItems(meta) {
+  const fav = new Set(meta.favs);
+  return [...BUILTIN.values()].filter((e) => e.tile && e.tile.kind === 'floor').map((e) => ({
+    path: e.path, url: pathToFileURL(e.path).href, walls: false, rel: e.rel, name: e.name, kind: 'image', section: 'Tiles', cat: 'tiles', pack: null,
+    folder: TILE_FOLDER, mtime: 0, fav: fav.has(e.rel), recent: meta.recent.indexOf(e.rel), thumb: pathToFileURL(e.small).href, builtin: true, squares: e.tile.squares, tile: { ...e.tile },
+  }));
+}
 function builtinItems(meta) {
   const fav = new Set(meta.favs);
-  return [...BUILTIN.values()].map((e) => ({
+  return [...BUILTIN.values()].filter((e) => e.tree).map((e) => ({
     path: e.path, url: pathToFileURL(e.path).href, walls: false, rel: e.rel, name: e.name, kind: 'image', section: 'Assets', cat: 'assets', pack: null,
     folder: TREE_FOLDER, mtime: 0, fav: fav.has(e.rel), recent: meta.recent.indexOf(e.rel), thumb: pathToFileURL(e.path).href, builtin: true, tree: { ...e.tree },
   }));
@@ -372,6 +409,7 @@ function defaultFolder(cat, kind) {
     case 'portraits': return 'Portraits';
     case 'party': return 'Party';
     case 'handouts': return 'Handouts';
+    case 'tiles': return 'Tiles';
     case 'sounds': return 'Audio/SFX';
     default: return kind === 'video' ? 'Maps/Animated' : 'Maps/Static';
   }
@@ -416,6 +454,6 @@ function importFiles(files, { cat, folder } = {}) {
 
 module.exports = {
   FOLDERS, kindOf, categoryOf, resolveLibraryRoot, defaultLibraryRoot, isPortable, ensureLibrary, listLibrary, setFavourite, touchRecent, importFiles,
-  toRef, resolveRef, hydrate, media, thumbUrl, putThumb, vttImagePath, forgetRecent, treeOf, isBuiltin,
+  toRef, resolveRef, hydrate, media, thumbUrl, putThumb, vttImagePath, forgetRecent, treeOf, isBuiltin, tileOf, setTileSquares,
   get root() { return ROOT; },
 };

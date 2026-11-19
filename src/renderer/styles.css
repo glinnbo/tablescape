@@ -3816,3 +3816,24 @@ body.gm .sv-trees-over { opacity: 0.7; } /* (above the tokens: see-through on yo
 .living-tiles .tile img { width: 48px; height: 48px; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45)); pointer-events: none; }
 .living-tiles .tile span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; font-size: 10.5px; }
 .living-sizes .seg-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ---------- Beta 3.22: Oldschool maps (the Draw tool) ---------- */
+.os-preview { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; z-index: 2; }
+.os-tools .tile { padding: 6px 2px 5px; gap: 3px; min-height: 0; font-size: 11px; }
+.os-tools .tile .i { width: 18px; height: 18px; }
+.os-floors { max-height: 172px; }
+.os-floors .tile img, .os-mats .tile img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; filter: none; }
+.os-more .i { width: 22px; height: 22px; margin: 11px 0; }
+.os-mats { grid-template-columns: repeat(4, 1fr); }
+.os-status .hint { font-size: 12px; }
+.os-status .hint.busy { color: var(--torch); animation: os-busy 1.2s ease-in-out infinite; }
+@keyframes os-busy { 50% { opacity: 0.45; } }
+.os-squares p { margin: 0 0 4px; color: var(--faint); font-size: 13px; }
+.os-squares canvas { width: 320px; height: 320px; border-radius: 8px; align-self: center; background: #111; }
+.os-squares .row { display: flex; align-items: center; gap: 10px; }
+.os-squares .row .grow { flex: 1; }
+.os-squares .row b { min-width: 110px; text-align: center; }
+.drawn-chip { position: absolute; left: 5px; bottom: 5px; z-index: 1; display: inline-flex; padding: 3px; border-radius: 7px; border: 1px solid var(--line-2); background: rgba(18, 19, 22, 0.88); color: #c9b9a0; }
+.drawn-chip .i { width: 12px; height: 12px; }
+#roster.collapsed .drawn-chip { display: none; }
+body.gm[data-tool="oldschool"] #viewport { cursor: crosshair; }

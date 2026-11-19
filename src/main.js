@@ -385,7 +385,7 @@ function campaignSummary() {
       ready: Object.fromEntries(READY_KINDS.map((k) => [k, readyOf(ch, k)])), // 2.2: what the GM wants at hand in this chapter (Prototype 26: anything from the library)
       maps: ch.maps.map((id) => {
         const m = c.maps.get(id);
-        return { id, name: m.name, bgPath: m.bg ? m.bg.path : null, bgKind: m.bg ? m.bg.kind : null, missing: !!(m.bg && m.bg.missing), fog: m.fog.enabled, snaps: snapList(m), broken: !!m.broken };
+        return { id, name: m.name, bgPath: m.bg ? m.bg.path : null, bgKind: m.bg ? m.bg.kind : null, missing: !!(m.bg && m.bg.missing), fog: m.fog.enabled, snaps: snapList(m), broken: !!m.broken, drawn: !!m.os };
       }),
     })),
     party: c.meta.party || [],
@@ -2271,7 +2271,7 @@ function devtoolsShortcut(win) {
 // =====================================================================
 // Commands
 // =====================================================================
-const MAP_CMD = /^(bg|view|layer|grid|fog|fx|light|weather|wind|spell|draw|mark|round|wall|vision|area|scene|atlasmap)\./;
+const MAP_CMD = /^(bg|view|layer|grid|fog|fx|light|weather|wind|spell|draw|mark|round|wall|vision|area|scene|atlasmap|os)\./;
 
 // ---------- walls from files, and what the party has seen ----------
 const sightLast = new Map(); // mapId -> Map(eyeId -> what was last recorded into the fog)
@@ -2454,8 +2454,46 @@ function dragLive(map, p, res) {
 }
 const dragSightAt = new Map(); // mapId → when the fog last followed a drag
 
+// ---------- Beta 3.22: Oldschool maps ----------
+// The GM screen draws the map's picture from what was drawn (renderer/oldschool.js) and sends it here with the walls
+// for sight. The picture is kept with the campaign (drawn/<map>-<what was drawn>.webp); older ones of that map go.
+function osBaked(p) {
+  const map = store.map(p.mapId);
+  if (!map || !map.os || !store.cur) return { ok: false };
+  let file = null;
+  if (p.data && !p.empty) {
+    const dir = path.join(store.cur.dir, 'drawn');
+    const hash = String(p.hash || Date.now()).replace(/[^a-z0-9]/gi, '').slice(0, 16) || 'x';
+    file = path.join(dir, `${map.id}-${hash}.webp`);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, Buffer.from(p.data));
+      const keep = osKept(map.id);
+      for (const f of fs.readdirSync(dir)) if (f.startsWith(`${map.id}-`) && path.join(dir, f) !== file && !keep.has(f)) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* */ } }
+    } catch (err) { applog.log.warn(`drawn map not saved: ${err.message}`); return { ok: false, error: err.message }; }
+  }
+  const res = mapstate.apply(map, 'os.result', { bg: file ? { path: file, x: p.x, y: p.y, scale: p.scale, nw: p.nw, nh: p.nh } : null, empty: !!p.empty, hash: p.hash, walls: p.walls }, library.media);
+  if (!res.changed) return { ok: false };
+  bumpRev(map.id);
+  store.touch(map.id);
+  broadcast();
+  for (const op of mapstate.recordSight(map, lastSight(map.id), true)) { bumpFog(map.id); sendFogDelta(map.id, { op }); }
+  return { ok: true };
+}
+// the drawn pictures still wanted: those the last undo steps bring back (so undo is instant), and those a snapshot of
+// some map shows; older ones are made again when undo reaches them
+function osKept(mapId) {
+  const keep = new Set();
+  const add = (bg) => { if (bg && bg.path) keep.add(path.basename(bg.path)); };
+  const h = store.history(mapId);
+  for (const s of [...h.undo.slice(-24), ...h.redo.slice(-24)]) add(s && s.bg);
+  for (const id of store.allMapIds()) { const m = store.map(id); for (const s of (m && m.snaps) || []) add(s.data && s.data.bg); }
+  return keep;
+}
+
 const phoneMoves = new Map(); // Prototype 14: mapId → Map(tokenId → when a phone last moved it)
 function handle(type, p = {}) {
+  if (type === 'os.baked') return osBaked(p); // (Beta 3.22) the picture of an Oldschool map's drawing
   // ----- map content -----
   if (MAP_CMD.test(type)) {
     const mapId = p.mapId || state.editMapId;
@@ -4367,6 +4405,7 @@ ipcMain.handle('library', (e, action, arg) => {
   if (action === 'forget') { library.forgetRecent(arg && arg.paths); return null; }
   if (action === 'vttimg') { const f = library.vttImagePath(arg); return f ? pathToFileURL(f).href : null; }
   if (action === 'import') return importToLibrary(arg || {});
+  if (action === 'tileSquares') return library.setTileSquares(arg.path, arg.squares); // (Beta 3.22) set once per tile
   const used = campaignFiles();
   return library.listLibrary().map((it) => ({ ...it, inCampaign: used.has(it.path) }));
 });

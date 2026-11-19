@@ -16,6 +16,7 @@ const LibraryDrawer = (() => {
     { id: 'portraits', label: 'Portraits', icon: 'messages' },
     { id: 'party', label: 'Party', icon: 'users-group' }, // 4.7: the players' characters
     { id: 'handouts', label: 'Handouts', icon: 'script' },
+    { id: 'tiles', label: 'Tiles', icon: 'color-swatch' }, // Beta 3.22: floors for Oldschool maps
   ];
   const SHELVES = [
     { id: 'fav', label: 'Favourites', icon: 'star' },
@@ -25,7 +26,7 @@ const LibraryDrawer = (() => {
   ];
   const CAT_LABEL = Object.fromEntries(CATS.map((c) => [c.id, c.label]));
   const CAT_ICON = Object.fromEntries(CATS.map((c) => [c.id, c.icon]));
-  const ROLE = { maps: 'map', tokens: 'token', assets: 'asset', overlays: 'overlay', sounds: 'sound', portraits: 'portrait', party: 'token', handouts: 'handout' };
+  const ROLE = { maps: 'map', tokens: 'token', assets: 'asset', overlays: 'overlay', sounds: 'sound', portraits: 'portrait', party: 'token', handouts: 'handout', tiles: 'tile' };
 
   // ---------- words, tags and variants ----------
   const STOP = new Set(('the and of a an with by for in on at to from maps map tokens token assets asset props prop effects effect ' +
@@ -84,7 +85,7 @@ const LibraryDrawer = (() => {
   // 4.11: an item's folders below its category's own folder: Tokens/Oterians/Fleet Chaplain/x.png → ['Oterians', 'Fleet Chaplain'].
   // Maps: Static and Animated are not folders of their own (variants of one map often live in both); a pack is a folder
   // each category's own folder in the library (and a level inside it that only sorts: Maps/Static, Effects/Overlays)
-  const CAT_ROOT = { maps: ['Maps'], tokens: ['Tokens'], assets: ['Assets', 'Props'], overlays: ['Effects'], portraits: ['Portraits'], party: ['Party'], handouts: ['Handouts'], sounds: ['Audio'] };
+  const CAT_ROOT = { maps: ['Maps'], tokens: ['Tokens'], assets: ['Assets', 'Props'], overlays: ['Effects'], portraits: ['Portraits'], party: ['Party'], handouts: ['Handouts'], sounds: ['Audio'], tiles: ['Tiles'] };
   const CAT_SKIP = { maps: /^(static|animated)$/i, overlays: /^overlays$/i };
   function foldersOf(it) {
     if (it._dirs) return it._dirs;
@@ -223,6 +224,7 @@ const LibraryDrawer = (() => {
       fight: 'Pick the fight music for this chapter',
       talk: 'Pick a portrait to bring into the conversation',
       addToken: 'Pick a token to put in the middle of the map',
+      tile: 'Pick a floor tile to draw with',
     };
     const purposeText = (p) => (p && p.startsWith('sfx:') ? `Pick a sound for ${(FXDATA.SKINS[p.slice(4)] || {}).label || ''} spells`
       : p && p.startsWith('moment:') ? `Pick a sound for the ${((Moments.BY[p.slice(7)] || {}).label || 'screen effect').toLowerCase()}` : PURPOSE[p]);
@@ -233,6 +235,7 @@ const LibraryDrawer = (() => {
       if (p === 'place' || p === 'addToken' || p === 'tokenBrush') return 'tokens';
       if (p === 'brush' || p === 'atlasAsset') return 'assets';
       if (p === 'talk') return 'portraits';
+      if (p === 'tile') return 'tiles';
       if (p === 'ambience' || p === 'mapSound' || p === 'fight' || p.startsWith('sfx:') || p.startsWith('moment:')) return 'sounds';
       return null;
     };
@@ -726,6 +729,7 @@ const LibraryDrawer = (() => {
       if (purpose && purpose.startsWith('sfx:')) return c === 'sounds' ? 'sfx' : null;
       if (purpose && purpose.startsWith('moment:')) return c === 'sounds' ? 'momentSound' : null;
       if (purpose === 'brush') return c === 'assets' ? 'brush' : null;
+      if (purpose === 'tile') return c === 'tiles' ? 'tile' : null; // (Beta 3.22)
       if (purpose === 'atlasAsset') return c === 'assets' ? 'atlasAsset' : null;
       if (purpose === 'tokenBrush') return c === 'tokens' ? 'tokenBrush' : null;
       if (purpose === 'mapSound') return c === 'sounds' ? 'sound' : null;
@@ -739,7 +743,7 @@ const LibraryDrawer = (() => {
     async function use(it, as, anchor) {
       const d = ui.drawer || {};
       const s = S();
-      const action = as || actionFor(it, d.purpose) || { maps: 'newMap', tokens: 'token', assets: 'brush', overlays: 'overlay', sounds: 'sound', portraits: 'talk', handouts: 'handout' }[it.cat];
+      const action = as || actionFor(it, d.purpose) || { maps: 'newMap', tokens: 'token', assets: 'brush', overlays: 'overlay', sounds: 'sound', portraits: 'talk', handouts: 'handout', tiles: 'tile' }[it.cat];
       const ch = ctx.viewChapter();
       touch(it);
       const back = d.back && d.purpose ? d.back : null; // opened from a menu to pick one thing
@@ -773,6 +777,11 @@ const LibraryDrawer = (() => {
         case 'brush':
           done(null);
           ctx.setBrush(it);
+          break;
+        case 'tile': // (Beta 3.22) a floor tile for the Draw tool of an Oldschool map
+          if (!s.map || !s.map.os) { toast('Tiles are floors for Oldschool maps: Add map → Oldschool map', { ms: 3200 }); break; }
+          done(null);
+          ctx.useTile(it);
           break;
         case 'tokenBrush':
           close();

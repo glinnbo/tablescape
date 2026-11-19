@@ -371,6 +371,7 @@ class SceneView {
     this.live = null;
     this.map = null;
     if (this.bgNode) { this.bgNode.el.remove(); this.bgNode = null; }
+    this.dropOldBg();
     for (const n of this.nodes.values()) this.dropNode(n);
     this.nodes.clear();
     this.broken.clear();
@@ -507,9 +508,13 @@ class SceneView {
   // ---------- background (map space) ----------
   renderBg() {
     const bg = this.map.bg;
-    if (!bg) { if (this.bgNode) { this.bgNode.el.remove(); this.bgNode = null; } this.broken.delete('bg'); return; }
+    if (!bg) { if (this.bgNode) { this.bgNode.el.remove(); this.bgNode = null; } this.dropOldBg(); this.broken.delete('bg'); return; }
     if (!this.bgNode || this.bgNode.url !== bg.url) {
-      if (this.bgNode) this.bgNode.el.remove();
+      // Beta 3.22: a picture that follows a picture stays until the new one is there (a drawn map gets a new one with
+      // every change: no blink in between)
+      const old = this.bgNode;
+      this.dropOldBg();
+      if (old && old.kind === 'image' && bg.kind === 'image' && old.nw) this.bgOld = old; else if (old) old.el.remove();
       const el = makeMedia(bg.kind, bg.url, bg.kind === 'video' ? this.videoOn() : this.playing);
       const node = { el, url: bg.url, kind: bg.kind, nw: 0, nh: 0 };
       this.bgNode = node;
@@ -519,11 +524,12 @@ class SceneView {
         node.nh = bg.kind === 'video' ? el.videoHeight : el.naturalHeight;
         this.broken.delete('bg');
         this.layoutBg();
+        if (this.bgNode === node) this.dropOldBg();
         this.layoutOverlays();
         this.emit('broken');
         this.emit('render');
       });
-      el.addEventListener('error', () => { this.broken.add('bg'); this.emit('broken'); });
+      el.addEventListener('error', () => { if (this.bgNode === node) this.dropOldBg(); this.broken.add('bg'); this.emit('broken'); });
       this.bgLayer.appendChild(el);
     }
     if (bg.kind === 'video') {
@@ -535,6 +541,8 @@ class SceneView {
     }
     this.layoutBg();
   }
+
+  dropOldBg() { if (this.bgOld) { this.bgOld.el.remove(); this.bgOld = null; } }
 
   // Placement in map inches. scale = map inches per source pixel.
   bgPlacement() {

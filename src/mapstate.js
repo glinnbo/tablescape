@@ -45,6 +45,47 @@ function cleanTree(t, ref) {
   return { v: k.v, base: k.base, seed: seed >= 1 && seed <= 9999 ? seed : newSeed() };
 }
 
+// ---------- Beta 3.22: Oldschool maps (drawn, not a picture) ----------
+// map.os: what the GM drew, in drawing order: floors ('area': a shape with its tile, its edge and its height level),
+// cuts (what the eraser took away), wall lines, pillars and stairs; doors sit on the walls. The GM screen turns it into
+// the map's picture (renderer/oldschool.js) and the line-of-sight walls (os.result); the TV only shows that picture.
+const OS_EDGES = ['ledge', 'walls', 'rock', 'cliff'];
+const OS_SHAPES = ['rect', 'poly', 'round', 'path', 'brush'];
+function defaultOs() { return { v: 1, items: [], doors: [], sun: 135, sight: true }; }
+const osNum = (v, d, a, b) => { const x = Number(v); return Number.isFinite(x) ? Math.min(b, Math.max(a, x)) : d; };
+const ptsOf = (pts) => (Array.isArray(pts) ? pts.filter((q) => Array.isArray(q) && Number.isFinite(Number(q[0])) && Number.isFinite(Number(q[1]))).slice(0, 4000).map((q) => [r3(Number(q[0])), r3(Number(q[1]))]) : []);
+const refOf = (t) => (t && (t.rel || t.path) ? { ...(t.rel ? { rel: String(t.rel) } : {}), ...(t.path ? { path: String(t.path) } : {}) } : null);
+function cleanOsItem(it) {
+  if (!it || typeof it !== 'object') return null;
+  const id = typeof it.id === 'string' && it.id ? it.id : newId('o');
+  const kind = ['area', 'cut', 'line', 'pillar', 'stairs'].includes(it.kind) ? it.kind : null;
+  if (!kind) return null;
+  const pts = ptsOf(it.pts);
+  if (kind === 'area' || kind === 'cut') {
+    const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'poly';
+    const need = shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' ? 1 : 2;
+    if (pts.length < need) return null;
+    const out = { id, kind, shape, pts, r: r3(osNum(it.r, 0.5, 0.05, 50)) };
+    if (kind === 'area') Object.assign(out, { tile: refOf(it.tile), edge: OS_EDGES.includes(it.edge) ? it.edge : 'walls', mat: typeof it.mat === 'string' ? it.mat : 'stone_wall', level: Math.round(osNum(it.level, 0, -3, 3)) });
+    return out;
+  }
+  if (kind === 'line') return pts.length >= 2 ? { id, kind, pts, w: r3(osNum(it.w, 0.5, 0.05, 10)), h: r3(osNum(it.h, 1, 0.1, 3)), mat: typeof it.mat === 'string' ? it.mat : 'stone_wall' } : null;
+  if (kind === 'pillar') return pts.length >= 1 ? { id, kind, pts: pts.slice(0, 1), r: r3(osNum(it.r, 0.3, 0.05, 10)), round: !!it.round, mat: typeof it.mat === 'string' ? it.mat : 'stone_wall' } : null;
+  // stairs: a box (two corners) climbing toward dir (0 right, 1 down, 2 left, 3 up), from the floor's level to one higher
+  return pts.length >= 2 ? { id, kind, pts: pts.slice(0, 2), dir: Math.round(osNum(it.dir, 3, 0, 3)), mat: typeof it.mat === 'string' ? it.mat : 'stone_wall' } : null;
+}
+function cleanOs(o) {
+  if (!o || typeof o !== 'object') return null;
+  const out = defaultOs();
+  out.items = (Array.isArray(o.items) ? o.items : []).map(cleanOsItem).filter(Boolean);
+  out.doors = (Array.isArray(o.doors) ? o.doors : []).filter((d) => d && [d.x1, d.y1, d.x2, d.y2].every((v) => Number.isFinite(Number(v)))).map((d) => ({
+    id: typeof d.id === 'string' && d.id ? d.id : newId('od'), x1: r3(+d.x1), y1: r3(+d.y1), x2: r3(+d.x2), y2: r3(+d.y2), door: d.door === 2 ? 2 : 1, ...(d.kind === 'window' ? { kind: 'window' } : {}),
+  }));
+  out.sun = Math.round(osNum(o.sun, 135, 0, 359));
+  out.sight = o.sight !== false;
+  return out;
+}
+
 function defaultGrid() {
   return { type: 'square', size: 1, angle: 0, ox: 0, oy: 0, show: true, color: '#ffffff', opacity: 0.3, width: 1 };
 }
@@ -102,6 +143,7 @@ function normalize(m) {
   out.marks = Array.isArray(out.marks) ? out.marks.filter((d) => d && d.kind) : [];
   out.round = { n: null, show: true, ...((m && m.round) || {}) };
   out.walls = Array.isArray(out.walls) ? out.walls.filter((w) => w && Number.isFinite(w.x1) && Number.isFinite(w.y2)) : [];
+  out.os = out.os ? cleanOs(out.os) : null; // (Beta 3.22) an Oldschool map's drawing
   out.vision = { on: true, dim: 0.5, ...((m && m.vision) || {}) };
   out.areas = Array.isArray(out.areas) ? out.areas.filter((a) => a && Array.isArray(a.rings) && a.rings.length) : [];
   out.frame = { ...FRAME0, ...((m && m.frame) || {}) };
@@ -202,6 +244,7 @@ function gridUnit(u) {
   const n = Number(u.n); const name = short(u.name, 30);
   return name && Number.isFinite(n) && n > 0 ? { n: Math.round(Math.min(100000, n) * 100) / 100, name } : null;
 }
+const r4g = (v) => Math.round((Number(v) || 0) * 10000) / 10000;
 const pick = (src, keys) => Object.fromEntries(keys.filter((k) => k in src).map((k) => [k, src[k]]));
 const num = (v, d) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 
@@ -933,6 +976,73 @@ function apply(map, type, p, media) {
       return map.marks.length === before ? { changed: null } : { changed: 'all', label: 'Markers cleared' };
     }
 
+    // ---------- Beta 3.22: Oldschool maps: the drawing ----------
+    case 'os.add': { // one thing drawn (or erased): p.item, or several: p.items
+      if (!map.os) return { changed: null };
+      const list = (p.items || [p.item]).map(cleanOsItem).filter(Boolean);
+      if (!list.length) return { changed: null };
+      map.os.items.push(...list);
+      const k = list[list.length - 1].kind;
+      return { changed: 'all', selected: list[list.length - 1].id, label: k === 'cut' ? 'Erased' : k === 'line' ? 'Wall drawn' : k === 'pillar' ? 'Pillar placed' : k === 'stairs' ? 'Stairs placed' : 'Floor drawn' };
+    }
+    case 'os.update': { // an area's tile, edge, material or level; any item's points
+      if (!map.os) return { changed: null };
+      const i = map.os.items.findIndex((x) => x.id === p.id);
+      if (i < 0) return { changed: null };
+      const next = cleanOsItem({ ...map.os.items[i], ...pick(p, ['tile', 'edge', 'mat', 'level', 'pts', 'r', 'w', 'h', 'round', 'dir']), id: p.id });
+      if (!next) return { changed: null };
+      map.os.items[i] = next;
+      return { changed: 'all', label: p.label || null };
+    }
+    case 'os.remove': {
+      if (!map.os) return { changed: null };
+      const ids = new Set([p.id, ...(p.ids || [])]);
+      const n = map.os.items.length + map.os.doors.length;
+      map.os.items = map.os.items.filter((x) => !ids.has(x.id));
+      map.os.doors = map.os.doors.filter((x) => !ids.has(x.id));
+      return n !== map.os.items.length + map.os.doors.length ? { changed: 'all', label: 'Removed' } : { changed: null };
+    }
+    case 'os.door': { // a door, secret door or window on a drawn wall (the segment it covers)
+      if (!map.os) return { changed: null };
+      const d = cleanOs({ doors: [{ ...p, id: newId('od') }] }).doors[0];
+      if (!d) return { changed: null };
+      map.os.doors.push(d);
+      return { changed: 'all', label: d.kind === 'window' ? 'Window added' : d.door === 2 ? 'Secret door added' : 'Door added' };
+    }
+    case 'os.set': { // the map's sun (where the light comes from), and whether walls for sight follow the drawing
+      if (!map.os) return { changed: null };
+      if ('sun' in p) map.os.sun = Math.round(osNum(p.sun, 135, 0, 359));
+      if ('sight' in p) map.os.sight = !!p.sight;
+      return { changed: 'all' };
+    }
+    case 'os.clear': {
+      if (!map.os || (!map.os.items.length && !map.os.doors.length)) return { changed: null };
+      map.os.items = []; map.os.doors = [];
+      return { changed: 'all', label: 'Drawing cleared' };
+    }
+    // the GM screen made the picture of the drawing: it becomes the map's picture, and its outlines the walls for sight
+    // (doors keep whether they are open). Not an undo step of its own: undo brings the drawing back, and it is made again.
+    case 'os.result': {
+      if (!map.os) return { changed: null };
+      if (p.bg) map.bg = { ...media(p.bg.path), kind: 'image', x: r4g(p.bg.x), y: r4g(p.bg.y), scale: p.bg.scale, nw: p.bg.nw, nh: p.bg.nh, volume: 0, rate: 1, os: String(p.hash || '') };
+      else if (p.empty) map.bg = null;
+      if (Array.isArray(p.walls)) {
+        const was = new Map(map.walls.filter((w) => w.os).map((w) => [w.os, w]));
+        map.walls = map.walls.filter((w) => !w.os);
+        if (map.os.sight) {
+          for (const q of p.walls) {
+            const w = wallOf(q.c || q, q.door || 0, q.kind);
+            if (!w) continue;
+            w.os = String(q.key || w.id);
+            const old = was.get(w.os);
+            if (old) { w.id = old.id; if (w.door || w.kind === 'window') { w.open = !!old.open; if (old.shut) w.shut = true; } }
+            map.walls.push(w);
+          }
+        }
+      }
+      return { changed: 'all' };
+    }
+
     // ---------- walls, doors and line of sight ----------
     case 'wall.add': { // one or more segments [x1, y1, x2, y2] (a chain of walls, a room, a door)
       const door = p.door === 2 ? 2 : p.door ? 1 : 0;
@@ -1182,7 +1292,7 @@ const STEP_WORDS = [
   [/^fx\.add/, 'New effect or light'], [/^fx\.remove/, 'Removing an effect'], [/^fx\./, 'Effect or light change'],
   [/^spell\.add|^spell\.burst/, 'Spell area'], [/^spell\./, 'Spell area change'], [/^wall\.import/, 'Walls from a file'], [/^wall\./, 'Walls'],
   [/^light\./, 'Light'], [/^weather\./, 'Weather'], [/^view\./, 'Moving the map'], [/^grid\./, 'Grid'], [/^bg\./, 'Background'],
-  [/^draw\./, 'Drawing'], [/^mark\./, 'Marker'], [/^round\./, 'Round counter'], [/^vision\./, 'Line of sight'], [/^scene\./, 'Snapshot'],
+  [/^draw\./, 'Drawing'], [/^os\./, 'Drawing the map'], [/^mark\./, 'Marker'], [/^round\./, 'Round counter'], [/^vision\./, 'Line of sight'], [/^scene\./, 'Snapshot'],
 ];
 const stepWords = (type) => { for (const [re, w] of STEP_WORDS) if (re.test(type || '')) return w; return 'Last change'; };
 class History {
@@ -1222,8 +1332,8 @@ class History {
   }
 }
 
-const SNAP_KEYS = ['bg', 'view', 'layers', 'grid', 'fog', 'fx', 'spells', 'weather', 'light', 'draw', 'marks', 'round', 'walls', 'vision', 'areas', 'frame', 'pframe', 'atlas']; // (Beta 3.12: atlas, a world map's mist and weather)
+const SNAP_KEYS = ['bg', 'view', 'layers', 'grid', 'fog', 'fx', 'spells', 'weather', 'light', 'draw', 'marks', 'round', 'walls', 'vision', 'areas', 'frame', 'pframe', 'atlas', 'os']; // (Beta 3.12: atlas, a world map's mist and weather; Beta 3.22: os, an Oldschool map's drawing)
 function snapshot(map) { return structuredClone(Object.fromEntries(SNAP_KEYS.map((k) => [k, map[k]]))); }
 function restore(map, snap) { for (const k of SNAP_KEYS) if (k in snap) map[k] = snap[k]; }
 
-module.exports = { emptyMap, normalize, apply, expire, recordSeen, recordSight, newId, History, defaultGrid, sceneOf, sceneMatches };
+module.exports = { defaultOs, cleanOs, emptyMap, normalize, apply, expire, recordSeen, recordSight, newId, History, defaultGrid, sceneOf, sceneMatches };

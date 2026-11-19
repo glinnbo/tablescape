@@ -231,6 +231,8 @@ function eachRef(o, fn) {
 }
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+// Beta 3.22: the picture of an Oldschool map's drawing (made by the GM screen, kept in the campaign's folder "drawn")
+const drawnPic = (ref) => !!ref && /(^|[\\/])drawn[\\/][^\\/]+$/.test(String(ref.rel || ref.path || ''));
 const insideLib = (abs) => { const r = path.relative(library.root, abs); return r && !r.startsWith('..') && !path.isAbsolute(r) ? r.split(path.sep).join('/') : null; };
 
 // meta keys that belong to one table's sessions, not to the adventure
@@ -246,6 +248,7 @@ function plan(dir, { kind = 'adventure', chapterId = null } = {}) {
   const chapter = chapterId ? chapters[0] : null;
   if (chapter) { out.name = `${meta.name}: ${chapter.name}`; if (!chapter.maps.includes(out.lastMapId)) out.lastMapId = chapter.maps[0] || null; }
   if (kind === 'adventure') for (const k of PERSONAL) delete out[k];
+  if (Array.isArray(out.recent)) out.recent = out.recent.map((r) => (r && drawnPic(r.bg) ? { ...r, bg: null } : r)); // (Beta 3.22)
   if (kind === 'adventure' && out.table && typeof out.table === 'object') { out.table = { ...out.table }; for (const k of ['deck', 'phones', 'seats']) delete out.table[k]; } // (Beta 3.18: the looks go along, one table's remote, phones and seats not)
   // Beta 3.11: the atlas (world and regional maps) goes with the whole campaign, not with a single chapter; as an
   // adventure, no map is found yet
@@ -263,6 +266,9 @@ function plan(dir, { kind = 'adventure', chapterId = null } = {}) {
       m.spells = []; m.draw = [];
       if (m.round) m.round = { ...m.round, n: null };
     }
+    // Beta 3.22: an Oldschool map goes as its drawing; its picture is made again when it is opened (its file is named
+    // after the map's id, which changes)
+    if (m.os && drawnPic(m.bg)) m.bg = null;
     maps.push({ id, m });
   }
   // the files they use, each once; their references point into the library
@@ -270,7 +276,7 @@ function plan(dir, { kind = 'adventure', chapterId = null } = {}) {
   const fromPc = new Map(); // abs -> rel
   const missing = new Set();
   const fix = (ref) => {
-    if (library.treeOf(ref)) { // (Beta 3.20: a living tree comes with the app: its name goes along, no file)
+    if (library.treeOf(ref) || library.tileOf(ref)) { // (Beta 3.20: a living tree comes with the app: its name goes along, no file; Beta 3.22: a tile too)
       ref.rel = library.toRef(library.resolveRef(ref)).rel; delete ref.path; delete ref.url; delete ref.missing;
       return;
     }
@@ -297,7 +303,7 @@ function plan(dir, { kind = 'adventure', chapterId = null } = {}) {
     try { list = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of list) {
       const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) { if (['.backups', 'maps'].includes(r) || (kind === 'adventure' && r === 'Notes')) continue; walk(path.join(d, e.name), r); } else if (e.isFile() && r !== 'campaign.json' && !e.name.endsWith('.tmp')) extra.push({ rel: r, abs: path.join(d, e.name) });
+      if (e.isDirectory()) { if (['.backups', 'maps', 'drawn'].includes(r) || (kind === 'adventure' && r === 'Notes')) continue; walk(path.join(d, e.name), r); } else if (e.isFile() && r !== 'campaign.json' && !e.name.endsWith('.tmp')) extra.push({ rel: r, abs: path.join(d, e.name) });
     }
   };
   walk(dir, '');

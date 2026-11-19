@@ -14,6 +14,7 @@ const Guide = (() => {
     ['Build', [['M', 'Move the map (also while Build is folded)'], ['S', 'Assets: trees, rocks, furniture'], ['E', 'Effects, lights and weather'], ['W', 'Walls and doors (W again: next mode)'], ['K', 'Layers'], ['G', 'Grid on or off']]],
     ['Play', [['V', 'Select and move tokens'], ['N', 'Tokens: click to drop NPCs'], ['U', 'Party marker: where it is (arrow keys: one square)'], ['R / C', 'Reveal / cover fog'], ['A', 'Spells'], ['P', 'Point: ping, laser, spotlight, ruler (P again: next)'], ['D', 'Draw: chalk, pen, text, eraser (D again: next)'], ['X', 'Markers and counters (Toolbox)'], ['J', 'Map notes only you see (Build)'], ['O', 'Conversation: NPC portraits on the table'], ['Q', 'Toolbox: map tools and panels'], ['I', 'Initiative'], ['Enter', 'Next turn / next round']]],
     ['Spells and assets', [['Click', 'Cast or stamp'], ['Drag', 'Aim a cone, line or cube / scatter assets'], ['Ctrl + wheel', 'Turn by 15° (Shift: 5°), also placed areas and assets'], ['Shift while aiming', 'Snap to 15°'], ['+  −', 'Spell size in 5 ft steps'], ['[  ]', 'Asset size'], ['A picked asset\'s frame', 'Sides: flat or long · corners: size · knob: turn'], ['Shift + drag', 'Select several assets'], ['Alt', 'Place or measure without snapping']]],
+    ['Draw (Oldschool maps)', [['Drag', 'A room, a round room, a corridor, a wall, stairs (Shift: square, circle, straight)'], ['Click', 'A shape corner by corner; Enter, double-click or right-click closes it'], ['Alt while drawing', 'Erase instead'], ['Backspace / Esc', 'Take the last corner back / drop the shape']]],
     ['Walls', [['Click', 'Wall corner by corner (Alt: no snapping)'], ['Double-click / Enter', 'End the line of walls'], ['Click a door', 'Open or close it (also with V)'], ['Delete', 'Remove the selected wall']]],
     ['Table', [['T', 'Send this map to the table'], ['B', 'Blackout on or off'], ['1 – 0', 'Use the hotbar (3 pages: the mouse wheel over it)'], ['Alt 1 – 9', 'Open a map of this chapter'], ['F1 – F8', 'Play snapshot 1 to 8 of the map on the table'], ['Shift 1 – 9', 'Play a starred screen effect'], ['Ctrl 1 – 9', 'Play a Spotify mood'], ['F', 'Fit the view to the table'], ['Shift F', 'Show everything, also off the table'], ['Esc on the TV', 'Close the table window']]],
     ['Panels', [['L', 'Library'], ['Shift L', 'Library full screen'], ['Tab', 'Map thumbnails on or off'], ['Shift I', 'Character cards: the party at a glance (only for you)'], ['?', 'This guide'], ['Ctrl ,', 'Tablescape settings: the TV, picture, sound, performance'], ['Ctrl + / Ctrl − / Ctrl 0', 'Size of everything on your screen (not the TV)']]],
@@ -23,6 +24,13 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.22', [
+      'Oldschool maps: Add map → Oldschool map, and draw the map on the grid like on the big squared paper of old. Rooms, round rooms, shapes, corridors, caves with the brush, wall lines, pillars, stairs, doors, secret doors and windows',
+      'Every floor gets a tile and an edge: built walls, rock, a ledge or a cliff into darkness. Platforms raised and pits lowered. The light falls from one side, walls cast shadows; Light from turns it',
+      'Sixteen tiles come with Tablescape: eleven floors (cobblestone, slate, wood, sand, ice, glowing and lava stones …) and five materials for walls and rock (stone, dark stone, hedge, rock, mossy rock)',
+      'Your own tiles go into the new Tiles section of the library; the first time you use one, you say how many squares it spans. Drag one onto a floor to give it that tile',
+      'The walls for line of sight follow the drawing (ledges and cliffs block nothing); doors open and close as usual. Ctrl + Z takes anything back',
+    ]],
     ['Beta 3.21', [
       'Assets has two tabs: Library (your own pictures and animations) and Living (trees, bushes and mushrooms that move in the wind)',
       'Living shows every kind as a picture: Trees, Bushes, Mushrooms. Pick Small, Medium, Large or Mixed; each one you stamp is turned a little differently',
@@ -393,7 +401,7 @@ const Guide = (() => {
     const folders = [
       ['Maps', 'Battle maps: pictures or videos (webm, mp4)'], ['Tokens', 'NPCs and monsters, round or cut out (png with transparency)'],
       ['Assets', 'Trees, rocks, furniture, traps; animated ones (webm with transparency) in Assets/Animated. Living trees come with Tablescape: they move in the wind'], ['Overlays', 'Rain, fog, embers over the whole table'],
-      ['Sounds', 'Ambience, Music, SFX'], ['Portraits', 'NPC faces for conversations'], ['Handouts', 'Letters and pictures to show the players'], ['Campaigns', 'Your campaigns: one folder each, with backups inside'],
+      ['Sounds', 'Ambience, Music, SFX'], ['Portraits', 'NPC faces for conversations'], ['Handouts', 'Letters and pictures to show the players'], ['Tiles', 'Seamless floors for Oldschool maps (Tablescape brings sixteen)'], ['Campaigns', 'Your campaigns: one folder each, with backups inside'],
     ];
     return h('div', { class: 'guide-text' },
       h('h3', {}, 'The library'),

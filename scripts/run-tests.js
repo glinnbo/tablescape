@@ -26,7 +26,7 @@ const base = process.env.TS_APP ? [] : ['.'];
 // (Beta 3.7: on a machine without a graphics card, as most test machines are, WebGL runs in software for the area
 // "burn", so the handout burn is really drawn and checked, not only its plain fallback. Only there: it slows everything.)
 const SOFT_GL = process.platform === 'linux' ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'] : [];
-const GL_AREAS = ['burn', 'atlasgl', 'trees']; // (the areas that draw with WebGL: software GL, slow, so only there)
+const GL_AREAS = ['burn', 'atlasgl', 'trees', 'oldschool']; // (the areas that draw with WebGL: software GL, slow, so only there)
 const argsFor = (name) => (GL_AREAS.includes(name) || process.env.TS_SOFT_GL === '1' ? [...base, ...SOFT_GL] : base);
 const linux = process.platform === 'linux';
 if (linux && (process.getuid?.() === 0 || process.env.CI)) base.push('--no-sandbox');

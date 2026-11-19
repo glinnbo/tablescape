@@ -58,6 +58,7 @@ const NAMES = [
   'brightness-up', 'brightness-down',
   // Prototype 1: the players' phones move their tokens
   'run', 'device-gamepad-2', 'hand-stop', 'user-edit', 'compass',
+  'stairs', // Beta 3.22: Oldschool maps
 ];
 
 const dir = path.join(__dirname, '..', 'node_modules', '@tabler', 'icons', 'icons', 'outline');
