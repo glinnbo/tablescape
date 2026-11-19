@@ -52,7 +52,7 @@ module.exports = (area) => {
     t.eq(await t.popTitle(), 'Draw', 'its panel');
     t.ok(await t.g(`!document.querySelector('#empty.on')`), 'no "no background" card in the way');
     t.ok(await t.g(`(() => { const b = document.querySelector('#rail [data-id="oldschool"]'); return !!b && !b.hidden && b.offsetParent !== null; })()`), 'Draw is on the rail');
-    t.eq(await t.count('.os-tools .tile'), 13, 'its tools');
+    t.eq(await t.count('.os-tools .tile'), 10, 'its tools (Beta 3.28: no Corridor, Floor or Pieces)');
     t.ok(await t.count('.os-floors .tile[data-v]') >= 11, 'the floors of the app');
     t.ok(await t.g(`!!document.querySelector('.map-tile[data-id="${own}"] .tile-thumb .i')`), 'its tile in the strip shows a pencil');
   });
@@ -116,7 +116,7 @@ module.exports = (area) => {
   area.deep('the Draw panel: each tool, a floor, the edge, where the light comes from', async (t) => {
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
     await t.g(`localStorage.removeItem('osPrefs')`);
-    for (const id of ['shape', 'round', 'corridor', 'brush', 'erase', 'floor', 'wall', 'pillar', 'stairs', 'door', 'piece', 'ground', 'room']) {
+    for (const id of ['shape', 'round', 'brush', 'erase', 'wall', 'pillar', 'stairs', 'door', 'ground', 'room']) {
       await t.clickSel(`.os-tools .tile[data-v="${id}"]`);
       t.eq(await t.g('Play.ui.os.tool'), id, `tool ${id}`);
     }
@@ -126,6 +126,9 @@ module.exports = (area) => {
     await t.clickText('#pop .seg-btn', 'Cliff');
     t.eq(await t.g('Play.ui.os.edge'), 'cliff', 'the edge');
     t.ok(await t.count('.os-mats .tile') >= 2, 'what the cliff is made of');
+    await t.clickText('#pop .seg-btn', 'Fade');
+    t.eq(await t.g('Play.ui.os.edge'), 'fade', 'Fade (Beta 3.28)');
+    t.ok(await t.g(`document.querySelector('.os-mats').parentNode.hidden`), 'nothing to be made of');
     await t.clickText('#pop .seg-btn', 'Walls');
     const sun = M(t).os.sun;
     t.handle('os.set', { mapId: own, sun: (sun + 90) % 360 });
@@ -140,7 +143,7 @@ module.exports = (area) => {
     t.note(`made in ${JSON.stringify(await t.g('Oldschool.stats.last'))}`);
   }, { ms: 180000 });
 
-  area.deep('a shape clicked corner by corner, closed with Enter; a corridor along the grid; a door on a wall line', async (t) => {
+  area.deep('a shape clicked corner by corner, closed with Enter; a passage drawn on; a door on a wall line', async (t) => {
     await clear(t);
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
     await t.clickSel('.os-tools .tile[data-v="shape"]');
@@ -150,13 +153,9 @@ module.exports = (area) => {
     await t.until(() => M(t).os.items.length === 1, 4000, 'the shape');
     t.eq(M(t).os.items[0].shape, 'poly', 'a shape');
     t.eq(M(t).os.items[0].pts.length, 4, 'four corners');
-    await t.clickSel('.os-tools .tile[data-v="corridor"]');
-    const a = await t.scr(21.5 * k, 5.5 * k); const b = await t.scr(27.5 * k, 5.5 * k);
-    await t.drag(a, b, 14);
-    await t.until(() => M(t).os.items.length === 2, 4000, 'the corridor');
-    const c = M(t).os.items[1];
-    t.eq([c.shape, c.r], ['path', 0.5 * k], 'one square wide', c);
-    t.ok(c.pts.every((q) => Math.abs(q[1] - 5.5 * k) < 1e-3), 'along the middle of a row of squares', c.pts);
+    // (Beta 3.28: the Corridor tool is gone; a passage drawn before still draws)
+    t.handle('os.add', { mapId: own, item: { kind: 'area', shape: 'path', pts: [[21.5 * k, 5.5 * k], [27.5 * k, 5.5 * k]], r: 0.5 * k, tile: { rel: 'Tiles/Tablescape/Old cobblestone.webp' }, edge: 'walls', mat: 'stone_wall', level: 0 } });
+    await t.until(() => M(t).os.items.length === 2, 4000, 'the passage');
     await baked(t);
     const n = wallsOf(t).length;
     await t.clickSel('.os-tools .tile[data-v="door"]');
@@ -167,7 +166,7 @@ module.exports = (area) => {
     t.eq([door.x1, door.x2, door.y1, door.y2], [21 * k, 21 * k, 5 * k, 6 * k], 'one square of the wall line', door);
     await baked(t);
     const dw = wallsOf(t).filter((w) => w.door);
-    t.eq(dw.length, 1, 'a door where the corridor opens into the room: it closes it');
+    t.eq(dw.length, 1, 'a door where the passage opens into the room: it closes it');
     t.ok(wallsOf(t).length > 0 && n > 0, 'walls');
   }, { ms: 180000 });
 
@@ -337,7 +336,7 @@ module.exports = (area) => {
     await t.clickSel('.os-tools .tile[data-v="room"]');
   }, { ms: 300000 });
 
-  area.deep('floors mix by opacity: a soft line, uneven, tiled along the grid; off; Floor → Paint lays a floor into the floors under the brush', async (t) => {
+  area.deep('floors mix by opacity: a soft line, uneven, tiled along the grid (insides and joints); off', async (t) => {
     await clear(t);
     const T = (n) => ({ rel: `Tiles/Tablescape/${n}.webp` });
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
@@ -348,7 +347,7 @@ module.exports = (area) => {
     await t.settle();
     const items = M(t).os.items;
     t.ok(items.every((x) => x.mixW === 1.5 && x.mixU === 0.5 && x.mixT === 0.5), 'a floor drawn mixes as the panel says', items.map((x) => [x.mixW, x.mixU, x.mixT]));
-    let m = await baked(t);
+    await baked(t);
     // across the edge between grass and sand: squares of both, not a straight line
     const row = await t.g(`(async () => { const b = Play.state().map.bg; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d'); g.drawImage(img, 0, 0); const out = []; for (let y = 2.5; y < 9; y += 1) { const r = []; for (let x = 17.5; x < 23; x += 1) { const d = g.getImageData(Math.round((x * ${k} - b.x) / b.scale), Math.round((y * ${k} - b.y) / b.scale), 1, 1).data; r.push(d[1] > d[0] ? 'g' : 's'); } out.push(r.join('')); } return out; })()`);
     t.note(`squares across the edge: ${row.join(' ')}`);
@@ -357,65 +356,9 @@ module.exports = (area) => {
     t.handle('os.update', { mapId: own, id: first, mixW: 0 });
     await t.settle();
     t.eq(M(t).os.items[1].mixW, 0, 'off for one floor (width 0)');
-    m = await baked(t);
-    // Floor → Paint: a brush stroke of grass into the sand
-    await t.clickSel('.os-tools .tile[data-v="floor"]');
-    await t.clickText('#pop .seg-btn', 'Paint');
-    t.eq(await t.g('Play.ui.os.floorHow'), 'paint', 'painting');
-    await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Mossy court.webp"]');
-    await t.drag(await t.scr(22 * k, 5 * k), await t.scr(25 * k, 6 * k), 12);
-    await t.until(() => M(t).os.items.some((x) => x.kind === 'paint'), 5000, 'the stroke');
-    const pi = M(t).os.items.find((x) => x.kind === 'paint');
-    t.eq([pi.shape, pi.tile && pi.tile.rel, pi.mixU, pi.mixT], ['brush', 'Tiles/Tablescape/Mossy court.webp', 0.5, 0.5], 'a stroke of the picked floor', pi);
-    t.ok(await t.g(`Play.OS.hashOf(${JSON.stringify({ os: { ...M(t).os, items: M(t).os.items.filter((x) => x.kind !== 'paint') }, grid: M(t).grid })}) !== Play.OS.hashOf(${JSON.stringify({ os: M(t).os, grid: M(t).grid })})`), 'it changes the picture');
     await baked(t);
-    t.ok(!wallsOf(t).some((w) => Math.min(w.x1, w.x2) > 21 * k && Math.max(w.x1, w.x2) < 26 * k && Math.min(w.y1, w.y2) > 3 * k && Math.max(w.y1, w.y2) < 8 * k), 'no walls from a stroke');
-    // erase over it takes it away
-    await t.clickSel('.os-tools .tile[data-v="erase"]');
-    await t.clickText('#pop .seg-btn', 'Box');
-    await t.drag(await t.scr(21.5 * k, 3.5 * k), await t.scr(25.5 * k, 7.5 * k), 10);
-    await t.until(() => !M(t).os.items.some((x) => x.kind === 'paint'), 5000, 'the stroke erased');
-    await t.g(`Play.ui.os.floorHow = 'click'`);
     await t.clickSel('.os-tools .tile[data-v="room"]');
   }, { ms: 300000 });
-
-  area.deep('ready-made pieces: picked in the panel, stamped with a click (one undo step), a quarter turn turns them', async (t) => {
-    await clear(t);
-    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
-    await t.clickSel('.os-tools .tile[data-v="piece"]');
-    t.eq(await t.count('.os-pieces .tile'), 8, 'eight pieces');
-    await t.clickSel('.os-pieces .tile[data-v="shrine"]');
-    t.eq(await t.g('Play.ui.os.piece'), 'shrine', 'the shrine picked');
-    const at = await t.scr(20 * k, 8 * k);
-    await t.mouse('mouseMove', at.x, at.y);
-    await t.until(() => t.g(`document.querySelectorAll('svg.os-preview rect, svg.os-preview ellipse').length > 2`), 3000, 'the piece under the pointer');
-    t.ok(await t.g(`[...document.querySelectorAll('svg.os-preview [fill^="url("]')].length >= 2`), 'its floors with their tiles');
-    await t.sleep(900);
-    await t.shot(t.gm(), 'oldschool-pieces');
-    await t.click(at.x, at.y);
-    await t.until(() => M(t).os.items.length === 4, 4000, 'the shrine stamped');
-    const its = M(t).os.items;
-    t.eq(its.map((x) => x.kind).join(), 'area,area,stairs,pillar', 'its floor, its dais, its stairs, its altar');
-    t.eq(its[0].tile.rel, (await t.g('Play.ui.os.floor')).rel, 'the floor picked in the panel');
-    t.eq([its[1].tile.rel, its[1].edge, its[1].level], ['Tiles/Tablescape/Glowing blue.webp', 'ledge', 1], 'the dais keeps its own look');
-    const [[x0, y0], [x1, y1]] = its[0].pts;
-    t.eq([x1 - x0, y1 - y0], [9 * k, 9 * k], 'nine squares');
-    t.ok(Number.isInteger(Math.round(x0 / k * 1e4) / 1e4) && Number.isInteger(Math.round(y0 / k * 1e4) / 1e4), 'its corner on the grid', [x0, y0]);
-    t.eq(M(t).os.doors.length, 1, 'its door');
-    t.handle('history.undo', { mapId: own });
-    await t.settle();
-    t.eq([M(t).os.items.length, M(t).os.doors.length], [0, 0], 'one undo takes it all back');
-    await t.clickSel('.os-pieces .tile[data-v="tavern"]');
-    await t.clickText('#pop .btn', 'Turn');
-    t.eq(await t.g('Play.ui.os.turn'), 1, 'a quarter turn');
-    await t.click(at.x, at.y);
-    await t.until(() => M(t).os.items.length > 0, 4000, 'the tavern stamped');
-    const [[a0, b0], [a1, b1]] = M(t).os.items[0].pts;
-    t.eq([Math.abs(a1 - a0), Math.abs(b1 - b0)], [7 * k, 10 * k], 'turned: seven wide, ten long');
-    await t.clickText('#pop .btn', 'Turn'); await t.clickText('#pop .btn', 'Turn'); await t.clickText('#pop .btn', 'Turn');
-    t.eq(await t.g('Play.ui.os.turn'), 0, 'four quarter turns: as it was');
-    await baked(t, 90000);
-  }, { ms: 240000 });
 
   area.deep('the TV inks what is drawn: a pen traces it, its tile fills in, then the picture takes over; a secret door never shows', async (t) => {
     await clear(t);

@@ -83,6 +83,7 @@ uniform float uBranchAmt, uLobes, uSeed, uTreeSeed;
 uniform float uShadow, uAlpha;
 uniform float uHue, uSat, uBright, uWarm, uPatchHue, uPatchBri;
 uniform vec3 uTint; uniform float uTintAmt;
+uniform mat4 uLookM; uniform vec4 uLookO; uniform float uLookOn;  // the map's colours (Natural, Vivid, Muted...)
 varying vec2 vTex; varying vec2 vNoise;
 float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7)))*43758.5453); }
 float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0 - 2.0*f);
@@ -127,6 +128,10 @@ void main(){
   rgb *= uBright*(1.0 + pn*2.0*uPatchBri);
   rgb *= vec3(1.0 + uWarm*0.6, 1.0 + uWarm*0.25, 1.0 - uWarm*0.6);
   rgb = clamp(rgb, 0.0, col.a);                     // stay valid premultiplied colour
+  if (uLookOn > 0.5 && col.a > 0.002) {             // the map's colour matrix, on the colour itself (not premultiplied)
+    vec4 u = uLookM*vec4(rgb/col.a, col.a) + uLookO;
+    rgb = clamp(u.rgb, 0.0, 1.0)*col.a;
+  }
   rgb = mix(rgb, uTint*col.a, uTintAmt);
   gl_FragColor = vec4(rgb, col.a)*uAlpha;           // premultiplied alpha
 }`;
@@ -134,7 +139,7 @@ void main(){
 const DEBUG_TINTS = [[.95,.3,.3],[.95,.65,.2],[.9,.9,.25],[.3,.85,.4],[.3,.6,.95],[.75,.4,.95],[.95,.4,.7],[.4,.9,.9],[.6,.6,.6]];
 const UNIFORMS = ['uView','uCenter','uSize','uAnchor','uOffset','uScale','uTreeScale','uRot','uFlip','uTex','uRadius','uTime',
   'uRustleT','uBranchT','uWind','uRustleAmt','uRustleScale','uLight','uBranchAmt','uLobes','uSeed','uTreeSeed','uShadow','uAlpha',
-  'uHue','uSat','uBright','uWarm','uPatchHue','uPatchBri','uTint','uTintAmt'];
+  'uHue','uSat','uBright','uWarm','uPatchHue','uPatchBri','uTint','uTintAmt','uLookM','uLookO','uLookOn'];
 const DEG = Math.PI/180;
 
 /* 1-D value noise for gusts */
@@ -332,6 +337,13 @@ class TreeWind {
     gl.uniformMatrix3fv(U.uView, false, [a*2/Wd, -b*2/Hd, 0, c*2/Wd, -d*2/Hd, 0, e*2/Wd - 1, 1 - f*2/Hd, 1]);
     gl.uniform1f(U.uTime, this.time); gl.uniform1f(U.uRustleT, this.rustleT); gl.uniform1f(U.uBranchT, this.branchT);
     const wa = this.wind.dir*DEG; gl.uniform2f(U.uWind, Math.cos(wa), Math.sin(wa));
+    // the map's colours: a colour matrix as feColorMatrix takes it (20 values, row by row), or none
+    const L = Array.isArray(this.look) && this.look.length === 20 ? this.look : null;
+    gl.uniform1f(U.uLookOn, L ? 1 : 0);
+    if (L) {
+      gl.uniformMatrix4fv(U.uLookM, false, [0, 1, 2, 3].flatMap((j) => [L[j], L[5 + j], L[10 + j], L[15 + j]]));
+      gl.uniform4f(U.uLookO, L[4], L[9], L[14], L[19]);
+    }
 
     for (const tree of trees) {
       const v = this.variants.get(tree.variant); if (!v) continue;

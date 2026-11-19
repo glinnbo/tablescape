@@ -189,7 +189,7 @@ const Play = (() => {
   const RAIL = [
     { group: 'history' },
     { group: 'build', title: 'Build', fold: true, items: [
-      { id: 'oldschool', icon: 'pencil', label: 'Draw', tool: true, pop: true, tip: 'Draw this map: rooms, corridors, caves, walls and doors' }, // (Beta 3.22: only on Oldschool maps)
+      { id: 'oldschool', icon: 'pencil', label: 'Draw', tool: true, pop: true, tip: 'Draw this map: rooms, caves, walls and doors' }, // (Beta 3.22: only on Oldschool maps)
       { id: 'map', icon: 'map-2', label: 'Map', key: 'M', tool: true, pop: true, tip: 'Move and scale the map; its brightness, contrast and colours' },
       { id: 'grid', icon: 'grid-4x4', label: 'Grid', pop: true, tip: 'Grid shape, size and tilt (G shows or hides it)' },
       { id: 'fx', icon: 'flame', label: 'Effects', key: 'E', tool: true, pop: true, tip: 'Torches, mist, lights, darkness and weather' },
@@ -642,9 +642,8 @@ const Play = (() => {
     oldschool: ['Pick a tool, a floor and an edge, then draw on the grid. Tiles and walls appear as you draw; the picture is finished a moment later.',
       'Room and Round: drag (Shift: square, circle). Shape: click the corners; click the first again, double-click, Enter or right-click closes it.',
       'Alt with a floor tool erases instead. Erase also takes wall lines, pillars and doors away. Ctrl + Z brings anything back.',
-      'Edges: Walls are built around the floor; Rock carves rooms out of stone; Ledge and Cliff drop into darkness, and one can see across them.',
+      'Edges: Walls are built around the floor; Rock carves rooms out of stone; Ledge and Cliff drop into darkness; Fade lets the floor fade into the dark. One can see across Ledge, Cliff and Fade.',
       'Raised and Lower make platforms and pits; Stairs climb toward where you drag. Doors sit on grid lines: click one again to take it away.',
-      'Pieces: ready-made rooms. Pick one, click the map; Turn (or Ctrl + wheel) gives it a quarter turn. Their floors take the floor and edge you picked.',
       'Ground: water, lava, acid, magical darkness or swamp. The picture shows the pool, its effect moves on it (in Effects you can make it stronger, tint it or hide it). Erase takes it away.',
       'Doors open and shut on the table: the leaf swings when you open a door.',
       'Your own tiles go into the library\'s Tiles section; the first time you use one, you set its grid. Right-click any floor → Adjust grid: its joints are the squares. Drag a tile from the library onto a floor to give it that tile.'],
@@ -755,7 +754,7 @@ const Play = (() => {
   }
   // Prototype 25: one line with what you cannot guess, shown for a few seconds when a tool is picked (Options → This screen)
   const TOOL_HINTS = {
-    oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', corridor: 'Drag along the grid', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', floor: 'Click a floor to give it the picked tile', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a grid line · again: the door goes', piece: 'Click to place · Ctrl + wheel: turn', ground: ui.os && ui.os.groundShape === 'brush' ? 'Paint the ground' : 'Drag the ground' }[ui.os && ui.os.tool] || ''),
+    oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a grid line · again: the door goes', ground: ui.os && ui.os.groundShape === 'brush' ? 'Paint the ground' : 'Drag the ground' }[ui.os && ui.os.tool] || ''),
     map: 'Drag moves the map · Alt + wheel scales it · Space-drag moves your view',
     fx: () => ({ place: 'Click places it · drag its marker to move it · right-click for more', paint: '[ and ] change the brush size', light: 'Click the map or a token to place a light', weather: '' }[ui.fxMode] || ''),
     asset: 'Click stamps · drag scatters · Ctrl + wheel turns · [ and ] resize · Shift + click selects several',
@@ -3914,7 +3913,6 @@ const Play = (() => {
       if (e.ctrlKey || e.metaKey) {
         if (ui.tool === 'fog') { ui.brushIn = clamp(round(ui.brushIn * factor * 4) / 4, 0.5, 8); refreshPop(); updateBrushCursor(); return; }
         if (ui.tool === 'fx' && ui.fxMode === 'paint') { ui.paintIn = clamp(round(ui.paintIn * factor * 4) / 4, 0.5, 8); refreshPop(); updateBrushCursor(); return; }
-        if (ui.tool === 'oldschool' && OS.wheel(e)) return; // (Beta 3.23: a ready-made piece turns)
         // Ctrl + wheel turns things: 15° per notch, 5° with Shift
         const dir = Math.sign(e.deltaY || e.deltaX);
         if (dir && (ui.tool === 'spell' || ui.tool === 'select' || ui.tool === 'asset')) { turnWithWheel(e, dir, e.shiftKey ? 5 : 15); return; }

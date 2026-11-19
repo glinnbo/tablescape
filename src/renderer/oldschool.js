@@ -1,7 +1,7 @@
 // Oldschool maps (Beta 3.22): a map drawn on the grid instead of a picture.
 //
 // What the GM drew (map.os, see mapstate.js) becomes one picture here, on the GM screen: the floors with their tiles,
-// the edges (a ledge, built walls, solid rock or a cliff into darkness), wall lines, pillars, stairs and doors, all with
+// the edges (a ledge, built walls, solid rock or a cliff into darkness, or a floor fading into it), wall lines, pillars, stairs and doors, all with
 // light from one side, shadows thrown by what stands higher, and darker corners. Every drawn thing has a height; the
 // graphics card works out light and shadow from those heights (WebGL 2). The TV only gets the finished picture, so a
 // drawn map costs no more at the table than a picture map. The same drawing gives the walls for line of sight.
@@ -17,9 +17,9 @@ const Oldschool = (() => {
   const byId = new Map(DATA.tiles.map((t) => [t.id, t]));
   const FLOORS = DATA.tiles.filter((t) => t.kind === 'floor');
   const MATERIALS = DATA.tiles.filter((t) => t.kind === 'material');
-  const EDGES = ['walls', 'rock', 'ledge', 'cliff'];
-  const EDGE_CODE = { ledge: 1, walls: 2, rock: 3, cliff: 4 };
-  const DEFAULT_MAT = { walls: 'stone_wall', rock: 'rock', cliff: 'cliff', ledge: 'stone_wall' };
+  const EDGES = ['walls', 'rock', 'ledge', 'cliff', 'fade']; // (Beta 3.28: Fade, the floor fading into the dark)
+  const EDGE_CODE = { ledge: 1, walls: 2, rock: 3, cliff: 4, fade: 5 };
+  const DEFAULT_MAT = { walls: 'stone_wall', rock: 'rock', cliff: 'cliff', ledge: 'stone_wall', fade: 'stone_wall' };
   const relOf = (t) => `Tiles/Tablescape/${t.label}.webp`;
   const builtinByRel = new Map(DATA.tiles.map((t) => [relOf(t), t]));
   const PX = 80; // dots per square in the picture (the TV shows about this many per inch)
@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // (2.6) and darker corners of what it raised (stairs count as floor); a wall line or pillar only its shadows and corners
   const HALO = 6.6; const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 13; // (13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 14; // (14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -454,11 +454,21 @@ vec3 wallLook(vec3 c, float dOut, float P){
   c *= 0.42 + 0.58 * smoothstep(0.0, 0.05 * P, 0.45 * P - dOut);
   return c;
 }
-// the drop of a cliff: a dark rock face that fades down into the dark
-// (not lit by the sun: a drop is in its own shade, so it never glows)
-float cliffFade(vec2 q, float dOut, float P){ return exp(-dOut / (0.24 * P)) * (0.8 + 0.4 * noise(q / 0.3)); }
-vec3 cliffCol(vec3 c, float light){ return c * 0.42 * min(light, 0.75); }
-float cliffAlpha(float dOut, float P){ return 1.0 - smoothstep(1.2 * P, 2.0 * P, dOut); }
+// Beta 3.28: a cliff that shows: a rough rock face falling away from the floor (bright at its top, in layers along the
+// edge, half a square to a square wide, unevenly), then down into the dark over about a square
+float cliffR(vec2 q, float P){ return (0.5 + 0.45 * noise(q / 0.8) + 0.2 * noise(q / 0.23)) * P; }
+vec3 cliffCol(vec3 c, vec2 q, float dOut, float P, float light, vec3 dark){
+  float R = cliffR(q, P); float t = clamp(dOut / R, 0.0, 1.0);
+  float layers = 0.84 + 0.16 * sin(dOut / (0.06 * P) + noise(q / 0.45) * 7.0);
+  vec3 f = c * layers * mix(1.2, 0.3, pow(t, 0.8)) * (0.6 + 0.4 * min(light, 1.1)) * (0.85 + 0.3 * noise(q / 0.14));
+  return mix(f, dark, smoothstep(0.9 * R, R + 0.7 * P, dOut));
+}
+float cliffAlpha(vec2 q, float dOut, float P){ float R = cliffR(q, P); return 1.0 - smoothstep(R + 0.35 * P, R + 0.9 * P, dOut); }
+// Beta 3.28: Fade: the floor fades into the dark over a square and a half from its edge, a little unevenly
+float fadeAlpha(vec2 q, float dIn, float P){
+  float d = dIn + ((noise(q / 0.9) - 0.5) * 0.6 + (noise(q / 0.3) - 0.5) * 0.25) * P;
+  return smoothstep(-0.05 * P, 1.5 * P, d);
+}
 `;
   // light, shadows and darker corners
   const FS_SHADE = `#version 300 es
@@ -487,7 +497,8 @@ void main(){
   else if (kind == 0.0) alb = voidC;
   else alb = matCol(mi, px);
   if (kind == 7.0) alb = alb * 1.12 + 0.025; // the ledge's rim: the floor, a little lighter
-  if (kind == 1.0 || kind == 6.0 || kind == 7.0) { int edge = int(floor(texelFetch(attrT, ip, 0).r * 255.0 / 40.0 + 0.5)); alb = floorLook(alb, q, dIn, edge, P); }
+  int fe = int(floor(texelFetch(attrT, ip, 0).r * 255.0 / 40.0 + 0.5)); // (a floor's own edge)
+  if (kind == 1.0 || kind == 6.0 || kind == 7.0) alb = floorLook(alb, q, dIn, fe, P);
   if (kind == 2.0) alb = wallLook(alb, dOut, P);
   if (kind == 5.0 && (K(px + vec2(1.5, 0.0)) != 5.0 || K(px - vec2(1.5, 0.0)) != 5.0 || K(px + vec2(0.0, 1.5)) != 5.0 || K(px - vec2(0.0, 1.5)) != 5.0)) alb *= 0.5; // (wall lines and pillars: a dark edge)
   // its slope: from the heights, plus the picture's own bumps on rock and walls
@@ -520,7 +531,8 @@ void main(){
   vec3 c = alb * light;
   // the cliff fades into darkness; beyond the drawing the picture is see-through (the table's own dark shows there)
   float a = 1.0;
-  if (kind == 4.0) { c = mix(voidC, cliffCol(alb, light), cliffFade(q, dOut, P)); a = cliffAlpha(dOut, P); }
+  if (kind == 4.0) { c = cliffCol(alb, q, dOut, P, light, voidC); a = cliffAlpha(q, dOut, P); }
+  if ((kind == 1.0 || kind == 6.0) && fe == 5) { float fa = fadeAlpha(q, dIn, P); c *= 0.55 + 0.45 * fa; a = fa; }
   if (kind == 0.0) { c = voidC; a = 0.0; }
   o = vec4(clamp(c, 0.0, 1.0), a);
 }`;
@@ -557,13 +569,13 @@ void main(){
   int edge = int(floor(na.r * 255.0 / 40.0 + 0.5));
   int mi = clamp(int(floor(na.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
   // outside the floors: what the edge makes of it (as in the heights)
-  vec3 cOut = voidC; float aOut = 0.0; float fade = 1.0;
+  vec3 cOut = voidC; float aOut = 0.0;
   if (edge == 2) { if (dOut < 0.45 * P) { cOut = wallLook(matCol(mi, q), dOut, P); aOut = 1.0; } }
   else if (edge == 3) {
     float R = 2.3 * P + (noise(q / 0.7) - 0.5) * 0.9 * P + (noise(q / 0.2) - 0.5) * 0.25 * P;
     if (dOut <= R) { cOut = matCol(mi, q); aOut = 1.0; }
   } else if (edge == 4) {
-    if (dOut <= 3.2 * P) { cOut = matCol(mi, q); aOut = cliffAlpha(dOut, P); fade = cliffFade(q, dOut, P); }
+    if (dOut <= 3.2 * P) { cOut = matCol(mi, q); aOut = cliffAlpha(q, dOut, P); }
   }
   // the floor (a ledge's rim a little lighter)
   vec3 cIn = fl.rgb;
@@ -572,8 +584,9 @@ void main(){
   // the light, a little smoothed (its steps are the base's dots)
   vec2 lu = lo / loSize; vec2 e = 0.7 / loSize;
   float li = 2.0 * (2.0 * texture(lightT, lu).r + texture(lightT, lu + e).r + texture(lightT, lu - e).r + texture(lightT, lu + vec2(e.x, -e.y)).r + texture(lightT, lu + vec2(-e.x, e.y)).r) / 6.0;
-  cOut = edge == 4 ? mix(voidC, cliffCol(cOut, li), fade) : cOut * li;
-  vec3 col = mix(cOut, cIn * li, fl.a); float a = mix(aOut, 1.0, fl.a);
+  cOut = edge == 4 ? cliffCol(cOut, q, dOut, P, li, voidC) : cOut * li;
+  float aIn = 1.0; if (edge == 5) { aIn = fadeAlpha(q, dIn, P); cIn *= 0.55 + 0.45 * aIn; }
+  vec3 col = mix(cOut, cIn * li, fl.a); float a = mix(aOut, aIn, fl.a);
   // wall lines and pillars: a dark edge, and a shadow at their foot
   int ms = clamp(int(floor(so.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
   float r1 = max(1.5, 0.025 * P); float r2 = max(2.0, 0.08 * P);
@@ -697,6 +710,7 @@ void main(){
     const fd = Fb.getContext('2d', CPU).getImageData(0, 0, nw, nh).data;
     const bg = Hb.getContext('2d', CPU); const Bc = Hb;
     const img = bg.getImageData(0, 0, nw, nh); const d = img.data;
+    const AL = new Float32Array(nw * nh); const BL = new Float32Array(nw * nh); // (the mask and the bell, for the joints)
     for (let v = 0; v < nh; v++) {
       const gy = (ly0 + (v + 0.5) * ds - org[1]) / P;
       for (let u = 0; u < nw; u++) {
@@ -705,11 +719,15 @@ void main(){
         // (2) the line, uneven: a slow wave (two scales) moves it in and out
         const wave = (vnoise(gx / 2.4 + 3.1, gy / 2.4 + 7.7) - 0.5) * 2 + (vnoise(gx / 0.9 + 1.3, gy / 0.9 + 4.2) - 0.5) * 0.6;
         let e = s0 + wave * U * 0.42;
-        // (3) near the line, each square a push of its own
+        const e0 = Math.min(1, Math.max(0, e));
+        // (3) near the line, each square a push of its own: Beta 3.28, half the squares change inside (here), along the
+        // joints of the others the other floor shows (below)
         const bell = Math.min(1, 4 * s0 * (1 - s0) * 1.6);
-        e += (h2(Math.floor(gx) + 0.37, Math.floor(gy) + 0.71) - 0.5) * 2 * Tl * 0.5 * bell;
+        const sx = Math.floor(gx); const sy = Math.floor(gy);
+        if (h2(sx + 0.13, sy + 0.29) < 0.5) e += (h2(sx + 0.37, sy + 0.71) - 0.5) * 2 * Tl * 0.5 * bell;
         const al = Math.min(1, Math.max(0, (e - 0.5) * 1.25 + 0.5));
         d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = Math.round(al * 255);
+        AL[i >> 2] = al; BL[i >> 2] = Math.min(bell, 4 * e0 * (1 - e0) * 1.6); // (near the line as drawn and as it shows)
       }
     }
     bg.putImageData(img, 0, 0);
@@ -719,6 +737,31 @@ void main(){
     ag.imageSmoothingEnabled = true; ag.imageSmoothingQuality = 'high';
     const Bs = mk(nw, nh); { const sg = Bs.getContext('2d'); sg.filter = 'blur(0.6px)'; sg.drawImage(Bc, 0, 0); sg.filter = 'none'; }
     ag.drawImage(Bs, lx0 - x0, ly0 - y0, nw * ds, nh * ds);
+    // (3b) Beta 3.28: the joints. Tiles have their joints on the grid lines, so near the line some joints (a square's
+    // side each, at random) take the other floor: the new one's joints in the old floor, the old one's in the new
+    if (Tl > 0) {
+      const at = (x, y) => { const u = Math.round((x - lx0) / ds - 0.5); const v = Math.round((y - ly0) / ds - 0.5); return u < 0 || v < 0 || u >= nw || v >= nh ? -1 : v * nw + u; };
+      const hw = Math.max(0.8, 0.08 * P);
+      const Jp = mk(ww, hh); const Jn = mk(ww, hh); const pg = Jp.getContext('2d'); const ngc = Jn.getContext('2d'); let anyP = false; let anyN = false;
+      const c0 = Math.floor((x0 - org[0]) / P) - 1; const c1 = Math.ceil((x1 - org[0]) / P) + 1;
+      const r0 = Math.floor((y0 - org[1]) / P) - 1; const r1 = Math.ceil((y1 - org[1]) / P) + 1;
+      const joint = (vert, cx, cy) => { // (from the grid corner cx, cy one square down, or to the right)
+        if (h2(cx * 1.31 + (vert ? 0.17 : 0.59), cy * 0.87 + (vert ? 0.43 : 0.11)) >= 0.5) return;
+        const X = org[0] + cx * P; const Y = org[1] + cy * P;
+        const j = at(vert ? X : X + P / 2, vert ? Y + P / 2 : Y); if (j < 0 || BL[j] < 0.02) return;
+        const jm = Math.min(1, Tl * 1.5 * BL[j] * (0.6 + 0.4 * h2(cx + 0.61, cy + (vert ? 0.83 : 0.27))));
+        const g2 = AL[j] < 0.5 ? pg : ngc; if (AL[j] < 0.5) anyP = true; else anyN = true;
+        const gr = vert ? g2.createLinearGradient(X - hw - x0, 0, X + hw - x0, 0) : g2.createLinearGradient(0, Y - hw - y0, 0, Y + hw - y0);
+        const cA = `rgba(255,255,255,${jm.toFixed(3)})`;
+        gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.35, cA); gr.addColorStop(0.65, cA); gr.addColorStop(1, 'rgba(255,255,255,0)');
+        g2.fillStyle = gr;
+        if (vert) g2.fillRect(X - hw - x0, Y - y0, 2 * hw, P); else g2.fillRect(X - x0, Y - hw - y0, P, 2 * hw);
+      };
+      for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) { joint(true, cx, cy); joint(false, cx, cy); }
+      if (anyP) { ag.save(); ag.globalCompositeOperation = 'lighter'; ag.drawImage(Jp, 0, 0); ag.restore(); }
+      if (anyN) { ag.save(); ag.globalCompositeOperation = 'destination-out'; ag.drawImage(Jn, 0, 0); ag.restore(); }
+      Jp.width = Jp.height = Jn.width = Jn.height = 0;
+    }
     // the new floor through the mask, over the floor that is there
     const nf = mk(ww, hh); const ng = nf.getContext('2d'); ng.translate(-x0, -y0); ng.fillStyle = pat; ng.fillRect(x0, y0, ww, hh); ng.setTransform(1, 0, 0, 1, 0, 0);
     ng.globalCompositeOperation = 'destination-in'; ng.drawImage(A, 0, 0);

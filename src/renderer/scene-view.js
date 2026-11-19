@@ -471,6 +471,8 @@ class SceneView {
     const sig = L ? L.join(',') : '';
     if (sig === this.lookSig) return;
     this.lookSig = sig;
+    // (Beta 3.28: the living trees take it in their own drawing; standing still, they are drawn again once)
+    if (this.treeN && !this.treeRaf) requestAnimationFrame(() => { if (!this.dead && !this.treeRaf && this.map) this.drawTrees(); });
     // (Beta 3.2: the Sway layer too: it shows the map picture moving, and showed it without the look)
     if (!L) { this.bgLayer.style.filter = ''; this.cv.sway.el.style.filter = ''; this.assetsEl.style.filter = ''; this.assetsFrontEl.style.filter = ''; this.assetsOverEl.style.filter = ''; return; }
     if (!this.lookEl) {
@@ -1985,6 +1987,7 @@ class SceneView {
     st.wind = { ...to, now: this.treeWindNow.strength };
     const rad = Math.PI / 180;
     const v = this.v;
+    const treeLook = this.peek ? null : SceneView.lookOf(m.look); // (Beta 3.28: living trees take the map's colours too)
     for (const lev of ['ground', 'front', 'over']) {
       const mine = list.filter((l) => (l.over ? 'over' : l.front ? 'front' : 'ground') === lev);
       let c = this.tcv[lev];
@@ -1999,7 +2002,7 @@ class SceneView {
       const k = this.ppi * v.zoom * c.res;
       const R = c.rect;
       const t0 = performance.now();
-      const ok = c.L.frame(trees, { dt, wind: this.treeWindNow, shadows: this.treeShadows, animate: true, matrix: [k, 0, 0, k, (v.x * this.ppi - R.x) * c.res, (v.y * this.ppi - R.y) * c.res] });
+      const ok = c.L.frame(trees, { dt, wind: this.treeWindNow, shadows: this.treeShadows, animate: true, look: treeLook, matrix: [k, 0, 0, k, (v.x * this.ppi - R.x) * c.res, (v.y * this.ppi - R.y) * c.res] });
       this.treeMs = (this.treeMs || 0) * 0.9 + (performance.now() - t0) * 0.1; st.ms = Math.round(this.treeMs * 100) / 100; // (what handing them to the graphics card costs this window, per frame)
       if (ok) { st.drawn += c.L.ready(trees); st.levels.push(lev); st.time = c.L.tw ? c.L.tw.time : 0; }
       if (ok && this.treeProbe) { // (the self-test asks what is drawn at a point of the map)

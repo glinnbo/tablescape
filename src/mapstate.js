@@ -49,7 +49,7 @@ function cleanTree(t, ref) {
 // map.os: what the GM drew, in drawing order: floors ('area': a shape with its tile, its edge and its height level),
 // cuts (what the eraser took away), wall lines, pillars and stairs; doors sit on the walls. The GM screen turns it into
 // the map's picture (renderer/oldschool.js) and the line-of-sight walls (os.result); the TV only shows that picture.
-const OS_EDGES = ['ledge', 'walls', 'rock', 'cliff'];
+const OS_EDGES = ['ledge', 'walls', 'rock', 'cliff', 'fade']; // (Beta 3.28: fade)
 const OS_SHAPES = ['rect', 'poly', 'round', 'path', 'brush'];
 // Beta 3.25: ground drawn into an Oldschool map (the Draw tool's Ground): the picture shows the pool, an effect of the
 // same kind (fx, key os) makes it move

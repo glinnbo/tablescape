@@ -115,11 +115,11 @@ const Trees = (() => {
       }
     }
     // one frame: trees in drawing order; matrix: map inches → canvas pixels
-    frame(trees, { dt, wind, shadows, animate, matrix }) {
+    frame(trees, { dt, wind, shadows, animate, matrix, look }) {
       const tw = this.tw; const gl = this.gl;
       if (!tw || gl.isContextLost()) return false;
       this.want(new Set(trees.map((t) => t.variant)));
-      tw.wind = wind; tw.shadows = shadows; tw.animate = animate;
+      tw.wind = wind; tw.shadows = shadows; tw.animate = animate; tw.look = look || null; // (Beta 3.28: the map's colours)
       tw.update(dt, trees);
       gl.viewport(0, 0, this.el.width, this.el.height);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);

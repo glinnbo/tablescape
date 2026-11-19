@@ -14,7 +14,7 @@ const Guide = (() => {
     ['Build', [['M', 'Move the map (also while Build is folded)'], ['S', 'Assets: trees, rocks, furniture'], ['E', 'Effects, lights and weather'], ['W', 'Walls and doors (W again: next mode)'], ['K', 'Layers'], ['G', 'Grid on or off']]],
     ['Play', [['V', 'Select and move tokens'], ['N', 'Tokens: click to drop NPCs'], ['U', 'Party marker: where it is (arrow keys: one square)'], ['R / C', 'Reveal / cover fog'], ['A', 'Spells'], ['P', 'Point: ping, laser, spotlight, ruler (P again: next)'], ['D', 'Draw: chalk, pen, text, eraser (D again: next)'], ['X', 'Markers and counters (Toolbox)'], ['J', 'Map notes only you see (Build)'], ['O', 'Conversation: NPC portraits on the table'], ['Q', 'Toolbox: map tools and panels'], ['I', 'Initiative'], ['Enter', 'Next turn / next round']]],
     ['Spells and assets', [['Click', 'Cast or stamp'], ['Drag', 'Aim a cone, line or cube / scatter assets'], ['Ctrl + wheel', 'Turn by 15° (Shift: 5°), also placed areas and assets'], ['Shift while aiming', 'Snap to 15°'], ['+  −', 'Spell size in 5 ft steps'], ['[  ]', 'Asset size'], ['A picked asset\'s frame', 'Sides: flat or long · corners: size · knob: turn'], ['Shift + drag', 'Select several assets'], ['Alt', 'Place or measure without snapping']]],
-    ['Draw (Oldschool maps)', [['Drag', 'A room, a round room, a corridor, a wall, stairs (Shift: square, circle, straight)'], ['Click', 'A shape corner by corner; Enter, double-click or right-click closes it'], ['Alt while drawing', 'Erase instead'], ['Backspace / Esc', 'Take the last corner back / drop the shape'], ['Ctrl + wheel', 'Pieces: a quarter turn']]],
+    ['Draw (Oldschool maps)', [['Drag', 'A room, a round room, a wall, stairs (Shift: square, circle, straight)'], ['Click', 'A shape corner by corner; Enter, double-click or right-click closes it'], ['Alt while drawing', 'Erase instead'], ['Backspace / Esc', 'Take the last corner back / drop the shape']]],
     ['Walls', [['Click', 'Wall corner by corner (Alt: no snapping)'], ['Double-click / Enter', 'End the line of walls'], ['Click a door', 'Open or close it (also with V)'], ['Delete', 'Remove the selected wall']]],
     ['Table', [['T', 'Send this map to the table'], ['B', 'Blackout on or off'], ['1 – 0', 'Use the hotbar (3 pages: the mouse wheel over it)'], ['Alt 1 – 9', 'Open a map of this chapter'], ['F1 – F8', 'Play snapshot 1 to 8 of the map on the table'], ['Shift 1 – 9', 'Play a starred screen effect'], ['Ctrl 1 – 9', 'Play a Spotify mood'], ['F', 'Fit the view to the table'], ['Shift F', 'Show everything, also off the table'], ['Esc on the TV', 'Close the table window']]],
     ['Panels', [['L', 'Library'], ['Shift L', 'Library full screen'], ['Tab', 'Map thumbnails on or off'], ['Shift I', 'Character cards: the party at a glance (only for you)'], ['?', 'This guide'], ['Ctrl ,', 'Tablescape settings: the TV, picture, sound, performance'], ['Ctrl + / Ctrl − / Ctrl 0', 'Size of everything on your screen (not the TV)']]],
@@ -24,6 +24,14 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.28', [
+      'Oldschool maps: a new edge, Fade: the floor fades into the dark over a square and a half, a little unevenly. One can see across it',
+      'Cliffs show: a rough rock face falls away from the floor, bright at its top, then into darkness',
+      'Floors mix along the grid in two ways (the Tiled slider): some squares change inside, elsewhere the joints between the squares take the other floor',
+      'Brush, Erase (brush) and Wall show what you draw while you drag, at its real width with an orange rim',
+      'Living trees take the map\'s colours (Natural, Vivid, Muted and the rest) like the picture does',
+      'The Draw panel is simpler: Corridor, Floor and Pieces are gone (what you drew with them stays and can be erased)',
+    ]],
     ['Beta 3.27', [
       'Oldschool maps: floors mix by opacity alone, as three rules: a soft line where the floors meet (Mix width, ½ to 3 squares; 0 is off), the line made uneven (Uneven), and near it squares that show more or less of the new floor along the grid (Tiled). A new floor starts at 1½ squares, uneven and tiled at a half; floors from 3.26 take that too',
       'Floor → Paint uses the same rules (Uneven, Tiled) with the brush\'s size',
