@@ -3837,3 +3837,20 @@ body.gm .sv-trees-over { opacity: 0.7; } /* (above the tokens: see-through on yo
 .drawn-chip .i { width: 12px; height: 12px; }
 #roster.collapsed .drawn-chip { display: none; }
 body.gm[data-tool="oldschool"] #viewport { cursor: crosshair; }
+
+/* Beta 3.23: an Oldschool map's depth view: the picture drawn leaning by the graphics card, the picture itself hidden */
+.sv-bg.sv-depth-on > img { visibility: hidden; }
+.sv-bg > canvas.sv-depth { pointer-events: none; }
+/* Beta 3.23: an Oldschool map inks onto the table: the pen traces, the tile fills in, then the picture takes over */
+.sv-bg > svg.sv-osink { left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.sv-osink .ink-pen { stroke: rgba(246, 230, 196, 0.95); stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1 1; stroke-dashoffset: 1; animation: osink-pen 0.65s ease-out forwards; }
+.sv-osink .ink-fill { opacity: 0; animation: osink-fill 0.6s ease-out 0.35s forwards; }
+.sv-osink .ink-paint { stroke-dasharray: 1 1; stroke-dashoffset: 1; animation: osink-pen 0.8s ease-in-out forwards; }
+.sv-osink .ink-item { transition: opacity 0.32s ease; }
+.sv-osink .ink-item.ink-out { opacity: 0; }
+@keyframes osink-pen { to { stroke-dashoffset: 0; } }
+@keyframes osink-fill { to { opacity: 1; } }
+/* Beta 3.23: ready-made pieces, sketched on squared paper */
+.os-pieces .tile { padding: 5px 2px 6px; gap: 3px; min-height: 0; min-width: 0; }
+.os-pieces .tile img { width: 52px; height: 52px; border-radius: 6px; pointer-events: none; }
+.os-pieces .tile span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; font-size: 10.5px; }

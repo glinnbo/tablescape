@@ -51,7 +51,7 @@ function cleanTree(t, ref) {
 // the map's picture (renderer/oldschool.js) and the line-of-sight walls (os.result); the TV only shows that picture.
 const OS_EDGES = ['ledge', 'walls', 'rock', 'cliff'];
 const OS_SHAPES = ['rect', 'poly', 'round', 'path', 'brush'];
-function defaultOs() { return { v: 1, items: [], doors: [], sun: 135, sight: true }; }
+function defaultOs() { return { v: 1, items: [], doors: [], sun: 135, sight: true, depth: false }; } // (depth: Beta 3.23, the depth view)
 const osNum = (v, d, a, b) => { const x = Number(v); return Number.isFinite(x) ? Math.min(b, Math.max(a, x)) : d; };
 const ptsOf = (pts) => (Array.isArray(pts) ? pts.filter((q) => Array.isArray(q) && Number.isFinite(Number(q[0])) && Number.isFinite(Number(q[1]))).slice(0, 4000).map((q) => [r3(Number(q[0])), r3(Number(q[1]))]) : []);
 const refOf = (t) => (t && (t.rel || t.path) ? { ...(t.rel ? { rel: String(t.rel) } : {}), ...(t.path ? { path: String(t.path) } : {}) } : null);
@@ -83,6 +83,7 @@ function cleanOs(o) {
   }));
   out.sun = Math.round(osNum(o.sun, 135, 0, 359));
   out.sight = o.sight !== false;
+  out.depth = o.depth === true;
   return out;
 }
 
@@ -977,11 +978,12 @@ function apply(map, type, p, media) {
     }
 
     // ---------- Beta 3.22: Oldschool maps: the drawing ----------
-    case 'os.add': { // one thing drawn (or erased): p.item, or several: p.items
+    case 'os.add': { // one thing drawn (or erased): p.item, or several: p.items (Beta 3.23: with doors, a ready-made piece)
       if (!map.os) return { changed: null };
       const list = (p.items || [p.item]).map(cleanOsItem).filter(Boolean);
       if (!list.length) return { changed: null };
       map.os.items.push(...list);
+      if (Array.isArray(p.doors) && p.doors.length) map.os.doors.push(...cleanOs({ doors: p.doors.slice(0, 200).map((d) => ({ ...d, id: newId('od') })) }).doors);
       const k = list[list.length - 1].kind;
       return { changed: 'all', selected: list[list.length - 1].id, label: k === 'cut' ? 'Erased' : k === 'line' ? 'Wall drawn' : k === 'pillar' ? 'Pillar placed' : k === 'stairs' ? 'Stairs placed' : 'Floor drawn' };
     }
@@ -1013,6 +1015,7 @@ function apply(map, type, p, media) {
       if (!map.os) return { changed: null };
       if ('sun' in p) map.os.sun = Math.round(osNum(p.sun, 135, 0, 359));
       if ('sight' in p) map.os.sight = !!p.sight;
+      if ('depth' in p) map.os.depth = !!p.depth; // (Beta 3.23)
       return { changed: 'all' };
     }
     case 'os.clear': {
@@ -1024,7 +1027,11 @@ function apply(map, type, p, media) {
     // (doors keep whether they are open). Not an undo step of its own: undo brings the drawing back, and it is made again.
     case 'os.result': {
       if (!map.os) return { changed: null };
-      if (p.bg) map.bg = { ...media(p.bg.path), kind: 'image', x: r4g(p.bg.x), y: r4g(p.bg.y), scale: p.bg.scale, nw: p.bg.nw, nh: p.bg.nh, volume: 0, rate: 1, os: String(p.hash || '') };
+      if (p.bg) {
+        map.bg = { ...media(p.bg.path), kind: 'image', x: r4g(p.bg.x), y: r4g(p.bg.y), scale: p.bg.scale, nw: p.bg.nw, nh: p.bg.nh, volume: 0, rate: 1, os: String(p.hash || '') };
+        if (p.bg.hm) map.bg.hm = media(p.bg.hm); // (Beta 3.23) the heights for the depth view
+        if (Array.isArray(p.ids)) map.bg.osIds = p.ids.map(String).slice(0, 5000); // (Beta 3.23) what the picture already shows (the TV inks the rest)
+      }
       else if (p.empty) map.bg = null;
       if (Array.isArray(p.walls)) {
         const was = new Map(map.walls.filter((w) => w.os).map((w) => [w.os, w]));

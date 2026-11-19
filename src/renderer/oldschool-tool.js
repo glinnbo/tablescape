@@ -28,6 +28,7 @@ const OldschoolTool = (() => {
     { id: 'pillar', label: 'Pillar', icon: 'square-dashed', tip: 'Click a square for a pillar' },
     { id: 'stairs', label: 'Stairs', icon: 'stairs', tip: 'Drag where they go: they climb toward where you drag' },
     { id: 'door', label: 'Door', icon: 'door', tip: 'Click a grid line: a door there' },
+    { id: 'piece', label: 'Pieces', icon: 'box', tip: 'Ready-made rooms: pick one, click the map' }, // (Beta 3.23)
   ];
   const AREA_TOOLS = ['room', 'shape', 'round', 'corridor', 'brush'];
   const OWN = new Set(['osbox', 'ospath', 'osbrush', 'osline', 'osstairs']);
@@ -42,7 +43,7 @@ const OldschoolTool = (() => {
     const first = Oldschool.FLOORS[0];
     const prefs = {
       tool: 'room', snap: 'sq', level: 0, width: 1, brush: 1.5, erase: 'box', edge: 'walls', mats: { ...Oldschool.DEFAULT_MAT },
-      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', floorMode: 'tile',
+      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', floorMode: 'tile', piece: 'tavern', turn: 0,
       floor: first ? { rel: Oldschool.relOf(first) } : null,
     };
     try { const saved = JSON.parse(localStorage.getItem('osPrefs') || '{}'); Object.assign(prefs, saved, { mats: { ...prefs.mats, ...(saved.mats || {}) }, line: { ...prefs.line, ...(saved.line || {}) }, pillar: { ...prefs.pillar, ...(saved.pillar || {}) } }); } catch {}
@@ -102,6 +103,7 @@ const OldschoolTool = (() => {
       if (t === 'floor') { repaint(pt); return null; }
       if (t === 'pillar') { const p = snapCenter(pt, e.altKey); add({ kind: 'pillar', pts: [[p.x, p.y]], r: O.pillar.r * g(), round: O.pillar.round, mat: O.line.mat }); return null; }
       if (t === 'door') { placeDoor(pt); return null; }
+      if (t === 'piece') { stamp(pt); return null; }
       if (t === 'corridor' && !cut) { const p = snapCorr(pt); return { kind: 'ospath', pts: [[p.x, p.y]], cut }; }
       if (t === 'brush' || (t === 'erase' && O.erase === 'brush')) return { kind: 'osbrush', pts: [[round(pt.x, 3), round(pt.y, 3)]], cut, r: (O.brush * g()) / 2 };
       if (t === 'wall') { const p = snapCorner(pt, e.altKey); return { kind: 'osline', a: p, b: p }; }
@@ -219,6 +221,21 @@ const OldschoolTool = (() => {
       const patch = O.floorMode === 'edge' ? { edge: L.edge, mat: L.mat } : O.floorMode === 'both' ? { tile: L.tile, edge: L.edge, mat: L.mat } : { tile: L.tile };
       cmd('os.update', { id: it.id, ...patch }).then((r) => { if (r && r.ok) toast(O.floorMode === 'edge' ? 'New edge' : 'New floor', { ms: 1400, undo: () => cmd('history.undo') }); });
     }
+    // Beta 3.23: a ready-made piece, centred on the pointer, its corner on the grid (oldschool-pieces.js)
+    function pieceAt(pt) {
+      const p = OldschoolPieces.BY[O.piece] || OldschoolPieces.LIST[0];
+      const sz = OldschoolPieces.sizeOf(p, O.turn || 0); const G = grid(); const s = g();
+      const x0 = G.ox + Math.round((pt.x - (sz.w * s) / 2 - G.ox) / s) * s; const y0 = G.oy + Math.round((pt.y - (sz.h * s) / 2 - G.oy) / s) * s;
+      return { p, ...OldschoolPieces.build(p, { x0, y0, g: s, q: O.turn || 0, look: areaLook(), defaultMat: (e) => O.mats[e] || Oldschool.DEFAULT_MAT[e] }), x0, y0 };
+    }
+    function stamp(pt) {
+      const P = pieceAt(pt);
+      const at = Date.now();
+      pending.push(...P.items.map((it) => ({ ...it, at })), ...P.doors.map((d) => ({ kind: 'door', ...d, at })));
+      drawPreview(pt);
+      cmd('os.add', { items: P.items, doors: P.doors }).then((r) => { if (r && r.ok) toast(`${P.p.label} placed`, { ms: 1600, undo: () => cmd('history.undo') }); });
+    }
+    function turnPiece() { O.turn = ((O.turn || 0) + 1) % 4; save(); drawPreview(lastPt); }
     // a door on the grid line nearest to the click, one square long
     function placeDoor(pt) {
       const G = grid(); const s = g();
@@ -301,6 +318,13 @@ const OldschoolTool = (() => {
         const [fx, fy] = O.poly.pts[0];
         root.append(el('circle', { cx: fx, cy: fy, r: g() * 0.15, fill: '#f0b44a' }));
       }
+      // the piece a click would stamp
+      if (pt && !d && O.tool === 'piece' && typeof OldschoolPieces === 'object') {
+        const P = pieceAt(pt);
+        for (const it of P.items) { const e2 = shapeEl(it, look(it), { opacity: '0.7' }); if (e2) root.append(e2); }
+        for (const dd of P.doors) root.append(shapeEl({ kind: 'door', ...dd }, null, { opacity: '0.9' }));
+        root.append(el('rect', { x: P.x0, y: P.y0, width: P.w * g(), height: P.h * g(), fill: 'none', stroke: '#f0b44a', 'stroke-width': thin, 'stroke-dasharray': `${thin * 3} ${thin * 2}` }));
+      }
       // where a click would go (pillars and doors)
       if (pt && !d && (O.tool === 'pillar' || O.tool === 'door')) {
         if (O.tool === 'pillar') { const q = snapCenter(pt); root.append(shapeEl({ kind: 'pillar', pts: [[q.x, q.y]], r: O.pillar.r * g(), round: O.pillar.round }, 'rgba(240,180,74,0.5)')); }
@@ -313,7 +337,7 @@ const OldschoolTool = (() => {
       }
     }
     let lastPt = null; let lastD = null;
-    function hover(e, pt) { lastPt = pt; if (ui.tool === 'oldschool' && (O.poly || O.tool === 'pillar' || O.tool === 'door')) drawPreview(pt); }
+    function hover(e, pt) { lastPt = pt; if (ui.tool === 'oldschool' && (O.poly || O.tool === 'pillar' || O.tool === 'door' || O.tool === 'piece')) drawPreview(pt); }
     function leave() { lastPt = null; if (ui.tool === 'oldschool') drawPreview(); }
     // the view moved or zoomed: the preview follows
     function redraw() { if (svg && (ui.tool === 'oldschool' || pending.length)) drawPreview(lastPt, lastD); }
@@ -344,7 +368,8 @@ const OldschoolTool = (() => {
         const r = await Oldschool.bake(snap, lib);
         if (map() && map().id === mapId) {
           const data = r.blob ? new Uint8Array(await r.blob.arrayBuffer()) : null;
-          await ts.cmd('os.baked', { mapId, hash: want, empty: !!r.empty, data, x: r.x, y: r.y, scale: r.scale, nw: r.nw, nh: r.nh, walls: r.walls });
+          const hdata = r.hblob ? new Uint8Array(await r.hblob.arrayBuffer()) : null; // (Beta 3.23: the heights for the depth view)
+          await ts.cmd('os.baked', { mapId, hash: want, empty: !!r.empty, data, hdata, ids: [...snap.os.items.map((x) => x.id), ...snap.os.doors.map((x) => x.id)], x: r.x, y: r.y, scale: r.scale, nw: r.nw, nh: r.nh, walls: r.walls });
         }
         lastErr = null;
       } catch (err) { console.error(err); lastErr = String(err && err.message || err); }
@@ -421,6 +446,14 @@ const OldschoolTool = (() => {
         opts.push(h('div', { class: 'ctl-label' }, t === 'stairs' ? 'Steps of' : 'Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; save(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff']));
       } else if (t === 'door') {
         opts.push(seg({ options: [{ value: 'door', label: 'Door', icon: 'door' }, { value: 'secret', label: 'Secret', icon: 'eye-off' }, { value: 'window', label: 'Window', icon: 'window' }], get: () => O.door, set: (v) => { O.door = v; save(); } }));
+      } else if (t === 'piece' && typeof OldschoolPieces === 'object') {
+        const box = h('div', { class: 'tiles os-pieces' }, ...OldschoolPieces.LIST.map((p) => h('button', {
+          class: 'tile', dataset: { v: p.id }, 'aria-label': p.label, 'data-tip': `${p.label} (${p.w} × ${p.h} squares)`,
+          onclick: () => { O.piece = p.id; save(); paintP(); drawPreview(lastPt); },
+        }, h('img', { src: OldschoolPieces.sketch(p), alt: '', draggable: false }), h('span', {}, p.label))));
+        const paintP = () => { for (const b of box.children) b.classList.toggle('on', b.dataset.v === O.piece); };
+        bind(paintP);
+        opts.push(box, h('div', { class: 'row' }, btn('Turn', 'rotate-clockwise', () => turnPiece(), { tip: 'A quarter turn (also the mouse wheel with Ctrl)' })));
       } else if (t === 'floor') {
         opts.push(seg({ label: 'A click changes', options: [{ value: 'tile', label: 'Floor' }, { value: 'edge', label: 'Edge' }, { value: 'both', label: 'Both' }], get: () => O.floorMode, set: (v) => { O.floorMode = v; save(); } }));
       }
@@ -448,6 +481,8 @@ const OldschoolTool = (() => {
       bind(() => { edgeMat.hidden = O.edge === 'ledge'; });
       const light = slider({ label: 'Light from', min: 0, max: 355, step: 5, get: () => (360 - (map().os.sun ?? 135) + 90) % 360, set: (v, k) => ctx.send(k || 'os-sun', 'os.set', { sun: (360 - v + 90 + 360) % 360 }), fmt: (v) => ['above', 'top right', 'the right', 'bottom right', 'below', 'bottom left', 'the left', 'top left'][Math.round(v / 45) % 8] });
       const sight = toggle({ label: 'Walls for sight follow the drawing', get: () => map().os.sight !== false, set: (v) => cmd('os.set', { sight: v }) });
+      // Beta 3.23: walls lean away from the table's middle, their inner faces show (on this map; off at first)
+      const depth = toggle({ label: 'Depth view', get: () => map().os.depth === true, set: (v) => cmd('os.set', { depth: v }).then((r) => { if (r && r.ok) toast(v ? 'Depth view on: walls lean away from the middle of the table' : 'Depth view off', { ms: 2200 }); }) });
       const st = h('div', { class: 'row os-status' });
       bind(() => {
         const busy = baking || status === 'busy';
@@ -458,7 +493,7 @@ const OldschoolTool = (() => {
       return h('div', { class: 'stack' }, tools, ...opts, snapSeg, sep(),
         h('div', { class: 'ctl-label' }, 'Floor'), floorBox,
         h('div', { class: 'ctl-label' }, 'Edge'), edgeSeg, edgeMat,
-        sep(), light, sight, st);
+        sep(), light, depth, sight, st);
     }
     function matPicker(get, set, ids) {
       const { bind } = c();
@@ -484,7 +519,10 @@ const OldschoolTool = (() => {
     }
 
     const hashOf = (m) => Oldschool.hash(m, lib); // (for the self-test)
-    return { hashOf, owns, pointerDown, pointerMove, pointerUp, hover, leave, redraw, update, buildPop, cancel, rightClick, dblClick, useTile, dropTile, loadLib, get busy() { return baking; }, TOOLS };
+    // Ctrl + wheel turns the piece (Beta 3.23)
+    let wheelAt = 0;
+    function wheel(e) { if (ui.tool !== 'oldschool' || O.tool !== 'piece' || !e.ctrlKey) return false; const now = Date.now(); if (now - wheelAt > 220) { wheelAt = now; turnPiece(); } return true; }
+    return { hashOf, wheel, owns, pointerDown, pointerMove, pointerUp, hover, leave, redraw, update, buildPop, cancel, rightClick, dblClick, useTile, dropTile, loadLib, get busy() { return baking; }, TOOLS };
   }
   return { create };
 })();

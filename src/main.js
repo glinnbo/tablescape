@@ -2460,7 +2460,7 @@ const dragSightAt = new Map(); // mapId → when the fog last followed a drag
 function osBaked(p) {
   const map = store.map(p.mapId);
   if (!map || !map.os || !store.cur) return { ok: false };
-  let file = null;
+  let file = null; let hfile = null;
   if (p.data && !p.empty) {
     const dir = path.join(store.cur.dir, 'drawn');
     const hash = String(p.hash || Date.now()).replace(/[^a-z0-9]/gi, '').slice(0, 16) || 'x';
@@ -2468,11 +2468,12 @@ function osBaked(p) {
     try {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(file, Buffer.from(p.data));
+      if (p.hdata) { hfile = path.join(dir, `${map.id}-${hash}-h.png`); fs.writeFileSync(hfile, Buffer.from(p.hdata)); } // (Beta 3.23: the heights for the depth view)
       const keep = osKept(map.id);
-      for (const f of fs.readdirSync(dir)) if (f.startsWith(`${map.id}-`) && path.join(dir, f) !== file && !keep.has(f)) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* */ } }
+      for (const f of fs.readdirSync(dir)) if (f.startsWith(`${map.id}-`) && path.join(dir, f) !== file && path.join(dir, f) !== hfile && !keep.has(f)) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* */ } }
     } catch (err) { applog.log.warn(`drawn map not saved: ${err.message}`); return { ok: false, error: err.message }; }
   }
-  const res = mapstate.apply(map, 'os.result', { bg: file ? { path: file, x: p.x, y: p.y, scale: p.scale, nw: p.nw, nh: p.nh } : null, empty: !!p.empty, hash: p.hash, walls: p.walls }, library.media);
+  const res = mapstate.apply(map, 'os.result', { bg: file ? { path: file, hm: hfile, x: p.x, y: p.y, scale: p.scale, nw: p.nw, nh: p.nh } : null, empty: !!p.empty, hash: p.hash, ids: p.ids, walls: p.walls }, library.media);
   if (!res.changed) return { ok: false };
   bumpRev(map.id);
   store.touch(map.id);
@@ -2484,7 +2485,7 @@ function osBaked(p) {
 // some map shows; older ones are made again when undo reaches them
 function osKept(mapId) {
   const keep = new Set();
-  const add = (bg) => { if (bg && bg.path) keep.add(path.basename(bg.path)); };
+  const add = (bg) => { if (bg && bg.path) keep.add(path.basename(bg.path)); if (bg && bg.hm && bg.hm.path) keep.add(path.basename(bg.hm.path)); };
   const h = store.history(mapId);
   for (const s of [...h.undo.slice(-24), ...h.redo.slice(-24)]) add(s && s.bg);
   for (const id of store.allMapIds()) { const m = store.map(id); for (const s of (m && m.snaps) || []) add(s.data && s.data.bg); }

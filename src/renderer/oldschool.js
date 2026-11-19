@@ -128,7 +128,7 @@ const Oldschool = (() => {
     const os = map.os;
     const tiles = new Set();
     for (const it of os.items) if (it.tile) { const t = tileInfo(it.tile, lib); tiles.add(`${it.tile.rel || it.tile.path}=${t ? t.squares : '?'}`); }
-    const s = JSON.stringify([os.items, os.doors, os.sun, os.sight, map.grid.size, map.grid.ox, map.grid.oy, [...tiles].sort(), 7]);
+    const s = JSON.stringify([os.items, os.doors, os.sun, os.sight, !!os.depth, map.grid.size, map.grid.ox, map.grid.oy, [...tiles].sort(), 7]);
     let h1 = 0x811c9dc5; let h2 = 0x01000193;
     for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 + c, 2246822519) ^ (h2 >>> 13); }
     return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
@@ -196,19 +196,43 @@ in vec2 a; out vec2 v_uv; void main(){ v_uv = a * 0.5 + 0.5; gl_Position = vec4(
   }
   // the heavy passes in bands of rows, with a breath in between: one huge draw can make a weak graphics card (or the
   // browser's watchdog) give up, and the screen stays smooth while the picture is made
-  async function runBands(C, P, w, h, fb, uniforms, textures) {
+  // The graphics card is given the work in portions, and the next one only when it has done the last (a fence): a
+  // portion queued on top of another is done in one go, and one go that lasts too long makes the browser give up on
+  // the graphics card (it happened on slow ones). The portion grows while the card keeps up easily.
+  function pacer(gl) {
+    let budget = 260000; let since = 0; // heavy dots between waits
+    return {
+      band: (w) => Math.max(8, Math.floor(budget / Math.max(1, w))),
+      async add(n) {
+        since += n; if (since < budget) return;
+        since = 0;
+        const t0 = performance.now();
+        const f = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
+        try {
+          for (let i = 0; i < 6000; i++) {
+            const st = gl.clientWaitSync(f, 0, 0);
+            if (st === gl.ALREADY_SIGNALED || st === gl.CONDITION_SATISFIED || st === gl.WAIT_FAILED) break;
+            await new Promise((r) => setTimeout(r, i < 4 ? 0 : 4));
+            if (gl.isContextLost()) throw new Error('the graphics card stopped');
+          }
+        } finally { gl.deleteSync(f); }
+        const ms = performance.now() - t0;
+        if (ms < 15) budget = Math.min(budget * 2, 64e6); else if (ms > 300) budget = Math.max(40000, budget / 2);
+      },
+    };
+  }
+  async function runBands(C, P, w, h, fb, uniforms, textures, pace) {
     const { gl } = C;
-    const band = Math.max(16, Math.floor(260000 / Math.max(1, w)));
-    if (band >= h) { run(C, P, w, h, fb, uniforms, textures); return; }
     run(C, P, w, 0, fb, uniforms, textures); // (binds everything; draws nothing)
     gl.viewport(0, 0, w, h);
     gl.enable(gl.SCISSOR_TEST);
     try {
-      for (let y = 0; y < h; y += band) {
-        gl.scissor(0, y, w, Math.min(band, h - y));
+      for (let y = 0; y < h;) {
+        const band = Math.min(pace.band(w), h - y);
+        gl.scissor(0, y, w, band);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-        gl.flush();
-        await new Promise((r) => setTimeout(r, 0));
+        y += band;
+        await pace.add(w * band);
         if (gl.isContextLost()) throw new Error('the graphics card stopped');
       }
     } finally { gl.disable(gl.SCISSOR_TEST); }
@@ -245,17 +269,21 @@ void main(){
   }
   o = best.x > 65000.0 ? vec4(1.0) : enc(best);
 }`;
-  function flood(C, w, h, mask, ch, inv) {
+  async function flood(C, w, h, mask, ch, inv, pace) {
     const { gl } = C;
     const A = target(gl, w, h); const B = target(gl, w, h);
+    const pass = (w * h) / 6; // (a pass reads nine dots: lighter than the light and shade)
     run(C, prog(C, 'seed', FS_SEED), w, h, A.fb, { size: [w, h], ch, inv }, { m: mask });
+    await pace.add(pass);
     let src = A; let dst = B;
     for (let s = 2 ** Math.ceil(Math.log2(Math.max(w, h))) / 2; s >= 1; s /= 2) {
       run(C, prog(C, 'jfa', FS_JFA), w, h, dst.fb, { size: [w, h], step: s }, { j: src.t });
       [src, dst] = [dst, src];
+      await pace.add(pass);
     }
     // (one more pass at step 1 smooths the last errors)
     run(C, prog(C, 'jfa', FS_JFA), w, h, dst.fb, { size: [w, h], step: 1 }, { j: src.t });
+    await pace.add(pass);
     gl.deleteFramebuffer(src.fb); gl.deleteTexture(src.t); gl.deleteFramebuffer(dst.fb);
     return dst.t;
   }
@@ -410,8 +438,9 @@ void main(){
     await Promise.all([...want.values()].map(async (t) => { try { loaded.set(t.url, await image(t.url)); } catch (err) { console.error(err); } }));
     const pats = new Map(); // url → pattern at its size
     const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+    const CPU = { willReadFrequently: true }; // (read back: kept in memory)
     const floorC = canvas(W, Hh); const fg = floorC.getContext('2d');
-    const attrC = canvas(W, Hh); const ag = attrC.getContext('2d');
+    const attrC = canvas(W, Hh); const ag = attrC.getContext('2d', CPU);
     const solidC = canvas(W, Hh); const sg = solidC.getContext('2d');
     const stairsC = canvas(W, Hh); const tg = stairsC.getContext('2d');
     const patOf = (t) => {
@@ -474,37 +503,40 @@ void main(){
     }
     // ---- light and shadow (WebGL 2) ----
     const C = gl2();
-    let out = null;
+    let out = null; let hC = null;
     if (C) {
-      try { out = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC }); } catch (err) { console.error(err); out = null; }
+      try { const r = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC }); out = r.out; hC = r.hC; } catch (err) { console.error(err); out = null; }
     }
     if (!out) { // no graphics card: the flat painting with simple dark edges
-      out = canvas(W, Hh); const o = out.getContext('2d');
+      out = canvas(W, Hh); const o = out.getContext('2d', CPU);
       o.save(); o.shadowColor = 'rgba(0,0,0,0.9)'; o.shadowBlur = P * 0.25; o.drawImage(floorC, 0, 0); o.restore();
       o.drawImage(solidC, 0, 0);
     }
     drawDoors(out.getContext('2d'), os, T, P, k);
     const blob = await new Promise((res) => out.toBlob(res, 'image/webp', 0.88));
+    // (Beta 3.23) with the depth view on: the heights too, without loss (PNG)
+    const hblob = hC ? await new Promise((res) => hC.toBlob(res, 'image/png')) : null;
+    if (hC) hC.width = hC.height = 0;
     // the big paintings are let go at once: canvases can hold memory of the graphics card until they are collected,
     // and a drawing session makes many pictures
     for (const c of [floorC, attrC, solidC, stairsC, out]) c.width = c.height = 0;
     for (const p of pats.values()) if (p && p.cv) p.cv.width = p.cv.height = 0;
     const walls = sightWalls(os, map, lib, { X0, Y0, nsx, nsy, g });
-    return { blob, x: X0, y: Y0, scale: g / P, nw: W, nh: Hh, walls };
+    return { blob, hblob, x: X0, y: Y0, scale: g / P, nw: W, nh: Hh, walls };
   }
 
   async function shade(C, W, Hh, P, org, os, cv) {
     const { gl } = C;
     const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     if (W > max || Hh > max) return null;
-    C.canvas.width = W; C.canvas.height = Hh;
+    if (C.canvas.width !== 1) C.canvas.width = C.canvas.height = 1; // (everything is drawn off screen)
     const tFloor = tex(gl, W, Hh, cv.floorC, { nearest: true });
     const tAttr = tex(gl, W, Hh, cv.attrC, { nearest: true });
     const tSolid = tex(gl, W, Hh, cv.solidC, { nearest: true });
     const tStairs = tex(gl, W, Hh, cv.stairsC, { nearest: true });
     // the materials (repeating, at their own squares)
     const mats = [];
-    for (const m of MATERIALS) { const img = await image(DIR + m.file); mats.push(tex(gl, 0, 0, img, { repeat: true, mip: true })); }
+    for (const m of MATERIALS) { const img = await image(DIR + m.file); const sc = scaled(img, m.squares * P); mats.push(tex(gl, 0, 0, sc, { repeat: true, mip: true })); sc.width = sc.height = 0; } // (at the size they are painted)
     while (mats.length < 5) mats.push(mats[0]);
     const matSq = MATERIALS.slice(0, 5).map((m) => m.squares); while (matSq.length < 5) matSq.push(4);
     const matT = { mtl0: mats[0], mtl1: mats[1], mtl2: mats[2], mtl3: mats[3], mtl4: mats[4] };
@@ -513,21 +545,42 @@ void main(){
     run(C, prog(C, 'inside', `#version 300 es
 precision highp float; in vec2 v_uv; out vec4 o; uniform sampler2D a, s; uniform vec2 size;
 void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p, 0).a, texelFetch(s, p, 0).g); o = vec4(0.0, 0.0, 0.0, f >= 0.5 ? 1.0 : 0.0); }`), W, Hh, merged.fb, { size: [W, Hh] }, { a: tFloor, s: tStairs });
-    const outJ = flood(C, W, Hh, merged.t, 0, 0); // seeds: inside → for outside dots, the nearest floor
-    const inJ = flood(C, W, Hh, merged.t, 0, 1); // seeds: outside → for floor dots, the nearest edge
-    const solJ = flood(C, W, Hh, tSolid, 1, 1); // inside wall lines: how far to their side
+    const pace = pacer(gl);
+    const outJ = await flood(C, W, Hh, merged.t, 0, 0, pace); // seeds: inside → for outside dots, the nearest floor
+    const inJ = await flood(C, W, Hh, merged.t, 0, 1, pace); // seeds: outside → for floor dots, the nearest edge
+    const solJ = await flood(C, W, Hh, tSolid, 1, 1, pace); // inside wall lines: how far to their side
+    gl.deleteTexture(merged.t); gl.deleteFramebuffer(merged.fb); // (what is no longer needed goes at once: a big map needs the room)
     const Ht = target(gl, W, Hh);
-    await runBands(C, prog(C, 'height', FS_HEIGHT), W, Hh, Ht.fb, { size: [W, Hh], P, org, matSq }, { floorT: tFloor, attrT: tAttr, solidT: tSolid, stairsT: tStairs, outJ, inJ, solJ, ...matT });
+    await runBands(C, prog(C, 'height', FS_HEIGHT), W, Hh, Ht.fb, { size: [W, Hh], P, org, matSq }, { floorT: tFloor, attrT: tAttr, solidT: tSolid, stairsT: tStairs, outJ, inJ, solJ, ...matT }, pace);
+    for (const t of [tAttr, tSolid, tStairs, solJ]) gl.deleteTexture(t);
     const a = ((os.sun ?? 135) * Math.PI) / 180; const el = (40 * Math.PI) / 180;
     const L = [Math.cos(a) * Math.cos(el), -Math.sin(a) * Math.cos(el), Math.sin(el)];
-    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, null, { size: [W, Hh], P, org, matSq, L, voidC: [0.015, 0.016, 0.02] }, { hT: Ht.t, floorT: tFloor, outJ, inJ, ...matT });
-    // (the canvas shows the picture upside down: WebGL counts rows from the bottom)
+    const Sh = target(gl, W, Hh);
+    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq, L, voidC: [0.015, 0.016, 0.02] }, { hT: Ht.t, floorT: tFloor, outJ, inJ, ...matT }, pace);
+    // read back into a painting in memory (rows come out top first, as the paintings went in)
     const outC = document.createElement('canvas'); outC.width = W; outC.height = Hh;
-    const o = outC.getContext('2d'); o.translate(0, Hh); o.scale(1, -1); o.drawImage(C.canvas, 0, 0); o.setTransform(1, 0, 0, 1, 0, 0);
-    for (const t of [tFloor, tAttr, tSolid, tStairs, outJ, inJ, solJ, Ht.t, merged.t, ...new Set(mats)]) gl.deleteTexture(t);
-    gl.deleteFramebuffer(Ht.fb); gl.deleteFramebuffer(merged.fb);
-    C.canvas.width = C.canvas.height = 1; // (its drawing buffer let go)
-    return outC;
+    {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, Sh.fb);
+      const px = new Uint8Array(W * Hh * 4);
+      gl.readPixels(0, 0, W, Hh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      outC.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(new Uint8ClampedArray(px.buffer), W, Hh), 0, 0);
+    }
+    gl.deleteTexture(Sh.t); gl.deleteFramebuffer(Sh.fb);
+    // (Beta 3.23) the heights for the depth view: height in red and green, what the dot is (×8) and its material in
+    // blue, fully opaque so nothing is lost on the way (rows come out top first: the paintings were uploaded that way)
+    let hC = null;
+    if (os.depth) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, Ht.fb);
+      const px = new Uint8Array(W * Hh * 4);
+      gl.readPixels(0, 0, W, Hh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      for (let i = 0; i < px.length; i += 4) { px[i + 2] = Math.min(255, px[i + 2] * 8 + px[i + 3]); px[i + 3] = 255; }
+      hC = document.createElement('canvas'); hC.width = W; hC.height = Hh;
+      hC.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(new Uint8ClampedArray(px.buffer), W, Hh), 0, 0);
+    }
+    for (const t of [tFloor, outJ, inJ, Ht.t, ...new Set(mats)]) gl.deleteTexture(t);
+    gl.deleteFramebuffer(Ht.fb);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { out: outC, hC };
   }
   // doors: a wooden leaf with stone posts (secret doors show nothing; windows a strip of glass)
   function drawDoors(o, os, T, P) {
