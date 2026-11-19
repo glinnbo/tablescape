@@ -265,10 +265,13 @@ const OldschoolTool = (() => {
     const el = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs || {})) if (v != null) e.setAttribute(k, v); return e; };
     function patternFor(defs, ref) {
       const t = Oldschool.tileInfo(ref, lib); if (!t) return '#77736c';
-      const id = `osp-${btoa(unescape(encodeURIComponent(t.url))).replace(/[^a-z0-9]/gi, '').slice(-24)}`;
+      const off = t.off || [0, 0];
+      const key = `${t.url}@${t.squares}@${off}`; let hsh = 0x811c9dc5;
+      for (let i = 0; i < key.length; i++) hsh = Math.imul(hsh ^ key.charCodeAt(i), 16777619);
+      const id = `osp-${(hsh >>> 0).toString(36)}-${key.length}`;
       if (!defs.querySelector(`#${id}`)) {
         const s = (t.squares || 4) * g(); const G = grid();
-        const p = el('pattern', { id, patternUnits: 'userSpaceOnUse', x: G.ox, y: G.oy, width: s, height: s });
+        const p = el('pattern', { id, patternUnits: 'userSpaceOnUse', x: G.ox - off[0] * g(), y: G.oy - off[1] * g(), width: s, height: s });
         p.append(el('image', { href: t.url, x: 0, y: 0, width: s, height: s, preserveAspectRatio: 'none' }));
         defs.append(p);
       }
@@ -383,34 +386,92 @@ const OldschoolTool = (() => {
     // ---------- tiles: the squares a tile spans, set once ----------
     async function pickTile(it) {
       if (!it) return;
-      if (!it.builtin && !it.squares) { const n = await askSquares(it); if (!n) return; it.squares = n; }
+      if (!it.builtin && !it.squares) { const r = await adjustGrid(it, { first: true }); if (!r) return; Object.assign(it, r); }
       O.floor = { rel: it.rel, ...(it.rel ? {} : { path: it.path }) }; save();
       ctx.refreshPop(); drawPreview();
     }
-    function askSquares(it) {
+    // Beta 3.24: a tile's grid (any floor: right-click it → Adjust grid; your own the first time it is used). Like the
+    // map's Grid: how many squares across, and the lines shifted onto its joints (drag them, or the sliders).
+    // Resolves { squares, off } or null.
+    function adjustGrid(it, { first = false } = {}) {
       return new Promise((resolve) => {
-        let n = 4; let done = false;
-        const cv = h('canvas', { class: 'os-tilegrid', width: 320, height: 320 });
+        const info = Oldschool.tileInfo(it.builtin ? { rel: it.rel } : { rel: it.rel, path: it.path }, lib) || {};
+        let n = it.squares || info.squares || 4; let off = [...(it.off || info.off || [0, 0])]; let done = false;
+        const S = 360;
+        const cv = h('canvas', { class: 'os-tilegrid', width: S * 2, height: S * 2, 'aria-label': 'The tile with its grid: drag the lines onto its joints' });
         const img = new Image();
-        const paint = () => {
-          const g2 = cv.getContext('2d'); g2.clearRect(0, 0, 320, 320);
-          if (img.naturalWidth) g2.drawImage(img, 0, 0, 320, 320);
-          g2.strokeStyle = 'rgba(240,180,74,0.95)'; g2.lineWidth = 1.5;
-          for (let i = 0; i <= n; i++) { const p = Math.round((i * 320) / n) + 0.5; g2.beginPath(); g2.moveTo(p, 0); g2.lineTo(p, 320); g2.stroke(); g2.beginPath(); g2.moveTo(0, p); g2.lineTo(320, p); g2.stroke(); }
-          out.textContent = `${n} × ${n} squares`;
-        };
         const out = h('b', {});
+        const sx = h('input', { type: 'range', min: 0, max: 1, step: 0.005, 'aria-label': 'Shift sideways' }); const ox = h('output');
+        const sy = h('input', { type: 'range', min: 0, max: 1, step: 0.005, 'aria-label': 'Shift up / down' }); const oy = h('output');
+        const paint = () => {
+          const g2 = cv.getContext('2d'); const W = S * 2;
+          g2.clearRect(0, 0, W, W);
+          if (img.naturalWidth) g2.drawImage(img, 0, 0, W, W);
+          const cell = W / n;
+          const lines = (stroke, w) => {
+            g2.strokeStyle = stroke; g2.lineWidth = w; g2.beginPath();
+            for (let i = -1; i <= n + 1; i++) {
+              const x = Math.round((off[0] + i) * cell) + 0.5; const y = Math.round((off[1] + i) * cell) + 0.5;
+              if (x >= 0 && x <= W) { g2.moveTo(x, 0); g2.lineTo(x, W); }
+              if (y >= 0 && y <= W) { g2.moveTo(0, y); g2.lineTo(W, y); }
+            }
+            g2.stroke();
+          };
+          lines('rgba(0,0,0,0.55)', 5); lines('rgba(240,180,74,0.95)', 2.2);
+          out.textContent = `${n} × ${n} squares`;
+          sx.value = off[0]; sy.value = off[1];
+          ox.textContent = `${Math.round(off[0] * 100)}%`; oy.textContent = `${Math.round(off[1] * 100)}%`;
+        };
         img.onload = () => {
-          try { const gd = typeof GridDetect === 'object' ? GridDetect.fromImage(img, img.naturalWidth, img.naturalHeight) : null; if (gd && gd.cell) n = clamp(Math.round((img.naturalWidth / gd.cell) * 2) / 2, 1, 24); } catch { /* */ }
+          if (first && !it.squares) {
+            try { const gd = typeof GridDetect === 'object' ? GridDetect.fromImage(img, img.naturalWidth, img.naturalHeight) : null; if (gd && gd.cell) n = clamp(Math.round((img.naturalWidth / gd.cell) * 2) / 2, 1, 30); } catch { /* */ }
+            try { off = Oldschool.findJoints(img, n); } catch { /* */ }
+          }
           paint();
         };
         img.src = it.url || UI.pathToUrl(it.path);
-        const step = (dv) => { n = clamp(n + dv, 1, 24); paint(); };
+        const step = (dv) => { n = clamp(n + dv, 1, 30); paint(); };
+        sx.addEventListener('input', () => { off[0] = Number(sx.value); paint(); });
+        sy.addEventListener('input', () => { off[1] = Number(sy.value); paint(); });
+        // drag on the tile: the lines follow the pointer
+        let drag = null;
+        cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, off: [...off] }; });
+        cv.addEventListener('pointermove', (e) => {
+          if (!drag) return;
+          const r = cv.getBoundingClientRect(); const cell = r.width / n;
+          off = [0, 1].map((i) => ((((drag.off[i] + ((i ? e.clientY - drag.y : e.clientX - drag.x) / cell)) % 1) + 1) % 1));
+          paint();
+        });
+        cv.addEventListener('pointerup', () => { drag = null; });
+        const find = () => { if (img.naturalWidth) { off = Oldschool.findJoints(img, n); paint(); } };
+        const save = async () => {
+          done = true;
+          await ts.library('tileSquares', it.builtin ? { rel: it.rel, squares: n, off } : { path: it.path, squares: n, off });
+          libAt = 0; await loadLib(true);
+          dlg.close(); ctx.refreshPop(); update();
+          if (!first) toast(`${it.name}: its grid is set`, { ms: 1800 });
+          resolve({ squares: n, off });
+        };
+        const reset = async () => {
+          done = true;
+          await ts.library('tileSquares', { rel: it.rel, squares: null });
+          libAt = 0; await loadLib(true);
+          dlg.close(); ctx.refreshPop(); update();
+          resolve(null);
+        };
+        const ctl = (label, input, o) => h('label', { class: 'ctl ctl-slider' }, h('span', { class: 'ctl-label' }, label), input, o);
         const body = h('div', { class: 'stack os-squares' },
-          h('p', {}, 'How many squares does it span? Match the lines to its blocks.'), cv,
-          h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => step(-0.5) }, iconEl('minus')), out, h('button', { class: 'btn', onclick: () => step(0.5) }, iconEl('plus')), h('span', { class: 'grow' }),
-            h('button', { class: 'btn primary', onclick: async () => { done = true; await ts.library('tileSquares', { path: it.path, squares: n }); libAt = 0; await loadLib(true); dlg.close(); resolve(n); } }, 'Use it')));
-        const dlg = UI.dialog(`${it.name}: its squares`, body, { onClose: () => { if (!done) resolve(null); } });
+          cv,
+          h('div', { class: 'row' }, h('span', { class: 'ctl-label' }, 'Squares across'), h('span', { class: 'grow' }),
+            h('button', { class: 'btn', 'aria-label': 'Fewer squares', onclick: () => step(-0.5) }, iconEl('minus')), out,
+            h('button', { class: 'btn', 'aria-label': 'More squares', onclick: () => step(0.5) }, iconEl('plus'))),
+          ctl('Shift sideways', sx, ox), ctl('Shift up / down', sy, oy),
+          h('div', { class: 'row' },
+            h('button', { class: 'btn', 'data-tip': 'Tablescape looks for the joints', onclick: find }, iconEl('focus-2'), 'Find the joints'),
+            it.builtin && it.adjusted ? h('button', { class: 'btn ghost', 'data-tip': 'As it came with Tablescape', onclick: reset }, iconEl('restore'), 'As it came') : null,
+            h('span', { class: 'grow' }),
+            h('button', { class: 'btn primary', onclick: save }, first ? 'Use it' : 'Save')));
+        const dlg = UI.dialog(`${it.name}: its grid`, body, { onClose: () => { if (!done) resolve(null); } });
       });
     }
 
@@ -460,15 +521,20 @@ const OldschoolTool = (() => {
       const snapSeg = seg({ options: [{ value: 'sq', label: 'Squares' }, { value: 'half', label: 'Half' }, { value: 'free', label: 'Free' }], get: () => O.snap, set: (v) => { O.snap = v; save(); } });
       // the floor tiles: those of the app, then those of the library
       const floorBox = h('div', { class: 'living-pick os-floors' });
-      const floorList = () => [...Oldschool.FLOORS.map((f) => ({ rel: Oldschool.relOf(f), name: f.label, url: Oldschool.tileInfo({ rel: Oldschool.relOf(f) }).small, builtin: true, squares: f.squares })), ...lib.filter((x) => !x.builtin)];
+      const floorList = () => [...Oldschool.FLOORS.map((f) => {
+        const rel = Oldschool.relOf(f); const o = lib.find((x) => x.builtin && x.rel === rel);
+        return { rel, name: f.label, url: Oldschool.tileInfo({ rel }).small, big: Oldschool.tileInfo({ rel }).url, builtin: true, squares: (o && o.squares) || f.squares, off: (o && o.off) || f.off || [0, 0], adjusted: !!(o && o.adjusted) };
+      }), ...lib.filter((x) => !x.builtin)];
       const paintFloors = () => {
         const list = floorList();
-        const sig = list.map((x) => `${x.rel || x.path}:${x.squares}`).join('|');
+        const sig = list.map((x) => `${x.rel || x.path}:${x.squares}:${x.off}`).join('|');
         if (floorBox.dataset.sig !== sig) {
           floorBox.dataset.sig = sig;
           floorBox.replaceChildren(h('div', { class: 'tiles living-tiles' }, ...list.map((it) => h('button', {
             class: 'tile', dataset: { v: it.rel || it.path }, 'data-tip': `${it.name}${it.squares ? ` (${it.squares} × ${it.squares} squares)` : ''}`, 'aria-label': it.name,
             onclick: () => pickTile(it),
+            // (Beta 3.24) right-click: its grid
+            oncontextmenu: (e) => { e.preventDefault(); e.stopPropagation(); UI.openMenu(e.clientX, e.clientY, [{ icon: 'grid-4x4', label: 'Adjust grid', action: () => adjustGrid(it.builtin ? { ...it, url: it.big } : it) }]); },
           }, h('img', { src: it.builtin ? it.url : it.thumb || it.url, alt: '', draggable: false }), h('span', {}, it.name))),
           h('button', { class: 'tile os-more', 'data-tip': 'Your own tiles: the library\'s Tiles section', onclick: () => ctx.openLibrary() }, iconEl('plus'), h('span', {}, 'More'))));
         }

@@ -282,7 +282,7 @@ const Play = (() => {
     }
     const stage = h('div', { id: 'stage' },
       h('div', { id: 'viewport' }),
-      h('div', { id: 'frame' }, h('span', { class: 'frame-tab' })),
+      h('div', { id: 'frame' }, h('span', { class: 'frame-tab', 'data-tip': 'Drag: the TV shows another part of the map', onpointerdown: (e) => grabFrame(e) }, iconEl('arrows-move'), h('span', { class: 'frame-label' }))),
       h('div', { id: 'empty' }),
       h('div', { id: 'topbar' }),
       h('div', { id: 'toolhint', role: 'status' }), // Prototype 25
@@ -646,7 +646,7 @@ const Play = (() => {
       'Raised and Lower make platforms and pits; Stairs climb toward where you drag. Doors sit on grid lines: click one again to take it away.',
       'Pieces: ready-made rooms. Pick one, click the map; Turn (or Ctrl + wheel) gives it a quarter turn. Their floors take the floor and edge you picked.',
       'Depth view: the walls lean away from the middle of the table, so their inner faces show on every side, also on the TV. Tokens, grid and fog stay on the floor.',
-      'Your own tiles go into the library\'s Tiles section; the first time you use one, you say how many squares it spans. Drag a tile from the library onto a floor to give it that tile.'],
+      'Your own tiles go into the library\'s Tiles section; the first time you use one, you set its grid. Right-click any floor → Adjust grid: its joints are the squares. Drag a tile from the library onto a floor to give it that tile.'],
     map: ['Drag the map to move it; Alt + wheel scales it. Fog, grid, tokens and effects move with it.', 
       'Colours change the picture and its assets only. Each map keeps its own.', 'Hold "original" to compare, here and on the table.',
       'Right-drag or Space-drag moves your view; F fits it to the table, Shift + F shows everything.'],
@@ -2505,7 +2505,30 @@ const Play = (() => {
     const live = isLive();
     const kind = !live ? 'prep' : S.table.blackout ? 'black' : S.table.open ? 'live' : 'closed';
     els.frame.className = `on ${kind}`;
-    els.frame.firstChild.textContent = { prep: 'Prep: players can\'t see this', live: 'On the table', black: 'Blacked out', closed: 'On the table (window closed)' }[kind];
+    els.frame.querySelector('.frame-label').textContent = { prep: 'Prep: players can\'t see this', live: 'On the table', black: 'Blacked out', closed: 'On the table (window closed)' }[kind];
+  }
+  // Beta 3.24 (a test): the TV's frame is grabbed by its tab and moved over the map, as in the Atlas. The map stays
+  // where it is on your screen (your view follows the frame), the TV shows the part the frame is moved to.
+  function grabFrame(e) {
+    if (!S || !S.map || e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const tab = e.currentTarget; try { tab.setPointerCapture(e.pointerId); } catch { /* */ }
+    const v0 = { ...curView() }; const cam0 = { ...view.cam }; const x0 = e.clientX; const y0 = e.clientY;
+    const k = 1 / ((cam0.s || 1) * view.ppi); const key = `frame-${Date.now()}`; let moved = false;
+    tab.classList.add('grabbing');
+    const mv = (ev) => {
+      const dx = ev.clientX - x0; const dy = ev.clientY - y0;
+      if (!moved && Math.hypot(dx, dy) < 3) return;
+      moved = true;
+      view.setCamera({ tx: cam0.tx + dx, ty: cam0.ty + dy });
+      sendView(key, { x: v0.x - dx * k, y: v0.y - dy * k }, true);
+    };
+    const up = () => {
+      tab.removeEventListener('pointermove', mv); tab.removeEventListener('pointerup', up); tab.removeEventListener('pointercancel', up);
+      tab.classList.remove('grabbing');
+      if (moved) finishView();
+    };
+    tab.addEventListener('pointermove', mv); tab.addEventListener('pointerup', up); tab.addEventListener('pointercancel', up);
   }
 
   function renderEmpty() {

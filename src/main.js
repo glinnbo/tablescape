@@ -4406,7 +4406,7 @@ ipcMain.handle('library', (e, action, arg) => {
   if (action === 'forget') { library.forgetRecent(arg && arg.paths); return null; }
   if (action === 'vttimg') { const f = library.vttImagePath(arg); return f ? pathToFileURL(f).href : null; }
   if (action === 'import') return importToLibrary(arg || {});
-  if (action === 'tileSquares') return library.setTileSquares(arg.path, arg.squares); // (Beta 3.22) set once per tile
+  if (action === 'tileSquares') return library.setTileSquares(arg.rel || arg.path, arg.squares, arg.off); // (Beta 3.22) set once per tile; 3.24: where its joints lie, any tile
   const used = campaignFiles();
   return library.listLibrary().map((it) => ({ ...it, inCampaign: used.has(it.path) }));
 });

@@ -28,14 +28,41 @@ const Oldschool = (() => {
 
   // ---------- tiles ----------
   // a tile reference ({ rel, path }) → what to paint with: url, squares (null: not set yet)
+  // squares: how many squares the tile spans; off: where its joints lie ([across, down], a fraction of a square from
+  // its left and top edge; Beta 3.24). The library's list (lib) carries what the GM adjusted.
   function tileInfo(ref, lib) {
     if (!ref) return null;
     const b = builtinByRel.get(ref.rel);
-    if (b) return { url: DIR + b.file, small: DIR + b.small, squares: b.squares, label: b.label, builtin: true, id: b.id };
+    if (b) {
+      const o = lib && lib.find((x) => x.builtin && x.rel === ref.rel);
+      return { url: DIR + b.file, small: DIR + b.small, squares: (o && o.squares) || b.squares, off: (o && o.off) || b.off || [0, 0], label: b.label, builtin: true, id: b.id };
+    }
     const it = lib && lib.find((x) => (ref.rel && x.rel === ref.rel) || (ref.path && x.path === ref.path));
     const p = (it && it.path) || ref.path;
     if (!p) return null;
-    return { url: it ? it.url : UI.pathToUrl(p), small: it && it.thumb ? it.thumb : null, squares: it ? it.squares : null, label: it ? it.name : String(p).split(/[\\/]/).pop(), path: p };
+    return { url: it ? it.url : UI.pathToUrl(p), small: it && it.thumb ? it.thumb : null, squares: it ? it.squares : null, off: (it && it.off) || [0, 0], label: it ? it.name : String(p).split(/[\\/]/).pop(), path: p };
+  }
+  // Beta 3.24: where the joints of a tile lie, for n squares across: the dark thin lines, folded over one square
+  function findJoints(img, n) {
+    const N = 384; const c = document.createElement('canvas'); c.width = c.height = N;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, N, N);
+    const d = g.getImageData(0, 0, N, N).data;
+    const L = new Float32Array(N * N);
+    for (let i = 0; i < N * N; i++) L[i] = (d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11) / 255;
+    const out = [];
+    for (const axis of [0, 1]) {
+      const prof = new Float32Array(N);
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) prof[axis ? y : x] += L[y * N + x] / N;
+      // darker than its surroundings (a joint), then folded over one square
+      const r = Math.max(2, Math.round(N / n / 3)); const dark = new Float32Array(N);
+      for (let i = 0; i < N; i++) { let sum = 0; for (let k = -r; k <= r; k++) sum += prof[(i + k + N) % N]; dark[i] = Math.max(0, sum / (2 * r + 1) - prof[i]); }
+      const B = 96; const fold = new Float32Array(B); const cnt = new Float32Array(B); const P = N / n;
+      for (let i = 0; i < N; i++) { const b = Math.floor((((i + 0.5) % P) / P) * B) % B; fold[b] += dark[i]; cnt[b]++; }
+      let best = 0; let at = 0;
+      for (let b = 0; b < B; b++) { let v = 0; for (let k = -2; k <= 2; k++) { const j = (b + k + B) % B; v += cnt[j] ? fold[j] / cnt[j] : 0; } if (v > best) { best = v; at = b; } }
+      out.push(Math.round(((at + 0.5) / B) * 1000) / 1000);
+    }
+    return out;
   }
   const matInfo = (id) => { const t = byId.get(id) || byId.get('stone_wall'); return t ? { url: DIR + t.file, squares: t.squares, id: t.id } : null; };
   const images = new Map(); // url → Promise<Image>
@@ -127,7 +154,7 @@ const Oldschool = (() => {
   function hash(map, lib) {
     const os = map.os;
     const tiles = new Set();
-    for (const it of os.items) if (it.tile) { const t = tileInfo(it.tile, lib); tiles.add(`${it.tile.rel || it.tile.path}=${t ? t.squares : '?'}`); }
+    for (const it of os.items) if (it.tile) { const t = tileInfo(it.tile, lib); tiles.add(`${it.tile.rel || it.tile.path}=${t ? `${t.squares}@${t.off}` : '?'}`); }
     const s = JSON.stringify([os.items, os.doors, os.sun, os.sight, !!os.depth, map.grid.size, map.grid.ox, map.grid.oy, [...tiles].sort(), 7]);
     let h1 = 0x811c9dc5; let h2 = 0x01000193;
     for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 + c, 2246822519) ^ (h2 >>> 13); }
@@ -445,12 +472,13 @@ void main(){
     const stairsC = canvas(W, Hh); const tg = stairsC.getContext('2d');
     const patOf = (t) => {
       if (!t || !loaded.has(t.url)) return '#5a5650';
-      const key = `${t.url}@${t.squares || 4}`;
+      const off = t.off || [0, 0];
+      const key = `${t.url}@${t.squares || 4}@${off}`;
       if (!pats.has(key)) {
         const s = (t.squares || 4) * P;
         const cv = scaled(loaded.get(t.url), s);
         const pat = fg.createPattern(cv, 'repeat');
-        pat.setTransform(new DOMMatrix().translate(org[0], org[1]));
+        pat.setTransform(new DOMMatrix().translate(org[0] - off[0] * P, org[1] - off[1] * P)); // (its joints on the grid)
         pats.set(key, { pat, cv });
       }
       return pats.get(key).pat;
@@ -751,5 +779,5 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     return null;
   }
 
-  return { DATA, FLOORS, MATERIALS, EDGES, relOf, tileInfo, matInfo, bounds, hash, bake, areaAt, supported: () => !!gl2(), DEFAULT_MAT };
+  return { DATA, FLOORS, MATERIALS, EDGES, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, supported: () => !!gl2(), DEFAULT_MAT };
 })();

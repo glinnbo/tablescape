@@ -352,7 +352,7 @@ class CampaignStore {
       case 'map.add': {
         const x = ch(p.chapterId) || chapters[0];
         const m = emptyMap(clampName(p.name, p.path ? path.parse(p.path).name : p.oldschool ? 'Drawn map' : `Map ${x.maps.length + 1}`));
-        if (p.oldschool && !p.path) m.os = defaultOs(); // (Beta 3.22) an Oldschool map: drawn, no picture
+        if (p.oldschool && !p.path) { m.os = defaultOs(); m.grid = { ...m.grid, show: false }; } // (Beta 3.22) an Oldschool map: drawn, no picture; 3.24: the tiles are its grid (it is there, unseen)
         if (p.path) {
           const kind = library.kindOf(p.path);
           if (kind === 'image' || kind === 'video') m.bg = { ...library.media(p.path), kind, x: 0, y: 0, scale: null, volume: 0, rate: 1 };

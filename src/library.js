@@ -206,7 +206,7 @@ function listLibrary(root = ROOT) {
         fav: fav.has(rel),
         recent: meta.recent.indexOf(rel),
         thumb: thumb && fs.existsSync(thumb) ? pathToFileURL(thumb).href : null,
-        ...(parts[0] === 'Tiles' ? { squares: meta.tiles[rel] || null } : {}),
+        ...(parts[0] === 'Tiles' ? tileGridOf(meta.tiles[rel]) : {}),
       });
     }
   };
@@ -236,13 +236,24 @@ function setFavourite(absPath, on) {
   writeMeta(m);
   return true;
 }
-// Beta 3.22: how many squares a tile of the library spans (set once, the first time it is used on an Oldschool map)
-function setTileSquares(absPath, squares) {
-  const rel = relOf(absPath);
-  const n = Math.round(Number(squares) * 4) / 4;
-  if (!rel || !(n >= 0.5 && n <= 64)) return false;
+// Beta 3.22: how many squares a tile of the library spans (set once, the first time it is used on an Oldschool map).
+// Beta 3.24: and where its joints lie (off: [across, down] as a fraction of a square), for the tiles of the app too
+// (key: their name; squares null: back to the app's own). Kept in the library's meta as { squares, off }.
+function tileGridOf(v) {
+  if (typeof v === 'number') return { squares: v, off: null };
+  if (v && typeof v === 'object') return { squares: Number(v.squares) || null, off: Array.isArray(v.off) ? v.off.map((x) => ((Number(x) % 1) + 1) % 1) : null };
+  return { squares: null, off: null };
+}
+function setTileSquares(key, squares, off) {
+  const b = BUILTIN.get(key) || (key && BUILTIN_AT.get(path.resolve(String(key))));
+  const rel = b && b.tile ? b.rel : relOf(key);
+  if (!rel) return false;
   const m = readMeta();
-  m.tiles[rel] = n;
+  if (squares == null) { if (!b) return false; delete m.tiles[rel]; writeMeta(m); return true; }
+  const n = Math.round(Number(squares) * 4) / 4;
+  if (!(n >= 0.5 && n <= 64)) return false;
+  const o = Array.isArray(off) && off.length === 2 && off.every((x) => Number.isFinite(Number(x))) ? off.map((x) => Math.round((((Number(x) % 1) + 1) % 1) * 1000) / 1000) : null;
+  m.tiles[rel] = o ? { squares: n, off: o } : n;
   writeMeta(m);
   return true;
 }
@@ -324,7 +335,7 @@ function loadTiles() {
   try { data = require('./renderer/tile-data'); } catch { return; }
   const dir = path.join(__dirname, 'renderer', 'tiles');
   for (const t of data.tiles) {
-    const e = { rel: `${TILE_FOLDER}/${t.label}.webp`, path: path.join(dir, t.file), name: t.label, small: path.join(dir, t.small), tile: { id: t.id, kind: t.kind, squares: t.squares } };
+    const e = { rel: `${TILE_FOLDER}/${t.label}.webp`, path: path.join(dir, t.file), name: t.label, small: path.join(dir, t.small), tile: { id: t.id, kind: t.kind, squares: t.squares, off: t.off || [0, 0] } };
     BUILTIN.set(e.rel, e); BUILTIN_AT.set(e.path, e);
   }
 }
@@ -332,10 +343,14 @@ loadTiles();
 const tileOf = (ref) => { const e = ref && ((ref.rel && BUILTIN.get(ref.rel)) || (ref.path && BUILTIN_AT.get(path.resolve(ref.path)))); return e && e.tile ? { ...e.tile } : null; };
 function builtinTileItems(meta) {
   const fav = new Set(meta.favs);
-  return [...BUILTIN.values()].filter((e) => e.tile && e.tile.kind === 'floor').map((e) => ({
-    path: e.path, url: pathToFileURL(e.path).href, walls: false, rel: e.rel, name: e.name, kind: 'image', section: 'Tiles', cat: 'tiles', pack: null,
-    folder: TILE_FOLDER, mtime: 0, fav: fav.has(e.rel), recent: meta.recent.indexOf(e.rel), thumb: pathToFileURL(e.small).href, builtin: true, squares: e.tile.squares, tile: { ...e.tile },
-  }));
+  return [...BUILTIN.values()].filter((e) => e.tile && e.tile.kind === 'floor').map((e) => {
+    const own = tileGridOf(meta.tiles[e.rel]); // (Beta 3.24: adjusted by the GM)
+    return {
+      path: e.path, url: pathToFileURL(e.path).href, walls: false, rel: e.rel, name: e.name, kind: 'image', section: 'Tiles', cat: 'tiles', pack: null,
+      folder: TILE_FOLDER, mtime: 0, fav: fav.has(e.rel), recent: meta.recent.indexOf(e.rel), thumb: pathToFileURL(e.small).href, builtin: true,
+      squares: own.squares || e.tile.squares, off: own.squares ? own.off || [0, 0] : e.tile.off, adjusted: !!own.squares, tile: { ...e.tile },
+    };
+  });
 }
 function builtinItems(meta) {
   const fav = new Set(meta.favs);

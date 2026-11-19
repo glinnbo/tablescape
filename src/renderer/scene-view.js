@@ -688,7 +688,8 @@ class SceneView {
       const id = `ink-${t.id || 'x'}-${String(t.squares)}`;
       if (!this.osInkDefs.querySelector(`#${id}`)) {
         const s = (t.squares || 4) * sq;
-        const p = mk('pattern', { id, patternUnits: 'userSpaceOnUse', x: g0.ox || 0, y: g0.oy || 0, width: s, height: s });
+        const off = t.off || [0, 0]; // (Beta 3.24: its joints on the grid)
+        const p = mk('pattern', { id, patternUnits: 'userSpaceOnUse', x: (g0.ox || 0) - off[0] * sq, y: (g0.oy || 0) - off[1] * sq, width: s, height: s });
         p.append(mk('image', { href: t.url, x: 0, y: 0, width: s, height: s, preserveAspectRatio: 'none' }));
         this.osInkDefs.append(p);
       }

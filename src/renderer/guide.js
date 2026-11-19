@@ -24,6 +24,11 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.24', [
+      'Oldschool maps: the tiles are the grid. The joints of the tiles that come with Tablescape now lie on the squares, and new drawn maps start with the grid line hidden (it is still there for snapping, tokens and measuring)',
+      'Right-click a floor in the Draw panel → Adjust grid: squares across, shift sideways and up/down (or drag the lines onto the joints), Find the joints; As it came puts a tile of Tablescape back. Your own tiles open the same window the first time',
+      'A test: the TV frame on your screen can be grabbed by its tab and moved over the map, as in the Atlas. The map stays where it is, the TV shows the new part',
+    ]],
     ['Beta 3.23', [
       'Oldschool maps: Depth view (Draw panel, per map). The walls, pillars and rock lean away from the middle of the table, so their inner faces show on every side, on the TV and on your screen. Tokens, grid and fog stay on the floor',
       'The TV inks what you draw: a pen traces each new room, its tile fills in, a corridor is painted along, then the finished picture takes over. Secret doors never show',
