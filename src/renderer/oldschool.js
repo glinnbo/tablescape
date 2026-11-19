@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // for every floor); a door: the wall line it opens
   const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 19; // (19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 20; // (20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -204,7 +204,7 @@ const Oldschool = (() => {
   function hash(map, lib) {
     const os = map.os; const bx = boxOf(map);
     const sharp = bx && bx.sharp ? [bx.sharp.P, bx.sharp.ts] : 0;
-    return fingerprint(JSON.stringify([os.items, os.doors.map(noLeaf), os.sun, os.shadows || 'short', os.sight, map.grid.size, map.grid.ox, map.grid.oy, tileKeys(os.items, lib), sharp, VERSION]));
+    return fingerprint(JSON.stringify([os.items, os.doors.map(noLeaf), os.sun, shadowKey(os), os.sight, map.grid.size, map.grid.ox, map.grid.oy, tileKeys(os.items, lib), sharp, VERSION]));
   }
   // Beta 3.31: how far a change of each thing can change the picture around it, in squares (it was 6.6 for every
   // floor). Outside a floor: what its edge builds there (any floor's edge may take the place: the widest counts) and
@@ -213,7 +213,7 @@ const Oldschool = (() => {
   const EDGE_REACH = { walls: 0.5, rock: 3.0, cliff: 3.2, ledge: 0.3, fade: 1.8 };
   const mixes = (it) => (it.kind === 'area' && it.mixW > 0 && !(it.level || 0)) || it.kind === 'paint';
   function reaches(os, g) {
-    const S = SHADOWS[os.shadows] || SHADOWS.short; const light = Math.max(0.7, S.tan ? 2.2 / S.tan : 0);
+    const S = shadowOf(os); const light = Math.max(0.7, S.tan ? 2.2 / S.tan : 0, S.all > 0 ? 2.7 : 0);
     let edge = 0; for (const it of os.items) if (it.kind === 'area') edge = Math.max(edge, EDGE_REACH[it.edge] ?? 3.2);
     const mixers = []; os.items.forEach((it, n) => { if (mixes(it)) mixers.push({ n, box: itemBox(it), pad: (it.kind === 'paint' ? 1.2 * (it.r / g) : 1.35 * it.mixW) + 0.85 }); });
     const out = new Map();
@@ -228,6 +228,7 @@ const Oldschool = (() => {
   const itemKeys = new WeakMap(); // (a thing's own fingerprint, worked out once: tiles ask for it again and again)
   const itemKey = (it) => { let h = itemKeys.get(it); if (!h) { h = fingerprint(JSON.stringify(it)); itemKeys.set(it, h); } return h; };
   // one sharp tile's key: what lies near it (in drawing order), the light, the grid, the dots a square
+  const shadowKey = (os) => { const S = shadowOf(os); return [S.len, S.all]; };
   const noLeaf = (d) => { const { leaf, ...rest } = d; return rest; }; // (Beta 3.33: the leaf is drawn live)
   function tileKey(map, lib, bx, c, r) {
     const os = map.os; const { g, ox, oy, sharp } = bx;
@@ -237,7 +238,7 @@ const Oldschool = (() => {
     const items = os.items.filter((it) => near(bx.boxes.get(it), bx.reach.get(it) * g));
     if (!items.some((it) => it.kind !== 'cut' && near(bx.boxes.get(it), REACH * g))) return null; // (nothing shows here)
     const doors = os.doors.map(noLeaf).filter((d) => near([Math.min(d.x1, d.x2), Math.min(d.y1, d.y2), Math.max(d.x1, d.x2), Math.max(d.y1, d.y2)], HALO_SOLID * g)); // (a door opens a wall line)
-    return fingerprint(JSON.stringify([items.map(itemKey), doors, os.sun, os.shadows || 'short', g, ox, oy, tileKeys(items, lib), bx.P, sharp.P, sharp.ts, c, r, VERSION]));
+    return fingerprint(JSON.stringify([items.map(itemKey), doors, os.sun, shadowKey(os), g, ox, oy, tileKeys(items, lib), bx.P, sharp.P, sharp.ts, c, r, VERSION]));
   }
 
   // ---------- WebGL 2 ----------
@@ -512,8 +513,8 @@ float fadeOut(vec2 q, float dOut, float P){
   // light, shadows and darker corners
   const FS_SHADE = `#version 300 es
 precision highp float; in vec2 v_uv; layout(location = 0) out vec4 o; layout(location = 1) out vec4 o2;
-uniform sampler2D hT, floorT, attrT, haloT, outJ, inJ, mtl0, mtl1, mtl2, mtl3, mtl4;
-uniform vec2 size; uniform float P; uniform vec2 org; uniform float matSq[5]; uniform vec3 L; uniform vec3 voidC; uniform float shT; uniform float shK;
+uniform sampler2D hT, floorT, attrT, haloT, outJ, inJ, nearS, mtl0, mtl1, mtl2, mtl3, mtl4;
+uniform vec2 size; uniform float P; uniform vec2 org; uniform float matSq[5]; uniform vec3 L; uniform vec3 voidC; uniform float shT; uniform float shK; uniform float shA;
 vec2 dec(vec4 c){ c = floor(c * 255.0 + 0.5); return vec2(c.r*256.0 + c.g, c.b*256.0 + c.a); }
 ${LOOK}
 float K(vec2 p){ p = clamp(p, vec2(0.0), size - 1.0); return floor(texelFetch(hT, ivec2(p), 0).b * 255.0 + 0.5); }
@@ -559,6 +560,15 @@ void main(){
       sh = max(sh, clamp(above / (1.5 + t * 0.3), 0.0, 1.0));
     }
   }
+  // Beta 3.35: shadows all around (caves): every wall throws its shadow in every direction, as if lit from all sides:
+  // a floor darker the nearer it is to a wall, rock, a wall line or a pillar (not at a drop: a ledge or a cliff)
+  float sa = 0.0;
+  if (shA > 0.0 && (kind == 1.0 || kind == 6.0 || kind == 7.0)) {
+    float d = 1e5;
+    if (dIn < 1e4) { vec2 beyond = si2 + normalize(si2 - px + vec2(1e-3)) * 2.0; if (H(beyond) > h + 2.0) d = dIn; }
+    vec2 sn = dec(texelFetch(nearS, ip, 0)); if (sn.x < 65000.0) d = min(d, length(sn - px));
+    float f = 1.0 - clamp(d / (1.8 * P), 0.0, 1.0); sa = pow(f, 1.6);
+  }
   // darker where it is surrounded by what is higher
   float ao = 0.0; float rr = 0.3 * P;
   for (int i = 0; i < 12; i++) {
@@ -566,7 +576,7 @@ void main(){
     ao += clamp((H(px + vec2(cos(a), sin(a)) * r) - h) / (0.9 * P), 0.0, 1.0);
   }
   ao = 1.0 - 0.45 * ao / 12.0;
-  float light = (0.5 + 0.5 * lam) * (1.0 - shK * sh) * ao;
+  float light = (0.5 + 0.5 * lam) * (1.0 - shK * sh) * (1.0 - 0.65 * shA * sa) * ao;
   o2 = vec4(clamp(light * 0.5, 0.0, 1.0), 0.0, 0.0, 1.0); // (the light alone, halved: the sharp tiles take it)
   vec3 c = alb * light;
   // the cliff fades into darkness; beyond the drawing the picture is see-through (the table's own dark shows there)
@@ -1076,6 +1086,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const inJ = await flood(C, W, Hh, merged.t, 0, 1, pace); // seeds: outside → for floor dots, the nearest edge
     say(0.3);
     const solJ = await flood(C, W, Hh, tSolid, 1, 1, pace); // inside wall lines: how far to their side
+    const SA = shadowOf(os); const nearS = SA.all > 0 ? await flood(C, W, Hh, tSolid, 1, 0, pace) : null; // (Beta 3.35: for shadows all around, the nearest wall line or pillar)
     say(0.4);
     gl.deleteTexture(merged.t); gl.deleteFramebuffer(merged.fb); // (what is no longer needed goes at once: a big map needs the room)
     const Ht = target(gl, W, Hh);
@@ -1084,12 +1095,13 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     say(0.6);
     const a = ((os.sun ?? 135) * Math.PI) / 180; const el = (40 * Math.PI) / 180;
     const L = [Math.cos(a) * Math.cos(el), -Math.sin(a) * Math.cos(el), Math.sin(el)];
-    const S = SHADOWS[os.shadows] || SHADOWS.short; // (Beta 3.25: short, soft shadows unless the map wants long ones)
+    const S = shadowOf(os); // (Beta 3.35: how long, and how much all around)
     // the picture and (a second output) the light alone
     const Sh = target(gl, W, Hh); const Lt = tex(gl, W, Hh, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, Sh.fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, Lt, 0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq: M.sq, L, voidC: VOID, shT: S.tan, shK: S.k }, { hT: Ht.t, floorT: tFloor, attrT: tAttr, haloT: tHalo, outJ, inJ, ...M.t }, pace);
+    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq: M.sq, L, voidC: VOID, shT: S.tan, shK: S.k, shA: S.all }, { hT: Ht.t, floorT: tFloor, attrT: tAttr, haloT: tHalo, outJ, inJ, nearS: nearS || outJ, ...M.t }, pace);
+    if (nearS) gl.deleteTexture(nearS);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     say(1);
     // read back into a painting in memory (rows come out top first, as the paintings went in)
@@ -1112,8 +1124,13 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
   }
   const VOID = [0, 0, 0]; // (Beta 3.25: black, as the table around: a drop ends in it without a seam)
   // Beta 3.25: how long the shadows are (the tangent of the sun's height for them) and how dark; the light on slopes
-  // keeps its 40° (walls keep their relief)
-  const SHADOWS = { short: { tan: Math.tan((62 * Math.PI) / 180), k: 0.42 }, long: { tan: Math.tan((40 * Math.PI) / 180), k: 0.5 }, off: { tan: 0, k: 0 } };
+  // keeps its 40° (walls keep their relief). Beta 3.35: a length from 0 (none) to 1 (the sun at 33°) instead of short /
+  // long / off (short was 0.35, long 0.75), and shadows all around (0 to 1: caves)
+  function shadowOf(os) {
+    const len = Number.isFinite(os.shadowLen) ? os.shadowLen : os.shadows === 'off' ? 0 : os.shadows === 'long' ? 0.75 : 0.35;
+    const all = Number.isFinite(os.shadowAll) ? os.shadowAll : 0;
+    return { len, all, tan: len > 0 ? 1 / (1.55 * len) : 0, k: len > 0 ? 0.4 + 0.12 * len : 0 };
+  }
   // the materials (repeating, at their own squares), painted at P dots a square
   async function matTextures(C, P) {
     const { gl } = C; const list = [];
@@ -1217,7 +1234,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
   // the room's floor runs through it, and the cut ends of the wall shade the doorway (more on the side away from the
   // sun). A window sits in a niche: the wall's own stone, the part the window sits in shaded as if deeper down, with a
   // stop at each end holding it. Secret doors show nothing. The leaves are drawn live on both screens (scene-view.js).
-  const NICHE = { stop: 0.09, stopW: 0.21 }; // (squares: how far a window's stops reach along it, and across)
+  const NICHE = { stop: 0.1, stopW: 0.33 }; // (squares: how far a window's stops reach along it, and across; Beta 3.35: wider, for the thicker glass)
   function drawDoors(o, os, T, P, dc) {
     if (!dc) return;
     const { g, org, floorPat } = dc;
@@ -1261,7 +1278,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
   // a window's niche in the wall (Glinn's sketch, 19 November 2026): across the wall's whole thickness, a stop at each
   // end; the wall there darker, and the wall around it casts its shadow in, away from the sun
   function windowNiche(o, S, bd, P, sx, sy) {
-    const e = NICHE.stop * P; const h = Math.min(bd * 0.7, NICHE.stopW * P) / 2; const t = bd / 2;
+    const e = NICHE.stop * P; const h = Math.min(bd * 0.75, NICHE.stopW * P) / 2; const t = bd / 2;
     const niche = new Path2D();
     niche.moveTo(-e, -t); niche.lineTo(S + e, -t); niche.lineTo(S + e, -h); niche.lineTo(S, -h); niche.lineTo(S, h); niche.lineTo(S + e, h);
     niche.lineTo(S + e, t); niche.lineTo(-e, t); niche.lineTo(-e, h); niche.lineTo(0, h); niche.lineTo(0, -h); niche.lineTo(-e, -h); niche.closePath();
@@ -1555,6 +1572,6 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
 
   // (noSharp: the self-test's software graphics are slow; it switches the sharp tiles off where they are not the point.
   // noPill: and the progress pill, whose running maid would keep its window drawing all the while)
-  const api = { DATA, FLOORS, MATERIALS, EDGES, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, doorPlace, setSharp, stats, noSharp: false, noPill: false, sharpOf: (map) => { const b = boxOf(map); return b && b.sharp; }, supported: () => !!gl2(), DEFAULT_MAT };
+  const api = { DATA, FLOORS, MATERIALS, EDGES, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, doorPlace, shadowOf, setSharp, stats, noSharp: false, noPill: false, sharpOf: (map) => { const b = boxOf(map); return b && b.sharp; }, supported: () => !!gl2(), DEFAULT_MAT };
   return api;
 })();

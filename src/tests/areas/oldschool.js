@@ -54,8 +54,11 @@ module.exports = (area) => {
     t.eq(await t.popTitle(), 'Draw', 'its panel');
     t.ok(await t.g(`!document.querySelector('#empty.on')`), 'no "no background" card in the way');
     t.ok(await t.g(`(() => { const b = document.querySelector('#rail [data-id="oldschool"]'); return !!b && !b.hidden && b.offsetParent !== null; })()`), 'Draw is on the rail');
-    t.eq(await t.count('.os-tools .tile'), 9, 'its tools (Beta 3.28: no Corridor, Floor or Pieces; 3.29: no Ground)');
-    t.ok(await t.count('.os-floors .tile[data-v]') >= 11, 'the floors of the app');
+    t.eq(await t.count('.os-tools .tile'), 10, 'its tools (Beta 3.28: no Corridor, Floor or Pieces; 3.29: no Ground; 3.35: Window of its own)');
+    t.eq(await t.count('.os-floors .tile[data-v]'), 8, 'the last 8 tiles used (Beta 3.35)');
+    await t.clickSel('.os-tile-list');
+    await t.until(async () => (await t.count('.fp[data-id="ostiles"] .pl-it')) >= 11, 4000, 'List …: all the tiles of the app');
+    await t.clickSel('.fp[data-id="ostiles"] .fp-close');
     t.ok(await t.g(`!!document.querySelector('.map-tile[data-id="${own}"] .tile-thumb .i')`), 'its tile in the strip shows a pencil');
   });
 
@@ -118,10 +121,26 @@ module.exports = (area) => {
   area.deep('the Draw panel: each tool, a floor, the edge, where the light comes from', async (t) => {
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
     await t.g(`localStorage.removeItem('osPrefs')`);
-    for (const id of ['shape', 'round', 'brush', 'erase', 'wall', 'pillar', 'stairs', 'door', 'room']) {
+    for (const id of ['shape', 'round', 'brush', 'erase', 'wall', 'pillar', 'stairs', 'door', 'window', 'room']) {
       await t.clickSel(`.os-tools .tile[data-v="${id}"]`);
       t.eq(await t.g('Play.ui.os.tool'), id, `tool ${id}`);
     }
+    // (Beta 3.35) the choices come first; the door's leaf follows Door / Secret; a window has a tool of its own
+    await t.clickSel('.os-tools .tile[data-v="door"]');
+    await t.clickText('#pop .seg-btn', 'Iron');
+    t.eq(await t.g('Play.ui.os.doorLeaf'), 'metal', 'an iron door');
+    await t.clickText('#pop .seg-btn', 'Secret');
+    t.ok(await t.g(`document.querySelector('#pop .os-leaf').hidden`), 'a secret door has no leaf to pick');
+    await t.clickText('#pop .seg-btn', 'Door');
+    t.ok(await t.g(`!document.querySelector('#pop .os-leaf').hidden`), 'a door has');
+    t.eq(await t.count('#pop .os-floors'), 0, 'no tiles for doors');
+    await t.clickSel('.os-tools .tile[data-v="window"]');
+    await t.clickText('#pop .seg-btn', 'Bars');
+    t.eq(await t.g('Play.ui.os.windowLeaf'), 'bars', 'bars in a window');
+    await t.clickSel('.os-tools .tile[data-v="pillar"]');
+    t.eq(await t.g(`(() => { const l = [...document.querySelectorAll('#pop .ctl-slider')].find((x) => x.textContent.includes('Size')); return l && Number(l.querySelector('input').max); })()`), 8, 'pillars up to 8 squares');
+    await t.clickSel('.os-tools .tile[data-v="room"]');
+    t.ok(await t.g(`(() => { const p = document.querySelector('#pop'); const at = (sel) => [...p.querySelectorAll('*')].indexOf(p.querySelector(sel)); return at('.os-level') < at('.os-floors') && at('.os-floors') < at('.os-sun-dial'); })()`), 'choices, then the tiles, then the map\'s settings');
     await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Slate.webp"]');
     t.eq(await t.g('Play.ui.os.floor.rel'), 'Tiles/Tablescape/Slate.webp', 'a floor picked');
     t.ok(await t.g(`document.querySelector('.os-floors .tile[data-v="Tiles/Tablescape/Slate.webp"]').classList.contains('on')`), 'shown as picked');
@@ -136,11 +155,17 @@ module.exports = (area) => {
     t.handle('os.set', { mapId: own, sun: (sun + 90) % 360 });
     await t.settle();
     t.eq(M(t).os.sun, (sun + 90) % 360, 'the light from elsewhere');
-    t.eq(M(t).os.shadows, 'short', 'short shadows at first');
-    await t.clickText('#pop .seg-btn', 'Long');
-    await t.until(() => M(t).os.shadows === 'long', 4000, 'long shadows');
-    await t.clickText('#pop .seg-btn', 'Short');
-    await t.until(() => M(t).os.shadows === 'short', 4000, 'and short again');
+    // (Beta 3.35) the light on a dial; how long the shadows are, and shadows all around (caves), on sliders
+    t.ok(await t.g(`!!document.querySelector('#pop .os-sun-dial')`), 'the light on a dial');
+    t.eq([M(t).os.shadowLen, M(t).os.shadowAll], [0.35, 0], 'shadows of the length of "short" at first, none all around');
+    t.handle('os.set', { mapId: own, shadowLen: 0.75, shadowAll: 0.6 });
+    await t.settle();
+    t.eq([M(t).os.shadowLen, M(t).os.shadowAll], [0.75, 0.6], 'longer, and all around');
+    t.handle('os.set', { mapId: own, shadows: 'off' });
+    await t.settle();
+    t.eq(M(t).os.shadowLen, 0, 'Off of before: no length');
+    t.handle('os.set', { mapId: own, shadowLen: 0.35, shadowAll: 0 });
+    await t.settle();
     await baked(t, 150000);
     t.note(`made in ${JSON.stringify(await t.g('Oldschool.stats.last'))}`);
   }, { ms: 180000 });
@@ -249,7 +274,9 @@ module.exports = (area) => {
     const file = path.join(L.root, 'Tiles', 'Test pebbles.webp');
     fs.copyFileSync(L.resolveRef({ rel: 'Tiles/Tablescape/Ice.webp' }), file);
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
-    await t.until(() => t.rect('.os-more'), 4000, 'More');
+    await t.clickSel('.os-tools .tile[data-v="room"]');
+    await t.clickSel('.os-tile-list'); // (Beta 3.35: Tiles → List … → Library …)
+    await t.until(() => t.rect('.os-more'), 4000, 'Library …');
     await t.g(`document.querySelector('.os-more').scrollIntoView({ block: 'center' })`);
     await t.clickSel('.os-more');
     await t.until(() => t.g(`!!(Play.ui.drawer && Play.ui.drawer.purpose === 'tile')`), 4000, 'the library, to pick a tile');
@@ -267,6 +294,8 @@ module.exports = (area) => {
     await t.until(() => t.lib('tiles').find((x) => x.path === file).squares > 0, 4000, 'its squares kept');
     t.eq(await t.g('Play.ui.os.floor.rel'), 'Tiles/Test pebbles.webp', 'the floor to draw with now');
     t.eq(await t.popTitle(), 'Draw', 'back in Draw');
+    t.ok(await t.g(`!!document.querySelector('.os-floors .tile[data-v="Tiles/Test pebbles.webp"]')`), 'among the last used');
+    if (await t.g(`!!document.querySelector('.fp[data-id="ostiles"]')`)) await t.clickSel('.fp[data-id="ostiles"] .fp-close');
   }, { ms: 120000 });
 
   area.deep('sharp tiles: as many dots a square as the TV shows; something drawn makes only the tiles near it again', async (t) => {

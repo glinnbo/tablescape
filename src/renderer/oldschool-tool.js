@@ -6,7 +6,8 @@
 //   Wall               drag a wall line from corner to corner
 //   Pillar             click a square
 //   Stairs             drag where they go: they climb toward where you drag
-//   Door               click a grid line: a door, a secret door or a window there; drag along it: one of any length
+//   Door               click a grid line: a door or a secret door there; drag along it: one of any length
+//   Window             the same for a window (Beta 3.35: a tool of its own)
 //   (Beta 3.28: Corridor, Floor and Pieces are gone; what they made still draws. Beta 3.29: Ground is gone)
 // What is drawn is kept in map.os (mapstate.js); the picture is made from it here (oldschool.js) and sent to main,
 // which makes it the map's picture and its outlines the walls for sight. gm-play.js hands the pointer to this tool.
@@ -25,6 +26,7 @@ const OldschoolTool = (() => {
     { id: 'pillar', label: 'Pillar', icon: 'square-dashed', tip: 'Click a square for a pillar' },
     { id: 'stairs', label: 'Stairs', icon: 'stairs', tip: 'Drag where they go: they climb toward where you drag' },
     { id: 'door', label: 'Door', icon: 'door', tip: 'Click a grid line: a door there; drag along it: a longer one' },
+    { id: 'window', label: 'Window', icon: 'window', tip: 'Click a grid line: a window there; drag along it: a longer one' },
   ];
   // Beta 3.28: Corridor, Floor and Pieces left the toolbar (what they made still draws and erases)
   // Beta 3.25: the ground the Ground tool lays (the effects of the same name, with a pool in the picture)
@@ -52,6 +54,7 @@ const OldschoolTool = (() => {
       floor: first ? { rel: Oldschool.relOf(first) } : null,
     };
     try { const saved = JSON.parse(localStorage.getItem('osPrefs') || '{}'); if ('mix' in saved && !('mixU' in saved)) { delete saved.mix; delete saved.mixW; } Object.assign(prefs, saved, { mats: { ...prefs.mats, ...(saved.mats || {}) }, line: { ...prefs.line, ...(saved.line || {}) }, pillar: { ...prefs.pillar, ...(saved.pillar || {}) } }); } catch {}
+    if (prefs.door === 'window') { prefs.door = 'door'; if (prefs.tool === 'door') prefs.tool = 'window'; } // (Beta 3.35: windows have a tool of their own)
     if (!TOOLS.some((x) => x.id === prefs.tool)) prefs.tool = 'room';
     ui.os = { ...prefs, poly: null };
     const O = ui.os;
@@ -78,6 +81,8 @@ const OldschoolTool = (() => {
       if (free || O.snap === 'free') return { x: round(p.x, 3), y: round(p.y, 3) };
       return { x: round(G.ox + (Math.floor((p.x - G.ox) / s) + 0.5) * s, 4), y: round(G.oy + (Math.floor((p.y - G.oy) / s) + 0.5) * s, 4) };
     }
+    // Beta 3.35: a pillar of 2, 4, 6 or 8 squares sits on a grid corner, so it covers whole squares; others on a square
+    const pillarAt = (p, free) => { const n = O.pillar.r * 2; return !free && Math.abs(n - Math.round(n)) < 1e-6 && Math.round(n) % 2 === 0 ? snapCorner(p) : snapCenter(p, free); };
     // a corridor's line runs through square centres (odd widths) or along grid lines (even ones)
     const snapCorr = (p, free) => (free || O.snap === 'free' ? snapCorner(p, true) : O.width % 2 === 1 ? snapCenter(p) : snapCorner(p));
 
@@ -108,8 +113,8 @@ const OldschoolTool = (() => {
       }
       if (t === 'floor' && O.floorHow === 'paint') return { kind: 'osbrush', pts: [[round(pt.x, 3), round(pt.y, 3)]], paint: true, r: (O.brush * g()) / 2 }; // (Beta 3.26)
       if (t === 'floor') { repaint(pt); return null; }
-      if (t === 'pillar') { const p = snapCenter(pt, e.altKey); add({ kind: 'pillar', pts: [[p.x, p.y]], r: O.pillar.r * g(), round: O.pillar.round, mat: O.line.mat }); return null; }
-      if (t === 'door') return { kind: 'osdoor', a: pt, b: pt }; // (Beta 3.33: a click, or a drag along a grid line)
+      if (t === 'pillar') { const p = pillarAt(pt, e.altKey); add({ kind: 'pillar', pts: [[p.x, p.y]], r: O.pillar.r * g(), round: O.pillar.round, mat: O.line.mat }); return null; }
+      if (t === 'door' || t === 'window') return { kind: 'osdoor', a: pt, b: pt }; // (Beta 3.33: a click, or a drag along a grid line)
       if (t === 'piece') { stamp(pt); return null; }
       if (t === 'corridor' && !cut) { const p = snapCorr(pt); return { kind: 'ospath', pts: [[p.x, p.y]], cut }; }
       if (t === 'ground' && O.groundShape === 'brush') return { kind: 'osbrush', pts: [[round(pt.x, 3), round(pt.y, 3)]], ground: O.ground, r: (O.brush * g()) / 2 };
@@ -286,7 +291,7 @@ const OldschoolTool = (() => {
       return { x1: x, y1, x2: x, y2 };
     }
     function putDoor({ x1, y1, x2, y2 }) {
-      const win = O.door === 'window'; const secret = O.door === 'secret';
+      const win = O.tool === 'window'; const secret = !win && O.door === 'secret';
       const leaf = secret ? null : win ? O.windowLeaf : O.doorLeaf;
       const p = { x1: round(x1, 4), y1: round(y1, 4), x2: round(x2, 4), y2: round(y2, 4), door: secret ? 2 : 1, ...(win ? { kind: 'window' } : {}), ...(leaf && leaf !== 'wood' && leaf !== 'clear' ? { leaf } : {}) };
       // (doors it lies over go: a new door replaces them)
@@ -417,8 +422,8 @@ const OldschoolTool = (() => {
         root.append(el('rect', { x: P.x0, y: P.y0, width: P.w * g(), height: P.h * g(), fill: 'none', stroke: '#f0b44a', 'stroke-width': thin, 'stroke-dasharray': `${thin * 3} ${thin * 2}` }));
       }
       // where a click would go (pillars and doors)
-      if (pt && (!d || (d.kind === 'osdoor' && !doorSeg(d.a, d.b))) && (O.tool === 'pillar' || O.tool === 'door')) {
-        if (O.tool === 'pillar') { const q = snapCenter(pt); root.append(shapeEl({ kind: 'pillar', pts: [[q.x, q.y]], r: O.pillar.r * g(), round: O.pillar.round }, 'rgba(240,180,74,0.5)')); }
+      if (pt && (!d || (d.kind === 'osdoor' && !doorSeg(d.a, d.b))) && (O.tool === 'pillar' || O.tool === 'door' || O.tool === 'window')) {
+        if (O.tool === 'pillar') { const q = pillarAt(pt); root.append(shapeEl({ kind: 'pillar', pts: [[q.x, q.y]], r: O.pillar.r * g(), round: O.pillar.round }, 'rgba(240,180,74,0.5)')); }
         else {
           const G = grid(); const s = g(); const u = (pt.x - G.ox) / s; const v2 = (pt.y - G.oy) / s;
           const vert = Math.abs(u - Math.round(u)) <= Math.abs(v2 - Math.round(v2));
@@ -520,7 +525,7 @@ const OldschoolTool = (() => {
     async function pickTile(it) {
       if (!it) return;
       if (!it.builtin && !it.squares) { const r = await adjustGrid(it, { first: true }); if (!r) return; Object.assign(it, r); }
-      O.floor = { rel: it.rel, ...(it.rel ? {} : { path: it.path }) }; save();
+      O.floor = { rel: it.rel, ...(it.rel ? {} : { path: it.path }) }; rememberTile(O.floor); save();
       ctx.refreshPop(); drawPreview();
     }
     // Beta 3.24: a tile's grid (any floor: right-click it → Adjust grid; your own the first time it is used). Like the
@@ -609,71 +614,124 @@ const OldschoolTool = (() => {
     }
 
     // ---------- the panel ----------
+    // Beta 3.35 (Glinn's order): the tools; the choices of the tool picked (buttons first, each tool only what it uses);
+    // its tiles (the last 8 used, List … for all of them); its sliders; at the bottom the map's own settings.
+    const tileKey = (x) => (x ? x.rel || x.path : null);
+    // the floor tiles: those of the app, then those of the library
+    const floorList = () => [...Oldschool.FLOORS.map((f) => {
+      const rel = Oldschool.relOf(f); const o = lib.find((x) => x.builtin && x.rel === rel);
+      return { rel, name: f.label, url: Oldschool.tileInfo({ rel }).small, big: Oldschool.tileInfo({ rel }).url, builtin: true, squares: (o && o.squares) || f.squares, off: (o && o.off) || f.off || [0, 0], adjusted: !!(o && o.adjusted) };
+    }), ...lib.filter((x) => !x.builtin)];
+    // the last 8 used (a pick among them keeps their places; one from the list takes the oldest one's place)
+    function recentTiles() {
+      const all = floorList(); const by = new Map(all.map((x) => [tileKey(x), x]));
+      let keys = (O.recentTiles || []).map(tileKey).filter((k) => by.has(k));
+      if (O.floor && by.has(tileKey(O.floor)) && !keys.includes(tileKey(O.floor))) keys.unshift(tileKey(O.floor));
+      for (const it of all) { if (keys.length >= 8) break; if (!keys.includes(tileKey(it))) keys.push(tileKey(it)); }
+      keys = keys.slice(0, 8);
+      if (JSON.stringify(keys) !== JSON.stringify((O.recentTiles || []).map(tileKey))) { O.recentTiles = keys.map((k) => { const it = by.get(k); return it.rel ? { rel: it.rel } : { path: it.path }; }); save(); }
+      return keys.map((k) => by.get(k));
+    }
+    function rememberTile(ref) {
+      const k = tileKey(ref); const list = O.recentTiles || [];
+      if (list.some((x) => tileKey(x) === k)) return;
+      O.recentTiles = [ref.rel ? { rel: ref.rel } : { path: ref.path }, ...list].slice(0, 8); save();
+    }
+    const gridMenu = (e, it) => { e.preventDefault(); e.stopPropagation(); UI.openMenu(e.clientX, e.clientY, [{ icon: 'grid-4x4', label: 'Adjust grid', action: () => adjustGrid(it.builtin ? { ...it, url: it.big } : it) }]); };
+    // Tiles → List …: every tile (the app's in their folder, yours in theirs); click: draw with it
+    const tileListDef = () => ({
+      id: 'ostiles', title: 'Tiles', icon: 'layout-grid',
+      tips: ['Click a tile to draw with it.', 'Right-click a tile: Adjust grid (how many squares it spans, where its joints lie).'],
+      build: () => {
+        loadLib();
+        const items = () => floorList().map((it) => ({ ...it, src: it, path: it.builtin ? `tile:${it.rel}` : it.path, kind: 'image', thumb: it.builtin ? it.url : it.thumb || it.url, ...(it.builtin ? { _dirs: ['Tablescape'] } : {}) }));
+        const onMap = () => new Set((map() && map().os ? map().os.items : []).map((x) => tileKey(x.tile)).filter(Boolean));
+        const recent = () => new Set((O.recentTiles || []).map(tileKey));
+        return PickList.build({
+          bind: c().bind, items, rootLabel: 'Tiles', memKey: 'ostiles',
+          pathOf: (it) => it._dirs || PickList.pathOf(it), shortName: (it) => it.name,
+          shelves: [{ id: 'map', label: 'On this map', icon: 'map-2', has: (it) => onMap().has(tileKey(it.src)) }, { id: 'recent', label: 'Recent', icon: 'clock', has: (it) => recent().has(tileKey(it.src)) }],
+          pick: (it) => pickTile(it.src),
+          state: (it) => ({ on: tileKey(O.floor) === tileKey(it.src), tip: `${it.name}${it.squares ? ` (${it.squares} × ${it.squares} squares)` : ''}` }),
+          menu: (e, it) => gridMenu(e, it.src),
+          empty: 'No tiles yet.',
+          foot: [c().btn('From this PC …', 'folder', async () => { const r = await ts.library('import', { cat: 'tiles' }); if (r && r.ok) { libAt = 0; await loadLib(true); toast(`${r.items.length} tile${r.items.length === 1 ? '' : 's'} added`, { ms: 2000 }); } else if (r && r.error) toast(r.error, { kind: 'error' }); }, { kind: 'small', tip: 'Copy pictures from anywhere on this PC into Tiles' }),
+            c().btn('Library …', 'books', () => ctx.openLibrary(), { kind: 'small ghost os-more', tip: 'The library\'s Tiles section' })],
+        });
+      },
+    });
     function buildPop() {
-      const { slider, toggle, seg, btn, row, hint, sep, bind } = c();
+      const { slider, toggle, seg, btn, sep, bind } = c();
       loadLib();
       const m = map();
-      if (!m || !m.os) return h('div', { class: 'stack' }, hint('Draw works on Oldschool maps: Add map → Oldschool map.'));
+      if (!m || !m.os) return h('div', { class: 'stack' }, c().hint('Draw works on Oldschool maps: Add map → Oldschool map.'));
       const tools = h('div', { class: 'tiles os-tools' }, ...TOOLS.map((t) => h('button', {
         class: 'tile', dataset: { v: t.id }, 'data-tip': t.tip, 'aria-label': t.label,
         onclick: () => { O.tool = t.id; O.poly = null; save(); ctx.openPop('oldschool'); drawPreview(); },
       }, iconEl(t.icon), h('span', {}, t.label))));
       bind(() => { for (const b of tools.children) b.classList.toggle('on', b.dataset.v === O.tool); });
-      const opts = [];
       const t = O.tool;
-      if (AREA_TOOLS.includes(t)) {
-        if (t === 'brush') opts.push(slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` }));
-        opts.push(seg({ cls: 'os-level', options: [{ value: -1, label: 'Lower', icon: 'arrow-down' }, { value: 0, label: 'Floor' }, { value: 1, label: 'Raised', icon: 'arrow-up' }], get: () => O.level, set: (v) => { O.level = v; save(); } }));
-        opts.push(...mixCtl(true));
+      const area = AREA_TOOLS.includes(t);
+      const choices = []; const after = [];
+      const snap3 = () => seg({ options: [{ value: 'sq', label: 'Squares' }, { value: 'half', label: 'Half' }, { value: 'free', label: 'Free' }], get: () => O.snap, set: (v) => { O.snap = v; save(); } });
+      const snap2 = () => seg({ options: [{ value: 'sq', label: 'Squares' }, { value: 'half', label: 'Half' }], get: () => (O.snap === 'half' ? 'half' : 'sq'), set: (v) => { O.snap = v; save(); } });
+      const brush = () => slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` });
+      const madeOf = () => [h('div', { class: 'ctl-label' }, 'Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; save(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff'])];
+      if (area) {
+        choices.push(seg({ cls: 'os-level', options: [{ value: -1, label: 'Lower', icon: 'arrow-down' }, { value: 0, label: 'Floor' }, { value: 1, label: 'Raised', icon: 'arrow-up' }], get: () => O.level, set: (v) => { O.level = v; save(); } }));
+        choices.push(snap3());
+        choices.push(seg({ cls: 'seg-5', options: Oldschool.EDGES.map((e) => ({ value: e, label: EDGE_LABEL[e] })), get: () => O.edge, set: (v) => { O.edge = v; save(); ctx.openPop('oldschool'); } }));
+        const edgeMat = h('div', {}, matPicker(() => O.mats[O.edge], (v) => { O.mats[O.edge] = v; save(); }, O.edge === 'walls' ? ['stone_wall', 'dark_stone_wall', 'hedge'] : ['rock', 'cliff', 'stone_wall', 'dark_stone_wall']));
+        bind(() => { edgeMat.hidden = O.edge === 'ledge' || O.edge === 'fade'; });
+        choices.push(edgeMat);
+        if (t === 'brush') after.push(brush());
+        after.push(...mixCtl(true));
       } else if (t === 'erase') {
-        opts.push(seg({ options: [{ value: 'box', label: 'Box', icon: 'square' }, { value: 'round', label: 'Round', icon: 'circle' }, { value: 'brush', label: 'Brush', icon: 'brush' }], get: () => O.erase, set: (v) => { O.erase = v; save(); ctx.refreshPop(); } }));
-        if (O.erase === 'brush') opts.push(slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` }));
-      } else if (t === 'wall' || t === 'pillar') { // (Beta 3.29: stairs are of the picked floor)
-        if (t === 'wall') {
-          opts.push(seg({ options: [{ value: 0.25, label: 'Thin' }, { value: 0.5, label: 'Normal' }, { value: 1, label: 'Thick' }], get: () => O.line.w, set: (v) => { O.line.w = v; save(); } }));
-          opts.push(seg({ options: [{ value: 0.4, label: 'Low' }, { value: 1, label: 'Full height' }], get: () => O.line.h, set: (v) => { O.line.h = v; save(); } }));
-        }
-        if (t === 'pillar') {
-          opts.push(seg({ options: [{ value: false, label: 'Square', icon: 'square' }, { value: true, label: 'Round', icon: 'circle' }], get: () => O.pillar.round, set: (v) => { O.pillar.round = v === true || v === 'true'; save(); } }));
-          opts.push(slider({ label: 'Size', min: 0.2, max: 1.5, step: 0.05, get: () => O.pillar.r * 2, set: (v) => { O.pillar.r = v / 2; save(); }, fmt: (v) => `${round(v, 2)} square${v === 1 ? '' : 's'}` }));
-        }
-        opts.push(h('div', { class: 'ctl-label' }, 'Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; save(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff']));
+        choices.push(seg({ options: [{ value: 'box', label: 'Box', icon: 'square' }, { value: 'round', label: 'Round', icon: 'circle' }, { value: 'brush', label: 'Brush', icon: 'brush' }], get: () => O.erase, set: (v) => { O.erase = v; save(); ctx.openPop('oldschool'); } }));
+        if (O.erase === 'brush') after.push(brush()); else choices.push(snap3());
+      } else if (t === 'wall') {
+        choices.push(seg({ options: [{ value: 0.25, label: 'Thin' }, { value: 0.5, label: 'Normal' }, { value: 1, label: 'Thick' }], get: () => O.line.w, set: (v) => { O.line.w = v; save(); } }));
+        choices.push(seg({ options: [{ value: 0.4, label: 'Low' }, { value: 1, label: 'Full height' }], get: () => O.line.h, set: (v) => { O.line.h = v; save(); } }));
+        choices.push(snap3(), ...madeOf());
+      } else if (t === 'pillar') {
+        choices.push(seg({ options: [{ value: false, label: 'Square', icon: 'square' }, { value: true, label: 'Round', icon: 'circle' }], get: () => O.pillar.round, set: (v) => { O.pillar.round = v === true || v === 'true'; save(); } }));
+        choices.push(snap3(), ...madeOf());
+        // (Beta 3.35: up to 8 squares; 2, 4, 6 and 8 sit on a grid corner)
+        after.push(slider({ label: 'Size', min: 0.2, max: 8, step: 0.1, get: () => O.pillar.r * 2, set: (v) => { O.pillar.r = round(v / 2, 3); save(); }, fmt: (v) => `${round(v, 1)} square${v === 1 ? '' : 's'}` }));
+      } else if (t === 'stairs') {
+        choices.push(snap3());
       } else if (t === 'door') {
-        opts.push(seg({ options: [{ value: 'door', label: 'Door', icon: 'door' }, { value: 'secret', label: 'Secret', icon: 'eye-off' }, { value: 'window', label: 'Window', icon: 'window' }], get: () => O.door, set: (v) => { O.door = v; save(); ctx.refreshPop(); } }));
-        // (Beta 3.33) what fills it
-        if (O.door === 'door') opts.push(seg({ cls: 'seg-4', options: [{ value: 'wood', label: 'Wood' }, { value: 'metal', label: 'Iron' }, { value: 'stone', label: 'Stone' }, { value: 'portcullis', label: 'Portcullis' }], get: () => O.doorLeaf, set: (v) => { O.doorLeaf = v; save(); } }));
-        if (O.door === 'window') opts.push(seg({ cls: 'seg-5', options: [{ value: 'clear', label: 'Glass' }, { value: 'leaded', label: 'Leaded' }, { value: 'stained', label: 'Stained' }, { value: 'shutter', label: 'Shutters' }, { value: 'bars', label: 'Bars' }], get: () => O.windowLeaf, set: (v) => { O.windowLeaf = v; save(); } }));
+        choices.push(seg({ options: [{ value: 'door', label: 'Door', icon: 'door' }, { value: 'secret', label: 'Secret', icon: 'eye-off' }], get: () => (O.door === 'secret' ? 'secret' : 'door'), set: (v) => { O.door = v; save(); paintLeaf(); } }));
+        const leafSeg = seg({ cls: 'seg-4 os-leaf', options: [{ value: 'wood', label: 'Wood' }, { value: 'metal', label: 'Iron' }, { value: 'stone', label: 'Stone' }, { value: 'portcullis', label: 'Portcullis' }], get: () => O.doorLeaf, set: (v) => { O.doorLeaf = v; save(); } });
+        const paintLeaf = () => { leafSeg.hidden = O.door === 'secret'; };
+        bind(paintLeaf);
+        choices.push(leafSeg, snap2());
+      } else if (t === 'window') {
+        choices.push(seg({ cls: 'seg-5 os-leaf', options: [{ value: 'clear', label: 'Glass' }, { value: 'leaded', label: 'Leaded' }, { value: 'stained', label: 'Stained' }, { value: 'shutter', label: 'Shutters' }, { value: 'bars', label: 'Bars' }], get: () => O.windowLeaf, set: (v) => { O.windowLeaf = v; save(); } }));
+        choices.push(snap2());
       }
-      const snapSeg = seg({ options: [{ value: 'sq', label: 'Squares' }, { value: 'half', label: 'Half' }, { value: 'free', label: 'Free' }], get: () => O.snap, set: (v) => { O.snap = v; save(); } });
-      // the floor tiles: those of the app, then those of the library
-      const floorBox = h('div', { class: 'living-pick os-floors' });
-      const floorList = () => [...Oldschool.FLOORS.map((f) => {
-        const rel = Oldschool.relOf(f); const o = lib.find((x) => x.builtin && x.rel === rel);
-        return { rel, name: f.label, url: Oldschool.tileInfo({ rel }).small, big: Oldschool.tileInfo({ rel }).url, builtin: true, squares: (o && o.squares) || f.squares, off: (o && o.off) || f.off || [0, 0], adjusted: !!(o && o.adjusted) };
-      }), ...lib.filter((x) => !x.builtin)];
+      // its tiles: the last 8 used, in two rows; List … has them all
+      const usesTiles = area || t === 'stairs';
+      const floorBox = h('div', { class: 'tiles os-floors' });
       const paintFloors = () => {
-        const list = floorList();
-        const sig = list.map((x) => `${x.rel || x.path}:${x.squares}:${x.off}`).join('|');
+        const list = recentTiles();
+        const sig = list.map((x) => `${tileKey(x)}:${x.squares}:${x.off}`).join('|');
         if (floorBox.dataset.sig !== sig) {
           floorBox.dataset.sig = sig;
-          floorBox.replaceChildren(h('div', { class: 'tiles living-tiles' }, ...list.map((it) => h('button', {
-            class: 'tile', dataset: { v: it.rel || it.path }, 'data-tip': `${it.name}${it.squares ? ` (${it.squares} × ${it.squares} squares)` : ''}`, 'aria-label': it.name,
-            onclick: () => pickTile(it),
-            // (Beta 3.24) right-click: its grid
-            oncontextmenu: (e) => { e.preventDefault(); e.stopPropagation(); UI.openMenu(e.clientX, e.clientY, [{ icon: 'grid-4x4', label: 'Adjust grid', action: () => adjustGrid(it.builtin ? { ...it, url: it.big } : it) }]); },
-          }, h('img', { src: it.builtin ? it.url : it.thumb || it.url, alt: '', draggable: false }), h('span', {}, it.name))),
-          h('button', { class: 'tile os-more', 'data-tip': 'Your own tiles: the library\'s Tiles section', onclick: () => ctx.openLibrary() }, iconEl('plus'), h('span', {}, 'More'))));
+          floorBox.replaceChildren(...list.map((it) => h('button', {
+            class: 'tile', dataset: { v: tileKey(it) }, 'data-tip': `${it.name}${it.squares ? ` (${it.squares} × ${it.squares} squares)` : ''}`, 'aria-label': it.name,
+            onclick: () => pickTile(it), oncontextmenu: (e) => gridMenu(e, it), // (Beta 3.24) right-click: its grid
+          }, h('img', { src: it.builtin ? it.url : it.thumb || it.url, alt: '', draggable: false }), h('span', {}, it.name))));
         }
-        const cur = O.floor ? O.floor.rel || O.floor.path : null;
+        const cur = tileKey(O.floor);
         for (const b of floorBox.querySelectorAll('.tile[data-v]')) b.classList.toggle('on', b.dataset.v === cur);
       };
-      bind(paintFloors);
-      const edgeSeg = seg({ cls: 'seg-5', options: Oldschool.EDGES.map((e) => ({ value: e, label: EDGE_LABEL[e] })), get: () => O.edge, set: (v) => { O.edge = v; save(); ctx.refreshPop(); } });
-      const edgeMat = h('div', {}, matPicker(() => O.mats[O.edge], (v) => { O.mats[O.edge] = v; save(); }, O.edge === 'walls' ? ['stone_wall', 'dark_stone_wall', 'hedge'] : ['rock', 'cliff', 'stone_wall', 'dark_stone_wall']));
-      bind(() => { edgeMat.hidden = O.edge === 'ledge' || O.edge === 'fade'; });
-      const light = slider({ label: 'Light from', min: 0, max: 355, step: 5, get: () => (360 - (map().os.sun ?? 135) + 90) % 360, set: (v, k) => ctx.send(k || 'os-sun', 'os.set', { sun: (360 - v + 90 + 360) % 360 }), fmt: (v) => ['above', 'top right', 'the right', 'bottom right', 'below', 'bottom left', 'the left', 'top left'][Math.round(v / 45) % 8] });
-      // Beta 3.25: how long the shadows are (short by default: calm on the table)
-      const shadows = seg({ cls: 'os-shadows', options: [{ value: 'short', label: 'Short' }, { value: 'long', label: 'Long' }, { value: 'off', label: 'Off' }], get: () => map().os.shadows || 'short', set: (v) => cmd('os.set', { shadows: v }) });
+      const listBtn = btn('List …', 'layout-grid', () => ctx.togglePanel(tileListDef()), { kind: 'wide os-tile-list', tip: 'All tiles: the app\'s and your own' });
+      if (usesTiles) { bind(paintFloors); bind(() => listBtn.classList.toggle('on', !!ctx.panelOpen('ostiles'))); }
+      // the map's own settings (Beta 3.35: the light's dial, how long the shadows are, shadows all around for caves)
+      const pctOff = (v) => (v > 0 ? `${Math.round(v * 100)} %` : 'off');
+      const shadowLen = slider({ label: 'Shadow length', min: 0, max: 1, step: 0.05, get: () => Oldschool.shadowOf(map().os).len, set: (v, k) => ctx.send(k || 'os-shlen', 'os.set', { shadowLen: v }), fmt: pctOff });
+      const shadowAll = slider({ label: 'Shadows all around', min: 0, max: 1, step: 0.05, get: () => Oldschool.shadowOf(map().os).all, set: (v, k) => ctx.send(k || 'os-shall', 'os.set', { shadowAll: v }), fmt: pctOff });
       const sight = toggle({ label: 'Walls for sight follow the drawing', get: () => map().os.sight !== false, set: (v) => cmd('os.set', { sight: v }) });
       const st = h('div', { class: 'row os-status' });
       bind(() => {
@@ -682,10 +740,33 @@ const OldschoolTool = (() => {
         if (st.dataset.t === txt) return; st.dataset.t = txt;
         st.replaceChildren(h('span', { class: 'grow hint' }, txt), btn('Clear', 'trash', async () => { if (!map().os.items.length) return; const r = await cmd('os.clear', {}); if (r && r.ok) toast('Drawing cleared', { undo: () => cmd('history.undo') }); }, { kind: 'small', tip: 'Take everything drawn away (undo brings it back)' }));
       });
-      return h('div', { class: 'stack' }, tools, ...opts, snapSeg, sep(),
-        h('div', { class: 'ctl-label' }, 'Floor'), floorBox,
-        h('div', { class: 'ctl-label' }, 'Edge'), edgeSeg, edgeMat,
-        sep(), light, h('div', { class: 'ctl-label' }, 'Shadows'), shadows, sight, st);
+      return h('div', { class: 'stack' }, tools, ...choices,
+        ...(usesTiles ? [sep(), h('div', { class: 'ctl-label' }, 'Tiles'), floorBox, listBtn] : []),
+        ...(after.length ? [sep(), ...after] : []),
+        sep(), h('div', { class: 'ctl-label os-head' }, 'Map settings'), sunDial(), shadowLen, shadowAll, sight, st);
+    }
+    // Beta 3.35: where the light comes from, as a dial: drag the sun round it
+    function sunDial() {
+      const { bind } = c();
+      const NAMES = ['the right', 'top right', 'above', 'top left', 'the left', 'bottom left', 'below', 'bottom right'];
+      const knob = h('span', { class: 'os-sun-knob' }, iconEl('sun'));
+      const dial = h('div', { class: 'os-sun-dial', role: 'slider', tabindex: '0', 'aria-label': 'Light from', 'data-tip': 'Drag the sun round' }, h('i', { class: 'os-sun-hub' }), knob);
+      const out = h('output');
+      const key = `os-sun-${Math.random().toString(36).slice(2, 6)}`;
+      let held = null; // (while it is dragged: the angle shown, before the map has it)
+      const paint = () => {
+        const v = held ?? (map() && map().os ? map().os.sun ?? 135 : 135); const a = (v * Math.PI) / 180; const R = 25;
+        knob.style.transform = `translate(${(Math.cos(a) * R).toFixed(1)}px, ${(-Math.sin(a) * R).toFixed(1)}px)`;
+        out.textContent = NAMES[Math.round(v / 45) % 8]; dial.setAttribute('aria-valuenow', String(v));
+      };
+      const setSun = (v) => { v = (((Math.round(v / 5) * 5) % 360) + 360) % 360; held = v; paint(); ctx.send(key, 'os.set', { sun: v }); };
+      const from = (e) => { const r = dial.getBoundingClientRect(); setSun((Math.atan2(-(e.clientY - (r.top + r.height / 2)), e.clientX - (r.left + r.width / 2)) * 180) / Math.PI); };
+      dial.addEventListener('pointerdown', (e) => { e.preventDefault(); dial.setPointerCapture(e.pointerId); from(e); dial.onpointermove = from; });
+      const done = () => { dial.onpointermove = null; held = null; };
+      dial.addEventListener('pointerup', done); dial.addEventListener('pointercancel', done);
+      dial.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setSun((map().os.sun ?? 135) + (e.key === 'ArrowLeft' ? 15 : -15)); held = null; } });
+      bind(paint);
+      return h('div', { class: 'ctl os-sun-row' }, h('span', { class: 'ctl-label' }, 'Light from'), dial, out);
     }
     // Beta 3.27: how a new floor (or a paint stroke) mixes into the floor already there, by opacity: its width (a floor;
     // 0: not at all), how uneven the line is, how much the squares along it are pushed in or out

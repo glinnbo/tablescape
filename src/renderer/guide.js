@@ -24,6 +24,12 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.35', [
+      'Draw panel in a new order: the tool\'s choices first (each tool shows only what it uses), then its tiles, the last 8 used in two rows with List … for all of them (folders, On this map, Recent), then its sliders; the map\'s own settings at the bottom',
+      'Map settings: where the light comes from on a dial (drag the sun round it), Shadow length on a slider (instead of Short / Long / Off), and Shadows all around: every wall and pillar darkens the floor near it, for caves',
+      'Doors and windows: twice as thick; Window is a tool of its own; picking Wood, Iron, Stone or Portcullis works again (the choices did not follow Door / Window before)',
+      'Pillars up to 8 squares; 2, 4, 6 and 8 squares sit on a grid corner so they cover whole squares',
+    ]],
     ['Beta 3.34', [
       'Oldschool maps, doors without a frame: just the door. Where a door lies on a wall the wall opens, the floor runs through and the cut ends of the wall shade the doorway, so an open door or a raised portcullis shows the way through. A window sits in a niche of the wall: the wall\'s own stone, deeper where the window sits, with a stop at each end. Wall lines stay whole under windows and secret doors',
     ]],

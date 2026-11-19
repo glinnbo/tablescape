@@ -24,18 +24,18 @@ const FOG_BLUR = 6; // the fog's soft edge in table pixels (drawn into the fog p
 const T0 = 1.7e9; // seconds; keeps animation time small so the trig stays smooth
 
 // Beta 3.33: an Oldschool map's door and window leaves, from the pictures in doors/ (made at 140 dots a square):
-// strips of any length (an end, the middle as often as it fits, the other end), slimmed to about 0.12 squares of
-// body; glass a little brighter, so it reads as a window. parts(): the leaves of one opening, in map inches.
+// strips of any length (an end, the middle as often as it fits, the other end), about 0.24 squares of body (Beta 3.35:
+// twice the 0.12 of 3.33); glass a little brighter, so it reads as a window. parts(): the leaves of one opening, in map inches.
 const OsLeaves = (() => {
   const DIR = new URL('doors/', document.baseURI).href;
   const leafOf = (pre, more) => ({ pre, ends: ['hinge', 'latch'], ...more });
-  const DOOR = { h: 40, end: 18, piv: 5, k: 0.6 }; const WIN = { h: 22, end: 12, piv: 4, k: 0.745 };
+  const DOOR = { h: 40, end: 18, piv: 5, k: 1.2 }; const WIN = { h: 22, end: 12, piv: 4, k: 1.49 };
   const KIND = {
     wood: leafOf('leaf_wood', DOOR), metal: leafOf('leaf_metal', DOOR), stone: leafOf('leaf_stone', DOOR),
-    portcullis: { pre: 'portcullis', ends: ['end_left', 'end_right'], h: 30, end: 14, k: 0.6, lift: true },
+    portcullis: { pre: 'portcullis', ends: ['end_left', 'end_right'], h: 30, end: 14, k: 1.2, lift: true },
     clear: leafOf('glass_clear', { ...WIN, glass: true }), leaded: leafOf('glass_leaded', { ...WIN, glass: true }), stained: leafOf('glass_stained', { ...WIN, glass: true }),
     shutter: leafOf('shutter_wood', WIN),
-    bars: { pre: 'window_bars', ends: ['end_left', 'end_right'], h: 22, end: 12, k: 0.745, fixed: true },
+    bars: { pre: 'window_bars', ends: ['end_left', 'end_right'], h: 22, end: 12, k: 1.49, fixed: true },
   };
   const imgs = new Map(); let loading = null; const waiting = new Set();
   const names = () => Object.values(KIND).flatMap((K) => [`${K.pre}_${K.ends[0]}`, `${K.pre}_middle`, `${K.pre}_${K.ends[1]}`]);

@@ -3857,6 +3857,7 @@ const Play = (() => {
     ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
     refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), setTool: (t) => setTool(t),
     openLibrary: () => Drawer.open({ cat: 'tiles', purpose: 'tile', back: { pop: 'oldschool', tool: 'oldschool' } }),
+    togglePanel: (def) => { Floats.toggle(def); renderRail(); }, panelOpen: (id) => !!(Floats && Floats.isOpen(id)), // (Beta 3.35: Draw → Tiles → List)
   });
   const Walls = WallsTool.create({
     ui, cmd, undoable, send, pending, state: () => S, view: () => view, popId: () => popId,

@@ -66,8 +66,8 @@ function mixOf(it) {
   if (legacy) return { mixW: it.mix === 'off' ? 0 : MIX_DEFAULT.mixW, mixU: MIX_DEFAULT.mixU, mixT: MIX_DEFAULT.mixT };
   return { mixW: Math.round(osNum(it.mixW, MIX_DEFAULT.mixW, 0, 3) * 2) / 2, mixU: r3(osNum(it.mixU, MIX_DEFAULT.mixU, 0, 1)), mixT: r3(osNum(it.mixT, MIX_DEFAULT.mixT, 0, 1)) };
 }
-function defaultOs() { return { v: 1, items: [], doors: [], sun: 135, shadows: 'short', sight: true }; } // (Beta 3.25: the depth view of 3.23 is gone; shadows)
-const SHADOW_KINDS = ['short', 'long', 'off'];
+function defaultOs() { return { v: 1, items: [], doors: [], sun: 135, shadowLen: 0.35, shadowAll: 0, sight: true }; } // (Beta 3.25: the depth view of 3.23 is gone; shadows. Beta 3.35: their length and all around)
+const SHADOW_LEN = { short: 0.35, long: 0.75, off: 0 }; // (Beta 3.35: what short / long / off of before became)
 const osNum = (v, d, a, b) => { const x = Number(v); return Number.isFinite(x) ? Math.min(b, Math.max(a, x)) : d; };
 const ptsOf = (pts) => (Array.isArray(pts) ? pts.filter((q) => Array.isArray(q) && Number.isFinite(Number(q[0])) && Number.isFinite(Number(q[1]))).slice(0, 4000).map((q) => [r3(Number(q[0])), r3(Number(q[1]))]) : []);
 const refOf = (t) => (t && (t.rel || t.path) ? { ...(t.rel ? { rel: String(t.rel) } : {}), ...(t.path ? { path: String(t.path) } : {}) } : null);
@@ -109,7 +109,8 @@ function cleanOs(o) {
     return { id: typeof d.id === 'string' && d.id ? d.id : newId('od'), x1: r3(+d.x1), y1: r3(+d.y1), x2: r3(+d.x2), y2: r3(+d.y2), door: d.door === 2 ? 2 : 1, ...(win ? { kind: 'window' } : {}), ...(leaf ? { leaf } : {}) };
   });
   out.sun = Math.round(osNum(o.sun, 135, 0, 359));
-  out.shadows = SHADOW_KINDS.includes(o.shadows) ? o.shadows : 'short';
+  out.shadowLen = r3(osNum(o.shadowLen, SHADOW_LEN[o.shadows] ?? 0.35, 0, 1));
+  out.shadowAll = r3(osNum(o.shadowAll, 0, 0, 1));
   out.sight = o.sight !== false;
   return out;
 }
@@ -1091,7 +1092,9 @@ function apply(map, type, p, media) {
       if (!map.os) return { changed: null };
       if ('sun' in p) map.os.sun = Math.round(osNum(p.sun, 135, 0, 359));
       if ('sight' in p) map.os.sight = !!p.sight;
-      if ('shadows' in p) map.os.shadows = SHADOW_KINDS.includes(p.shadows) ? p.shadows : 'short'; // (Beta 3.25)
+      if ('shadows' in p) map.os.shadowLen = SHADOW_LEN[p.shadows] ?? 0.35; // (Beta 3.25; 3.35: a length now)
+      if ('shadowLen' in p) map.os.shadowLen = r3(osNum(p.shadowLen, 0.35, 0, 1));
+      if ('shadowAll' in p) map.os.shadowAll = r3(osNum(p.shadowAll, 0, 0, 1));
       return { changed: 'all' };
     }
     case 'os.clear': {
