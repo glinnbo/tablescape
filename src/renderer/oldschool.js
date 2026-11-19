@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // (2.6) and darker corners of what it raised (stairs count as floor); a wall line or pillar only its shadows and corners
   const HALO = 6.6; const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 14; // (14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 15; // (15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -140,6 +140,14 @@ const Oldschool = (() => {
     if (erase) g.globalCompositeOperation = 'destination-out';
     if (it.shape === 'path' || it.shape === 'brush') stroke(g, it, T, k, erase ? '#000' : style);
     else { g.fillStyle = erase ? '#000' : style; g.fill(shapePath(it, T)); }
+    g.restore();
+  }
+  // Beta 3.29: a Fade floor's tile goes on beyond its edge (the shaders fade it out there): the area grown by R dots
+  const FADE_R = 1.7; // (squares: a little more than the fade's square and a half)
+  function paintHalo(g, it, T, k, style, R) {
+    g.save();
+    if (it.shape === 'path' || it.shape === 'brush') stroke(g, { ...it, shape: 'brush', r: it.r + R / k }, T, k, style);
+    else { const p = shapePath(it, T); g.fillStyle = style; g.strokeStyle = style; g.lineWidth = 2 * R; g.lineJoin = 'round'; g.fill(p); g.stroke(p); }
     g.restore();
   }
   // wall lines and pillars
@@ -362,7 +370,8 @@ void main(){
 
   // the heights: floors at their level (a ledge's rim raised), built walls, rock and cliffs outside, wall lines and
   // pillars, stairs. Heights are in dots; stored as 16 bits (red, green) around 32768, with what the dot is in blue
-  // (0 void, 1 floor, 2 wall band, 3 rock, 4 cliff, 5 wall line or pillar, 6 stairs, 7 ledge rim) and its material in alpha.
+  // (0 void, 1 floor, 2 wall band, 3 rock, 4 cliff, 5 wall line or pillar, 6 stairs, 7 ledge rim, 8 a Fade floor beyond its
+// edge) and its material in alpha.
   const FS_HEIGHT = `#version 300 es
 precision highp float; in vec2 v_uv; out vec4 o;
 uniform sampler2D floorT, attrT, solidT, stairsT, outJ, inJ, solJ, mtl0, mtl1, mtl2, mtl3, mtl4;
@@ -417,6 +426,8 @@ void main(){
     vec3 c = matCol(mi, px);
     if (dOut > 3.2 * P) { h = base - 3.0 * P; kind = 0.0; }
     else { h = base - dOut * 0.9 + lum(c) * 0.3 * P + noise(q / 0.4) * 0.15 * P; kind = 4.0; }
+  } else if (edge == 5 && dOut < 1.6 * P) { // (Beta 3.29) Fade: the floor's tile beyond its edge, flat, fading out
+    h = base; kind = 8.0;
   } else { // ledge: nothing beyond it but darkness
     h = base - 3.0 * P; kind = 0.0;
   }
@@ -464,16 +475,18 @@ vec3 cliffCol(vec3 c, vec2 q, float dOut, float P, float light, vec3 dark){
   return mix(f, dark, smoothstep(0.9 * R, R + 0.7 * P, dOut));
 }
 float cliffAlpha(vec2 q, float dOut, float P){ float R = cliffR(q, P); return 1.0 - smoothstep(R + 0.35 * P, R + 0.9 * P, dOut); }
-// Beta 3.28: Fade: the floor fades into the dark over a square and a half from its edge, a little unevenly
-float fadeAlpha(vec2 q, float dIn, float P){
-  float d = dIn + ((noise(q / 0.9) - 0.5) * 0.6 + (noise(q / 0.3) - 0.5) * 0.25) * P;
-  return smoothstep(-0.05 * P, 1.5 * P, d);
+// Fade (Beta 3.28; 3.29 outward and softer): the floor's tile goes on beyond its edge and fades into the dark over a
+// square and a half, on a soft curve, a little unevenly (not at the edge itself: no seam there)
+float fadeOut(vec2 q, float dOut, float P){
+  float d = dOut + (noise(q / 1.3) - 0.5) * 0.4 * P * smoothstep(0.0, 0.6 * P, dOut);
+  float t = clamp(d / (1.5 * P), 0.0, 1.0);
+  return exp(-2.8 * t * t) * (1.0 - smoothstep(0.75, 1.0, t)); // (gentle at the edge, a long tail, nothing at 1½)
 }
 `;
   // light, shadows and darker corners
   const FS_SHADE = `#version 300 es
 precision highp float; in vec2 v_uv; layout(location = 0) out vec4 o; layout(location = 1) out vec4 o2;
-uniform sampler2D hT, floorT, attrT, outJ, inJ, mtl0, mtl1, mtl2, mtl3, mtl4;
+uniform sampler2D hT, floorT, attrT, haloT, outJ, inJ, mtl0, mtl1, mtl2, mtl3, mtl4;
 uniform vec2 size; uniform float P; uniform vec2 org; uniform float matSq[5]; uniform vec3 L; uniform vec3 voidC; uniform float shT; uniform float shK;
 vec2 dec(vec4 c){ c = floor(c * 255.0 + 0.5); return vec2(c.r*256.0 + c.g, c.b*256.0 + c.a); }
 ${LOOK}
@@ -494,6 +507,7 @@ void main(){
   // what it looks like
   vec3 alb;
   if (kind == 1.0 || kind == 6.0 || kind == 7.0) alb = fl.rgb;
+  else if (kind == 8.0) alb = floorLook(texelFetch(haloT, ip, 0).rgb, q, 1e5, 5, P);
   else if (kind == 0.0) alb = voidC;
   else alb = matCol(mi, px);
   if (kind == 7.0) alb = alb * 1.12 + 0.025; // the ledge's rim: the floor, a little lighter
@@ -532,7 +546,7 @@ void main(){
   // the cliff fades into darkness; beyond the drawing the picture is see-through (the table's own dark shows there)
   float a = 1.0;
   if (kind == 4.0) { c = cliffCol(alb, q, dOut, P, light, voidC); a = cliffAlpha(q, dOut, P); }
-  if ((kind == 1.0 || kind == 6.0) && fe == 5) { float fa = fadeAlpha(q, dIn, P); c *= 0.55 + 0.45 * fa; a = fa; }
+  if (kind == 8.0) a = fadeOut(q, dOut, P) * texelFetch(haloT, ip, 0).a;
   if (kind == 0.0) { c = voidC; a = 0.0; }
   o = vec4(clamp(c, 0.0, 1.0), a);
 }`;
@@ -542,7 +556,7 @@ void main(){
   // base (it changes slowly, so it is smooth when stretched).
   const FS_SHARP = `#version 300 es
 precision highp float; in vec2 v_uv; out vec4 o;
-uniform sampler2D floorH, solidH, outJ, inJ, attrT, lightT, mtl0, mtl1, mtl2, mtl3, mtl4;
+uniform sampler2D floorH, solidH, haloH, outJ, inJ, attrT, lightT, mtl0, mtl1, mtl2, mtl3, mtl4;
 uniform vec2 size; uniform vec2 tileO; uniform vec2 loSize; uniform vec2 orgLo; uniform float s; uniform float P; uniform float matSq[5]; uniform vec3 voidC;
 vec2 dec(vec4 c){ c = floor(c * 255.0 + 0.5); return vec2(c.r*256.0 + c.g, c.b*256.0 + c.a); }
 ${LOOK}
@@ -576,6 +590,8 @@ void main(){
     if (dOut <= R) { cOut = matCol(mi, q); aOut = 1.0; }
   } else if (edge == 4) {
     if (dOut <= 3.2 * P) { cOut = matCol(mi, q); aOut = cliffAlpha(q, dOut, P); }
+  } else if (edge == 5) { // (Beta 3.29) Fade: its tile beyond the edge, fading out
+    if (dOut < 1.6 * P) { vec4 hc = texelFetch(haloH, ip, 0); aOut = fadeOut(q, dOut, P) * hc.a; cOut = floorLook(hc.rgb, q, 1e5, 5, P); }
   }
   // the floor (a ledge's rim a little lighter)
   vec3 cIn = fl.rgb;
@@ -585,8 +601,7 @@ void main(){
   vec2 lu = lo / loSize; vec2 e = 0.7 / loSize;
   float li = 2.0 * (2.0 * texture(lightT, lu).r + texture(lightT, lu + e).r + texture(lightT, lu - e).r + texture(lightT, lu + vec2(e.x, -e.y)).r + texture(lightT, lu + vec2(-e.x, e.y)).r) / 6.0;
   cOut = edge == 4 ? cliffCol(cOut, q, dOut, P, li, voidC) : cOut * li;
-  float aIn = 1.0; if (edge == 5) { aIn = fadeAlpha(q, dIn, P); cIn *= 0.55 + 0.45 * aIn; }
-  vec3 col = mix(cOut, cIn * li, fl.a); float a = mix(aOut, aIn, fl.a);
+  vec3 col = mix(cOut, cIn * li, fl.a); float a = mix(aOut, 1.0, fl.a);
   // wall lines and pillars: a dark edge, and a shadow at their foot
   int ms = clamp(int(floor(so.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
   float r1 = max(1.5, 0.025 * P); float r2 = max(2.0, 0.08 * P);
@@ -710,58 +725,80 @@ void main(){
     const fd = Fb.getContext('2d', CPU).getImageData(0, 0, nw, nh).data;
     const bg = Hb.getContext('2d', CPU); const Bc = Hb;
     const img = bg.getImageData(0, 0, nw, nh); const d = img.data;
-    const AL = new Float32Array(nw * nh); const BL = new Float32Array(nw * nh); // (the mask and the bell, for the joints)
+    const N = nw * nh; const AL0 = new Float32Array(N); const BE = new Float32Array(N); const BJ = new Float32Array(N); // (the mask before rule 3; how near the line, for squares and, reaching further, for joints)
     for (let v = 0; v < nh; v++) {
       const gy = (ly0 + (v + 0.5) * ds - org[1]) / P;
       for (let u = 0; u < nw; u++) {
-        const i = (v * nw + u) * 4; const gx = (lx0 + (u + 0.5) * ds - org[0]) / P;
-        const f = fd[i + 3] / 255; const s0 = f > 0.02 ? Math.min(1, d[i + 3] / 255 / f) : 0;
-        // (2) the line, uneven: a slow wave (two scales) moves it in and out
+        const i = v * nw + u; const gx = (lx0 + (u + 0.5) * ds - org[0]) / P;
+        const f = fd[i * 4 + 3] / 255; const s0 = f > 0.02 ? Math.min(1, d[i * 4 + 3] / 255 / f) : 0;
+        // (2) the line, uneven: a slow wave (two scales) moves it in and out (Beta 3.29: within the soft band only, so
+        // the floors stay whole away from it)
         const wave = (vnoise(gx / 2.4 + 3.1, gy / 2.4 + 7.7) - 0.5) * 2 + (vnoise(gx / 0.9 + 1.3, gy / 0.9 + 4.2) - 0.5) * 0.6;
-        let e = s0 + wave * U * 0.42;
-        const e0 = Math.min(1, Math.max(0, e));
-        // (3) near the line, each square a push of its own: Beta 3.28, half the squares change inside (here), along the
-        // joints of the others the other floor shows (below)
-        const bell = Math.min(1, 4 * s0 * (1 - s0) * 1.6);
-        const sx = Math.floor(gx); const sy = Math.floor(gy);
-        if (h2(sx + 0.13, sy + 0.29) < 0.5) e += (h2(sx + 0.37, sy + 0.71) - 0.5) * 2 * Tl * 0.5 * bell;
-        const al = Math.min(1, Math.max(0, (e - 0.5) * 1.25 + 0.5));
-        d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = Math.round(al * 255);
-        AL[i >> 2] = al; BL[i >> 2] = Math.min(bell, 4 * e0 * (1 - e0) * 1.6); // (near the line as drawn and as it shows)
+        const e0 = Math.min(1, Math.max(0, s0 + wave * U * 0.42 * Math.min(1, 10 * s0 * (1 - s0))));
+        AL0[i] = Math.min(1, Math.max(0, (e0 - 0.5) * 1.25 + 0.5));
+        BE[i] = Math.min(1, 4 * e0 * (1 - e0) * 1.6); // (1 on the line as it shows, 0 away from it)
+      }
+    }
+    // the joints reach about a square further than the band, into the floors on either side (fading with the distance):
+    // the band, grown softly (a maximum weighted by distance, row by row, then column by column)
+    {
+      const RJ = 8; const span = Math.ceil(RJ * 1.5); const wt = []; for (let o = -span; o <= span; o++) wt.push(Math.exp(-((o / RJ) ** 2)));
+      const tmp = new Float32Array(N);
+      for (let v = 0; v < nh; v++) for (let u = 0; u < nw; u++) { let m = 0; for (let o = -span; o <= span; o++) { const uu = u + o; if (uu < 0 || uu >= nw) continue; const x = BE[v * nw + uu] * wt[o + span]; if (x > m) m = x; } tmp[v * nw + u] = m; }
+      for (let v = 0; v < nh; v++) for (let u = 0; u < nw; u++) { let m = 0; for (let o = -span; o <= span; o++) { const vv = v + o; if (vv < 0 || vv >= nh) continue; const x = tmp[vv * nw + u] * wt[o + span]; if (x > m) m = x; } BJ[v * nw + u] = m; }
+    }
+    // (3) Beta 3.29, Glinn's two patterns near the line, as many as Tiled says: whole squares that fill with the other
+    // floor (mostly full, some half: "purple"), and the joints, soft glows of the other floor along the grid lines that
+    // fade out across and along them and add up where they meet ("green")
+    const at = (gx, gy) => { const u = Math.round((org[0] + gx * P - lx0) / ds - 0.5); const v = Math.round((org[1] + gy * P - ly0) / ds - 0.5); return u < 0 || v < 0 || u >= nw || v >= nh ? -1 : v * nw + u; };
+    const segs = new Map();
+    const joint = (vert, X, Y) => { // the joint from grid corner X, Y one square down (vert) or right: its glow, + new, - old
+      const key = `${vert ? 'v' : 'h'}${X},${Y}`; let a = segs.get(key);
+      if (a !== undefined) return a;
+      a = 0;
+      const j = at(vert ? X : X + 0.5, vert ? Y + 0.5 : Y);
+      if (j >= 0 && BJ[j] > 0.02 && h2(X * 1.31 + (vert ? 0.17 : 0.59), Y * 0.87 + (vert ? 0.43 : 0.11)) < Tl * 0.9 * BJ[j]) {
+        const st = (0.65 + 0.35 * h2(X + 0.61, Y + (vert ? 0.83 : 0.27))) * (0.6 + 0.4 * Tl) * (0.4 + 0.6 * BJ[j]);
+        a = AL0[j] < 0.5 ? st : -st;
+      }
+      segs.set(key, a); return a;
+    };
+    const SG = 0.22; // (across: about a third of a square each side)
+    const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const cap = (t) => ss(-0.35, 0.25, t) * (1 - ss(0.75, 1.35, t)); // (along: soft past its ends, so joints that meet add up)
+    for (let v = 0; v < nh; v++) {
+      const gy = (ly0 + (v + 0.5) * ds - org[1]) / P;
+      for (let u = 0; u < nw; u++) {
+        const i = v * nw + u; const gx = (lx0 + (u + 0.5) * ds - org[0]) / P;
+        let al = AL0[i];
+        if (Tl > 0) {
+          const sx = Math.floor(gx); const sy = Math.floor(gy);
+          const c = at(sx + 0.5, sy + 0.5);
+          if (c >= 0 && h2(sx + 0.13, sy + 0.29) < Tl * 0.5 * BE[c]) { // purple: the square fills
+            const fill = h2(sx + 0.37, sy + 0.71) < 0.7 ? 1 : 0.5;
+            al = AL0[c] < 0.5 ? Math.max(al, fill) : Math.min(al, 1 - fill);
+          }
+          let gp = 0; let gn = 0; // green: the joints around
+          for (let X = sx; X <= sx + 1; X++) {
+            const acr = Math.exp(-((gx - X) ** 2) / (SG * SG)); if (acr < 0.01) continue;
+            for (let Y = sy - 1; Y <= sy + 1; Y++) { const a = joint(true, X, Y); if (a) { const w = a * acr * cap(gy - Y); if (w > 0) gp += w; else gn -= w; } }
+          }
+          for (let Y = sy; Y <= sy + 1; Y++) {
+            const acr = Math.exp(-((gy - Y) ** 2) / (SG * SG)); if (acr < 0.01) continue;
+            for (let X = sx - 1; X <= sx + 1; X++) { const a = joint(false, X, Y); if (a) { const w = a * acr * cap(gx - X); if (w > 0) gp += w; else gn -= w; } }
+          }
+          al = 1 - (1 - al) * (1 - Math.min(1, gp)); al *= 1 - Math.min(1, gn);
+        }
+        d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = 255; d[i * 4 + 3] = Math.round(al * 255);
       }
     }
     bg.putImageData(img, 0, 0);
-    // a touch softer at the grid lines, then stretched over the box
+    // a touch softer, then stretched over the box
     const ww = x1 - x0; const hh = y1 - y0;
     const A = mk(ww, hh); const ag = A.getContext('2d');
     ag.imageSmoothingEnabled = true; ag.imageSmoothingQuality = 'high';
     const Bs = mk(nw, nh); { const sg = Bs.getContext('2d'); sg.filter = 'blur(0.6px)'; sg.drawImage(Bc, 0, 0); sg.filter = 'none'; }
     ag.drawImage(Bs, lx0 - x0, ly0 - y0, nw * ds, nh * ds);
-    // (3b) Beta 3.28: the joints. Tiles have their joints on the grid lines, so near the line some joints (a square's
-    // side each, at random) take the other floor: the new one's joints in the old floor, the old one's in the new
-    if (Tl > 0) {
-      const at = (x, y) => { const u = Math.round((x - lx0) / ds - 0.5); const v = Math.round((y - ly0) / ds - 0.5); return u < 0 || v < 0 || u >= nw || v >= nh ? -1 : v * nw + u; };
-      const hw = Math.max(0.8, 0.08 * P);
-      const Jp = mk(ww, hh); const Jn = mk(ww, hh); const pg = Jp.getContext('2d'); const ngc = Jn.getContext('2d'); let anyP = false; let anyN = false;
-      const c0 = Math.floor((x0 - org[0]) / P) - 1; const c1 = Math.ceil((x1 - org[0]) / P) + 1;
-      const r0 = Math.floor((y0 - org[1]) / P) - 1; const r1 = Math.ceil((y1 - org[1]) / P) + 1;
-      const joint = (vert, cx, cy) => { // (from the grid corner cx, cy one square down, or to the right)
-        if (h2(cx * 1.31 + (vert ? 0.17 : 0.59), cy * 0.87 + (vert ? 0.43 : 0.11)) >= 0.5) return;
-        const X = org[0] + cx * P; const Y = org[1] + cy * P;
-        const j = at(vert ? X : X + P / 2, vert ? Y + P / 2 : Y); if (j < 0 || BL[j] < 0.02) return;
-        const jm = Math.min(1, Tl * 1.5 * BL[j] * (0.6 + 0.4 * h2(cx + 0.61, cy + (vert ? 0.83 : 0.27))));
-        const g2 = AL[j] < 0.5 ? pg : ngc; if (AL[j] < 0.5) anyP = true; else anyN = true;
-        const gr = vert ? g2.createLinearGradient(X - hw - x0, 0, X + hw - x0, 0) : g2.createLinearGradient(0, Y - hw - y0, 0, Y + hw - y0);
-        const cA = `rgba(255,255,255,${jm.toFixed(3)})`;
-        gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.35, cA); gr.addColorStop(0.65, cA); gr.addColorStop(1, 'rgba(255,255,255,0)');
-        g2.fillStyle = gr;
-        if (vert) g2.fillRect(X - hw - x0, Y - y0, 2 * hw, P); else g2.fillRect(X - x0, Y - hw - y0, P, 2 * hw);
-      };
-      for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) { joint(true, cx, cy); joint(false, cx, cy); }
-      if (anyP) { ag.save(); ag.globalCompositeOperation = 'lighter'; ag.drawImage(Jp, 0, 0); ag.restore(); }
-      if (anyN) { ag.save(); ag.globalCompositeOperation = 'destination-out'; ag.drawImage(Jn, 0, 0); ag.restore(); }
-      Jp.width = Jp.height = Jn.width = Jn.height = 0;
-    }
     // the new floor through the mask, over the floor that is there
     const nf = mk(ww, hh); const ng = nf.getContext('2d'); ng.translate(-x0, -y0); ng.fillStyle = pat; ng.fillRect(x0, y0, ww, hh); ng.setTransform(1, 0, 0, 1, 0, 0);
     ng.globalCompositeOperation = 'destination-in'; ng.drawImage(A, 0, 0);
@@ -776,7 +813,7 @@ void main(){
   // pillars (sg), stairs (tg). T: map inches → dots, k: dots an inch, P: dots a square, org: the grid's origin in dots.
   // ag and tg may be left out (the sharp tiles need only the floors and the solids).
   function paint(os, lib, T, k, P, org, loaded, cx, pats) {
-    const { fg, ag, sg, tg } = cx;
+    const { fg, ag, sg, tg, hg } = cx; // (hg: the Fade floors' tiles beyond their edge, Beta 3.29)
     const patOf = (t) => {
       if (!t || !loaded.has(t.url)) return '#5a5650';
       const off = t.off || [0, 0];
@@ -794,6 +831,7 @@ void main(){
         const t = tileInfo(it.tile, lib) || tileInfo({ rel: relOf(FLOORS[0]) });
         if (it.mixW > 0 && !(it.level || 0)) mixArea(fg, it, T, k, P, org, patOf(t), it.mixW * P, false, before); // (Beta 3.27)
         else paintArea(fg, it, T, k, patOf(t), false);
+        if (hg && it.edge === 'fade') paintHalo(hg, it, T, k, patOf(t), FADE_R * P);
         if (ag) paintArea(ag, it, T, k, `rgb(${EDGE_CODE[it.edge] * 40},${128 + it.level * 30},${matCode(it.mat || DEFAULT_MAT[it.edge])})`, false);
         if (tg) paintArea(tg, it, T, k, '#000', true); // (a floor drawn over stairs takes them away)
       } else if (it.kind === 'cut') {
@@ -809,15 +847,17 @@ void main(){
         if (ag) { ag.save(); ag.globalCompositeOperation = 'destination-over'; paintArea(ag, it, T, k, `rgb(${EDGE_CODE.ledge * 40},128,${matCode('stone_wall')})`, false); ag.restore(); } // (on nothing: a pool in the dark)
       } else if (it.kind === 'stairs') {
         const [x, y, w, h] = stairsBox(it, T);
-        const len = it.dir % 2 === 0 ? w : h; const steps = Math.max(2, Math.round((len / P) * 3));
+        const len = it.dir % 2 === 0 ? w : h; const steps = Math.max(2, Math.round((len / P) * 2)); // (Beta 3.29: two steps a square)
         if (tg) {
           const gr = it.dir === 0 ? tg.createLinearGradient(x, 0, x + w, 0) : it.dir === 2 ? tg.createLinearGradient(x + w, 0, x, 0) : it.dir === 1 ? tg.createLinearGradient(0, y, 0, y + h) : tg.createLinearGradient(0, y + h, 0, y);
           gr.addColorStop(0, `rgb(0,255,${steps})`); gr.addColorStop(1, `rgb(255,255,${steps})`);
           tg.fillStyle = gr; tg.fillRect(x, y, w, h);
         }
-        // the steps themselves: the stairs' material; every step a little lighter than the one below, its front (the
-        // riser, toward the bottom of the stairs) a dark band, its edge (the nosing) a light line
-        fg.save(); fg.fillStyle = patOf(matInfo(it.mat)); fg.fillRect(x, y, w, h);
+        // the steps themselves (Beta 3.29: of the floor picked, stairs from before of their material): from dark at the
+        // bottom to bright at the top, each step's front (the riser, toward the bottom of the stairs) a dark band with a
+        // soft shadow, its edge (the nosing) a light line
+        const look = it.tile ? patOf(tileInfo(it.tile, lib) || tileInfo({ rel: relOf(FLOORS[0]) })) : patOf(matInfo(it.mat));
+        fg.save();
         const along = it.dir % 2 === 0 ? w : h; const depth = along / steps;
         const rect = (a0, a1) => { // a band from a0 to a1 along the climb (0 = bottom of the stairs)
           const lo = Math.min(a0, a1); const len2 = Math.abs(a1 - a0);
@@ -826,12 +866,23 @@ void main(){
           if (it.dir === 1) return [x, y + lo, w, len2];
           return [x, y + h - lo - len2, w, len2];
         };
+        const at = (a) => (it.dir === 0 ? [x + a, 0] : it.dir === 2 ? [x + w - a, 0] : it.dir === 1 ? [0, y + a] : [0, y + h - a]); // (a point on the climb)
+        const grad = (a0, a1, stops) => { const g0 = at(a0); const g1 = at(a1); const gr = fg.createLinearGradient(g0[0], g0[1], g1[0], g1[1]); for (const [o, c] of stops) gr.addColorStop(o, c); return gr; };
         for (let i = 0; i < steps; i++) {
           const a0 = i * depth;
-          fg.fillStyle = `rgba(0,0,0,${(0.34 * (steps - 1 - i)) / Math.max(1, steps - 1)})`; fg.fillRect(...rect(a0, a0 + depth)); // lower steps darker
-          fg.fillStyle = 'rgba(0,0,0,0.5)'; fg.fillRect(...rect(a0, a0 + depth * 0.2)); // the riser
-          fg.fillStyle = 'rgba(255,240,220,0.22)'; fg.fillRect(...rect(a0 + depth * 0.2, a0 + depth * 0.2 + Math.max(1, P * 0.025))); // the nosing
+          fg.filter = `brightness(${(0.55 + (0.6 * i) / Math.max(1, steps - 1)).toFixed(3)})`; // (dark down, bright up)
+          fg.fillStyle = look; fg.fillRect(...rect(a0, a0 + depth));
+          fg.filter = 'none';
+          if (i > 0) { // (the lowest step meets the floor)
+            // the step above throws a soft shadow onto this one's back, and its edge catches the light
+            fg.fillStyle = grad(a0 - depth * 0.45, a0, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0.62)']]); fg.fillRect(...rect(a0 - depth * 0.45, a0));
+            fg.fillStyle = grad(a0, a0 + depth * 0.16, [[0, 'rgba(255,244,228,0.34)'], [1, 'rgba(255,244,228,0)']]); fg.fillRect(...rect(a0, a0 + depth * 0.16));
+          }
         }
+        // its sides a little dark (the stairs stand apart from the floor)
+        const side = Math.max(1, P * 0.05);
+        fg.fillStyle = 'rgba(0,0,0,0.35)';
+        if (it.dir % 2 === 0) { fg.fillRect(x, y, w, side); fg.fillRect(x, y + h - side, w, side); } else { fg.fillRect(x, y, side, h); fg.fillRect(x + w - side, y, side, h); }
         fg.restore();
         // stairs count as floor, at the level of the floor they stand on
         if (ag) {
@@ -869,23 +920,25 @@ void main(){
     const want = new Map();
     for (const it of os.items) {
       if (it.kind === 'area' && it.tile) { const t = tileInfo(it.tile, lib); if (t && t.url) want.set(t.url, t); }
-      if (it.kind === 'stairs') { const t = matInfo(it.mat); if (t) want.set(t.url, t); }
+      if (it.kind === 'stairs') { const t = it.tile ? tileInfo(it.tile, lib) : matInfo(it.mat); if (t && t.url) want.set(t.url, t); }
     }
     const loaded = new Map();
     await Promise.all([...want.values()].map(async (t) => { try { loaded.set(t.url, await image(t.url)); } catch (err) { console.error(err); } }));
     const pats = new Map(); // tile at a size → its scaled painting
     const floorC = canvas(W, Hh); const attrC = canvas(W, Hh); const solidC = canvas(W, Hh); const stairsC = canvas(W, Hh);
-    paint(os, lib, T, k, P, org, loaded, { fg: floorC.getContext('2d'), ag: attrC.getContext('2d', CPU), sg: solidC.getContext('2d'), tg: stairsC.getContext('2d') }, pats);
+    const anyFade = os.items.some((it) => it.kind === 'area' && it.edge === 'fade');
+    const haloC = anyFade ? canvas(W, Hh) : canvas(1, 1);
+    paint(os, lib, T, k, P, org, loaded, { fg: floorC.getContext('2d'), ag: attrC.getContext('2d', CPU), sg: solidC.getContext('2d'), tg: stairsC.getContext('2d'), hg: anyFade ? haloC.getContext('2d') : null }, pats);
     const tm = { paint: Math.round(performance.now() - t0) }; let tl = performance.now();
     // ---- light and shadow (WebGL 2) ----
     const C = gl2();
     let out = null; let sharp = null;
     if (C) {
       try {
-        const r = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC }, async (R) => {
-          for (const c of [floorC, attrC, solidC, stairsC]) c.width = c.height = 0; // (let go before the tiles)
+        const r = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC, haloC }, async (R) => {
+          for (const c of [floorC, attrC, solidC, stairsC, haloC]) c.width = c.height = 0; // (let go before the tiles)
           tm.light = Math.round(performance.now() - tl); tl = performance.now();
-          if (bx.sharp) sharp = await sharpTiles(C, R, { map, lib, bx, loaded, pats, W, Hh, org, prev });
+          if (bx.sharp) sharp = await sharpTiles(C, R, { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade });
           tm.tiles = Math.round(performance.now() - tl); tl = performance.now();
         });
         out = r;
@@ -906,7 +959,7 @@ void main(){
     tm.base = Math.round(performance.now() - tl);
     // the big paintings are let go at once: canvases can hold memory of the graphics card until they are collected,
     // and a drawing session makes many pictures
-    for (const c of [floorC, attrC, solidC, stairsC, out, base]) c.width = c.height = 0;
+    for (const c of [floorC, attrC, solidC, stairsC, haloC, out, base]) c.width = c.height = 0;
     for (const p of pats.values()) if (p && p.cv) p.cv.width = p.cv.height = 0;
     const walls = sightWalls(os, map, lib, { X0, Y0, nsx, nsy, g });
     stats.last = { ms: Math.round(performance.now() - t0), ...tm, dots: W * Hh, P, sharpP: sharp ? sharp.P : 0, made: sharp ? sharp.tiles.filter((x) => x.blob).length : 0, kept: sharp ? sharp.tiles.filter((x) => !x.blob).length : 0 };
@@ -923,6 +976,7 @@ void main(){
     const tAttr = tex(gl, W, Hh, cv.attrC, { nearest: true });
     const tSolid = tex(gl, W, Hh, cv.solidC, { nearest: true });
     const tStairs = tex(gl, W, Hh, cv.stairsC, { nearest: true });
+    const tHalo = tex(gl, cv.haloC.width, cv.haloC.height, cv.haloC, { nearest: true });
     const M = await matTextures(C, P);
     // floors (and stairs) are inside; distances both ways, and inside wall lines
     const merged = target(gl, W, Hh);
@@ -944,7 +998,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const Sh = target(gl, W, Hh); const Lt = tex(gl, W, Hh, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, Sh.fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, Lt, 0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq: M.sq, L, voidC: VOID, shT: S.tan, shK: S.k }, { hT: Ht.t, floorT: tFloor, attrT: tAttr, outJ, inJ, ...M.t }, pace);
+    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq: M.sq, L, voidC: VOID, shT: S.tan, shK: S.k }, { hT: Ht.t, floorT: tFloor, attrT: tAttr, haloT: tHalo, outJ, inJ, ...M.t }, pace);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     // read back into a painting in memory (rows come out top first, as the paintings went in)
     const outC = document.createElement('canvas'); outC.width = W; outC.height = Hh;
@@ -955,7 +1009,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
       outC.getContext('2d', CPU).putImageData(new ImageData(new Uint8ClampedArray(px.buffer), W, Hh), 0, 0);
     }
     gl.deleteTexture(Sh.t); gl.deleteFramebuffer(Sh.fb);
-    for (const t of [tFloor, Ht.t, ...M.list]) gl.deleteTexture(t);
+    for (const t of [tFloor, tHalo, Ht.t, ...M.list]) gl.deleteTexture(t);
     gl.deleteFramebuffer(Ht.fb);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     // the light is stretched smoothly on the tiles
@@ -980,7 +1034,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
   // Beta 3.25: the sharp tiles. Tiles lie on whole squares from the grid's origin (ts squares across), so they stay
   // where they are when the drawing grows. A tile whose key is unchanged is kept as it is.
   async function sharpTiles(C, R, a) {
-    const { gl } = C; const { map, lib, bx, loaded, pats, W, Hh, org, prev } = a;
+    const { gl } = C; const { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade } = a;
     const os = map.os; const { g, ox, oy, sx0, sy0, sx1, sy1 } = bx; const { P: PH, ts } = bx.sharp;
     const TD = ts * PH; const kH = PH / g; const s = PH / bx.P;
     const keep = new Set(prev && prev.P === PH && prev.ts === ts ? (prev.tiles || []).map((t) => t.h) : []);
@@ -994,15 +1048,15 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
           M = M || await matTextures(C, PH);
           const tx0 = ox + c * ts * g; const ty0 = oy + r * ts * g;
           const T = (x, y) => [(x - tx0) * kH, (y - ty0) * kH];
-          const fc = canvas(TD, TD); const sc = canvas(TD, TD);
-          paint(os, lib, T, kH, PH, [(ox - tx0) * kH, (oy - ty0) * kH], loaded, { fg: fc.getContext('2d'), sg: sc.getContext('2d') }, pats);
-          const tF = tex(gl, TD, TD, fc, { nearest: true }); const tS = tex(gl, TD, TD, sc, { nearest: true });
-          fc.width = fc.height = 0; sc.width = sc.height = 0;
+          const fc = canvas(TD, TD); const sc = canvas(TD, TD); const hc = anyFade ? canvas(TD, TD) : canvas(1, 1);
+          paint(os, lib, T, kH, PH, [(ox - tx0) * kH, (oy - ty0) * kH], loaded, { fg: fc.getContext('2d'), sg: sc.getContext('2d'), hg: anyFade ? hc.getContext('2d') : null }, pats);
+          const tF = tex(gl, TD, TD, fc, { nearest: true }); const tS = tex(gl, TD, TD, sc, { nearest: true }); const tH = tex(gl, hc.width, hc.height, hc, { nearest: true });
+          fc.width = fc.height = 0; sc.width = sc.height = 0; hc.width = hc.height = 0;
           const O = target(gl, TD, TD);
-          await runBands(C, prog(C, 'sharp', FS_SHARP), TD, TD, O.fb, { size: [TD, TD], tileO: [c * ts * PH, r * ts * PH], loSize: [W, Hh], orgLo: org, s, P: PH, matSq: M.sq, voidC: VOID }, { floorH: tF, solidH: tS, outJ: R.outJ, inJ: R.inJ, attrT: R.attrT, lightT: R.lightT, ...M.t }, R.pace);
+          await runBands(C, prog(C, 'sharp', FS_SHARP), TD, TD, O.fb, { size: [TD, TD], tileO: [c * ts * PH, r * ts * PH], loSize: [W, Hh], orgLo: org, s, P: PH, matSq: M.sq, voidC: VOID }, { floorH: tF, solidH: tS, haloH: tH, outJ: R.outJ, inJ: R.inJ, attrT: R.attrT, lightT: R.lightT, ...M.t }, R.pace);
           const px = new Uint8Array(TD * TD * 4);
           gl.bindFramebuffer(gl.FRAMEBUFFER, O.fb); gl.readPixels(0, 0, TD, TD, gl.RGBA, gl.UNSIGNED_BYTE, px);
-          gl.deleteTexture(tF); gl.deleteTexture(tS); gl.deleteTexture(O.t); gl.deleteFramebuffer(O.fb);
+          gl.deleteTexture(tF); gl.deleteTexture(tS); gl.deleteTexture(tH); gl.deleteTexture(O.t); gl.deleteFramebuffer(O.fb);
           const oc = canvas(TD, TD); const o = oc.getContext('2d', CPU);
           o.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), TD, TD), 0, 0);
           drawDoors(o, os, T, PH);

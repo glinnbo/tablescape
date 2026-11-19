@@ -71,19 +71,13 @@ const refOf = (t) => (t && (t.rel || t.path) ? { ...(t.rel ? { rel: String(t.rel
 function cleanOsItem(it) {
   if (!it || typeof it !== 'object') return null;
   const id = typeof it.id === 'string' && it.id ? it.id : newId('o');
-  const kind = ['area', 'cut', 'line', 'pillar', 'stairs', 'ground', 'paint'].includes(it.kind) ? it.kind : null;
+  const kind = ['area', 'cut', 'line', 'pillar', 'stairs', 'paint'].includes(it.kind) ? it.kind : null; // (Beta 3.29: no more ground)
   if (!kind) return null;
   const pts = ptsOf(it.pts);
   if (kind === 'paint') { // (Beta 3.26) a floor painted into the floors under a brush
     if (pts.length < 1) return null;
     const m = mixOf(it);
     return { id, kind, shape: 'brush', pts, r: r3(osNum(it.r, 0.75, 0.05, 50)), tile: refOf(it.tile), mixU: m.mixU, mixT: m.mixT };
-  }
-  if (kind === 'ground') {
-    const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'rect';
-    const need = shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' ? 1 : 2;
-    if (pts.length < need) return null;
-    return { id, kind, shape, pts, r: r3(osNum(it.r, 0.5, 0.05, 50)), preset: GROUND_KINDS.includes(it.preset) ? it.preset : 'water' };
   }
   if (kind === 'area' || kind === 'cut') {
     const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'poly';
@@ -99,7 +93,8 @@ function cleanOsItem(it) {
   if (kind === 'line') return pts.length >= 2 ? { id, kind, pts, w: r3(osNum(it.w, 0.5, 0.05, 10)), h: r3(osNum(it.h, 1, 0.1, 3)), mat: typeof it.mat === 'string' ? it.mat : 'stone_wall' } : null;
   if (kind === 'pillar') return pts.length >= 1 ? { id, kind, pts: pts.slice(0, 1), r: r3(osNum(it.r, 0.3, 0.05, 10)), round: !!it.round, mat: typeof it.mat === 'string' ? it.mat : 'stone_wall' } : null;
   // stairs: a box (two corners) climbing toward dir (0 right, 1 down, 2 left, 3 up), from the floor's level to one higher
-  return pts.length >= 2 ? { id, kind, pts: pts.slice(0, 2), dir: Math.round(osNum(it.dir, 3, 0, 3)), mat: typeof it.mat === 'string' ? it.mat : 'stone_wall' } : null;
+  // (Beta 3.29: in a floor tile, tile; stairs from before have only their material)
+  return pts.length >= 2 ? { id, kind, pts: pts.slice(0, 2), dir: Math.round(osNum(it.dir, 3, 0, 3)), mat: typeof it.mat === 'string' ? it.mat : 'stone_wall', ...(refOf(it.tile) ? { tile: refOf(it.tile) } : {}) } : null;
 }
 function cleanOs(o) {
   if (!o || typeof o !== 'object') return null;
@@ -215,6 +210,7 @@ function normalize(m) {
   out.round = { n: null, show: true, ...((m && m.round) || {}) };
   out.walls = Array.isArray(out.walls) ? out.walls.filter((w) => w && Number.isFinite(w.x1) && Number.isFinite(w.y2)) : [];
   out.os = out.os ? cleanOs(out.os) : null; // (Beta 3.22) an Oldschool map's drawing
+  if (out.os) syncGround(out); // (Beta 3.29: Ground is gone; pools drawn before go, and their effects with them)
   out.vision = { on: true, dim: 0.5, ...((m && m.vision) || {}) };
   out.areas = Array.isArray(out.areas) ? out.areas.filter((a) => a && Array.isArray(a.rings) && a.rings.length) : [];
   out.frame = { ...FRAME0, ...((m && m.frame) || {}) };

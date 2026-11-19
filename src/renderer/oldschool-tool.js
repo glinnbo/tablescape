@@ -7,8 +7,7 @@
 //   Pillar             click a square
 //   Stairs             drag where they go: they climb toward where you drag
 //   Door               click a grid line: a door, a secret door or a window there
-//   Ground             water, lava, acid, magical darkness or swamp (Beta 3.25)
-//   (Beta 3.28: Corridor, Floor and Pieces are gone; what they made still draws)
+//   (Beta 3.28: Corridor, Floor and Pieces are gone; what they made still draws. Beta 3.29: Ground is gone)
 // What is drawn is kept in map.os (mapstate.js); the picture is made from it here (oldschool.js) and sent to main,
 // which makes it the map's picture and its outlines the walls for sight. gm-play.js hands the pointer to this tool.
 'use strict';
@@ -26,7 +25,6 @@ const OldschoolTool = (() => {
     { id: 'pillar', label: 'Pillar', icon: 'square-dashed', tip: 'Click a square for a pillar' },
     { id: 'stairs', label: 'Stairs', icon: 'stairs', tip: 'Drag where they go: they climb toward where you drag' },
     { id: 'door', label: 'Door', icon: 'door', tip: 'Click a grid line: a door there' },
-    { id: 'ground', label: 'Ground', icon: 'ripple', tip: 'Water, lava, acid, magical darkness or swamp: drag a box or a round, or paint it' }, // (Beta 3.25)
   ];
   // Beta 3.28: Corridor, Floor and Pieces left the toolbar (what they made still draws and erases)
   // Beta 3.25: the ground the Ground tool lays (the effects of the same name, with a pool in the picture)
@@ -185,7 +183,7 @@ const OldschoolTool = (() => {
           if (Math.abs(dy) < 1e-4) b = { x: b.x, y: a.y + s };
         }
         const dir = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 0 : 2) : (dy >= 0 ? 1 : 3);
-        add({ kind: 'stairs', pts: [[a.x, a.y], [b.x, b.y]], dir, mat: O.line.mat });
+        add({ kind: 'stairs', pts: [[a.x, a.y], [b.x, b.y]], dir, mat: O.line.mat, tile: O.floor }); // (Beta 3.29: in the picked floor)
       }
       drawPreview();
     }
@@ -323,7 +321,7 @@ const OldschoolTool = (() => {
       const root = el('g', { transform: `matrix(${px.x - p0.x} ${px.y - p0.y} ${py.x - p0.x} ${py.y - p0.y} ${p0.x} ${p0.y})` });
       svg.append(root);
       const thin = (0.06 * g()).toFixed(4);
-      const look = (it) => (it.kind === 'cut' ? 'rgba(10,10,12,0.85)' : it.kind === 'ground' ? groundColor(it.preset) : it.kind === 'line' || it.kind === 'pillar' || it.kind === 'stairs' ? 'rgba(140,135,128,0.95)' : patternFor(defs, it.tile));
+      const look = (it) => (it.kind === 'cut' ? 'rgba(10,10,12,0.85)' : it.kind === 'ground' ? groundColor(it.preset) : it.kind === 'line' || it.kind === 'pillar' || (it.kind === 'stairs' && !it.tile) ? 'rgba(140,135,128,0.95)' : patternFor(defs, it.tile));
       for (const it of pending) { const e2 = shapeEl(it, look(it), { opacity: '0.95' }); if (e2) root.append(e2); }
       // the one being drawn
       if (ui.tool !== 'oldschool') return;
@@ -363,7 +361,7 @@ const OldschoolTool = (() => {
       else if (d && d.kind === 'ospath') cur = { kind: d.cut ? 'cut' : 'area', shape: 'path', pts: d.pts, r: (O.width * g()) / 2, tile: O.floor };
       else if (d && d.kind === 'osbrush') cur = { kind: d.ground ? 'ground' : d.cut ? 'cut' : 'area', shape: 'brush', pts: d.pts, r: d.r, tile: O.floor, preset: d.ground };
       else if (d && d.kind === 'osline') cur = { kind: 'line', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], w: O.line.w * g() };
-      else if (d && d.kind === 'osstairs') cur = { kind: 'stairs', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]] };
+      else if (d && d.kind === 'osstairs') cur = { kind: 'stairs', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], tile: O.floor };
       if (cur && (cur.kind === 'line' || cur.shape === 'path' || cur.shape === 'brush')) {
         // (Beta 3.28) a stroke shows at its real width while dragging, with an orange rim (it used to vanish)
         const w = cur.kind === 'line' ? cur.w : cur.r * 2;
@@ -560,7 +558,7 @@ const OldschoolTool = (() => {
       } else if (t === 'erase') {
         opts.push(seg({ options: [{ value: 'box', label: 'Box', icon: 'square' }, { value: 'round', label: 'Round', icon: 'circle' }, { value: 'brush', label: 'Brush', icon: 'brush' }], get: () => O.erase, set: (v) => { O.erase = v; save(); ctx.refreshPop(); } }));
         if (O.erase === 'brush') opts.push(slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` }));
-      } else if (t === 'wall' || t === 'pillar' || t === 'stairs') {
+      } else if (t === 'wall' || t === 'pillar') { // (Beta 3.29: stairs are of the picked floor)
         if (t === 'wall') {
           opts.push(seg({ options: [{ value: 0.25, label: 'Thin' }, { value: 0.5, label: 'Normal' }, { value: 1, label: 'Thick' }], get: () => O.line.w, set: (v) => { O.line.w = v; save(); } }));
           opts.push(seg({ options: [{ value: 0.4, label: 'Low' }, { value: 1, label: 'Full height' }], get: () => O.line.h, set: (v) => { O.line.h = v; save(); } }));
@@ -569,18 +567,9 @@ const OldschoolTool = (() => {
           opts.push(seg({ options: [{ value: false, label: 'Square', icon: 'square' }, { value: true, label: 'Round', icon: 'circle' }], get: () => O.pillar.round, set: (v) => { O.pillar.round = v === true || v === 'true'; save(); } }));
           opts.push(slider({ label: 'Size', min: 0.2, max: 1.5, step: 0.05, get: () => O.pillar.r * 2, set: (v) => { O.pillar.r = v / 2; save(); }, fmt: (v) => `${round(v, 2)} square${v === 1 ? '' : 's'}` }));
         }
-        opts.push(h('div', { class: 'ctl-label' }, t === 'stairs' ? 'Steps of' : 'Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; save(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff']));
+        opts.push(h('div', { class: 'ctl-label' }, 'Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; save(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff']));
       } else if (t === 'door') {
         opts.push(seg({ options: [{ value: 'door', label: 'Door', icon: 'door' }, { value: 'secret', label: 'Secret', icon: 'eye-off' }, { value: 'window', label: 'Window', icon: 'window' }], get: () => O.door, set: (v) => { O.door = v; save(); } }));
-      } else if (t === 'ground') { // (Beta 3.25)
-        const box = h('div', { class: 'tiles os-grounds' }, ...GROUNDS.map((x) => h('button', {
-          class: 'tile', dataset: { v: x.id }, 'aria-label': x.label,
-          onclick: () => { O.ground = x.id; save(); paintG(); },
-        }, iconEl(x.icon), h('span', {}, x.label))));
-        const paintG = () => { for (const b of box.children) b.classList.toggle('on', b.dataset.v === O.ground); };
-        bind(paintG);
-        opts.push(box, seg({ options: [{ value: 'box', label: 'Box', icon: 'square' }, { value: 'round', label: 'Round', icon: 'circle' }, { value: 'brush', label: 'Brush', icon: 'brush' }], get: () => O.groundShape, set: (v) => { O.groundShape = v; save(); ctx.refreshPop(); } }));
-        if (O.groundShape === 'brush') opts.push(slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` }));
       }
       const snapSeg = seg({ options: [{ value: 'sq', label: 'Squares' }, { value: 'half', label: 'Half' }, { value: 'free', label: 'Free' }], get: () => O.snap, set: (v) => { O.snap = v; save(); } });
       // the floor tiles: those of the app, then those of the library

@@ -24,6 +24,12 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.29', [
+      'Oldschool maps: Fade goes outward: what you draw stays whole, and its floor carries on for a square and a half beyond your line, fading softly into the dark',
+      'Floors mix in three steps: a soft blend, made uneven, then (Tiled) whole squares near the line that fill with the other floor, and soft glows of the other floor along the joints, stronger where they meet',
+      'Stairs are of the floor you picked, two steps a square, dark at the bottom and bright at the top, each step with its shadow and a light edge',
+      'Ground is gone from Draw (pools drawn before leave with their effects); water, lava and the rest stay in Effects',
+    ]],
     ['Beta 3.28', [
       'Oldschool maps: a new edge, Fade: the floor fades into the dark over a square and a half, a little unevenly. One can see across it',
       'Cliffs show: a rough rock face falls away from the floor, bright at its top, then into darkness',

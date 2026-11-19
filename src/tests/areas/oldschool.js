@@ -52,7 +52,7 @@ module.exports = (area) => {
     t.eq(await t.popTitle(), 'Draw', 'its panel');
     t.ok(await t.g(`!document.querySelector('#empty.on')`), 'no "no background" card in the way');
     t.ok(await t.g(`(() => { const b = document.querySelector('#rail [data-id="oldschool"]'); return !!b && !b.hidden && b.offsetParent !== null; })()`), 'Draw is on the rail');
-    t.eq(await t.count('.os-tools .tile'), 10, 'its tools (Beta 3.28: no Corridor, Floor or Pieces)');
+    t.eq(await t.count('.os-tools .tile'), 9, 'its tools (Beta 3.28: no Corridor, Floor or Pieces; 3.29: no Ground)');
     t.ok(await t.count('.os-floors .tile[data-v]') >= 11, 'the floors of the app');
     t.ok(await t.g(`!!document.querySelector('.map-tile[data-id="${own}"] .tile-thumb .i')`), 'its tile in the strip shows a pencil');
   });
@@ -116,7 +116,7 @@ module.exports = (area) => {
   area.deep('the Draw panel: each tool, a floor, the edge, where the light comes from', async (t) => {
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
     await t.g(`localStorage.removeItem('osPrefs')`);
-    for (const id of ['shape', 'round', 'brush', 'erase', 'wall', 'pillar', 'stairs', 'door', 'ground', 'room']) {
+    for (const id of ['shape', 'round', 'brush', 'erase', 'wall', 'pillar', 'stairs', 'door', 'room']) {
       await t.clickSel(`.os-tools .tile[data-v="${id}"]`);
       t.eq(await t.g('Play.ui.os.tool'), id, `tool ${id}`);
     }
@@ -298,41 +298,25 @@ module.exports = (area) => {
     await t.g('Oldschool.noSharp = true');
   }, { ms: 300000 });
 
-  area.deep('Ground: water, lava, acid, magical darkness or swamp; a pool in the picture and its effect moving on it; erase takes it away', async (t) => {
+  area.deep('Beta 3.29: Ground is gone (a pool from before and its effect leave when the map is read); stairs are of the picked floor', async (t) => {
     await clear(t);
-    await t.g('Play.view().setPlaying(false)'); // (software graphics: moving effects would starve the picture here)
+    const MS = require('../../mapstate');
+    const old = MS.normalize({ ...MS.emptyMap('x'), os: { items: [room(2, 2, 8, 8), { kind: 'ground', shape: 'rect', pts: [[3 * k, 3 * k], [5 * k, 5 * k]], preset: 'lava' }] }, fx: [{ id: 'oggone', kind: 'region', preset: 'lava', strokes: [], os: 'gone' }, { id: 'f1', kind: 'fire' }] });
+    t.eq(old.os.items.map((x) => x.kind), ['area'], 'the pool is gone');
+    t.eq(old.fx.map((f) => f.id), ['f1'], 'its effect too, the others stay');
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
+    t.ok(!(await t.g(`!!document.querySelector('.os-tools .tile[data-v="ground"]')`)), 'no Ground tool');
+    await t.clickSel('.os-tools .tile[data-v="stairs"]');
+    t.ok(!(await t.g(`document.querySelector('#pop').textContent.includes('Steps of')`)), 'no "Steps of": they take the floor');
+    await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Slate.webp"]');
     t.handle('os.add', { mapId: own, items: [room(14, 2, 24, 9)] });
-    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
-    await t.clickSel('.os-tools .tile[data-v="ground"]');
-    t.eq(await t.count('.os-grounds .tile'), 5, 'five kinds');
-    await t.clickSel('.os-grounds .tile[data-v="lava"]');
-    t.eq(await t.g('Play.ui.os.ground'), 'lava', 'lava picked');
-    const a = await t.scr(16 * k, 4 * k); const b = await t.scr(19 * k, 6 * k);
+    const a = await t.scr(16 * k, 3 * k); const b = await t.scr(18 * k, 7 * k);
     await t.drag(a, b, 10);
-    await t.until(() => M(t).os.items.some((x) => x.kind === 'ground'), 5000, 'the ground drawn');
-    const gi = M(t).os.items.find((x) => x.kind === 'ground');
-    t.eq([gi.preset, gi.shape], ['lava', 'rect'], 'a box of lava', gi);
-    const fx = M(t).fx.find((f) => f.os === gi.id);
-    t.ok(fx && fx.kind === 'region' && fx.preset === 'lava' && fx.strokes.some((st) => st.poly) && fx.strokes.some((st) => st.nm), 'its effect: the outline and dots inside', fx);
-    const m = await baked(t);
-    // the picture: lava (warm, dark) where the pool is, the floor beside it
-    const px = await t.g(`(async () => { const b = Play.state().map.bg; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d'); g.drawImage(img, 0, 0); const at = (x, y) => [...g.getImageData(Math.round((x - b.x) / b.scale), Math.round((y - b.y) / b.scale), 1, 1).data]; return { pool: at(17.5 * ${k}, 5 * ${k}), floor: at(21.5 * ${k}, 5 * ${k}) }; })()`);
-    t.ok(px.pool[0] > px.pool[2] + 10 && px.pool.slice(0, 3).reduce((n, v, i) => n + Math.abs(v - px.floor[i]), 0) > 30, 'the pool in the picture', px);
-    t.handle('fx.update', { mapId: own, id: fx.id, intensity: 0.5 });
-    t.handle('os.update', { mapId: own, id: gi.id, preset: 'water' });
-    await t.settle();
-    const fx2 = M(t).fx.find((f) => f.os === gi.id);
-    t.ok(fx2 && fx2.preset === 'water' && fx2.intensity === 0.5, 'changed to water, what was set on the effect kept', fx2);
-    // erase over it: the ground and its effect go
-    await t.clickSel('.os-tools .tile[data-v="erase"]');
-    await t.drag(await t.scr(15.5 * k, 3.5 * k), await t.scr(19.5 * k, 6.5 * k), 10);
-    await t.until(() => !M(t).os.items.some((x) => x.kind === 'ground'), 5000, 'erased');
-    t.ok(!M(t).fx.some((f) => f.os), 'its effect gone too');
-    t.handle('history.undo', { mapId: own }); t.handle('history.undo', { mapId: own });
-    await t.settle();
-    t.ok(M(t).os.items.some((x) => x.kind === 'ground') && M(t).fx.some((f) => f.os), 'undo brings both back');
-    await t.g('Play.view().setPlaying(true)');
-    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
+    await t.until(() => M(t).os.items.some((x) => x.kind === 'stairs'), 5000, 'the stairs');
+    const st = M(t).os.items.find((x) => x.kind === 'stairs');
+    t.eq(st.tile && st.tile.rel, 'Tiles/Tablescape/Slate.webp', 'of the picked floor', st);
+    await baked(t);
+    await t.shot(t.gm(), 'oldschool-stairs');
     await t.clickSel('.os-tools .tile[data-v="room"]');
   }, { ms: 300000 });
 
