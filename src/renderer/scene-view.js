@@ -667,7 +667,7 @@ class SceneView {
   dropOldBg() { if (this.bgOld) { this.bgOld.el.remove(); this.bgOld = null; } }
 
   // ---------- Beta 3.25: an Oldschool map's doors, drawn live: shut across the doorway, or swung open ----------
-  // The picture has the frame (Beta 3.33: of the wall's own material, on the wall's middle); the leaves follow the
+  // The picture has the doorway (Beta 3.34: the wall opened, a window's niche); the leaves, on the wall's middle, follow the
   // door's wall (open or shut) and swing when it changes, into the room. Beta 3.33: the leaves are pictures (doors/:
   // wood, iron, stone, a portcullis that is gone when open; windows: glass, leaded, stained, shutters, bars), any
   // length, two leaves from 1.75 squares on. Under the fog like the picture. Secret doors stay in the picture alone.
@@ -698,7 +698,7 @@ class SceneView {
     for (const d of doors) {
       seen.add(d.id);
       const len = Math.hypot(d.x2 - d.x1, d.y2 - d.y1); if (len < 1e-3) continue;
-      // where the frame is: on the wall's middle (as the picture, made for the same drawing)
+      // where the door is: on the wall's middle (as the picture, made for the same drawing)
       const pk = `${m.bg.os || ''}|${d.x1},${d.y1},${d.x2},${d.y2},${sq}`;
       let pl = this.osDoorPl.get(d.id);
       if (!pl || pl.key !== pk) { try { pl = { key: pk, ...Oldschool.doorPlace(os, d, sq) }; } catch { pl = { key: pk, off: 0, side: 0 }; } this.osDoorPl.set(d.id, pl); }

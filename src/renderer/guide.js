@@ -24,6 +24,9 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.34', [
+      'Oldschool maps, doors without a frame: just the door. Where a door lies on a wall the wall opens, the floor runs through and the cut ends of the wall shade the doorway, so an open door or a raised portcullis shows the way through. A window sits in a niche of the wall: the wall\'s own stone, deeper where the window sits, with a stop at each end. Wall lines stay whole under windows and secret doors',
+    ]],
     ['Beta 3.33', [
       'Oldschool maps, doors and windows made new: drag along a wall with the Door tool for any length (two squares or more make a pair of leaves); a click still makes one square. Doors in wood, iron, stone or a portcullis; windows in glass, leaded, stained glass, shutters or bars. The frame is the wall\'s own stone, sits on the wall\'s middle and takes the map\'s light and shadow; the leaves swing into the room, a portcullis is raised',
       'Drawing an Oldschool map: when painting the picture takes a moment, a pill at the top shows how far along it is (the maid runs along, as when animations are prepared). The Draw panel no longer says "Making the picture"',

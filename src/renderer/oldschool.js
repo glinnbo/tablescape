@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // for every floor); a door: the wall line it opens
   const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 18; // (18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 19; // (19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -963,8 +963,10 @@ void main(){
         }
       }
     }
-    // doors: an opening in wall lines (the door itself is drawn on top at the end)
+    // doors: an opening in wall lines (the door itself is drawn on top at the end). Beta 3.34: not a window (it sits
+    // in a niche of the wall) nor a secret door (the wall shows whole)
     for (const d of os.doors) {
+      if (d.kind === 'window' || d.door === 2) continue;
       const [x1, y1] = T(d.x1, d.y1); const [x2, y2] = T(d.x2, d.y2);
       sg.save(); sg.globalCompositeOperation = 'destination-out'; sg.lineWidth = P * 1.2; sg.lineCap = 'butt'; sg.beginPath(); sg.moveTo(x1, y1); sg.lineTo(x2, y2); sg.stroke(); sg.restore();
     }
@@ -999,7 +1001,6 @@ void main(){
       if (it.kind === 'area' && it.tile) { const t = tileInfo(it.tile, lib); if (t && t.url) want.set(t.url, t); }
       if (it.kind === 'stairs') { const t = it.tile ? tileInfo(it.tile, lib) : matInfo(it.mat); if (t && t.url) want.set(t.url, t); }
     }
-    for (const d of os.doors) { if (d.door === 2) continue; const t = matInfo(doorPlace(os, d, g).mat); if (t) want.set(t.url, t); } // (Beta 3.33: their frames)
     const loaded = new Map();
     await Promise.all([...want.values()].map(async (t) => { try { loaded.set(t.url, await image(t.url)); } catch (err) { console.error(err); } }));
     // (Beta 3.31) their dots are unpacked now, all at once and off the drawing thread (after a pause they would be
@@ -1180,10 +1181,10 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     return { P: PH, ts, tiles };
   }
   // ---------- Beta 3.33: doors and windows of any length ----------
-  // Where a door sits and what its frame is made of. A door lies on a grid line; on a room's edge the wall lies outside
-  // the floor, so the frame goes onto the middle of that wall band (0.225 squares out); in a wall line, on its middle.
-  // The frame is the wall's own material; it is about 0.8 of the wall's thickness deep. `empty`: nothing lies beyond
-  // the wall there (the doorway then shows the room's floor).
+  // Where a door sits in its wall. A door lies on a grid line; on a room's edge the wall lies outside the floor, so the
+  // door goes onto the middle of that wall band (0.225 squares out); in a wall line, on its middle. thick: the wall's
+  // thickness; `empty`: nothing lies beyond the wall there (the doorway fades into the dark); `bandFloor`: another
+  // floor lies over the wall there (no wall to open). Used by the picture and by the live leaves (scene-view.js).
   function doorPlace(os, d, g) {
     const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1; const ux = (d.x2 - d.x1) / L; const uy = (d.y2 - d.y1) / L;
     const nx = -uy; const ny = ux; const mx = (d.x1 + d.x2) / 2; const my = (d.y1 + d.y2) / 2;
@@ -1194,7 +1195,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
         const [ax, ay] = it.pts[k2]; const [bx, by] = it.pts[k2 + 1]; const lx = bx - ax; const ly = by - ay; const ll = Math.hypot(lx, ly) || 1;
         if (Math.abs((lx * uy - ly * ux) / ll) > 0.05) continue; // (not along it)
         const t2 = ((mx - ax) * lx + (my - ay) * ly) / (ll * ll); const off = ((ax - mx) * nx + (ay - my) * ny);
-        if (t2 > -0.01 && t2 < 1.01 && Math.abs(off) < it.w / 2) return { off, thick: it.w, mat: it.mat || 'stone_wall', side: 0 };
+        if (t2 > -0.01 && t2 < 1.01 && Math.abs(off) < it.w / 2) return { off, thick: it.w, mat: it.mat || 'stone_wall', side: 0, line: true };
       }
     }
     // a room's edge: which side has floor just beyond the door's ends (the doorway itself may have floor on both)
@@ -1209,54 +1210,70 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const inside = sgn ? at(mx - nx * sgn * 0.2 * g, my - ny * sgn * 0.2 * g) || room : room;
     const mat = inside.edge === 'walls' || inside.edge === 'rock' ? inside.mat || DEFAULT_MAT[inside.edge] : 'stone_wall';
     const empty = sgn !== 0 && !at(mx + nx * sgn * 0.8 * g, my + ny * sgn * 0.8 * g);
-    return { off: sgn * 0.225 * g, thick: 0.45 * g, mat, side: sgn, empty, floor: inside };
+    const bandFloor = sgn !== 0 && !!at(mx + nx * sgn * 0.225 * g, my + ny * sgn * 0.225 * g); // (another floor lies over the wall there)
+    return { off: sgn * 0.225 * g, thick: 0.45 * g, mat, side: sgn, empty, floor: inside, bandFloor };
   }
-  // the frame: two jambs of the wall's material (a touch lighter than the lit wall), thin rails along the wall's faces,
-  // and for a window a sill between them; lit by the map's sun (a soft shadow, a lit edge, a fine dark rim). Secret
-  // doors show nothing. The leaf is drawn live on both screens (scene-view.js).
-  const DOOR_GEO = { jamb: 22 / 140, wjamb: 18 / 140, rail: 11 / 140, depth: 0.8 };
+  // Beta 3.34: no frame (Glinn: "the frame is too much"), just the door. Where a door lies on a wall the wall opens:
+  // the room's floor runs through it, and the cut ends of the wall shade the doorway (more on the side away from the
+  // sun). A window sits in a niche: the wall's own stone, the part the window sits in shaded as if deeper down, with a
+  // stop at each end holding it. Secret doors show nothing. The leaves are drawn live on both screens (scene-view.js).
+  const NICHE = { stop: 0.09, stopW: 0.21 }; // (squares: how far a window's stops reach along it, and across)
   function drawDoors(o, os, T, P, dc) {
     if (!dc) return;
-    const { g, org, matPat, floorPat } = dc;
+    const { g, org, floorPat } = dc;
     const sun = (((os.sun ?? 135) * Math.PI) / 180); const sx = Math.cos(sun); const sy = -Math.sin(sun); // (toward the light)
     const k = P / g;
     for (const d of os.doors) {
       if (d.door === 2) continue;
       const pl = doorPlace(os, d, g); const win = d.kind === 'window';
+      if (!pl.line && (!pl.side || pl.bandFloor)) continue; // (no wall here: floor on both sides, or another floor over it)
       const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1); if (L * k < 2) continue;
       const ux = (d.x2 - d.x1) / L; const uy = (d.y2 - d.y1) / L;
       const [ax, ay] = T(d.x1 - uy * pl.off, d.y1 + ux * pl.off);
-      const S = L * k; const dd = Math.min(0.6 * g, Math.max(0.2 * g, DOOR_GEO.depth * pl.thick)) * k;
-      const jw = (win ? DOOR_GEO.wjamb : DOOR_GEO.jamb) * P; const rl = Math.max(1, DOOR_GEO.rail * P); const lw = Math.max(1, P / 140);
-      const ang = Math.atan2(uy, ux); const onGrid = new DOMMatrix().rotate((-ang * 180) / Math.PI).translate(org[0] - ax, org[1] - ay); // (patterns on the grid, as the wall's)
-      const mp = matPat(o, pl.mat, onGrid); if (!mp) continue; const lsx = sx * Math.cos(-ang) - sy * Math.sin(-ang); const lsy = sx * Math.sin(-ang) + sy * Math.cos(-ang); // (the sun, along / across it)
+      const S = L * k; const bd = pl.thick * k; const ang = Math.atan2(uy, ux);
+      const lsx = sx * Math.cos(-ang) - sy * Math.sin(-ang); // (the sun along it)
       o.save(); o.translate(ax, ay); o.rotate(ang);
-      const box = (x0, y0, w, h, fill, tone) => {
-        o.fillStyle = fill; o.fillRect(x0, y0, w, h);
-        if (tone > 1) { o.save(); o.globalCompositeOperation = 'lighter'; o.globalAlpha = tone - 1; o.fillRect(x0, y0, w, h); o.restore(); } // (its own colours, brighter)
-        else if (tone < 1) { o.fillStyle = `rgba(0,0,0,${(1 - tone).toFixed(3)})`; o.fillRect(x0, y0, w, h); }
-      };
-      // the doorway: where nothing lies beyond, the room's floor goes on through the wall
-      if (!win && pl.empty && pl.floor) { const fp = floorPat(o, pl.floor, onGrid); if (fp) box(0, -dd / 2, S, dd, fp, 0.82); }
-      if (win) box(0, -dd / 2 + rl, S, dd - 2 * rl, mp, 0.78); // (the sill)
-      // shadows first (all parts at once), then the parts, then their edges
-      const parts = [[-jw, -dd / 2, jw, dd, 1.18], [S, -dd / 2, jw, dd, 1.18], [0, -dd / 2, S, rl, 1.05], [0, dd / 2 - rl, S, rl, 1.05]];
-      o.save(); o.shadowColor = 'rgba(0,0,0,0.5)'; o.shadowBlur = Math.max(1, 0.03 * P); o.shadowOffsetX = -sx * 0.018 * P; o.shadowOffsetY = -sy * 0.018 * P;
-      o.fillStyle = 'rgba(0,0,0,1)'; for (const [x0, y0, w, h] of parts) o.fillRect(x0, y0, w, h);
-      o.restore();
-      for (const [x0, y0, w, h, tone] of parts) box(x0, y0, w, h, mp, tone);
-      o.lineWidth = lw;
-      for (const [x0, y0, w, h] of parts) {
-        o.strokeStyle = 'rgba(255,246,230,0.2)'; o.beginPath(); // (the edges facing the sun)
-        if (lsy < 0) { o.moveTo(x0, y0 + lw / 2); o.lineTo(x0 + w, y0 + lw / 2); } else { o.moveTo(x0, y0 + h - lw / 2); o.lineTo(x0 + w, y0 + h - lw / 2); }
-        if (lsx < 0) { o.moveTo(x0 + lw / 2, y0); o.lineTo(x0 + lw / 2, y0 + h); } else { o.moveTo(x0 + w - lw / 2, y0); o.lineTo(x0 + w - lw / 2, y0 + h); }
-        o.stroke();
-        o.strokeStyle = 'rgba(12,11,10,0.5)'; o.strokeRect(x0 + lw / 2, y0 + lw / 2, w - lw, h - lw);
-      }
+      if (win) windowNiche(o, S, bd, P, sx, sy);
+      else doorway(o, pl, S, bd, P, lsx, new DOMMatrix().rotate((-ang * 180) / Math.PI).translate(org[0] - ax, org[1] - ay), floorPat);
       o.restore();
     }
   }
-  // what drawDoors needs to paint with: the walls' materials and the floors' tiles as patterns, on the grid
+  // a doorway through the wall (in a wall line the line is cut already, see paint)
+  function doorway(o, pl, S, bd, P, lsx, onGrid, floorPat) {
+    if (!pl.line && pl.floor) {
+      const fp = floorPat(o, pl.floor, onGrid);
+      if (fp) {
+        o.fillStyle = fp; o.fillRect(0, -bd / 2, S, bd); o.fillStyle = 'rgba(0,0,0,0.3)'; o.fillRect(0, -bd / 2, S, bd);
+        if (pl.empty) { // (toward the dark beyond: the floor fades into it, as the wall's edge does)
+          const out = pl.side > 0 ? bd / 2 : -bd / 2; const f = 0.16 * P; const gr = o.createLinearGradient(0, out - Math.sign(out) * f, 0, out);
+          gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.7)'); o.fillStyle = gr; o.fillRect(0, Math.min(out, out - Math.sign(out) * f), S, f);
+        }
+      }
+    }
+    // the cut ends of the wall: their shadow into the doorway (more on the side away from the sun), a dark seam
+    const w = 0.18 * P; const seam = 1.5 * P / 140;
+    for (const [x0, dir, a] of [[0, 1, 0.42 + 0.33 * Math.max(0, -lsx)], [S, -1, 0.42 + 0.33 * Math.max(0, lsx)]]) {
+      const gr = o.createLinearGradient(x0, 0, x0 + dir * w, 0); gr.addColorStop(0, `rgba(0,0,0,${a.toFixed(3)})`); gr.addColorStop(0.45, `rgba(0,0,0,${(a * 0.35).toFixed(3)})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      o.fillStyle = gr; o.fillRect(Math.min(x0, x0 + dir * w), -bd / 2, w, bd);
+      o.fillStyle = 'rgba(8,7,6,0.7)'; o.fillRect(dir > 0 ? x0 : x0 - seam, -bd / 2, seam, bd);
+    }
+  }
+  // a window's niche in the wall (Glinn's sketch, 19 November 2026): across the wall's whole thickness, a stop at each
+  // end; the wall there darker, and the wall around it casts its shadow in, away from the sun
+  function windowNiche(o, S, bd, P, sx, sy) {
+    const e = NICHE.stop * P; const h = Math.min(bd * 0.7, NICHE.stopW * P) / 2; const t = bd / 2;
+    const niche = new Path2D();
+    niche.moveTo(-e, -t); niche.lineTo(S + e, -t); niche.lineTo(S + e, -h); niche.lineTo(S, -h); niche.lineTo(S, h); niche.lineTo(S + e, h);
+    niche.lineTo(S + e, t); niche.lineTo(-e, t); niche.lineTo(-e, h); niche.lineTo(0, h); niche.lineTo(0, -h); niche.lineTo(-e, -h); niche.closePath();
+    o.save(); o.clip(niche);
+    o.fillStyle = 'rgba(0,0,0,0.5)'; o.fillRect(-e, -t, S + 2 * e, bd); // (deeper down: darker)
+    const around = new Path2D(); around.rect(-e - P, -t - P, S + 2 * e + 2 * P, bd + 2 * P); around.addPath(niche);
+    o.shadowColor = 'rgba(0,0,0,0.6)'; o.shadowBlur = Math.max(1, 0.035 * P); o.shadowOffsetX = -sx * 0.05 * P; o.shadowOffsetY = -sy * 0.05 * P;
+    o.fillStyle = '#000'; o.fill(around, 'evenodd'); // (only its shadow lands inside: the wall around casts it in)
+    o.restore();
+    o.lineWidth = Math.max(1, P / 140); o.strokeStyle = 'rgba(10,9,8,0.55)'; o.stroke(niche);
+  }
+  // what drawDoors needs to paint with: the floors' tiles as patterns, on the grid
   function doorPaints(os, lib, P, org, loaded, pats, g) {
     const scaledOf = (url, squares) => {
       const key = `${url}@${squares}@door@${P}`;
@@ -1265,7 +1282,6 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     };
     return {
       g, org,
-      matPat: (o, id, m) => { const t = matInfo(id); const cv = t && scaledOf(t.url, t.squares); if (!cv) return null; const p = o.createPattern(cv, 'repeat'); p.setTransform(m); return p; },
       floorPat: (o, area, m) => {
         const t = area.tile && tileInfo(area.tile, lib); if (!t) return null;
         const cv = scaledOf(t.url, t.squares || 4); if (!cv) return null;
