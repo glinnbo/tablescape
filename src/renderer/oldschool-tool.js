@@ -52,7 +52,7 @@ const OldschoolTool = (() => {
     const first = Oldschool.FLOORS[0];
     const prefs = {
       tool: 'room', snap: 'sq', level: 0, width: 1, brush: 1.5, erase: 'box', edge: 'walls', mats: { ...Oldschool.DEFAULT_MAT },
-      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box',
+      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box', mix: 'stones', mixW: 1, floorHow: 'click',
       floor: first ? { rel: Oldschool.relOf(first) } : null,
     };
     try { const saved = JSON.parse(localStorage.getItem('osPrefs') || '{}'); Object.assign(prefs, saved, { mats: { ...prefs.mats, ...(saved.mats || {}) }, line: { ...prefs.line, ...(saved.line || {}) }, pillar: { ...prefs.pillar, ...(saved.pillar || {}) } }); } catch {}
@@ -85,7 +85,7 @@ const OldschoolTool = (() => {
     const snapCorr = (p, free) => (free || O.snap === 'free' ? snapCorner(p, true) : O.width % 2 === 1 ? snapCenter(p) : snapCorner(p));
 
     // ---------- what a new floor gets ----------
-    const areaLook = () => ({ tile: O.floor, edge: O.edge, mat: O.edge === 'ledge' ? 'stone_wall' : O.mats[O.edge] || Oldschool.DEFAULT_MAT[O.edge], level: O.level });
+    const areaLook = () => ({ tile: O.floor, edge: O.edge, mat: O.edge === 'ledge' ? 'stone_wall' : O.mats[O.edge] || Oldschool.DEFAULT_MAT[O.edge], level: O.level, mix: O.mix, mixW: O.mixW });
     function add(item, label) {
       if (!map() || !map().os) return;
       pending.push({ ...item, at: Date.now() });
@@ -109,6 +109,7 @@ const OldschoolTool = (() => {
         drawPreview(pt);
         return null;
       }
+      if (t === 'floor' && O.floorHow === 'paint') return { kind: 'osbrush', pts: [[round(pt.x, 3), round(pt.y, 3)]], paint: true, r: (O.brush * g()) / 2 }; // (Beta 3.26)
       if (t === 'floor') { repaint(pt); return null; }
       if (t === 'pillar') { const p = snapCenter(pt, e.altKey); add({ kind: 'pillar', pts: [[p.x, p.y]], r: O.pillar.r * g(), round: O.pillar.round, mat: O.line.mat }); return null; }
       if (t === 'door') { placeDoor(pt); return null; }
@@ -167,6 +168,8 @@ const OldschoolTool = (() => {
         if (d.cut) dropDoorsIn(item);
       } else if (d.kind === 'ospath') {
         add({ kind: d.cut ? 'cut' : 'area', shape: 'path', pts: d.pts, r: (O.width * g()) / 2, ...(d.cut ? {} : areaLook()) });
+      } else if (d.kind === 'osbrush' && d.paint) { // (Beta 3.26) the picked floor painted into the floors under the brush
+        add({ kind: 'paint', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r, tile: O.floor, mix: O.mix === 'soft' ? 'soft' : 'stones' });
       } else if (d.kind === 'osbrush' && d.ground) {
         add({ kind: 'ground', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r, preset: d.ground });
       } else if (d.kind === 'osbrush') {
@@ -272,7 +275,7 @@ const OldschoolTool = (() => {
       const inBox = (mx, my) => mx >= x0 && mx <= x1 && my >= y0 && my <= y1;
       const ids = map().os.doors.filter((d) => inBox((d.x1 + d.x2) / 2, (d.y1 + d.y2) / 2)).map((d) => d.id);
       // (Beta 3.25) and the ground whose middle is in it
-      for (const it of map().os.items) if (it.kind === 'ground') { const xs = it.pts.map((q) => q[0]); const ys = it.pts.map((q) => q[1]); if (inBox((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2)) ids.push(it.id); }
+      for (const it of map().os.items) if (it.kind === 'ground' || it.kind === 'paint') { const xs = it.pts.map((q) => q[0]); const ys = it.pts.map((q) => q[1]); if (inBox((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2)) ids.push(it.id); }
       if (ids.length) cmd('os.remove', { ids });
     }
 
@@ -344,7 +347,7 @@ const OldschoolTool = (() => {
           if (t === 'corridor') {
             const q = snapCorr(pt); const w = O.width * s;
             root.append(el('rect', { x: q.x - w / 2, y: q.y - w / 2, width: w, height: w, fill: patternFor(defs, O.floor), opacity: '0.6' }), el('rect', { x: q.x - w / 2, y: q.y - w / 2, width: w, height: w, fill: 'none', stroke: ORANGE, 'stroke-width': thin, 'stroke-dasharray': `${thin * 3} ${thin * 2}` }));
-          } else if (t === 'brush' || (t === 'erase' && O.erase === 'brush') || (t === 'ground' && O.groundShape === 'brush')) {
+          } else if (t === 'brush' || (t === 'erase' && O.erase === 'brush') || (t === 'ground' && O.groundShape === 'brush') || (t === 'floor' && O.floorHow === 'paint')) {
             const r = (O.brush * s) / 2;
             root.append(el('circle', { cx: pt.x, cy: pt.y, r, fill: t === 'erase' ? 'rgba(10,10,12,0.55)' : t === 'ground' ? groundColor(O.ground) : patternFor(defs, O.floor), opacity: t === 'brush' ? '0.55' : '0.8' }), el('circle', { cx: pt.x, cy: pt.y, r, fill: 'none', stroke: ORANGE, 'stroke-width': thin }));
           } else if (t === 'wall') {
@@ -550,6 +553,7 @@ const OldschoolTool = (() => {
         if (t === 'corridor') opts.push(seg({ options: [1, 2, 3].map((n) => ({ value: n, label: `${n} square${n > 1 ? 's' : ''}` })), get: () => O.width, set: (v) => { O.width = v; save(); } }));
         if (t === 'brush') opts.push(slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` }));
         opts.push(seg({ cls: 'os-level', options: [{ value: -1, label: 'Lower', icon: 'arrow-down' }, { value: 0, label: 'Floor' }, { value: 1, label: 'Raised', icon: 'arrow-up' }], get: () => O.level, set: (v) => { O.level = v; save(); } }));
+        opts.push(...mixCtl(true));
       } else if (t === 'erase') {
         opts.push(seg({ options: [{ value: 'box', label: 'Box', icon: 'square' }, { value: 'round', label: 'Round', icon: 'circle' }, { value: 'brush', label: 'Brush', icon: 'brush' }], get: () => O.erase, set: (v) => { O.erase = v; save(); ctx.refreshPop(); } }));
         if (O.erase === 'brush') opts.push(slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` }));
@@ -583,7 +587,11 @@ const OldschoolTool = (() => {
         opts.push(box, seg({ options: [{ value: 'box', label: 'Box', icon: 'square' }, { value: 'round', label: 'Round', icon: 'circle' }, { value: 'brush', label: 'Brush', icon: 'brush' }], get: () => O.groundShape, set: (v) => { O.groundShape = v; save(); ctx.refreshPop(); } }));
         if (O.groundShape === 'brush') opts.push(slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` }));
       } else if (t === 'floor') {
-        opts.push(seg({ label: 'A click changes', options: [{ value: 'tile', label: 'Floor' }, { value: 'edge', label: 'Edge' }, { value: 'both', label: 'Both' }], get: () => O.floorMode, set: (v) => { O.floorMode = v; save(); } }));
+        opts.push(seg({ options: [{ value: 'click', label: 'Click', icon: 'pointer' }, { value: 'paint', label: 'Paint', icon: 'brush' }], get: () => O.floorHow, set: (v) => { O.floorHow = v; save(); ctx.refreshPop(); } }));
+        if (O.floorHow === 'paint') {
+          opts.push(slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` }));
+          opts.push(...mixCtl(false));
+        } else opts.push(seg({ label: 'A click changes', options: [{ value: 'tile', label: 'Floor' }, { value: 'edge', label: 'Edge' }, { value: 'both', label: 'Both' }], get: () => O.floorMode, set: (v) => { O.floorMode = v; save(); } }));
       }
       const snapSeg = seg({ options: [{ value: 'sq', label: 'Squares' }, { value: 'half', label: 'Half' }, { value: 'free', label: 'Free' }], get: () => O.snap, set: (v) => { O.snap = v; save(); } });
       // the floor tiles: those of the app, then those of the library
@@ -627,6 +635,14 @@ const OldschoolTool = (() => {
         h('div', { class: 'ctl-label' }, 'Floor'), floorBox,
         h('div', { class: 'ctl-label' }, 'Edge'), edgeSeg, edgeMat,
         sep(), light, h('div', { class: 'ctl-label' }, 'Shadows'), shadows, sight, st);
+    }
+    // Beta 3.26: how a new floor (or a paint stroke) mixes into the floor already there
+    function mixCtl(withOff) {
+      const { slider, seg } = c();
+      const opts = [{ value: 'stones', label: 'Stones' }, { value: 'soft', label: 'Soft' }, ...(withOff ? [{ value: 'off', label: 'Off' }] : [])];
+      const out = [h('div', { class: 'ctl-label' }, 'Mix'), seg({ cls: 'os-mix', options: opts, get: () => (!withOff && O.mix === 'off' ? 'stones' : O.mix), set: (v) => { O.mix = v; save(); ctx.refreshPop(); } })];
+      if (withOff && O.mix !== 'off') out.push(slider({ label: 'Mix width', min: 0.5, max: 3, step: 0.5, get: () => O.mixW, set: (v) => { O.mixW = v; save(); }, fmt: (v) => `${v} square${v === 1 ? '' : 's'}` }));
+      return out;
     }
     function matPicker(get, set, ids) {
       const { bind } = c();

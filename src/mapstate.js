@@ -54,6 +54,8 @@ const OS_SHAPES = ['rect', 'poly', 'round', 'path', 'brush'];
 // Beta 3.25: ground drawn into an Oldschool map (the Draw tool's Ground): the picture shows the pool, an effect of the
 // same kind (fx, key os) makes it move
 const GROUND_KINDS = ['water', 'lava', 'acid', 'darkness', 'swamp'];
+// Beta 3.26: how a floor mixes into the floor already there (stone by stone, a soft fade, or not), over mixW squares
+const MIX_KINDS = ['stones', 'soft', 'off'];
 function defaultOs() { return { v: 1, items: [], doors: [], sun: 135, shadows: 'short', sight: true }; } // (Beta 3.25: the depth view of 3.23 is gone; shadows)
 const SHADOW_KINDS = ['short', 'long', 'off'];
 const osNum = (v, d, a, b) => { const x = Number(v); return Number.isFinite(x) ? Math.min(b, Math.max(a, x)) : d; };
@@ -62,9 +64,13 @@ const refOf = (t) => (t && (t.rel || t.path) ? { ...(t.rel ? { rel: String(t.rel
 function cleanOsItem(it) {
   if (!it || typeof it !== 'object') return null;
   const id = typeof it.id === 'string' && it.id ? it.id : newId('o');
-  const kind = ['area', 'cut', 'line', 'pillar', 'stairs', 'ground'].includes(it.kind) ? it.kind : null;
+  const kind = ['area', 'cut', 'line', 'pillar', 'stairs', 'ground', 'paint'].includes(it.kind) ? it.kind : null;
   if (!kind) return null;
   const pts = ptsOf(it.pts);
+  if (kind === 'paint') { // (Beta 3.26) a floor painted into the floors under a brush
+    if (pts.length < 1) return null;
+    return { id, kind, shape: 'brush', pts, r: r3(osNum(it.r, 0.75, 0.05, 50)), tile: refOf(it.tile), mix: MIX_KINDS.includes(it.mix) && it.mix !== 'off' ? it.mix : 'stones' };
+  }
   if (kind === 'ground') {
     const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'rect';
     const need = shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' ? 1 : 2;
@@ -76,7 +82,11 @@ function cleanOsItem(it) {
     const need = shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' ? 1 : 2;
     if (pts.length < need) return null;
     const out = { id, kind, shape, pts, r: r3(osNum(it.r, 0.5, 0.05, 50)) };
-    if (kind === 'area') Object.assign(out, { tile: refOf(it.tile), edge: OS_EDGES.includes(it.edge) ? it.edge : 'walls', mat: typeof it.mat === 'string' ? it.mat : 'stone_wall', level: Math.round(osNum(it.level, 0, -3, 3)) });
+    if (kind === 'area') {
+      Object.assign(out, { tile: refOf(it.tile), edge: OS_EDGES.includes(it.edge) ? it.edge : 'walls', mat: typeof it.mat === 'string' ? it.mat : 'stone_wall', level: Math.round(osNum(it.level, 0, -3, 3)) });
+      out.mix = MIX_KINDS.includes(it.mix) ? it.mix : 'stones'; // (Beta 3.26)
+      out.mixW = Math.round(osNum(it.mixW, 1, 0.5, 3) * 2) / 2;
+    }
     return out;
   }
   if (kind === 'line') return pts.length >= 2 ? { id, kind, pts, w: r3(osNum(it.w, 0.5, 0.05, 10)), h: r3(osNum(it.h, 1, 0.1, 3)), mat: typeof it.mat === 'string' ? it.mat : 'stone_wall' } : null;
@@ -1039,13 +1049,13 @@ function apply(map, type, p, media) {
       if (Array.isArray(p.doors) && p.doors.length) map.os.doors.push(...cleanOs({ doors: p.doors.slice(0, 200).map((d) => ({ ...d, id: newId('od') })) }).doors);
       const k = list[list.length - 1].kind;
       syncGround(map);
-      return { changed: 'all', selected: list[list.length - 1].id, label: k === 'cut' ? 'Erased' : k === 'line' ? 'Wall drawn' : k === 'pillar' ? 'Pillar placed' : k === 'stairs' ? 'Stairs placed' : k === 'ground' ? 'Ground drawn' : 'Floor drawn' };
+      return { changed: 'all', selected: list[list.length - 1].id, label: k === 'cut' ? 'Erased' : k === 'line' ? 'Wall drawn' : k === 'pillar' ? 'Pillar placed' : k === 'stairs' ? 'Stairs placed' : k === 'ground' ? 'Ground drawn' : k === 'paint' ? 'Floor painted' : 'Floor drawn' };
     }
     case 'os.update': { // an area's tile, edge, material or level; any item's points
       if (!map.os) return { changed: null };
       const i = map.os.items.findIndex((x) => x.id === p.id);
       if (i < 0) return { changed: null };
-      const next = cleanOsItem({ ...map.os.items[i], ...pick(p, ['tile', 'edge', 'mat', 'level', 'pts', 'r', 'w', 'h', 'round', 'dir', 'preset']), id: p.id });
+      const next = cleanOsItem({ ...map.os.items[i], ...pick(p, ['tile', 'edge', 'mat', 'level', 'pts', 'r', 'w', 'h', 'round', 'dir', 'preset', 'mix', 'mixW']), id: p.id });
       if (!next) return { changed: null };
       map.os.items[i] = next;
       syncGround(map);

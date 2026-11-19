@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // (2.6) and darker corners of what it raised (stairs count as floor); a wall line or pillar only its shadows and corners
   const HALO = 6.6; const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 11; // (11: Beta 3.25, sharp tiles, the 2D look; walls for sight in the middle of the walls)
+  const VERSION = 12; // (12: Beta 3.26, floors that mix; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -651,6 +651,100 @@ void main(){
     for (const c of [Lc, Mc, E, R]) c.width = c.height = 0;
   }
 
+  // ---------- Beta 3.26: floors that mix into the floor already there ----------
+  // Over w dots, centred on the new floor's edge (a paint stroke: its whole brush, fading out), the new floor takes
+  // over from the old one. 'soft': a fade with a noisy edge. 'stones': each square is wholly one or the other (a chance
+  // of its own against how far into the change its middle lies), the squares near the turn get a ragged edge, and the
+  // higher texture (brighter than what is around it) lies over the lower. Where there was no floor, a new floor is laid
+  // as drawn (a paint stroke adds none). All in squares from the grid's origin: the base and the sharp tiles agree.
+  const h2 = (x, y) => { const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return v - Math.floor(v); };
+  const vnoise = (x, y) => {
+    const i = Math.floor(x); const j = Math.floor(y); let fx = x - i; let fy = y - j; fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+    const a = h2(i, j); const b = h2(i + 1, j); const c = h2(i, j + 1); const d = h2(i + 1, j + 1);
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+  };
+  function mixArea(fg, it, T, k, P, org, pat, how, w, paintOnly) {
+    const W = fg.canvas.width; const H = fg.canvas.height;
+    const q = itemBox(it); const a = T(q[0], q[1]); const b = T(q[2], q[3]);
+    const sig = paintOnly ? w * 0.4 : w * 0.85; // (how soft the change is: mixed squares about w on each side of the edge; a brush: its rim)
+    const pad = Math.ceil(sig * 3.2) + 2; // (the soft mask needs room beyond what is worked on)
+    const bx0 = Math.floor(Math.min(a[0], b[0])) - pad; const by0 = Math.floor(Math.min(a[1], b[1])) - pad;
+    const bx1 = Math.ceil(Math.max(a[0], b[0])) + pad; const by1 = Math.ceil(Math.max(a[1], b[1])) + pad;
+    // what is worked on: the box within the picture
+    const x0 = Math.max(0, bx0); const y0 = Math.max(0, by0); const x1 = Math.min(W, bx1); const y1 = Math.min(H, by1);
+    if (x1 <= x0 || y1 <= y0) return;
+    // the masks over the box with its room (clipped to the picture plus that room)
+    const mx0 = Math.max(bx0, -pad); const my0 = Math.max(by0, -pad); const mx1 = Math.min(bx1, W + pad); const my1 = Math.min(by1, H + pad);
+    const mw = mx1 - mx0; const mh = my1 - my0;
+    const mk = (cw, ch) => { const c = document.createElement('canvas'); c.width = cw; c.height = ch; return c; };
+    const Tm = (x, y) => { const [u, v] = T(x, y); return [u - mx0, v - my0]; };
+    // what changes where: the new floor, and (a floor drawn) where there is no floor around it, so its edge against
+    // the dark or a wall stays as it is (there is nothing to mix with there)
+    const M = mk(mw, mh); const Mg = M.getContext('2d', CPU);
+    if (paintOnly) paintArea(Mg, { ...it, r: it.r * 0.7 }, Tm, k, '#fff', false); // (a soft brush: full in its middle, nothing at its rim)
+    else {
+      Mg.fillStyle = '#fff'; Mg.fillRect(0, 0, mw, mh);
+      Mg.globalCompositeOperation = 'destination-out'; Mg.drawImage(fg.canvas, -mx0, -my0);
+      Mg.globalCompositeOperation = 'source-over'; paintArea(Mg, it, Tm, k, '#fff', false);
+    }
+    const soft = mk(mw, mh); const sg = soft.getContext('2d', CPU);
+    sg.filter = `blur(${Math.max(0.5, sig).toFixed(2)}px)`; sg.drawImage(M, 0, 0); sg.filter = 'none';
+    M.width = M.height = 0;
+    const hard = paintOnly ? null : mk(mw, mh); if (hard) paintArea(hard.getContext('2d', CPU), it, Tm, k, '#fff', false);
+    // the new floor over the box, and both floors blurred (what is "higher": brighter than around it)
+    const ww = x1 - x0; const hh = y1 - y0;
+    const nf = mk(ww, hh); const ng = nf.getContext('2d', CPU); ng.translate(-x0, -y0); ng.fillStyle = pat; ng.fillRect(x0, y0, ww, hh);
+    const br = Math.max(1, P * 0.18).toFixed(1);
+    const blurOf = (src) => { const c = mk(ww, hh); const g = c.getContext('2d', CPU); g.filter = `blur(${br}px)`; g.drawImage(src, 0, 0); g.filter = 'none'; return c; };
+    const oc = mk(ww, hh); oc.getContext('2d', CPU).drawImage(fg.canvas, x0, y0, ww, hh, 0, 0, ww, hh);
+    const nb = blurOf(nf); const ob = blurOf(oc);
+    const D = (c) => c.getContext('2d', CPU).getImageData(0, 0, c.width, c.height).data;
+    const O = oc.getContext('2d', CPU).getImageData(0, 0, ww, hh); const od = O.data;
+    const nd = D(nf); const nbd = D(nb); const obd = D(ob);
+    const S = sg.getImageData(0, 0, mw, mh).data; const Hd = hard ? D(hard) : null;
+    const sAt = (cx, cy) => { const u = Math.min(mw - 1, Math.max(0, Math.round(cx) - mx0)); const v = Math.min(mh - 1, Math.max(0, Math.round(cy) - my0)); return S[(v * mw + u) * 4 + 3] / 255; };
+    const lum = (d, i) => (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11) / 255;
+    const stones = how === 'stones';
+    const centre = new Map(); // square → how far into the change its middle lies
+    for (let y = 0; y < hh; y++) {
+      const cy = y0 + y + 0.5; const gy = (cy - org[1]) / P; const sy = Math.floor(gy);
+      for (let x = 0; x < ww; x++) {
+        const i = (y * ww + x) * 4; const cx = x0 + x + 0.5;
+        const mi = ((y0 + y - my0) * mw + (x0 + x - mx0)) * 4;
+        const s = S[mi + 3] / 255; const hA = Hd ? Hd[mi + 3] / 255 : 0;
+        if (s <= 0.002 && hA <= 0.002) continue;
+        const gx = (cx - org[0]) / P;
+        const oA = od[i + 3] / 255;
+        let al = 0;
+        if (oA <= 0.002) al = 0; // (no floor there: only the new floor as drawn)
+        else if (s >= 0.998 && (!stones || hA >= 0.998)) al = 1;
+        else {
+          const dh = (lum(nd, i) - lum(nbd, i)) - (lum(od, i) - lum(obd, i));
+          if (stones) {
+            const sx = Math.floor(gx); const key = sx * 65536 + sy;
+            let sc = centre.get(key); if (sc === undefined) { sc = sAt(org[0] + (sx + 0.5) * P, org[1] + (sy + 0.5) * P); centre.set(key, sc); }
+            const r = 0.04 + 0.92 * h2(sx + 0.37, sy + 0.71); // (a chance of its own)
+            const e = (sc - r) + (s - sc) * 0.4 + (vnoise(gx / 0.3, gy / 0.3) - 0.5) * 0.24 + dh * 0.7;
+            al = Math.min(1, Math.max(0, (e + 0.035) / 0.07));
+            al = al * al * (3 - 2 * al);
+          } else {
+            const e = s + (vnoise(gx / 0.55, gy / 0.55) - 0.5) * 0.4 + dh * 0.3;
+            al = Math.min(1, Math.max(0, (e - 0.15) / 0.7)); al = al * al * (3 - 2 * al);
+          }
+        }
+        // where there was floor, the new one takes over by al; where there was none, a new floor is laid as drawn
+        const aFloor = oA * al; const aNew = hA * (1 - oA);
+        const aN = aFloor + aNew;
+        if (aN <= 0.001) continue;
+        const outA = oA + aNew;
+        for (let c = 0; c < 3; c++) od[i + c] = Math.round((nd[i + c] * aN + od[i + c] * (oA - aFloor)) / Math.max(1e-6, outA));
+        od[i + 3] = Math.round(outA * 255);
+      }
+    }
+    fg.putImageData(O, x0, y0);
+    for (const c of [soft, hard, nf, nb, ob, oc]) if (c) c.width = c.height = 0;
+  }
+
   // ---------- making the picture ----------
   // The drawing painted flat: floors with their tiles (fg), what each area is (ag: edge, level, material), wall lines and
   // pillars (sg), stairs (tg). T: map inches → dots, k: dots an inch, P: dots a square, org: the grid's origin in dots.
@@ -671,7 +765,8 @@ void main(){
     for (const it of os.items) {
       if (it.kind === 'area') {
         const t = tileInfo(it.tile, lib) || tileInfo({ rel: relOf(FLOORS[0]) });
-        paintArea(fg, it, T, k, patOf(t), false);
+        if (it.mix !== 'off' && !(it.level || 0)) mixArea(fg, it, T, k, P, org, patOf(t), it.mix === 'soft' ? 'soft' : 'stones', (it.mixW || 1) * P, false); // (Beta 3.26)
+        else paintArea(fg, it, T, k, patOf(t), false);
         if (ag) paintArea(ag, it, T, k, `rgb(${EDGE_CODE[it.edge] * 40},${128 + it.level * 30},${matCode(it.mat || DEFAULT_MAT[it.edge])})`, false);
         if (tg) paintArea(tg, it, T, k, '#000', true); // (a floor drawn over stairs takes them away)
       } else if (it.kind === 'cut') {
@@ -679,6 +774,9 @@ void main(){
         sg.save(); sg.globalCompositeOperation = 'destination-out'; if (it.shape === 'path' || it.shape === 'brush') stroke(sg, it, T, k, '#000'); else sg.fill(shapePath(it, T)); sg.restore();
       } else if (it.kind === 'line' || it.kind === 'pillar') {
         paintSolid(sg, it, T, k, `rgb(255,${Math.round((it.h || 1) * 100)},${matCode(it.mat)})`, false);
+      } else if (it.kind === 'paint') { // (Beta 3.26) a floor painted into the floors under the brush
+        const t = tileInfo(it.tile, lib) || tileInfo({ rel: relOf(FLOORS[0]) });
+        mixArea(fg, it, T, k, P, org, patOf(t), it.mix === 'soft' ? 'soft' : 'stones', it.r * k, true);
       } else if (it.kind === 'ground') { // (Beta 3.25) a pool of water, lava, acid or swamp; magical darkness is the effect alone
         if (it.preset !== 'darkness') paintGround(fg, it, T, k, P, org);
         if (ag) { ag.save(); ag.globalCompositeOperation = 'destination-over'; paintArea(ag, it, T, k, `rgb(${EDGE_CODE.ledge * 40},128,${matCode('stone_wall')})`, false); ag.restore(); } // (on nothing: a pool in the dark)

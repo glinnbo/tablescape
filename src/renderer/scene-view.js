@@ -777,7 +777,7 @@ class SceneView {
     const fillOf = () => {
       if (it.kind === 'cut') return '#000';
       if (it.kind === 'ground') return { water: '#2c6f7c', lava: '#c4501c', acid: '#6aa82a', darkness: '#050308', swamp: '#46522a' }[it.preset] || '#2c6f7c'; // (Beta 3.25)
-      if (it.kind !== 'area') return '#8c877f';
+      if (it.kind !== 'area' && it.kind !== 'paint') return '#8c877f';
       const t = Oldschool.tileInfo(it.tile, []);
       if (!t || !t.url) return '#7d7466';
       const id = `ink-${t.id || 'x'}-${String(t.squares)}`;

@@ -24,6 +24,10 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.26', [
+      'Oldschool maps: floors mix. Where a new floor meets one that is already there, they change stone by stone (the squares near the edge are one or the other, a few half overgrown, the rougher texture on top), over one square by default. In the Draw panel: Mix Stones, Soft (a fade) or Off, and its width (½ to 3 squares)',
+      'Floor → Paint: paint the picked floor into the floors under the brush (stone by stone or soft), for patches of grass, sand or rubble; it adds no floor and changes no walls',
+    ]],
     ['Beta 3.25', [
       'Oldschool maps are sharp: on top of the picture lie tiles with as many dots a square as the TV shows (the picture had 80 and looked blurry), and the floor tiles come in their full size. When you draw, only the tiles near the change are made again',
       'No more flash on the table while you draw: a new picture is ready before it takes over',

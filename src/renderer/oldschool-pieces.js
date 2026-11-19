@@ -65,6 +65,8 @@ const OldschoolPieces = (() => {
           edge,
           mat: it.mat || (it.edge ? defaultMat(edge) : look.mat),
           level: (it.level || 0) + (look.level || 0),
+          // (Beta 3.26) the main floors mix as picked; an accent (a bar, a dais, a bridge) keeps a hard edge
+          mix: it.role === 'accent' ? 'off' : look.mix || 'stones', mixW: look.mixW || 1,
         });
       } else if (it.kind === 'pillar') Object.assign(o, { r: it.r * g, round: !!it.round, mat: it.mat });
       else if (it.kind === 'line') Object.assign(o, { w: it.w * g, h: it.h, mat: it.mat });

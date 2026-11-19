@@ -337,6 +337,48 @@ module.exports = (area) => {
     await t.clickSel('.os-tools .tile[data-v="room"]');
   }, { ms: 300000 });
 
+  area.deep('floors mix: stone by stone by default, soft or off; Floor → Paint lays a floor into the floors under the brush', async (t) => {
+    await clear(t);
+    const T = (n) => ({ rel: `Tiles/Tablescape/${n}.webp` });
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
+    await t.clickSel('.os-tools .tile[data-v="room"]');
+    t.eq(await t.g('Play.ui.os.mix'), 'stones', 'stone by stone at first');
+    t.ok(await t.g(`[...document.querySelectorAll('#pop .seg-btn')].some((b) => b.textContent.trim() === 'Stones')`), 'the Mix choice in the panel');
+    t.handle('os.add', { mapId: own, items: [room(14, 2, 26, 9, { tile: T('Desert sand') }), room(14, 2, 20, 9, { tile: T('Mossy court') })] });
+    await t.settle();
+    const items = M(t).os.items;
+    t.ok(items.every((x) => x.mix === 'stones' && x.mixW === 1), 'a floor drawn mixes stone by stone over one square', items.map((x) => [x.mix, x.mixW]));
+    let m = await baked(t);
+    // across the edge between grass and sand: squares of both, not a straight line
+    const row = await t.g(`(async () => { const b = Play.state().map.bg; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d'); g.drawImage(img, 0, 0); const out = []; for (let y = 2.5; y < 9; y += 1) { const r = []; for (let x = 17.5; x < 23; x += 1) { const d = g.getImageData(Math.round((x * ${k} - b.x) / b.scale), Math.round((y * ${k} - b.y) / b.scale), 1, 1).data; r.push(d[1] > d[0] ? 'g' : 's'); } out.push(r.join('')); } return out; })()`);
+    t.note(`squares across the edge: ${row.join(' ')}`);
+    t.ok(row.some((r) => /s/.test(r.slice(0, 3))) || row.some((r) => /g/.test(r.slice(3))), 'stones of each floor on the other side', row);
+    const first = M(t).os.items[1].id;
+    t.handle('os.update', { mapId: own, id: first, mix: 'off' });
+    await t.settle();
+    t.eq(M(t).os.items[1].mix, 'off', 'off for one floor');
+    m = await baked(t);
+    // Floor → Paint: a brush stroke of grass into the sand
+    await t.clickSel('.os-tools .tile[data-v="floor"]');
+    await t.clickText('#pop .seg-btn', 'Paint');
+    t.eq(await t.g('Play.ui.os.floorHow'), 'paint', 'painting');
+    await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Mossy court.webp"]');
+    await t.drag(await t.scr(22 * k, 5 * k), await t.scr(25 * k, 6 * k), 12);
+    await t.until(() => M(t).os.items.some((x) => x.kind === 'paint'), 5000, 'the stroke');
+    const pi = M(t).os.items.find((x) => x.kind === 'paint');
+    t.eq([pi.shape, pi.tile && pi.tile.rel, pi.mix], ['brush', 'Tiles/Tablescape/Mossy court.webp', 'stones'], 'a stroke of the picked floor', pi);
+    t.ok(await t.g(`Play.OS.hashOf(${JSON.stringify({ os: { ...M(t).os, items: M(t).os.items.filter((x) => x.kind !== 'paint') }, grid: M(t).grid })}) !== Play.OS.hashOf(${JSON.stringify({ os: M(t).os, grid: M(t).grid })})`), 'it changes the picture');
+    await baked(t);
+    t.ok(!wallsOf(t).some((w) => Math.min(w.x1, w.x2) > 21 * k && Math.max(w.x1, w.x2) < 26 * k && Math.min(w.y1, w.y2) > 3 * k && Math.max(w.y1, w.y2) < 8 * k), 'no walls from a stroke');
+    // erase over it takes it away
+    await t.clickSel('.os-tools .tile[data-v="erase"]');
+    await t.clickText('#pop .seg-btn', 'Box');
+    await t.drag(await t.scr(21.5 * k, 3.5 * k), await t.scr(25.5 * k, 7.5 * k), 10);
+    await t.until(() => !M(t).os.items.some((x) => x.kind === 'paint'), 5000, 'the stroke erased');
+    await t.g(`Play.ui.os.floorHow = 'click'`);
+    await t.clickSel('.os-tools .tile[data-v="room"]');
+  }, { ms: 300000 });
+
   area.deep('ready-made pieces: picked in the panel, stamped with a click (one undo step), a quarter turn turns them', async (t) => {
     await clear(t);
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
