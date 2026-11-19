@@ -29,11 +29,11 @@ const Oldschool = (() => {
   // with as many dots a square as the TV shows (the base was stretched there, and looked blurry). A tile is made again
   // only when something near it changed (its key), so a pillar costs one or two tiles, not the whole picture.
   const SHARP_MAX = 60e6; // dots in all the sharp tiles at most (a huge map gets fewer per square)
-  // squares: how far a change reaches into the picture: a floor's edge (rock and cliffs 3.2) and then the shadows
-  // (2.6) and darker corners of what it raised (stairs count as floor); a wall line or pillar only its shadows and corners
-  const HALO = 6.6; const HALO_SOLID = 3.4;
+  // squares: how far a change reaches into the picture (Beta 3.31: worked out for each thing, see reaches; it was 6.6
+  // for every floor); a door: the wall line it opens
+  const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 16; // (16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 17; // (17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -182,9 +182,12 @@ const Oldschool = (() => {
     let sharp = null;
     if (sharpWant) {
       const PH = Math.min(sharpWant, Math.floor(Math.sqrt(SHARP_MAX / (nsx * nsy))));
-      if (PH >= P * 1.2) sharp = { P: PH, ts: Math.max(4, Math.floor(1600 / PH)) }; // (a tile: at most 1600 dots across)
+      // (a tile: at most 1000 dots across. Beta 3.31, was 1600: a change re-makes fewer dots)
+      if (PH >= P * 1.2) sharp = { P: PH, ts: Math.max(4, Math.floor(1000 / PH)) };
     }
-    return { g, ox, oy, sx0, sy0, sx1, sy1, nsx, nsy, P, sharp };
+    // Beta 3.31: with sharp tiles on top the base is only the light, the distances and the picture shown while they
+    // come: it is made with half the dots a square from the start (it was made in full and then halved)
+    return { g, ox, oy, sx0, sy0, sx1, sy1, nsx, nsy, P: sharp ? Math.max(16, Math.round(P / 2)) : P, sharp };
   }
 
   // ---------- a fingerprint of what the picture depends on ----------
@@ -203,15 +206,37 @@ const Oldschool = (() => {
     const sharp = bx && bx.sharp ? [bx.sharp.P, bx.sharp.ts] : 0;
     return fingerprint(JSON.stringify([os.items, os.doors, os.sun, os.shadows || 'short', os.sight, map.grid.size, map.grid.ox, map.grid.oy, tileKeys(os.items, lib), sharp, VERSION]));
   }
+  // Beta 3.31: how far a change of each thing can change the picture around it, in squares (it was 6.6 for every
+  // floor). Outside a floor: what its edge builds there (any floor's edge may take the place: the widest counts) and
+  // the shadows; through mixing: its own soft line, and that of any mixing floor drawn after it that it touches (three of
+  // its blurs, and the square; floors drawn before it do not look at it).
+  const EDGE_REACH = { walls: 0.5, rock: 3.0, cliff: 3.2, ledge: 0.3, fade: 1.8 };
+  const mixes = (it) => (it.kind === 'area' && it.mixW > 0 && !(it.level || 0)) || it.kind === 'paint';
+  function reaches(os, g) {
+    const S = SHADOWS[os.shadows] || SHADOWS.short; const light = Math.max(0.7, S.tan ? 2.2 / S.tan : 0);
+    let edge = 0; for (const it of os.items) if (it.kind === 'area') edge = Math.max(edge, EDGE_REACH[it.edge] ?? 3.2);
+    const mixers = []; os.items.forEach((it, n) => { if (mixes(it)) mixers.push({ n, box: itemBox(it), pad: (it.kind === 'paint' ? 1.2 * (it.r / g) : 1.35 * it.mixW) + 0.85 }); });
+    const out = new Map();
+    os.items.forEach((it, n) => {
+      if (it.kind === 'line' || it.kind === 'pillar') { out.set(it, light + 0.4); return; }
+      const b = itemBox(it); let mix = 0;
+      for (const m of mixers) { const p = m.pad * g; if (m.n >= n && m.pad > mix && m.box[0] - p < b[2] && m.box[2] + p > b[0] && m.box[1] - p < b[3] && m.box[3] + p > b[1]) mix = m.pad; }
+      out.set(it, Math.max(edge + light, mix) + 0.3);
+    });
+    return out;
+  }
+  const itemKeys = new WeakMap(); // (a thing's own fingerprint, worked out once: tiles ask for it again and again)
+  const itemKey = (it) => { let h = itemKeys.get(it); if (!h) { h = fingerprint(JSON.stringify(it)); itemKeys.set(it, h); } return h; };
   // one sharp tile's key: what lies near it (in drawing order), the light, the grid, the dots a square
   function tileKey(map, lib, bx, c, r) {
     const os = map.os; const { g, ox, oy, sharp } = bx;
+    if (!bx.reach) { bx.reach = reaches(os, g); bx.boxes = new Map(os.items.map((it) => [it, itemBox(it)])); }
     const x0 = ox + c * sharp.ts * g; const y0 = oy + r * sharp.ts * g; const x1 = x0 + sharp.ts * g; const y1 = y0 + sharp.ts * g;
     const near = (q, m) => q[0] < x1 + m && q[2] > x0 - m && q[1] < y1 + m && q[3] > y0 - m;
-    const items = os.items.filter((it) => near(itemBox(it), (it.kind === 'line' || it.kind === 'pillar' ? HALO_SOLID : HALO) * g));
-    if (!items.some((it) => it.kind !== 'cut' && near(itemBox(it), REACH * g))) return null; // (nothing shows here)
+    const items = os.items.filter((it) => near(bx.boxes.get(it), bx.reach.get(it) * g));
+    if (!items.some((it) => it.kind !== 'cut' && near(bx.boxes.get(it), REACH * g))) return null; // (nothing shows here)
     const doors = os.doors.filter((d) => near([Math.min(d.x1, d.x2), Math.min(d.y1, d.y2), Math.max(d.x1, d.x2), Math.max(d.y1, d.y2)], HALO_SOLID * g)); // (a door opens a wall line)
-    return fingerprint(JSON.stringify([items, doors, os.sun, os.shadows || 'short', g, ox, oy, tileKeys(items, lib), bx.P, sharp.P, sharp.ts, c, r, VERSION]));
+    return fingerprint(JSON.stringify([items.map(itemKey), doors, os.sun, os.shadows || 'short', g, ox, oy, tileKeys(items, lib), bx.P, sharp.P, sharp.ts, c, r, VERSION]));
   }
 
   // ---------- WebGL 2 ----------
@@ -557,7 +582,7 @@ void main(){
   const FS_SHARP = `#version 300 es
 precision highp float; in vec2 v_uv; out vec4 o;
 uniform sampler2D floorH, solidH, haloH, outJ, inJ, attrT, lightT, mtl0, mtl1, mtl2, mtl3, mtl4;
-uniform vec2 size; uniform vec2 tileO; uniform vec2 loSize; uniform vec2 orgLo; uniform float s; uniform float P; uniform float matSq[5]; uniform vec3 voidC;
+uniform vec2 size; uniform vec2 tileO; uniform vec2 loSize; uniform vec2 orgLo; uniform float s; uniform float P; uniform float matSq[5]; uniform vec3 voidC; uniform vec3 L;
 vec2 dec(vec4 c){ c = floor(c * 255.0 + 0.5); return vec2(c.r*256.0 + c.g, c.b*256.0 + c.a); }
 ${LOOK}
 float SA(vec2 p){ return texelFetch(solidH, ivec2(clamp(p, vec2(0.0), size - 1.0)), 0).a; }
@@ -583,11 +608,20 @@ void main(){
   int edge = int(floor(na.r * 255.0 / 40.0 + 0.5));
   int mi = clamp(int(floor(na.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
   // outside the floors: what the edge makes of it (as in the heights)
-  vec3 cOut = voidC; float aOut = 0.0;
+  vec3 cOut = voidC; float aOut = 0.0; float rel = 1.0;
   if (edge == 2) { if (dOut < 0.45 * P) { cOut = wallLook(matCol(mi, q), dOut, P); aOut = 1.0; } }
   else if (edge == 3) {
     float R = 2.3 * P + (noise(q / 0.7) - 0.5) * 0.9 * P + (noise(q / 0.2) - 0.5) * 0.25 * P;
-    if (dOut <= R) { cOut = matCol(mi, q); aOut = 1.0; }
+    if (dOut <= R) {
+      cOut = matCol(mi, q); aOut = 1.0;
+      // (Beta 3.31) the rock's fine relief, from its picture's own light and dark as in the heights: the base, at half
+      // size now, carries only the broad light
+      float e2 = 0.012;
+      float sx = 0.35 * (dot(matCol(mi, q + vec2(e2, 0.0)) - matCol(mi, q - vec2(e2, 0.0)), vec3(0.299, 0.587, 0.114))) / (2.0 * e2);
+      float sy = 0.35 * (dot(matCol(mi, q + vec2(0.0, e2)) - matCol(mi, q - vec2(0.0, e2)), vec3(0.299, 0.587, 0.114))) / (2.0 * e2);
+      vec3 n = normalize(vec3(-sx, -sy, 1.0 / 0.9));
+      rel = mix(1.0, 0.5 + 0.5 * max(dot(n, L), 0.0) / L.z, 0.7);
+    }
   } else if (edge == 4) {
     if (dOut <= 3.2 * P) { cOut = matCol(mi, q); aOut = cliffAlpha(q, dOut, P); }
   } else if (edge == 5) { // (Beta 3.29) Fade: its tile beyond the edge, fading out
@@ -600,7 +634,7 @@ void main(){
   // the light, a little smoothed (its steps are the base's dots)
   vec2 lu = lo / loSize; vec2 e = 0.7 / loSize;
   float li = 2.0 * (2.0 * texture(lightT, lu).r + texture(lightT, lu + e).r + texture(lightT, lu - e).r + texture(lightT, lu + vec2(e.x, -e.y)).r + texture(lightT, lu + vec2(-e.x, e.y)).r) / 6.0;
-  cOut = edge == 4 ? cliffCol(cOut, q, dOut, P, li, voidC) : cOut * li;
+  cOut = edge == 4 ? cliffCol(cOut, q, dOut, P, li, voidC) : cOut * li * rel;
   vec3 col = mix(cOut, cIn * li, fl.a); float a = mix(aOut, 1.0, fl.a);
   // wall lines and pillars: a dark edge, and a shadow at their foot
   int ms = clamp(int(floor(so.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
@@ -692,36 +726,82 @@ void main(){
     const a = h2(i, j); const b = h2(i + 1, j); const c = h2(i, j + 1); const d = h2(i + 1, j + 1);
     return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
   };
+  // Beta 3.31: a floor's mask is worked out once, in the grid's own dots (DQ a square, whatever the picture's size), and
+  // kept: the base, every sharp tile and later pictures only stretch it. It is found again by the floor's shape and its
+  // mixing, and the shapes of the floors drawn before it that it touches.
+  const MASKS = new Map(); let maskPx = 0; const MASK_MAX = 24e6; // (dots kept in all; the oldest go first)
+  const shapeKeys = new WeakMap(); const maskNow = new WeakMap();
+  const shapeKey = (o) => { let h = shapeKeys.get(o); if (!h) { h = fingerprint(JSON.stringify([o.kind, o.shape, o.pts, o.r, o.mixW, o.mixU, o.mixT])); shapeKeys.set(o, h); } return h; };
   function mixArea(fg, it, T, k, P, org, pat, w, paintOnly, before) {
-    const W = fg.canvas.width; const H = fg.canvas.height;
+    const tm0 = performance.now();
+    try {
+      const W = fg.canvas.width; const H = fg.canvas.height;
+      // (within one picture a floor is asked for again by every tile: its mask is at hand)
+      let m0 = maskNow.get(it);
+      if (!m0 || m0.items !== before.items || m0.n !== before.n) { m0 = { items: before.items, n: before.n, M: maskOf(it, T, k, P, org, w, paintOnly, before) }; maskNow.set(it, m0); }
+      const M = m0.M;
+      const ds = P / M.dq; // (picture dots a mask dot)
+      // what is worked on: the mask's own box (the floor and the room its soft line takes) within the picture
+      const x0 = Math.max(0, Math.floor(org[0] + M.tx0 * ds)); const y0 = Math.max(0, Math.floor(org[1] + M.ty0 * ds));
+      const x1 = Math.min(W, Math.ceil(org[0] + M.tx1 * ds)); const y1 = Math.min(H, Math.ceil(org[1] + M.ty1 * ds));
+      if (x1 > x0 && y1 > y0) {
+        const mk = (cw, ch) => { const c = document.createElement('canvas'); c.width = Math.max(1, cw); c.height = Math.max(1, ch); return c; };
+        const ww = x1 - x0; const hh = y1 - y0;
+        const A = mk(ww, hh); const ag = A.getContext('2d');
+        ag.imageSmoothingEnabled = true; ag.imageSmoothingQuality = 'high';
+        // (only the part of the mask that lies here, and a dot more around it)
+        const u0 = Math.max(0, Math.floor((x0 - org[0]) / ds - M.lx) - 2); const v0 = Math.max(0, Math.floor((y0 - org[1]) / ds - M.ly) - 2);
+        const u1 = Math.min(M.nw, Math.ceil((x1 - org[0]) / ds - M.lx) + 2); const v1 = Math.min(M.nh, Math.ceil((y1 - org[1]) / ds - M.ly) + 2);
+        if (u1 > u0 && v1 > v0) ag.drawImage(M.cv, u0, v0, u1 - u0, v1 - v0, org[0] + (M.lx + u0) * ds - x0, org[1] + (M.ly + v0) * ds - y0, (u1 - u0) * ds, (v1 - v0) * ds);
+        // the new floor through the mask, over the floor that is there
+        const nf = mk(ww, hh); const ng = nf.getContext('2d'); ng.translate(-x0, -y0); ng.fillStyle = pat; ng.fillRect(x0, y0, ww, hh); ng.setTransform(1, 0, 0, 1, 0, 0);
+        ng.globalCompositeOperation = 'destination-in'; ng.drawImage(A, 0, 0);
+        fg.save(); fg.globalCompositeOperation = 'source-atop'; fg.drawImage(nf, x0, y0); fg.restore();
+        A.width = A.height = 0; nf.width = nf.height = 0;
+      }
+      // where there was no floor: the new floor as drawn
+      if (!paintOnly) { fg.save(); fg.globalCompositeOperation = 'destination-over'; paintArea(fg, it, T, k, pat, false); fg.restore(); }
+    } finally { prof.mix += performance.now() - tm0; prof.mixN++; }
+  }
+  function maskOf(it, T, k, P, org, w, paintOnly, before) {
+    // the grid, from the picture's own measures: g inches a square, its origin in map inches
+    const g = P / k; const t00 = T(0, 0); const ox = (org[0] - t00[0]) / k; const oy = (org[1] - t00[1]) / k;
+    const q = itemBox(it);
+    const sq0 = [(q[0] - ox) / g, (q[1] - oy) / g, (q[2] - ox) / g, (q[3] - oy) / g]; // (its box in squares)
+    const wS = w / P; // (the mix width in squares)
     const U = Math.min(1, Math.max(0, it.mixU ?? 0.5)); const Tl = Math.min(1, Math.max(0, it.mixT ?? 0.5));
-    const sig = paintOnly ? w * 0.4 : w * 0.45; // (the soft line: about w across, from one floor to the other)
-    const q = itemBox(it); const a = T(q[0], q[1]); const b = T(q[2], q[3]);
-    const pad = Math.ceil(sig * 3 + U * P * 0.8) + 2; // (room for the soft line and its wave)
-    const bx0 = Math.floor(Math.min(a[0], b[0])) - pad; const by0 = Math.floor(Math.min(a[1], b[1])) - pad;
-    const bx1 = Math.ceil(Math.max(a[0], b[0])) + pad; const by1 = Math.ceil(Math.max(a[1], b[1])) + pad;
-    // what is worked on: the box within the picture
-    const x0 = Math.max(0, bx0); const y0 = Math.max(0, by0); const x1 = Math.min(W, bx1); const y1 = Math.min(H, by1);
-    if (x1 <= x0 || y1 <= y0) return;
-    const mk = (cw, ch) => { const c = document.createElement('canvas'); c.width = Math.max(1, cw); c.height = Math.max(1, ch); return c; };
-    // the mask, coarse: 16 dots a square (Beta 3.30: the patches' soft edges and the joints need them), on the grid, so
-    // every tile and the base sample the same places; with room around it for the squares' middles
-    const DQ = 16; const ds = P / DQ; const pd = Math.ceil((pad + 0.6 * P) / ds) + 1;
-    const lx0 = org[0] + (Math.floor((x0 - org[0]) / ds) - pd) * ds; const ly0 = org[1] + (Math.floor((y0 - org[1]) / ds) - pd) * ds;
-    const nw = Math.ceil((x1 - lx0) / ds) + pd + 1; const nh = Math.ceil((y1 - ly0) / ds) + pd + 1;
-    // (1) the soft line: of the floor around a place (the floor there and the new one), how much is new. So the line runs
-    // along the edge between the two floors, and where both end at the dark or a wall nothing fades
-    const Tl0 = (x, y) => { const [u, v] = T(x, y); return [(u - lx0) / ds, (v - ly0) / ds]; };
-    const Hc = mk(nw, nh); paintArea(Hc.getContext('2d', CPU), paintOnly ? { ...it, r: it.r * 0.7 } : it, Tl0, k / ds, '#fff', false); // (a brush: full in its middle)
-    // (the floor drawn before it, from the drawing itself: the same on every tile, also beyond its edge)
-    const Fc = mk(nw, nh); const fgc = Fc.getContext('2d', CPU);
+    // 16 dots a square (the patches' soft edges and the joints need them); 8 for a floor too big for that
+    const padS = (paintOnly ? wS * 0.4 : wS * 0.45) * 3 + U * 0.8 + 0.15;
+    let DQ = 16; if ((sq0[2] - sq0[0] + 2 * padS + 2) * (sq0[3] - sq0[1] + 2 * padS + 2) * DQ * DQ > 9e6) DQ = 8;
+    const sig = (paintOnly ? wS * 0.4 : wS * 0.45) * DQ; // (the soft line: about w across, from one floor to the other)
+    const pad = Math.ceil(padS * DQ); // (room for the soft line and its wave)
+    const bx0 = Math.floor(sq0[0] * DQ) - pad; const by0 = Math.floor(sq0[1] * DQ) - pad;
+    const bx1 = Math.ceil(sq0[2] * DQ) + pad; const by1 = Math.ceil(sq0[3] * DQ) + pad;
+    const pd = Math.ceil(0.6 * DQ) + 2; // (and room around it for the squares' middles)
+    const lx = bx0 - pd; const ly = by0 - pd; const nw = bx1 + pd - lx; const nh = by1 + pd - ly;
+    // the floors drawn before it that lie in this box (their shapes are part of what the mask is)
+    const prior = [];
+    const X0 = ox + (lx / DQ) * g; const Y0 = oy + (ly / DQ) * g; const X1 = X0 + (nw / DQ) * g; const Y1 = Y0 + (nh / DQ) * g;
     for (let n = 0; n < before.n; n++) {
       const o = before.items[n];
-      if (o.kind === 'area' || o.kind === 'ground') paintArea(fgc, o, Tl0, k / ds, '#fff', false);
-      else if (o.kind === 'cut') paintArea(fgc, o, Tl0, k / ds, null, true);
+      if (o.kind !== 'area' && o.kind !== 'ground' && o.kind !== 'cut') continue;
+      const b = itemBox(o); if (b[0] < X1 && b[2] > X0 && b[1] < Y1 && b[3] > Y0) prior.push(o);
     }
+    const key = fingerprint(JSON.stringify([shapeKey(it), paintOnly ? 1 : 0, round4(w / P), prior.map(shapeKey), round4(g), round4(ox), round4(oy), DQ]));
+    const had = MASKS.get(key);
+    if (had) { MASKS.delete(key); MASKS.set(key, had); prof.maskKept++; return had; }
+    prof.maskMade++;
+    const mk = (cw, ch) => { const c = document.createElement('canvas'); c.width = Math.max(1, cw); c.height = Math.max(1, ch); return c; };
+    const kx = lx; const ky = ly; // (mask dot u is the (kx + u)th DQth of a square from the grid's origin)
+    // (1) the soft line: of the floor around a place (the floor there and the new one), how much is new. So the line runs
+    // along the edge between the two floors, and where both end at the dark or a wall nothing fades
+    const kq = DQ / g; const Tl0 = (x, y) => [(x - ox) * kq - lx, (y - oy) * kq - ly];
+    const Hc = mk(nw, nh); paintArea(Hc.getContext('2d', CPU), paintOnly ? { ...it, r: it.r * 0.7 } : it, Tl0, kq, '#fff', false); // (a brush: full in its middle)
+    // (the floor drawn before it, from the drawing itself: the same on every tile, also beyond its edge)
+    const Fc = mk(nw, nh); const fgc = Fc.getContext('2d', CPU);
+    for (const o of prior) { if (o.kind === 'cut') paintArea(fgc, o, Tl0, kq, null, true); else paintArea(fgc, o, Tl0, kq, '#fff', false); }
     fgc.drawImage(Hc, 0, 0);
-    const blurred = (src) => { const c = mk(nw, nh); const g2 = c.getContext('2d', CPU); g2.filter = `blur(${Math.max(0.3, sig / ds).toFixed(3)}px)`; g2.drawImage(src, 0, 0); g2.filter = 'none'; return c; };
+    const blurred = (src) => { const c = mk(nw, nh); const g2 = c.getContext('2d', CPU); g2.filter = `blur(${Math.max(0.3, sig).toFixed(3)}px)`; g2.drawImage(src, 0, 0); g2.filter = 'none'; return c; };
     const Hb = blurred(Hc); const Fb = blurred(Fc);
     const fd = Fb.getContext('2d', CPU).getImageData(0, 0, nw, nh).data;
     const bg = Hb.getContext('2d', CPU); const Bc = Hb;
@@ -731,8 +811,6 @@ void main(){
     const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
     const ss = (a0, b0, x) => { const t = clamp((x - a0) / (b0 - a0), 0, 1); return t * t * (3 - 2 * t); };
     const waveAt = (gx, gy) => (vnoise(gx / 2.4 + 3.1, gy / 2.4 + 7.7) - 0.5) * 2 + (vnoise(gx / 0.9 + 1.3, gy / 0.9 + 4.2) - 0.5) * 0.6;
-    // the mask's dots lie on the grid: dot u is the (kx + u)th sixteenth of a square from the grid's origin
-    const kx = Math.round((lx0 - org[0]) / ds); const ky = Math.round((ly0 - org[1]) / ds);
     const T2 = Math.min(1, 2 * Tl);
     // (3) Beta 3.30, measured from Glinn's goal picture. Near the line every square keeps the old floor as a soft patch
     // of its own: how far it reaches toward the new floor (most a little, some are eaten into: the new floor's whole
@@ -790,20 +868,15 @@ void main(){
       }
     }
     bg.putImageData(img, 0, 0);
-    // a touch softer, then stretched over the box
-    const ww = x1 - x0; const hh = y1 - y0;
-    const A = mk(ww, hh); const ag = A.getContext('2d');
-    ag.imageSmoothingEnabled = true; ag.imageSmoothingQuality = 'high';
-    const Bs = mk(nw, nh); { const sg = Bs.getContext('2d'); sg.filter = 'blur(0.4px)'; sg.drawImage(Bc, 0, 0); sg.filter = 'none'; }
-    ag.drawImage(Bs, lx0 - x0, ly0 - y0, nw * ds, nh * ds);
-    // the new floor through the mask, over the floor that is there
-    const nf = mk(ww, hh); const ng = nf.getContext('2d'); ng.translate(-x0, -y0); ng.fillStyle = pat; ng.fillRect(x0, y0, ww, hh); ng.setTransform(1, 0, 0, 1, 0, 0);
-    ng.globalCompositeOperation = 'destination-in'; ng.drawImage(A, 0, 0);
-    fg.save(); fg.globalCompositeOperation = 'source-atop'; fg.drawImage(nf, x0, y0); fg.restore();
-    // where there was no floor: the new floor as drawn
-    if (!paintOnly) { fg.save(); fg.globalCompositeOperation = 'destination-over'; paintArea(fg, it, T, k, pat, false); fg.restore(); }
-    for (const c of [Hc, Fc, Hb, Fb, Bs, A, nf]) c.width = c.height = 0;
+    // a touch softer; kept (the oldest masks make room)
+    const cv = mk(nw, nh); { const sg = cv.getContext('2d', CPU); sg.filter = 'blur(0.4px)'; sg.drawImage(Bc, 0, 0); sg.filter = 'none'; }
+    for (const c of [Hc, Fc, Hb, Fb]) c.width = c.height = 0;
+    const M = { cv, lx, ly, nw, nh, dq: DQ, tx0: bx0, ty0: by0, tx1: bx1, ty1: by1, px: nw * nh };
+    MASKS.set(key, M); maskPx += M.px;
+    for (const [k0, m0] of MASKS) { if (maskPx <= MASK_MAX || k0 === key) break; MASKS.delete(k0); maskPx -= m0.px; } // (a picture being made may still hold one: it is let go when nothing does)
+    return M;
   }
+  const round4 = (v) => Math.round(v * 1e4) / 1e4;
 
   // ---------- making the picture ----------
   // The drawing painted flat: floors with their tiles (fg), what each area is (ag: edge, level, material), wall lines and
@@ -897,17 +970,19 @@ void main(){
   }
   const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
   const CPU = { willReadFrequently: true }; // (read back: kept in memory)
-  const encode = (c) => new Promise((res) => c.toBlob(res, 'image/webp', 0.88));
+  // (Beta 3.31: a picture without anything see-through is saved as JPEG, which is made several times faster)
+  const encode = (c, jpg) => new Promise((res) => c.toBlob(res, jpg ? 'image/jpeg' : 'image/webp', jpg ? 0.92 : 0.88));
 
   // map: the map (os, grid). lib: library items (for tiles of the library). prev: the sharp tiles the picture has now
   // ({ P, ts, tiles: [{ c, r, h }] }): those whose key is the same are kept. Resolves to { empty } or
   // { blob, x, y, scale, nw, nh, walls, sharp: { P, ts, tiles: [{ c, r, h, blob? }] } | null }.
   const stats = { last: null }; // (how long the last picture took, and its tiles: for the self-test and the log)
+  const prof = { mix: 0, mixN: 0, maskMade: 0, maskKept: 0, tPaint: 0, tGl: 0, tEnc: 0 }; // (Beta 3.31: where the time goes, in ms)
   async function bake(map, lib, prev) {
     const os = map.os;
     const bx = boxOf(map);
     if (!bx) return { empty: true, walls: [] };
-    const t0 = performance.now();
+    const t0 = performance.now(); Object.assign(prof, { mix: 0, mixN: 0, maskMade: 0, maskKept: 0, tPaint: 0, tGl: 0, tEnc: 0 });
     const { g, ox, oy, sx0, sy0, sx1, sy1, nsx, nsy, P } = bx;
     const W = nsx * P; const Hh = nsy * P;
     const X0 = ox + sx0 * g; const Y0 = oy + sy0 * g; const k = P / g;
@@ -921,20 +996,25 @@ void main(){
     }
     const loaded = new Map();
     await Promise.all([...want.values()].map(async (t) => { try { loaded.set(t.url, await image(t.url)); } catch (err) { console.error(err); } }));
+    // (Beta 3.31) their dots are unpacked now, all at once and off the drawing thread (after a pause they would be
+    // unpacked one by one while painting)
+    await Promise.all([...loaded.values()].map((i) => (i.decode ? i.decode().catch(() => {}) : null)));
     const pats = new Map(); // tile at a size → its scaled painting
     const floorC = canvas(W, Hh); const attrC = canvas(W, Hh); const solidC = canvas(W, Hh); const stairsC = canvas(W, Hh);
     const anyFade = os.items.some((it) => it.kind === 'area' && it.edge === 'fade');
     const haloC = anyFade ? canvas(W, Hh) : canvas(1, 1);
     paint(os, lib, T, k, P, org, loaded, { fg: floorC.getContext('2d'), ag: attrC.getContext('2d', CPU), sg: solidC.getContext('2d'), tg: stairsC.getContext('2d'), hg: anyFade ? haloC.getContext('2d') : null }, pats);
-    const tm = { paint: Math.round(performance.now() - t0) }; let tl = performance.now();
+    const tm = { paint: Math.round(performance.now() - t0), mixBase: Math.round(prof.mix) }; let tl = performance.now();
     // ---- light and shadow (WebGL 2) ----
     const C = gl2();
-    let out = null; let sharp = null;
+    let out = null; let sharp = null; let saved = null;
     if (C) {
       try {
         const r = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC, haloC }, async (R) => {
           for (const c of [floorC, attrC, solidC, stairsC, haloC]) c.width = c.height = 0; // (let go before the tiles)
           tm.light = Math.round(performance.now() - tl); tl = performance.now();
+          // (Beta 3.31) the base's file is made while the tiles are painted
+          drawDoors(R.outC.getContext('2d'), os, T, P, k); saved = { cv: R.outC, blob: encode(R.outC) };
           if (bx.sharp) sharp = await sharpTiles(C, R, { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade });
           tm.tiles = Math.round(performance.now() - tl); tl = performance.now();
         });
@@ -947,19 +1027,19 @@ void main(){
       o.save(); o.shadowColor = 'rgba(0,0,0,0.9)'; o.shadowBlur = P * 0.25; o.drawImage(floorC, 0, 0); o.restore();
       o.drawImage(solidC, 0, 0);
     }
-    drawDoors(out.getContext('2d'), os, T, P, k);
-    // with sharp tiles on top, the base only shows while they come (and in the map's little pictures): half as many
-    // dots, quicker to make and to load
-    let base = out; let bk = 1;
-    if (sharp && sharp.tiles.length) { bk = 2; base = canvas(Math.max(1, Math.round(W / 2)), Math.max(1, Math.round(Hh / 2))); const b2 = base.getContext('2d'); b2.imageSmoothingQuality = 'high'; b2.drawImage(out, 0, 0, base.width, base.height); }
-    const blob = await encode(base);
+    const base = out; const bk = 1; // (Beta 3.31: with sharp tiles the base is half size already, see boxOf)
+    let blob = null;
+    if (saved && saved.cv === out) blob = await saved.blob;
+    else { drawDoors(out.getContext('2d'), os, T, P, k); blob = await encode(base); }
     tm.base = Math.round(performance.now() - tl);
     // the big paintings are let go at once: canvases can hold memory of the graphics card until they are collected,
     // and a drawing session makes many pictures
     for (const c of [floorC, attrC, solidC, stairsC, haloC, out, base]) c.width = c.height = 0;
     for (const p of pats.values()) if (p && p.cv) p.cv.width = p.cv.height = 0;
+    const tw0 = performance.now();
     const walls = sightWalls(os, map, lib, { X0, Y0, nsx, nsy, g });
-    stats.last = { ms: Math.round(performance.now() - t0), ...tm, dots: W * Hh, P, sharpP: sharp ? sharp.P : 0, made: sharp ? sharp.tiles.filter((x) => x.blob).length : 0, kept: sharp ? sharp.tiles.filter((x) => !x.blob).length : 0 };
+    tm.sight = Math.round(performance.now() - tw0);
+    stats.last = { ms: Math.round(performance.now() - t0), ...tm, mix: Math.round(prof.mix), mixN: prof.mixN, maskMade: prof.maskMade, maskKept: prof.maskKept, tilePaint: Math.round(prof.tPaint), tileGl: Math.round(prof.tGl), tileEnc: Math.round(prof.tEnc), dots: W * Hh, P, sharpP: sharp ? sharp.P : 0, made: sharp ? sharp.tiles.filter((x) => x.blob).length : 0, kept: sharp ? sharp.tiles.filter((x) => !x.blob).length : 0 };
     return { blob, x: X0, y: Y0, scale: (g / P) * bk, nw: Math.round(W / bk), nh: Math.round(Hh / bk), walls, sharp };
   }
 
@@ -1011,7 +1091,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     // the light is stretched smoothly on the tiles
     gl.bindTexture(gl.TEXTURE_2D, Lt); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    try { if (more) await more({ outJ, inJ, attrT: tAttr, lightT: Lt, pace }); }
+    try { if (more) await more({ outJ, inJ, attrT: tAttr, lightT: Lt, pace, outC }); }
     finally { for (const t of [outJ, inJ, tAttr, Lt]) gl.deleteTexture(t); }
     return outC;
   }
@@ -1034,8 +1114,9 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const { gl } = C; const { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade } = a;
     const os = map.os; const { g, ox, oy, sx0, sy0, sx1, sy1 } = bx; const { P: PH, ts } = bx.sharp;
     const TD = ts * PH; const kH = PH / g; const s = PH / bx.P;
+    const sunA = ((os.sun ?? 135) * Math.PI) / 180; const sunE = (40 * Math.PI) / 180; const L = [Math.cos(sunA) * Math.cos(sunE), -Math.sin(sunA) * Math.cos(sunE), Math.sin(sunE)];
     const keep = new Set(prev && prev.P === PH && prev.ts === ts ? (prev.tiles || []).map((t) => t.h) : []);
-    const tiles = []; let M = null;
+    const tiles = []; let M = null; const saving = [];
     try {
       for (let r = Math.floor(sy0 / ts); r <= Math.floor((sy1 - 1) / ts); r++) {
         for (let c = Math.floor(sx0 / ts); c <= Math.floor((sx1 - 1) / ts); c++) {
@@ -1045,27 +1126,35 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
           M = M || await matTextures(C, PH);
           const tx0 = ox + c * ts * g; const ty0 = oy + r * ts * g;
           const T = (x, y) => [(x - tx0) * kH, (y - ty0) * kH];
+          const tp0 = performance.now();
           const fc = canvas(TD, TD); const sc = canvas(TD, TD); const hc = anyFade ? canvas(TD, TD) : canvas(1, 1);
           paint(os, lib, T, kH, PH, [(ox - tx0) * kH, (oy - ty0) * kH], loaded, { fg: fc.getContext('2d'), sg: sc.getContext('2d'), hg: anyFade ? hc.getContext('2d') : null }, pats);
           const tF = tex(gl, TD, TD, fc, { nearest: true }); const tS = tex(gl, TD, TD, sc, { nearest: true }); const tH = tex(gl, hc.width, hc.height, hc, { nearest: true });
           fc.width = fc.height = 0; sc.width = sc.height = 0; hc.width = hc.height = 0;
+          const tp1 = performance.now(); prof.tPaint += tp1 - tp0;
           const O = target(gl, TD, TD);
-          await runBands(C, prog(C, 'sharp', FS_SHARP), TD, TD, O.fb, { size: [TD, TD], tileO: [c * ts * PH, r * ts * PH], loSize: [W, Hh], orgLo: org, s, P: PH, matSq: M.sq, voidC: VOID }, { floorH: tF, solidH: tS, haloH: tH, outJ: R.outJ, inJ: R.inJ, attrT: R.attrT, lightT: R.lightT, ...M.t }, R.pace);
+          await runBands(C, prog(C, 'sharp', FS_SHARP), TD, TD, O.fb, { size: [TD, TD], tileO: [c * ts * PH, r * ts * PH], loSize: [W, Hh], orgLo: org, s, P: PH, matSq: M.sq, voidC: VOID, L }, { floorH: tF, solidH: tS, haloH: tH, outJ: R.outJ, inJ: R.inJ, attrT: R.attrT, lightT: R.lightT, ...M.t }, R.pace);
           const px = new Uint8Array(TD * TD * 4);
           gl.bindFramebuffer(gl.FRAMEBUFFER, O.fb); gl.readPixels(0, 0, TD, TD, gl.RGBA, gl.UNSIGNED_BYTE, px);
           gl.deleteTexture(tF); gl.deleteTexture(tS); gl.deleteTexture(tH); gl.deleteTexture(O.t); gl.deleteFramebuffer(O.fb);
           const oc = canvas(TD, TD); const o = oc.getContext('2d', CPU);
           o.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), TD, TD), 0, 0);
           drawDoors(o, os, T, PH);
-          const blob = await encode(oc);
-          oc.width = oc.height = 0;
-          tiles.push({ c, r, h, blob });
+          let jpg = true; for (let i = 3; i < px.length; i += 4) if (px[i] !== 255) { jpg = false; break; }
+          const tp2 = performance.now(); prof.tGl += tp2 - tp1;
+          // (Beta 3.31) its file is made while the next tiles are painted, a few at a time
+          const tile = { c, r, h, jpg, blob: null };
+          const job = encode(oc, jpg).then((b) => { tile.blob = b; oc.width = oc.height = 0; });
+          saving.push(job); tiles.push(tile);
+          if (saving.length >= 6) await saving.shift();
+          prof.tEnc += performance.now() - tp2;
         }
       }
     } finally {
       if (M) for (const t of M.list) gl.deleteTexture(t);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
+    const te = performance.now(); await Promise.all(saving); prof.tEnc += performance.now() - te;
     return { P: PH, ts, tiles };
   }
   // doors: stone posts (Beta 3.25: the leaf is drawn live on both screens, shut or swung open: scene-view.js); secret

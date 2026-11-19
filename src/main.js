@@ -2473,9 +2473,12 @@ function osBaked(p) {
         const tiles = [];
         for (const t of p.sharp.tiles.slice(0, 4000)) {
           const h = String(t.h || '').replace(/[^a-z0-9]/gi, '').slice(0, 20); if (!h) continue;
-          const tf = path.join(dir, `${map.id}-s${h}.webp`);
+          // (Beta 3.31: a tile without anything see-through comes as JPEG; a kept one is there as either)
+          const tw = path.join(dir, `${map.id}-s${h}.webp`); const tj = path.join(dir, `${map.id}-s${h}.jpg`);
+          let tf = t.jpg ? tj : tw;
           if (t.data) fs.writeFileSync(tf, Buffer.from(t.data));
-          else if (!fs.existsSync(tf)) continue; // (gone: the base shows there)
+          else if (fs.existsSync(tw)) tf = tw; else if (fs.existsSync(tj)) tf = tj;
+          else continue; // (gone: the base shows there)
           tiles.push({ c: Math.round(+t.c) || 0, r: Math.round(+t.r) || 0, h, path: tf });
         }
         sharp = { P: +p.sharp.P || 0, ts: +p.sharp.ts || 0, tiles };

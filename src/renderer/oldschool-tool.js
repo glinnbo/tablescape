@@ -434,7 +434,7 @@ const OldschoolTool = (() => {
         if (map() && map().id === mapId) {
           const data = r.blob ? new Uint8Array(await r.blob.arrayBuffer()) : null;
           // (Beta 3.25) the sharp tiles: new ones with their picture, kept ones by their key alone
-          const sharp = r.sharp ? { P: r.sharp.P, ts: r.sharp.ts, tiles: await Promise.all(r.sharp.tiles.map(async (t) => ({ c: t.c, r: t.r, h: t.h, data: t.blob ? new Uint8Array(await t.blob.arrayBuffer()) : null }))) } : null;
+          const sharp = r.sharp ? { P: r.sharp.P, ts: r.sharp.ts, tiles: await Promise.all(r.sharp.tiles.map(async (t) => ({ c: t.c, r: t.r, h: t.h, jpg: !!(t.blob && t.jpg), data: t.blob ? new Uint8Array(await t.blob.arrayBuffer()) : null }))) } : null;
           await ts.cmd('os.baked', { mapId, hash: want, empty: !!r.empty, data, sharp, ids: [...snap.os.items.map((x) => x.id), ...snap.os.doors.map((x) => x.id)], x: r.x, y: r.y, scale: r.scale, nw: r.nw, nh: r.nh, walls: r.walls });
         }
         lastErr = null;
