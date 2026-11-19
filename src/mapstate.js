@@ -51,16 +51,26 @@ function cleanTree(t, ref) {
 // the map's picture (renderer/oldschool.js) and the line-of-sight walls (os.result); the TV only shows that picture.
 const OS_EDGES = ['ledge', 'walls', 'rock', 'cliff'];
 const OS_SHAPES = ['rect', 'poly', 'round', 'path', 'brush'];
-function defaultOs() { return { v: 1, items: [], doors: [], sun: 135, sight: true, depth: false }; } // (depth: Beta 3.23, the depth view)
+// Beta 3.25: ground drawn into an Oldschool map (the Draw tool's Ground): the picture shows the pool, an effect of the
+// same kind (fx, key os) makes it move
+const GROUND_KINDS = ['water', 'lava', 'acid', 'darkness', 'swamp'];
+function defaultOs() { return { v: 1, items: [], doors: [], sun: 135, shadows: 'short', sight: true }; } // (Beta 3.25: the depth view of 3.23 is gone; shadows)
+const SHADOW_KINDS = ['short', 'long', 'off'];
 const osNum = (v, d, a, b) => { const x = Number(v); return Number.isFinite(x) ? Math.min(b, Math.max(a, x)) : d; };
 const ptsOf = (pts) => (Array.isArray(pts) ? pts.filter((q) => Array.isArray(q) && Number.isFinite(Number(q[0])) && Number.isFinite(Number(q[1]))).slice(0, 4000).map((q) => [r3(Number(q[0])), r3(Number(q[1]))]) : []);
 const refOf = (t) => (t && (t.rel || t.path) ? { ...(t.rel ? { rel: String(t.rel) } : {}), ...(t.path ? { path: String(t.path) } : {}) } : null);
 function cleanOsItem(it) {
   if (!it || typeof it !== 'object') return null;
   const id = typeof it.id === 'string' && it.id ? it.id : newId('o');
-  const kind = ['area', 'cut', 'line', 'pillar', 'stairs'].includes(it.kind) ? it.kind : null;
+  const kind = ['area', 'cut', 'line', 'pillar', 'stairs', 'ground'].includes(it.kind) ? it.kind : null;
   if (!kind) return null;
   const pts = ptsOf(it.pts);
+  if (kind === 'ground') {
+    const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'rect';
+    const need = shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' ? 1 : 2;
+    if (pts.length < need) return null;
+    return { id, kind, shape, pts, r: r3(osNum(it.r, 0.5, 0.05, 50)), preset: GROUND_KINDS.includes(it.preset) ? it.preset : 'water' };
+  }
   if (kind === 'area' || kind === 'cut') {
     const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'poly';
     const need = shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' ? 1 : 2;
@@ -82,8 +92,51 @@ function cleanOs(o) {
     id: typeof d.id === 'string' && d.id ? d.id : newId('od'), x1: r3(+d.x1), y1: r3(+d.y1), x2: r3(+d.x2), y2: r3(+d.y2), door: d.door === 2 ? 2 : 1, ...(d.kind === 'window' ? { kind: 'window' } : {}),
   }));
   out.sun = Math.round(osNum(o.sun, 135, 0, 359));
+  out.shadows = SHADOW_KINDS.includes(o.shadows) ? o.shadows : 'short';
   out.sight = o.sight !== false;
-  out.depth = o.depth === true;
+  return out;
+}
+
+// Beta 3.25: each ground drawn has its effect (fx id 'og' + the item's id, os: the item); what the GM set on it in the
+// Effects panel (strength, colour, hidden) stays when the ground changes
+function syncGround(map) {
+  if (!map.os || !Array.isArray(map.fx)) return;
+  const g = (map.grid && map.grid.size) || 1;
+  const want = new Map(map.os.items.filter((it) => it.kind === 'ground').map((it) => [`og${it.id}`, it]));
+  map.fx = map.fx.filter((f) => !f.os || want.has(f.id));
+  for (const [id, it] of want) {
+    const strokes = groundStrokes(it, g);
+    const f = map.fx.find((x) => x.id === id);
+    if (!f) map.fx.push({ id, kind: 'region', preset: it.preset, strokes, intensity: 1, hidden: false, color: null, density: 1, speed: 1, os: it.id });
+    else { f.preset = it.preset; if (JSON.stringify(f.strokes) !== JSON.stringify(strokes)) f.strokes = strokes; }
+  }
+}
+// the effect's strokes: a corridor or brush is a stroke already; a box, round or shape is its outline (filled: where
+// the effect shows) and dots about a square apart inside it (for what moves in it: bubbles, embers), each no bigger
+// than its room to the edge
+function groundStrokes(it, g) {
+  const flat = (pts) => pts.flatMap(([x, y]) => [r3(x), r3(y)]);
+  if (it.shape === 'path' || it.shape === 'brush') return [{ sid: 'b', r: it.r, pts: flat(it.pts) }];
+  let poly;
+  if (it.shape === 'rect') { const [[ax, ay], [bx, by]] = it.pts; poly = [[ax, ay], [bx, ay], [bx, by], [ax, by]]; }
+  else if (it.shape === 'round') {
+    const [[ax, ay], [bx, by]] = it.pts; const cx = (ax + bx) / 2; const cy = (ay + by) / 2; const rx = Math.abs(bx - ax) / 2; const ry = Math.abs(by - ay) / 2;
+    poly = Array.from({ length: 40 }, (_, i) => [cx + Math.cos((i / 40) * Math.PI * 2) * rx, cy + Math.sin((i / 40) * Math.PI * 2) * ry]);
+  } else poly = it.pts;
+  const out = [{ sid: 'm', r: 0, poly: true, pts: flat(poly) }];
+  const inside = (x, y) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i]; const [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
+  const edge = (x, y) => { let d = Infinity; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [ax, ay] = poly[j]; const [bx, by] = poly[i]; const L = (bx - ax) ** 2 + (by - ay) ** 2; const t = L ? Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L)) : 0; d = Math.min(d, Math.hypot(x - ax - t * (bx - ax), y - ay - t * (by - ay))); } return d; };
+  const xs = poly.map((q) => q[0]); const ys = poly.map((q) => q[1]);
+  const x0 = Math.min(...xs); const x1 = Math.max(...xs); const y0 = Math.min(...ys); const y1 = Math.max(...ys);
+  const s = g * 0.9; let n = 0;
+  for (let y = y0 + s / 2; y < y1 && n < 400; y += s) {
+    for (let x = x0 + s / 2; x < x1 && n < 400; x += s) {
+      if (!inside(x, y)) continue;
+      const d = edge(x, y); if (d < g * 0.15) continue;
+      out.push({ sid: `d${n++}`, r: r3(Math.min(g * 0.55, d)), pts: [r3(x), r3(y)], nm: true });
+    }
+  }
+  if (!n) { const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2; out.push({ sid: 'd0', r: r3(Math.max(0.05, Math.min(g * 0.4, (x1 - x0) / 2, (y1 - y0) / 2))), pts: [r3(cx), r3(cy)], nm: true }); }
   return out;
 }
 
@@ -985,15 +1038,17 @@ function apply(map, type, p, media) {
       map.os.items.push(...list);
       if (Array.isArray(p.doors) && p.doors.length) map.os.doors.push(...cleanOs({ doors: p.doors.slice(0, 200).map((d) => ({ ...d, id: newId('od') })) }).doors);
       const k = list[list.length - 1].kind;
-      return { changed: 'all', selected: list[list.length - 1].id, label: k === 'cut' ? 'Erased' : k === 'line' ? 'Wall drawn' : k === 'pillar' ? 'Pillar placed' : k === 'stairs' ? 'Stairs placed' : 'Floor drawn' };
+      syncGround(map);
+      return { changed: 'all', selected: list[list.length - 1].id, label: k === 'cut' ? 'Erased' : k === 'line' ? 'Wall drawn' : k === 'pillar' ? 'Pillar placed' : k === 'stairs' ? 'Stairs placed' : k === 'ground' ? 'Ground drawn' : 'Floor drawn' };
     }
     case 'os.update': { // an area's tile, edge, material or level; any item's points
       if (!map.os) return { changed: null };
       const i = map.os.items.findIndex((x) => x.id === p.id);
       if (i < 0) return { changed: null };
-      const next = cleanOsItem({ ...map.os.items[i], ...pick(p, ['tile', 'edge', 'mat', 'level', 'pts', 'r', 'w', 'h', 'round', 'dir']), id: p.id });
+      const next = cleanOsItem({ ...map.os.items[i], ...pick(p, ['tile', 'edge', 'mat', 'level', 'pts', 'r', 'w', 'h', 'round', 'dir', 'preset']), id: p.id });
       if (!next) return { changed: null };
       map.os.items[i] = next;
+      syncGround(map);
       return { changed: 'all', label: p.label || null };
     }
     case 'os.remove': {
@@ -1002,6 +1057,7 @@ function apply(map, type, p, media) {
       const n = map.os.items.length + map.os.doors.length;
       map.os.items = map.os.items.filter((x) => !ids.has(x.id));
       map.os.doors = map.os.doors.filter((x) => !ids.has(x.id));
+      syncGround(map);
       return n !== map.os.items.length + map.os.doors.length ? { changed: 'all', label: 'Removed' } : { changed: null };
     }
     case 'os.door': { // a door, secret door or window on a drawn wall (the segment it covers)
@@ -1015,12 +1071,13 @@ function apply(map, type, p, media) {
       if (!map.os) return { changed: null };
       if ('sun' in p) map.os.sun = Math.round(osNum(p.sun, 135, 0, 359));
       if ('sight' in p) map.os.sight = !!p.sight;
-      if ('depth' in p) map.os.depth = !!p.depth; // (Beta 3.23)
+      if ('shadows' in p) map.os.shadows = SHADOW_KINDS.includes(p.shadows) ? p.shadows : 'short'; // (Beta 3.25)
       return { changed: 'all' };
     }
     case 'os.clear': {
       if (!map.os || (!map.os.items.length && !map.os.doors.length)) return { changed: null };
       map.os.items = []; map.os.doors = [];
+      syncGround(map);
       return { changed: 'all', label: 'Drawing cleared' };
     }
     // the GM screen made the picture of the drawing: it becomes the map's picture, and its outlines the walls for sight
@@ -1029,8 +1086,10 @@ function apply(map, type, p, media) {
       if (!map.os) return { changed: null };
       if (p.bg) {
         map.bg = { ...media(p.bg.path), kind: 'image', x: r4g(p.bg.x), y: r4g(p.bg.y), scale: p.bg.scale, nw: p.bg.nw, nh: p.bg.nh, volume: 0, rate: 1, os: String(p.hash || '') };
-        if (p.bg.hm) map.bg.hm = media(p.bg.hm); // (Beta 3.23) the heights for the depth view
         if (Array.isArray(p.ids)) map.bg.osIds = p.ids.map(String).slice(0, 5000); // (Beta 3.23) what the picture already shows (the TV inks the rest)
+        // (Beta 3.25) the sharp tiles on top of the picture: P dots a square, ts squares across, at whole squares from
+        // the grid's origin (c, r)
+        if (p.bg.sharp && p.bg.sharp.P > 0 && p.bg.sharp.ts > 0 && Array.isArray(p.bg.sharp.tiles)) map.bg.sharp = { P: p.bg.sharp.P, ts: p.bg.sharp.ts, tiles: p.bg.sharp.tiles.map((t) => ({ c: t.c, r: t.r, h: t.h, ...media(t.path) })) };
       }
       else if (p.empty) map.bg = null;
       if (Array.isArray(p.walls)) {

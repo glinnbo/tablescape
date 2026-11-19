@@ -4,7 +4,7 @@
   python3 scripts/make_tiles.py <folder with the source pictures>
 
 The source pictures are seamless squares (Glinn's Midjourney tiles), named <id>.png. This writes
-- src/renderer/tiles/<id>.webp        the tile, 1536 px (enough for about 16 squares at the bake's sharpness)
+- src/renderer/tiles/<id>.webp        the tile, 2048 px (its full size: the sharp tiles of Beta 3.25)
 - src/renderer/tiles/<id>-small.webp  256 px, for the library and the Draw panel
 - src/renderer/tile-data.js           the list below as a script (the windows cannot read files)
 
@@ -31,7 +31,8 @@ TILES = [
     ('slate', 'Slate', 'floor', 6),
     ('mossy_court', 'Mossy court', 'floor', 10),
     ('wood_parquet', 'Wood parquet', 'floor', 8),
-    ('desert_sand', 'Desert sand', 'floor', 15),
+    ('desert_sand', 'Desert sand', 'floor', 10),  # (Beta 3.25: Glinn's new picture)
+    ('desert_stone', 'Desert stone', 'floor', 6),
     ('ice', 'Ice', 'floor', 6),
     ('teal_stone', 'Teal stone', 'floor', 8),
     ('glowing_blue', 'Glowing blue', 'floor', 12),
@@ -44,7 +45,7 @@ TILES = [
     ('rock', 'Rock', 'material', 6),
     ('cliff', 'Mossy rock', 'material', 8),
 ]
-BIG = 1536
+BIG = 2048  # (Beta 3.25: their full size; the sharp tiles show up to 200 dots a square)
 SMALL = 256
 
 

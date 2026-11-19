@@ -469,7 +469,8 @@ class CampaignStore {
 
 function hydrateMap(m) {
   if (m.bg) library.hydrate(m.bg);
-  if (m.bg && m.bg.hm) library.hydrate(m.bg.hm); // (Beta 3.23: an Oldschool map's heights)
+  if (m.bg && m.bg.hm) delete m.bg.hm; // (the heights of the depth view, Beta 3.23; gone in 3.25)
+  if (m.bg && m.bg.sharp && Array.isArray(m.bg.sharp.tiles)) for (const t of m.bg.sharp.tiles) library.hydrate(t); // (Beta 3.25: an Oldschool map's sharp tiles)
   for (const l of m.layers) library.hydrate(l);
   for (const k of m.marks || []) if (k.ho) library.hydrate(k.ho); // (Beta 3.11: a place's handout)
   for (const s of m.snaps || []) { // the files a snapshot brings back (a picture, assets, films, map sounds)

@@ -24,6 +24,19 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.25', [
+      'Oldschool maps are sharp: on top of the picture lie tiles with as many dots a square as the TV shows (the picture had 80 and looked blurry), and the floor tiles come in their full size. When you draw, only the tiles near the change are made again',
+      'No more flash on the table while you draw: a new picture is ready before it takes over',
+      'The Depth view is gone: drawn maps stay clear and flat',
+      'A clearer 2D look: short, soft shadows (Draw → Shadows: Short, Long or Off), walls with a dark outline and a lit top edge, a shadow where floor meets wall, wall lines and pillars outlined, floors with gentle patches and some grime along the walls (no more stamped look)',
+      'A cliff now drops away as a dark rock face into the dark (it glowed before); doors are bigger, with a dark outline',
+      'Draw → Ground: water, lava, acid, magical darkness or swamp, as a box, a round or painted. The picture shows the pool, the effect of the same name moves on it (Effects can make it stronger, tint or hide it); Erase takes it away',
+      'Doors on drawn maps open on the table: when you open a door, its leaf swings open, on the TV and on your screen',
+      'Oldschool maps: the walls for sight lie in the middle of the walls, so under the fog the players see the near half of each wall (the fog\'s soft edge shows a little more): between two rooms the middle of the wall that parts them, wall lines along their middle. A shut door also closes the wall beside it',
+      'A small hole in a drawn floor (a lump of rock) blocks sight like a pillar instead of walls all round',
+      'New tiles: Desert sand (made new) and Desert stone',
+      'Draw: before you draw, the squares show around the pointer, with where it would start: the corner of a room, the corridor\'s width, the brush, the floor that would change',
+    ]],
     ['Beta 3.24', [
       'Oldschool maps: the tiles are the grid. The joints of the tiles that come with Tablescape now lie on the squares, and new drawn maps start with the grid line hidden (it is still there for snapping, tokens and measuring)',
       'Right-click a floor in the Draw panel → Adjust grid: squares across, shift sideways and up/down (or drag the lines onto the joints), Find the joints; As it came puts a tile of Tablescape back. Your own tiles open the same window the first time',
@@ -412,7 +425,7 @@ const Guide = (() => {
     const folders = [
       ['Maps', 'Battle maps: pictures or videos (webm, mp4)'], ['Tokens', 'NPCs and monsters, round or cut out (png with transparency)'],
       ['Assets', 'Trees, rocks, furniture, traps; animated ones (webm with transparency) in Assets/Animated. Living trees come with Tablescape: they move in the wind'], ['Overlays', 'Rain, fog, embers over the whole table'],
-      ['Sounds', 'Ambience, Music, SFX'], ['Portraits', 'NPC faces for conversations'], ['Handouts', 'Letters and pictures to show the players'], ['Tiles', 'Seamless floors for Oldschool maps (Tablescape brings sixteen)'], ['Campaigns', 'Your campaigns: one folder each, with backups inside'],
+      ['Sounds', 'Ambience, Music, SFX'], ['Portraits', 'NPC faces for conversations'], ['Handouts', 'Letters and pictures to show the players'], ['Tiles', 'Seamless floors for Oldschool maps (Tablescape brings seventeen)'], ['Campaigns', 'Your campaigns: one folder each, with backups inside'],
     ];
     return h('div', { class: 'guide-text' },
       h('h3', {}, 'The library'),

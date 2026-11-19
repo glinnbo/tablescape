@@ -25,6 +25,17 @@ const Oldschool = (() => {
   const PX = 80; // dots per square in the picture (the TV shows about this many per inch)
   const MAX_PX = 12e6; // dots in the picture at most (a huge map gets fewer per square)
   const MARGIN = 3; // squares around what was drawn (rock and cliffs reach out)
+  // Beta 3.25: the sharp layer. The picture above (80 dots a square at most) is the base; on top of it lie tiles made
+  // with as many dots a square as the TV shows (the base was stretched there, and looked blurry). A tile is made again
+  // only when something near it changed (its key), so a pillar costs one or two tiles, not the whole picture.
+  const SHARP_MAX = 60e6; // dots in all the sharp tiles at most (a huge map gets fewer per square)
+  // squares: how far a change reaches into the picture: a floor's edge (rock and cliffs 3.2) and then the shadows
+  // (2.6) and darker corners of what it raised (stairs count as floor); a wall line or pillar only its shadows and corners
+  const HALO = 6.6; const HALO_SOLID = 3.4;
+  const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
+  const VERSION = 11; // (11: Beta 3.25, sharp tiles, the 2D look; walls for sight in the middle of the walls)
+  let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
+  function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
   // ---------- tiles ----------
   // a tile reference ({ rel, path }) → what to paint with: url, squares (null: not set yet)
@@ -150,15 +161,49 @@ const Oldschool = (() => {
   }
   const stairsBox = (it, T) => { const [a, b] = it.pts.map(([x, y]) => T(x, y)); return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])]; };
 
+  // ---------- the picture's box: whole squares around what was drawn, plus a margin; its dots a square ----------
+  function boxOf(map) {
+    const os = map.os; const grid = map.grid;
+    const g = grid.size || 1; const ox = grid.ox || 0; const oy = grid.oy || 0;
+    const b = bounds(os);
+    if (!b) return null;
+    const sx0 = Math.floor((b[0] - ox) / g) - MARGIN; const sy0 = Math.floor((b[1] - oy) / g) - MARGIN;
+    const sx1 = Math.ceil((b[2] - ox) / g) + MARGIN; const sy1 = Math.ceil((b[3] - oy) / g) + MARGIN;
+    const nsx = sx1 - sx0; const nsy = sy1 - sy0;
+    const P = Math.max(16, Math.min(PX, Math.floor(Math.sqrt(MAX_PX / (nsx * nsy)))));
+    let sharp = null;
+    if (sharpWant) {
+      const PH = Math.min(sharpWant, Math.floor(Math.sqrt(SHARP_MAX / (nsx * nsy))));
+      if (PH >= P * 1.2) sharp = { P: PH, ts: Math.max(4, Math.floor(1600 / PH)) }; // (a tile: at most 1600 dots across)
+    }
+    return { g, ox, oy, sx0, sy0, sx1, sy1, nsx, nsy, P, sharp };
+  }
+
   // ---------- a fingerprint of what the picture depends on ----------
-  function hash(map, lib) {
-    const os = map.os;
-    const tiles = new Set();
-    for (const it of os.items) if (it.tile) { const t = tileInfo(it.tile, lib); tiles.add(`${it.tile.rel || it.tile.path}=${t ? `${t.squares}@${t.off}` : '?'}`); }
-    const s = JSON.stringify([os.items, os.doors, os.sun, os.sight, !!os.depth, map.grid.size, map.grid.ox, map.grid.oy, [...tiles].sort(), 7]);
+  function fingerprint(s) {
     let h1 = 0x811c9dc5; let h2 = 0x01000193;
     for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 + c, 2246822519) ^ (h2 >>> 13); }
     return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
+  }
+  const tileKeys = (items, lib) => {
+    const tiles = new Set();
+    for (const it of items) if (it.tile) { const t = tileInfo(it.tile, lib); tiles.add(`${it.tile.rel || it.tile.path}=${t ? `${t.squares}@${t.off}` : '?'}`); }
+    return [...tiles].sort();
+  };
+  function hash(map, lib) {
+    const os = map.os; const bx = boxOf(map);
+    const sharp = bx && bx.sharp ? [bx.sharp.P, bx.sharp.ts] : 0;
+    return fingerprint(JSON.stringify([os.items, os.doors, os.sun, os.shadows || 'short', os.sight, map.grid.size, map.grid.ox, map.grid.oy, tileKeys(os.items, lib), sharp, VERSION]));
+  }
+  // one sharp tile's key: what lies near it (in drawing order), the light, the grid, the dots a square
+  function tileKey(map, lib, bx, c, r) {
+    const os = map.os; const { g, ox, oy, sharp } = bx;
+    const x0 = ox + c * sharp.ts * g; const y0 = oy + r * sharp.ts * g; const x1 = x0 + sharp.ts * g; const y1 = y0 + sharp.ts * g;
+    const near = (q, m) => q[0] < x1 + m && q[2] > x0 - m && q[1] < y1 + m && q[3] > y0 - m;
+    const items = os.items.filter((it) => near(itemBox(it), (it.kind === 'line' || it.kind === 'pillar' ? HALO_SOLID : HALO) * g));
+    if (!items.some((it) => it.kind !== 'cut' && near(itemBox(it), REACH * g))) return null; // (nothing shows here)
+    const doors = os.doors.filter((d) => near([Math.min(d.x1, d.x2), Math.min(d.y1, d.y2), Math.max(d.x1, d.x2), Math.max(d.y1, d.y2)], HALO_SOLID * g)); // (a door opens a wall line)
+    return fingerprint(JSON.stringify([items, doors, os.sun, os.shadows || 'short', g, ox, oy, tileKeys(items, lib), bx.P, sharp.P, sharp.ts, c, r, VERSION]));
   }
 
   // ---------- WebGL 2 ----------
@@ -332,6 +377,7 @@ float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
 void main(){
   vec2 px = floor(v_uv * size); ivec2 ip = ivec2(px);
+  vec2 q = (px + 0.5 - org) / P; // (in squares from the grid's origin: the rock's roughness lies the same on every tile)
   vec4 fl = texelFetch(floorT, ip, 0); vec4 at = texelFetch(attrT, ip, 0); vec4 so = texelFetch(solidT, ip, 0); vec4 st = texelFetch(stairsT, ip, 0);
   float LV = 0.35 * P;                       // one level up or down
   float inside = fl.a;
@@ -360,8 +406,8 @@ void main(){
     else { h = base - 2.0 * P; kind = 0.0; }
   } else if (edge == 3) { // solid rock around the floor, rough where it meets it and where it ends in darkness
     vec3 c = matCol(mi, px);
-    float rough = noise(px / (0.35 * P)) * 0.18 * P + noise(px / (0.12 * P)) * 0.07 * P;
-    float R = 2.3 * P + (noise(px / (0.7 * P)) - 0.5) * 0.9 * P + (noise(px / (0.2 * P)) - 0.5) * 0.25 * P;
+    float rough = noise(q / 0.35) * 0.18 * P + noise(q / 0.12) * 0.07 * P;
+    float R = 2.3 * P + (noise(q / 0.7) - 0.5) * 0.9 * P + (noise(q / 0.2) - 0.5) * 0.25 * P;
     if (dOut > R) { h = base - 2.0 * P; kind = 0.0; }
     else {
       float rise = smoothstep(0.0, 0.3 * P + rough, dOut) * (1.0 - smoothstep(R - 0.35 * P, R, dOut) * 0.6);
@@ -370,7 +416,7 @@ void main(){
   } else if (edge == 4) { // a cliff: rock falling away into darkness
     vec3 c = matCol(mi, px);
     if (dOut > 3.2 * P) { h = base - 3.0 * P; kind = 0.0; }
-    else { h = base - dOut * 0.9 + lum(c) * 0.3 * P + noise(px / (0.4 * P)) * 0.15 * P; kind = 4.0; }
+    else { h = base - dOut * 0.9 + lum(c) * 0.3 * P + noise(q / 0.4) * 0.15 * P; kind = 4.0; }
   } else { // ledge: nothing beyond it but darkness
     h = base - 3.0 * P; kind = 0.0;
   }
@@ -384,12 +430,44 @@ void main(){
   o = encH(h, kind, m);
 }`;
 
+  // Beta 3.25, the 2D look (the same on the base and on the sharp tiles; q: squares from the grid's origin, P: dots a
+  // square, d...: distances in dots)
+  const LOOK = `
+float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
+// floors not stamped: gentle light and dark patches; along walls and rock some grime, and a shadow where they meet
+vec3 floorLook(vec3 c, vec2 q, float dIn, int edge, float P){
+  float pa = noise(q / 3.7) * 0.6 + noise(q / 1.3 + 17.0) * 0.4;
+  c *= 0.9 + 0.2 * pa;
+  if (edge == 2 || edge == 3) {
+    float gr = (1.0 - smoothstep(0.0, 0.75 * P, dIn)) * (0.55 + 0.45 * noise(q / 0.45 + 5.0));
+    c = mix(c, c * vec3(0.70, 0.66, 0.62), gr * 0.5);
+    c *= 0.6 + 0.4 * smoothstep(0.0, 0.13 * P, dIn);
+  }
+  if (edge == 4) c *= 1.0 + 0.14 * (1.0 - smoothstep(0.0, 0.07 * P, dIn)); // (a cliff's top edge catches the light)
+  return c;
+}
+// built walls: their top's edge toward the floor a little lit, a dark line along their outer edge
+vec3 wallLook(vec3 c, float dOut, float P){
+  c *= 1.0 + 0.3 * (1.0 - smoothstep(0.02 * P, 0.07 * P, dOut));
+  c *= 0.42 + 0.58 * smoothstep(0.0, 0.05 * P, 0.45 * P - dOut);
+  return c;
+}
+// the drop of a cliff: a dark rock face that fades down into the dark
+// (not lit by the sun: a drop is in its own shade, so it never glows)
+float cliffFade(vec2 q, float dOut, float P){ return exp(-dOut / (0.24 * P)) * (0.8 + 0.4 * noise(q / 0.3)); }
+vec3 cliffCol(vec3 c, float light){ return c * 0.42 * min(light, 0.75); }
+float cliffAlpha(float dOut, float P){ return 1.0 - smoothstep(1.2 * P, 2.0 * P, dOut); }
+`;
   // light, shadows and darker corners
   const FS_SHADE = `#version 300 es
-precision highp float; in vec2 v_uv; out vec4 o;
-uniform sampler2D hT, floorT, outJ, inJ, mtl0, mtl1, mtl2, mtl3, mtl4;
-uniform vec2 size; uniform float P; uniform vec2 org; uniform float matSq[5]; uniform vec3 L; uniform vec3 voidC;
+precision highp float; in vec2 v_uv; layout(location = 0) out vec4 o; layout(location = 1) out vec4 o2;
+uniform sampler2D hT, floorT, attrT, outJ, inJ, mtl0, mtl1, mtl2, mtl3, mtl4;
+uniform vec2 size; uniform float P; uniform vec2 org; uniform float matSq[5]; uniform vec3 L; uniform vec3 voidC; uniform float shT; uniform float shK;
 vec2 dec(vec4 c){ c = floor(c * 255.0 + 0.5); return vec2(c.r*256.0 + c.g, c.b*256.0 + c.a); }
+${LOOK}
+float K(vec2 p){ p = clamp(p, vec2(0.0), size - 1.0); return floor(texelFetch(hT, ivec2(p), 0).b * 255.0 + 0.5); }
 float H(vec2 p){ p = clamp(p, vec2(0.0), size - 1.0); vec4 c = texelFetch(hT, ivec2(p), 0); return floor(c.r*255.0+0.5)*256.0 + floor(c.g*255.0+0.5) - 32768.0; }
 float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
 vec3 matCol(int i, vec2 px){ vec2 uv = (px - org) / (matSq[i] * P);
@@ -401,12 +479,17 @@ void main(){
   float h = H(px);
   vec4 fl = texelFetch(floorT, ip, 0);
   vec2 so2 = dec(texelFetch(outJ, ip, 0)); float dOut = so2.x > 65000.0 ? 1e5 : length(so2 - px);
+  vec2 si2 = dec(texelFetch(inJ, ip, 0)); float dIn = si2.x > 65000.0 ? 1e5 : length(si2 - px);
+  vec2 q = (px + 0.5 - org) / P;
   // what it looks like
   vec3 alb;
   if (kind == 1.0 || kind == 6.0 || kind == 7.0) alb = fl.rgb;
   else if (kind == 0.0) alb = voidC;
   else alb = matCol(mi, px);
   if (kind == 7.0) alb = alb * 1.12 + 0.025; // the ledge's rim: the floor, a little lighter
+  if (kind == 1.0 || kind == 6.0 || kind == 7.0) { int edge = int(floor(texelFetch(attrT, ip, 0).r * 255.0 / 40.0 + 0.5)); alb = floorLook(alb, q, dIn, edge, P); }
+  if (kind == 2.0) alb = wallLook(alb, dOut, P);
+  if (kind == 5.0 && (K(px + vec2(1.5, 0.0)) != 5.0 || K(px - vec2(1.5, 0.0)) != 5.0 || K(px + vec2(0.0, 1.5)) != 5.0 || K(px - vec2(0.0, 1.5)) != 5.0)) alb *= 0.5; // (wall lines and pillars: a dark edge)
   // its slope: from the heights, plus the picture's own bumps on rock and walls
   float e = 1.5;
   float hx = H(px + vec2(e, 0.0)) - H(px - vec2(e, 0.0));
@@ -414,13 +497,16 @@ void main(){
   float bump = (kind >= 2.0 && kind <= 5.0) ? 0.9 : 0.25;
   vec3 n = normalize(vec3(-hx / (2.0 * e), -hy / (2.0 * e), 1.0 / max(bump, 0.2)));
   float lam = max(dot(n, L), 0.0) / L.z;
-  // shadows: does anything between here and the sun rise above the sun's ray?
-  float tanE = L.z / length(L.xy); vec2 d2 = normalize(L.xy);
-  float sh = 0.0; float reach = 2.2 * P / tanE;
-  for (int i = 1; i <= 56; i++) {
-    float t = float(i) / 56.0; t = t * t * reach + 1.0;
-    float above = H(px + d2 * t) - (h + t * tanE);
-    sh = max(sh, clamp(above / (2.0 + t * 0.12), 0.0, 1.0));
+  // shadows: does anything between here and the sun rise above the sun's ray? (Beta 3.25: their length of its own,
+  // shT; soft further from what throws them, so their edges are not steps)
+  float sh = 0.0;
+  if (shT > 0.0) {
+    vec2 d2 = normalize(L.xy); float reach = 2.2 * P / shT;
+    for (int i = 1; i <= 56; i++) {
+      float t = float(i) / 56.0; t = t * t * reach + 1.0;
+      float above = H(px + d2 * t) - (h + t * shT);
+      sh = max(sh, clamp(above / (1.5 + t * 0.3), 0.0, 1.0));
+    }
   }
   // darker where it is surrounded by what is higher
   float ao = 0.0; float rr = 0.3 * P;
@@ -429,78 +515,181 @@ void main(){
     ao += clamp((H(px + vec2(cos(a), sin(a)) * r) - h) / (0.9 * P), 0.0, 1.0);
   }
   ao = 1.0 - 0.45 * ao / 12.0;
-  float light = (0.5 + 0.5 * lam) * (1.0 - 0.5 * sh) * ao;
+  float light = (0.5 + 0.5 * lam) * (1.0 - shK * sh) * ao;
+  o2 = vec4(clamp(light * 0.5, 0.0, 1.0), 0.0, 0.0, 1.0); // (the light alone, halved: the sharp tiles take it)
   vec3 c = alb * light;
   // the cliff fades into darkness; beyond the drawing the picture is see-through (the table's own dark shows there)
   float a = 1.0;
-  if (kind == 4.0) { c = mix(voidC, c, exp(-dOut / (0.42 * P))); a = 1.0 - smoothstep(2.0 * P, 2.8 * P, dOut); }
+  if (kind == 4.0) { c = mix(voidC, cliffCol(alb, light), cliffFade(q, dOut, P)); a = cliffAlpha(dOut, P); }
   if (kind == 0.0) { c = voidC; a = 0.0; }
   o = vec4(clamp(c, 0.0, 1.0), a);
 }`;
 
-  // ---------- making the picture ----------
-  // map: the map (os, grid). lib: library items (for tiles of the library). Resolves to { empty } or
-  // { blob, x, y, scale, nw, nh, walls }.
-  async function bake(map, lib) {
-    const os = map.os; const grid = map.grid;
-    const g = grid.size || 1; const ox = grid.ox || 0; const oy = grid.oy || 0;
-    const b = bounds(os);
-    if (!b) return { empty: true, walls: [] };
-    // the picture's box: whole squares around what was drawn, plus a margin
-    const sx0 = Math.floor((b[0] - ox) / g) - MARGIN; const sy0 = Math.floor((b[1] - oy) / g) - MARGIN;
-    const sx1 = Math.ceil((b[2] - ox) / g) + MARGIN; const sy1 = Math.ceil((b[3] - oy) / g) + MARGIN;
-    const nsx = sx1 - sx0; const nsy = sy1 - sy0;
-    const P = Math.max(16, Math.min(PX, Math.floor(Math.sqrt(MAX_PX / (nsx * nsy)))));
-    const W = nsx * P; const Hh = nsy * P;
-    const X0 = ox + sx0 * g; const Y0 = oy + sy0 * g; const k = P / g;
-    const T = (x, y) => [(x - X0) * k, (y - Y0) * k];
-    const org = [(ox - X0) * k, (oy - Y0) * k]; // where the grid starts, in dots (tiles line up with it)
-    // the pictures it needs
-    const want = new Map();
-    for (const it of os.items) {
-      if (it.kind === 'area' && it.tile) { const t = tileInfo(it.tile, lib); if (t && t.url) want.set(t.url, t); }
-      if (it.kind === 'stairs') { const t = matInfo(it.mat); if (t) want.set(t.url, t); }
+  // Beta 3.25: a sharp tile. The floors, wall lines and pillars are painted at its own size (sharp); what lies outside
+  // the floors (walls, rock, cliffs) is worked out again here from the base's distances, and the light comes from the
+  // base (it changes slowly, so it is smooth when stretched).
+  const FS_SHARP = `#version 300 es
+precision highp float; in vec2 v_uv; out vec4 o;
+uniform sampler2D floorH, solidH, outJ, inJ, attrT, lightT, mtl0, mtl1, mtl2, mtl3, mtl4;
+uniform vec2 size; uniform vec2 tileO; uniform vec2 loSize; uniform vec2 orgLo; uniform float s; uniform float P; uniform float matSq[5]; uniform vec3 voidC;
+vec2 dec(vec4 c){ c = floor(c * 255.0 + 0.5); return vec2(c.r*256.0 + c.g, c.b*256.0 + c.a); }
+${LOOK}
+float SA(vec2 p){ return texelFetch(solidH, ivec2(clamp(p, vec2(0.0), size - 1.0)), 0).a; }
+vec3 matCol(int i, vec2 q){ vec2 uv = q / matSq[i];
+  if (i == 0) return texture(mtl0, uv).rgb; if (i == 1) return texture(mtl1, uv).rgb; if (i == 2) return texture(mtl2, uv).rgb; if (i == 3) return texture(mtl3, uv).rgb; return texture(mtl4, uv).rgb; }
+void main(){
+  vec2 px = floor(v_uv * size); ivec2 ip = ivec2(px);
+  vec2 gh = px + 0.5 + tileO;  // this dot's middle, in sharp dots from the grid's origin
+  vec2 q = gh / P;             // in squares
+  vec2 lo = orgLo + gh / s;    // in the base's dots
+  if (lo.x < 0.0 || lo.y < 0.0 || lo.x >= loSize.x || lo.y >= loSize.y) { o = vec4(voidC, 0.0); return; }
+  vec4 fl = texelFetch(floorH, ip, 0); vec4 so = texelFetch(solidH, ip, 0);
+  // the nearest floor and the nearest dot outside (in sharp dots), from the seeds of the base's four nearest dots
+  float dOut = 1e5; vec2 sOut = vec2(-1.0); float dIn = 1e5;
+  ivec2 b0 = ivec2(floor(lo - 0.5)); ivec2 lim = ivec2(loSize) - 1;
+  for (int j = 0; j < 4; j++) {
+    ivec2 n = clamp(b0 + ivec2(j & 1, j >> 1), ivec2(0), lim);
+    vec2 a = dec(texelFetch(outJ, n, 0)); if (a.x < 65000.0) { float d = length(a + 0.5 - lo) * s; if (d < dOut) { dOut = d; sOut = a; } }
+    vec2 b = dec(texelFetch(inJ, n, 0)); if (b.x < 65000.0) dIn = min(dIn, length(b + 0.5 - lo) * s);
+  }
+  vec4 here = texelFetch(attrT, clamp(ivec2(floor(lo)), ivec2(0), lim), 0);
+  vec4 na = (fl.a >= 0.5 && here.a >= 0.5) || sOut.x < 0.0 ? here : texelFetch(attrT, ivec2(sOut), 0);
+  int edge = int(floor(na.r * 255.0 / 40.0 + 0.5));
+  int mi = clamp(int(floor(na.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
+  // outside the floors: what the edge makes of it (as in the heights)
+  vec3 cOut = voidC; float aOut = 0.0; float fade = 1.0;
+  if (edge == 2) { if (dOut < 0.45 * P) { cOut = wallLook(matCol(mi, q), dOut, P); aOut = 1.0; } }
+  else if (edge == 3) {
+    float R = 2.3 * P + (noise(q / 0.7) - 0.5) * 0.9 * P + (noise(q / 0.2) - 0.5) * 0.25 * P;
+    if (dOut <= R) { cOut = matCol(mi, q); aOut = 1.0; }
+  } else if (edge == 4) {
+    if (dOut <= 3.2 * P) { cOut = matCol(mi, q); aOut = cliffAlpha(dOut, P); fade = cliffFade(q, dOut, P); }
+  }
+  // the floor (a ledge's rim a little lighter)
+  vec3 cIn = fl.rgb;
+  if (edge == 1 && dIn < 0.26 * P) cIn = cIn * 1.12 + 0.025;
+  cIn = floorLook(cIn, q, dIn, edge, P);
+  // the light, a little smoothed (its steps are the base's dots)
+  vec2 lu = lo / loSize; vec2 e = 0.7 / loSize;
+  float li = 2.0 * (2.0 * texture(lightT, lu).r + texture(lightT, lu + e).r + texture(lightT, lu - e).r + texture(lightT, lu + vec2(e.x, -e.y)).r + texture(lightT, lu + vec2(-e.x, e.y)).r) / 6.0;
+  cOut = edge == 4 ? mix(voidC, cliffCol(cOut, li), fade) : cOut * li;
+  vec3 col = mix(cOut, cIn * li, fl.a); float a = mix(aOut, 1.0, fl.a);
+  // wall lines and pillars: a dark edge, and a shadow at their foot
+  int ms = clamp(int(floor(so.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
+  float r1 = max(1.5, 0.025 * P); float r2 = max(2.0, 0.08 * P);
+  float nIn = min(min(SA(px + vec2(r1, 0.0)), SA(px - vec2(r1, 0.0))), min(SA(px + vec2(0.0, r1)), SA(px - vec2(0.0, r1))));
+  float nOut = max(max(SA(px + vec2(r2, 0.0)), SA(px - vec2(r2, 0.0))), max(SA(px + vec2(0.0, r2)), SA(px - vec2(0.0, r2))));
+  if (so.a < 0.5 && nOut > 0.5) col *= 0.72;
+  if (so.a > 0.0) { vec3 sc = matCol(ms, q) * li; if (nIn < 0.5) sc *= 0.5; col = mix(col, sc, so.a); a = max(a, so.a); }
+  o = vec4(clamp(col, 0.0, 1.0), a);
+}`;
+
+  // ---------- Beta 3.25: ground (water, lava, acid, swamp) ----------
+  // Its surface is made here (a seamless painting four squares across, at the picture's dots a square); a dark rim
+  // inside its edge makes it lie lower than the floor. The effect of the same kind moves on top (mapstate: syncGround).
+  const GROUND = {
+    water: { a: '#123b46', b: '#2c7482', hi: '#8fd6e0', alpha: 0.82 },
+    lava: { a: '#2a0d06', b: '#4d1a0a', hi: '#ff7a22', hot: '#ffd36b', alpha: 1 },
+    acid: { a: '#2c560d', b: '#6db02a', hi: '#c8f27a', alpha: 0.95 },
+    swamp: { a: '#22281a', b: '#4a5428', hi: '#6f8a34', alpha: 0.95 },
+  };
+  const surfaces = new Map();
+  function surface(kind, P) {
+    const N = Math.max(64, Math.min(1024, Math.round(4 * P))); const key = `${kind}@${N}`;
+    if (surfaces.has(key)) return surfaces.get(key);
+    const L = GROUND[kind] || GROUND.water;
+    // seamless value noise: random values on a grid that wraps, smoothly between
+    const grid = (n, seed) => { const v = new Float32Array(n * n); let x = seed * 9301 + 49297; for (let i = 0; i < v.length; i++) { x = (x * 9301 + 49297) % 233280; v[i] = x / 233280; } return v; };
+    const octs = [[4, grid(4, 1), 0.5], [8, grid(8, 2), 0.3], [16, grid(16, 3), 0.2]];
+    const at = (u, v) => { let s = 0; for (const [n, g, w] of octs) { const x = u * n; const y = v * n; const i = Math.floor(x); const j = Math.floor(y); const fx = x - i; const fy = y - j; const sx = fx * fx * (3 - 2 * fx); const sy = fy * fy * (3 - 2 * fy); const G = (a, b) => g[((b % n) + n) % n * n + ((a % n) + n) % n]; s += w * ((G(i, j) * (1 - sx) + G(i + 1, j) * sx) * (1 - sy) + (G(i, j + 1) * (1 - sx) + G(i + 1, j + 1) * sx) * sy); } return s; };
+    const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+    const A = hex(L.a); const B = hex(L.b); const HI = hex(L.hi); const HOT = L.hot ? hex(L.hot) : HI;
+    const c = document.createElement('canvas'); c.width = c.height = N;
+    const g = c.getContext('2d'); const img = g.createImageData(N, N); const d = img.data;
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const n = at(x / N, y / N); const n2 = at(x / N + 0.37, y / N + 0.61);
+        let col = A.map((v, i) => v + (B[i] - v) * Math.min(1, Math.max(0, (n - 0.25) * 1.8)));
+        if (kind === 'lava') { const r = 1 - Math.abs(2 * n2 - 1); const t = Math.min(1, Math.max(0, (r - 0.8) / 0.17)); col = col.map((v, i) => v + ((t > 0.6 ? HOT : HI)[i] - v) * t); }
+        else if (kind === 'water') { const t = Math.max(0, (n2 - 0.72) / 0.28) * 0.35; col = col.map((v, i) => v + (HI[i] - v) * t); }
+        else { const t = Math.max(0, (n2 - 0.62) / 0.38) * 0.6; col = col.map((v, i) => v + (HI[i] - v) * t); }
+        const o = (y * N + x) * 4; d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = 255;
+      }
     }
-    const loaded = new Map();
-    await Promise.all([...want.values()].map(async (t) => { try { loaded.set(t.url, await image(t.url)); } catch (err) { console.error(err); } }));
-    const pats = new Map(); // url → pattern at its size
-    const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
-    const CPU = { willReadFrequently: true }; // (read back: kept in memory)
-    const floorC = canvas(W, Hh); const fg = floorC.getContext('2d');
-    const attrC = canvas(W, Hh); const ag = attrC.getContext('2d', CPU);
-    const solidC = canvas(W, Hh); const sg = solidC.getContext('2d');
-    const stairsC = canvas(W, Hh); const tg = stairsC.getContext('2d');
+    g.putImageData(img, 0, 0);
+    surfaces.set(key, c);
+    if (surfaces.size > 12) surfaces.delete(surfaces.keys().next().value);
+    return c;
+  }
+  function paintGround(fg, it, T, k, P, org) {
+    const L = GROUND[it.preset] || GROUND.water;
+    // worked on in a small painting of its own (its box, clipped to the picture)
+    const q = itemBox(it); const a = T(q[0], q[1]); const b = T(q[2], q[3]); const pad = Math.ceil(P * 0.4);
+    const x0 = Math.max(-pad, Math.floor(Math.min(a[0], b[0])) - pad); const y0 = Math.max(-pad, Math.floor(Math.min(a[1], b[1])) - pad);
+    const x1 = Math.min(fg.canvas.width + pad, Math.ceil(Math.max(a[0], b[0])) + pad); const y1 = Math.min(fg.canvas.height + pad, Math.ceil(Math.max(a[1], b[1])) + pad);
+    const w = x1 - x0; const h = y1 - y0; if (w < 1 || h < 1) return;
+    const T2 = (x, y) => { const [u, v] = T(x, y); return [u - x0, v - y0]; };
+    const mk = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+    const Lc = mk(); const lg = Lc.getContext('2d'); const Mc = mk(); const mg = Mc.getContext('2d');
+    const pat = lg.createPattern(surface(it.preset, P), 'repeat');
+    const S = 4 * P / surface(it.preset, P).width; // (the painting spans four squares)
+    pat.setTransform(new DOMMatrix().translate(org[0] - x0, org[1] - y0).scale(S));
+    paintArea(lg, it, T2, k, pat, false);
+    paintArea(mg, it, T2, k, '#fff', false);
+    // darker toward its edge, inside: it lies lower than the floor
+    const E = mk(); const eg = E.getContext('2d');
+    eg.fillStyle = 'rgba(0,0,0,0.62)'; eg.fillRect(0, 0, w, h);
+    eg.globalCompositeOperation = 'destination-out'; eg.filter = `blur(${Math.max(1, P * 0.16).toFixed(1)}px)`; eg.drawImage(Mc, 0, 0); eg.filter = 'none';
+    lg.globalCompositeOperation = 'source-atop'; lg.drawImage(E, 0, 0);
+    fg.save(); fg.globalAlpha = L.alpha; fg.drawImage(Lc, x0, y0); fg.restore();
+    // a wet rim just outside
+    fg.save(); fg.globalAlpha = 0.5; fg.globalCompositeOperation = 'source-atop';
+    const R = mk(); const rg = R.getContext('2d'); rg.filter = `blur(${Math.max(1, P * 0.04).toFixed(1)}px)`; rg.drawImage(Mc, 0, 0); rg.filter = 'none';
+    rg.globalCompositeOperation = 'source-in'; rg.fillStyle = 'rgba(0,0,0,0.5)'; rg.fillRect(0, 0, w, h);
+    rg.globalCompositeOperation = 'destination-out'; rg.drawImage(Mc, 0, 0);
+    fg.drawImage(R, x0, y0); fg.restore();
+    for (const c of [Lc, Mc, E, R]) c.width = c.height = 0;
+  }
+
+  // ---------- making the picture ----------
+  // The drawing painted flat: floors with their tiles (fg), what each area is (ag: edge, level, material), wall lines and
+  // pillars (sg), stairs (tg). T: map inches → dots, k: dots an inch, P: dots a square, org: the grid's origin in dots.
+  // ag and tg may be left out (the sharp tiles need only the floors and the solids).
+  function paint(os, lib, T, k, P, org, loaded, cx, pats) {
+    const { fg, ag, sg, tg } = cx;
     const patOf = (t) => {
       if (!t || !loaded.has(t.url)) return '#5a5650';
       const off = t.off || [0, 0];
-      const key = `${t.url}@${t.squares || 4}@${off}`;
-      if (!pats.has(key)) {
-        const s = (t.squares || 4) * P;
-        const cv = scaled(loaded.get(t.url), s);
-        const pat = fg.createPattern(cv, 'repeat');
-        pat.setTransform(new DOMMatrix().translate(org[0] - off[0] * P, org[1] - off[1] * P)); // (its joints on the grid)
-        pats.set(key, { pat, cv });
-      }
-      return pats.get(key).pat;
+      const key = `${t.url}@${t.squares || 4}@${off}@${P}`;
+      if (!pats.has(key)) pats.set(key, { cv: scaled(loaded.get(t.url), (t.squares || 4) * P), off });
+      const e = pats.get(key);
+      const pat = fg.createPattern(e.cv, 'repeat');
+      pat.setTransform(new DOMMatrix().translate(org[0] - e.off[0] * P, org[1] - e.off[1] * P)); // (its joints on the grid)
+      return pat;
     };
     const matCode = (id) => { const i = MATERIALS.findIndex((m) => m.id === id); return (i < 0 ? 1 : i + 1) * 40; };
     for (const it of os.items) {
       if (it.kind === 'area') {
         const t = tileInfo(it.tile, lib) || tileInfo({ rel: relOf(FLOORS[0]) });
         paintArea(fg, it, T, k, patOf(t), false);
-        paintArea(ag, it, T, k, `rgb(${EDGE_CODE[it.edge] * 40},${128 + it.level * 30},${matCode(it.mat || DEFAULT_MAT[it.edge])})`, false);
-        paintArea(tg, it, T, k, '#000', true); // (a floor drawn over stairs takes them away)
+        if (ag) paintArea(ag, it, T, k, `rgb(${EDGE_CODE[it.edge] * 40},${128 + it.level * 30},${matCode(it.mat || DEFAULT_MAT[it.edge])})`, false);
+        if (tg) paintArea(tg, it, T, k, '#000', true); // (a floor drawn over stairs takes them away)
       } else if (it.kind === 'cut') {
-        for (const c of [fg, ag, tg]) paintArea(c, it, T, k, null, true);
+        for (const c of [fg, ag, tg]) if (c) paintArea(c, it, T, k, null, true);
         sg.save(); sg.globalCompositeOperation = 'destination-out'; if (it.shape === 'path' || it.shape === 'brush') stroke(sg, it, T, k, '#000'); else sg.fill(shapePath(it, T)); sg.restore();
       } else if (it.kind === 'line' || it.kind === 'pillar') {
         paintSolid(sg, it, T, k, `rgb(255,${Math.round((it.h || 1) * 100)},${matCode(it.mat)})`, false);
+      } else if (it.kind === 'ground') { // (Beta 3.25) a pool of water, lava, acid or swamp; magical darkness is the effect alone
+        if (it.preset !== 'darkness') paintGround(fg, it, T, k, P, org);
+        if (ag) { ag.save(); ag.globalCompositeOperation = 'destination-over'; paintArea(ag, it, T, k, `rgb(${EDGE_CODE.ledge * 40},128,${matCode('stone_wall')})`, false); ag.restore(); } // (on nothing: a pool in the dark)
       } else if (it.kind === 'stairs') {
         const [x, y, w, h] = stairsBox(it, T);
         const len = it.dir % 2 === 0 ? w : h; const steps = Math.max(2, Math.round((len / P) * 3));
-        const gr = it.dir === 0 ? tg.createLinearGradient(x, 0, x + w, 0) : it.dir === 2 ? tg.createLinearGradient(x + w, 0, x, 0) : it.dir === 1 ? tg.createLinearGradient(0, y, 0, y + h) : tg.createLinearGradient(0, y + h, 0, y);
-        gr.addColorStop(0, `rgb(0,255,${steps})`); gr.addColorStop(1, `rgb(255,255,${steps})`);
-        tg.fillStyle = gr; tg.fillRect(x, y, w, h);
+        if (tg) {
+          const gr = it.dir === 0 ? tg.createLinearGradient(x, 0, x + w, 0) : it.dir === 2 ? tg.createLinearGradient(x + w, 0, x, 0) : it.dir === 1 ? tg.createLinearGradient(0, y, 0, y + h) : tg.createLinearGradient(0, y + h, 0, y);
+          gr.addColorStop(0, `rgb(0,255,${steps})`); gr.addColorStop(1, `rgb(255,255,${steps})`);
+          tg.fillStyle = gr; tg.fillRect(x, y, w, h);
+        }
         // the steps themselves: the stairs' material; every step a little lighter than the one below, its front (the
         // riser, toward the bottom of the stairs) a dark band, its edge (the nosing) a light line
         fg.save(); fg.fillStyle = patOf(matInfo(it.mat)); fg.fillRect(x, y, w, h);
@@ -520,40 +709,87 @@ void main(){
         }
         fg.restore();
         // stairs count as floor, at the level of the floor they stand on
-        const id = ag.getImageData(Math.max(0, Math.min(W - 1, Math.round(x + w / 2))), Math.max(0, Math.min(Hh - 1, Math.round(y + h / 2))), 1, 1).data;
-        ag.fillStyle = id[3] > 128 ? `rgb(${id[0]},${id[1]},${id[2]})` : `rgb(80,128,${matCode('stone_wall')})`; ag.fillRect(x, y, w, h);
+        if (ag) {
+          const W = ag.canvas.width; const Hh = ag.canvas.height;
+          const id = ag.getImageData(Math.max(0, Math.min(W - 1, Math.round(x + w / 2))), Math.max(0, Math.min(Hh - 1, Math.round(y + h / 2))), 1, 1).data;
+          ag.fillStyle = id[3] > 128 ? `rgb(${id[0]},${id[1]},${id[2]})` : `rgb(80,128,${matCode('stone_wall')})`; ag.fillRect(x, y, w, h);
+        }
       }
     }
-    // doors: an opening in wall lines, and the door itself drawn on top at the end
+    // doors: an opening in wall lines (the door itself is drawn on top at the end)
     for (const d of os.doors) {
       const [x1, y1] = T(d.x1, d.y1); const [x2, y2] = T(d.x2, d.y2);
       sg.save(); sg.globalCompositeOperation = 'destination-out'; sg.lineWidth = P * 1.2; sg.lineCap = 'butt'; sg.beginPath(); sg.moveTo(x1, y1); sg.lineTo(x2, y2); sg.stroke(); sg.restore();
     }
+  }
+  const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  const CPU = { willReadFrequently: true }; // (read back: kept in memory)
+  const encode = (c) => new Promise((res) => c.toBlob(res, 'image/webp', 0.88));
+
+  // map: the map (os, grid). lib: library items (for tiles of the library). prev: the sharp tiles the picture has now
+  // ({ P, ts, tiles: [{ c, r, h }] }): those whose key is the same are kept. Resolves to { empty } or
+  // { blob, x, y, scale, nw, nh, walls, sharp: { P, ts, tiles: [{ c, r, h, blob? }] } | null }.
+  const stats = { last: null }; // (how long the last picture took, and its tiles: for the self-test and the log)
+  async function bake(map, lib, prev) {
+    const os = map.os;
+    const bx = boxOf(map);
+    if (!bx) return { empty: true, walls: [] };
+    const t0 = performance.now();
+    const { g, ox, oy, sx0, sy0, sx1, sy1, nsx, nsy, P } = bx;
+    const W = nsx * P; const Hh = nsy * P;
+    const X0 = ox + sx0 * g; const Y0 = oy + sy0 * g; const k = P / g;
+    const T = (x, y) => [(x - X0) * k, (y - Y0) * k];
+    const org = [(ox - X0) * k, (oy - Y0) * k]; // where the grid starts, in dots (tiles line up with it)
+    // the pictures it needs
+    const want = new Map();
+    for (const it of os.items) {
+      if (it.kind === 'area' && it.tile) { const t = tileInfo(it.tile, lib); if (t && t.url) want.set(t.url, t); }
+      if (it.kind === 'stairs') { const t = matInfo(it.mat); if (t) want.set(t.url, t); }
+    }
+    const loaded = new Map();
+    await Promise.all([...want.values()].map(async (t) => { try { loaded.set(t.url, await image(t.url)); } catch (err) { console.error(err); } }));
+    const pats = new Map(); // tile at a size → its scaled painting
+    const floorC = canvas(W, Hh); const attrC = canvas(W, Hh); const solidC = canvas(W, Hh); const stairsC = canvas(W, Hh);
+    paint(os, lib, T, k, P, org, loaded, { fg: floorC.getContext('2d'), ag: attrC.getContext('2d', CPU), sg: solidC.getContext('2d'), tg: stairsC.getContext('2d') }, pats);
+    const tm = { paint: Math.round(performance.now() - t0) }; let tl = performance.now();
     // ---- light and shadow (WebGL 2) ----
     const C = gl2();
-    let out = null; let hC = null;
+    let out = null; let sharp = null;
     if (C) {
-      try { const r = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC }); out = r.out; hC = r.hC; } catch (err) { console.error(err); out = null; }
+      try {
+        const r = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC }, async (R) => {
+          for (const c of [floorC, attrC, solidC, stairsC]) c.width = c.height = 0; // (let go before the tiles)
+          tm.light = Math.round(performance.now() - tl); tl = performance.now();
+          if (bx.sharp) sharp = await sharpTiles(C, R, { map, lib, bx, loaded, pats, W, Hh, org, prev });
+          tm.tiles = Math.round(performance.now() - tl); tl = performance.now();
+        });
+        out = r;
+      } catch (err) { console.error(err); out = null; sharp = null; }
     }
     if (!out) { // no graphics card: the flat painting with simple dark edges
+      if (!floorC.width) { floorC.width = W; floorC.height = Hh; solidC.width = W; solidC.height = Hh; paint(os, lib, T, k, P, org, loaded, { fg: floorC.getContext('2d'), sg: solidC.getContext('2d') }, pats); }
       out = canvas(W, Hh); const o = out.getContext('2d', CPU);
       o.save(); o.shadowColor = 'rgba(0,0,0,0.9)'; o.shadowBlur = P * 0.25; o.drawImage(floorC, 0, 0); o.restore();
       o.drawImage(solidC, 0, 0);
     }
     drawDoors(out.getContext('2d'), os, T, P, k);
-    const blob = await new Promise((res) => out.toBlob(res, 'image/webp', 0.88));
-    // (Beta 3.23) with the depth view on: the heights too, without loss (PNG)
-    const hblob = hC ? await new Promise((res) => hC.toBlob(res, 'image/png')) : null;
-    if (hC) hC.width = hC.height = 0;
+    // with sharp tiles on top, the base only shows while they come (and in the map's little pictures): half as many
+    // dots, quicker to make and to load
+    let base = out; let bk = 1;
+    if (sharp && sharp.tiles.length) { bk = 2; base = canvas(Math.max(1, Math.round(W / 2)), Math.max(1, Math.round(Hh / 2))); const b2 = base.getContext('2d'); b2.imageSmoothingQuality = 'high'; b2.drawImage(out, 0, 0, base.width, base.height); }
+    const blob = await encode(base);
+    tm.base = Math.round(performance.now() - tl);
     // the big paintings are let go at once: canvases can hold memory of the graphics card until they are collected,
     // and a drawing session makes many pictures
-    for (const c of [floorC, attrC, solidC, stairsC, out]) c.width = c.height = 0;
+    for (const c of [floorC, attrC, solidC, stairsC, out, base]) c.width = c.height = 0;
     for (const p of pats.values()) if (p && p.cv) p.cv.width = p.cv.height = 0;
     const walls = sightWalls(os, map, lib, { X0, Y0, nsx, nsy, g });
-    return { blob, hblob, x: X0, y: Y0, scale: g / P, nw: W, nh: Hh, walls };
+    stats.last = { ms: Math.round(performance.now() - t0), ...tm, dots: W * Hh, P, sharpP: sharp ? sharp.P : 0, made: sharp ? sharp.tiles.filter((x) => x.blob).length : 0, kept: sharp ? sharp.tiles.filter((x) => !x.blob).length : 0 };
+    return { blob, x: X0, y: Y0, scale: (g / P) * bk, nw: Math.round(W / bk), nh: Math.round(Hh / bk), walls, sharp };
   }
 
-  async function shade(C, W, Hh, P, org, os, cv) {
+  // the base's light and shadow; then (more) is given what the sharp tiles need while it is still on the card
+  async function shade(C, W, Hh, P, org, os, cv, more) {
     const { gl } = C;
     const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     if (W > max || Hh > max) return null;
@@ -562,12 +798,7 @@ void main(){
     const tAttr = tex(gl, W, Hh, cv.attrC, { nearest: true });
     const tSolid = tex(gl, W, Hh, cv.solidC, { nearest: true });
     const tStairs = tex(gl, W, Hh, cv.stairsC, { nearest: true });
-    // the materials (repeating, at their own squares)
-    const mats = [];
-    for (const m of MATERIALS) { const img = await image(DIR + m.file); const sc = scaled(img, m.squares * P); mats.push(tex(gl, 0, 0, sc, { repeat: true, mip: true })); sc.width = sc.height = 0; } // (at the size they are painted)
-    while (mats.length < 5) mats.push(mats[0]);
-    const matSq = MATERIALS.slice(0, 5).map((m) => m.squares); while (matSq.length < 5) matSq.push(4);
-    const matT = { mtl0: mats[0], mtl1: mats[1], mtl2: mats[2], mtl3: mats[3], mtl4: mats[4] };
+    const M = await matTextures(C, P);
     // floors (and stairs) are inside; distances both ways, and inside wall lines
     const merged = target(gl, W, Hh);
     run(C, prog(C, 'inside', `#version 300 es
@@ -579,59 +810,108 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const solJ = await flood(C, W, Hh, tSolid, 1, 1, pace); // inside wall lines: how far to their side
     gl.deleteTexture(merged.t); gl.deleteFramebuffer(merged.fb); // (what is no longer needed goes at once: a big map needs the room)
     const Ht = target(gl, W, Hh);
-    await runBands(C, prog(C, 'height', FS_HEIGHT), W, Hh, Ht.fb, { size: [W, Hh], P, org, matSq }, { floorT: tFloor, attrT: tAttr, solidT: tSolid, stairsT: tStairs, outJ, inJ, solJ, ...matT }, pace);
-    for (const t of [tAttr, tSolid, tStairs, solJ]) gl.deleteTexture(t);
+    await runBands(C, prog(C, 'height', FS_HEIGHT), W, Hh, Ht.fb, { size: [W, Hh], P, org, matSq: M.sq }, { floorT: tFloor, attrT: tAttr, solidT: tSolid, stairsT: tStairs, outJ, inJ, solJ, ...M.t }, pace);
+    for (const t of [tSolid, tStairs, solJ]) gl.deleteTexture(t);
     const a = ((os.sun ?? 135) * Math.PI) / 180; const el = (40 * Math.PI) / 180;
     const L = [Math.cos(a) * Math.cos(el), -Math.sin(a) * Math.cos(el), Math.sin(el)];
-    const Sh = target(gl, W, Hh);
-    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq, L, voidC: [0.015, 0.016, 0.02] }, { hT: Ht.t, floorT: tFloor, outJ, inJ, ...matT }, pace);
+    const S = SHADOWS[os.shadows] || SHADOWS.short; // (Beta 3.25: short, soft shadows unless the map wants long ones)
+    // the picture and (a second output) the light alone
+    const Sh = target(gl, W, Hh); const Lt = tex(gl, W, Hh, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, Sh.fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, Lt, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq: M.sq, L, voidC: VOID, shT: S.tan, shK: S.k }, { hT: Ht.t, floorT: tFloor, attrT: tAttr, outJ, inJ, ...M.t }, pace);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     // read back into a painting in memory (rows come out top first, as the paintings went in)
     const outC = document.createElement('canvas'); outC.width = W; outC.height = Hh;
     {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, Sh.fb);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, Sh.fb); gl.readBuffer(gl.COLOR_ATTACHMENT0);
       const px = new Uint8Array(W * Hh * 4);
       gl.readPixels(0, 0, W, Hh, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      outC.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(new Uint8ClampedArray(px.buffer), W, Hh), 0, 0);
+      outC.getContext('2d', CPU).putImageData(new ImageData(new Uint8ClampedArray(px.buffer), W, Hh), 0, 0);
     }
     gl.deleteTexture(Sh.t); gl.deleteFramebuffer(Sh.fb);
-    // (Beta 3.23) the heights for the depth view: height in red and green, what the dot is (×8) and its material in
-    // blue, fully opaque so nothing is lost on the way (rows come out top first: the paintings were uploaded that way)
-    let hC = null;
-    if (os.depth) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, Ht.fb);
-      const px = new Uint8Array(W * Hh * 4);
-      gl.readPixels(0, 0, W, Hh, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      for (let i = 0; i < px.length; i += 4) { px[i + 2] = Math.min(255, px[i + 2] * 8 + px[i + 3]); px[i + 3] = 255; }
-      hC = document.createElement('canvas'); hC.width = W; hC.height = Hh;
-      hC.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(new Uint8ClampedArray(px.buffer), W, Hh), 0, 0);
-    }
-    for (const t of [tFloor, outJ, inJ, Ht.t, ...new Set(mats)]) gl.deleteTexture(t);
+    for (const t of [tFloor, Ht.t, ...M.list]) gl.deleteTexture(t);
     gl.deleteFramebuffer(Ht.fb);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    return { out: outC, hC };
+    // the light is stretched smoothly on the tiles
+    gl.bindTexture(gl.TEXTURE_2D, Lt); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    try { if (more) await more({ outJ, inJ, attrT: tAttr, lightT: Lt, pace }); }
+    finally { for (const t of [outJ, inJ, tAttr, Lt]) gl.deleteTexture(t); }
+    return outC;
   }
-  // doors: a wooden leaf with stone posts (secret doors show nothing; windows a strip of glass)
+  const VOID = [0, 0, 0]; // (Beta 3.25: black, as the table around: a drop ends in it without a seam)
+  // Beta 3.25: how long the shadows are (the tangent of the sun's height for them) and how dark; the light on slopes
+  // keeps its 40° (walls keep their relief)
+  const SHADOWS = { short: { tan: Math.tan((62 * Math.PI) / 180), k: 0.42 }, long: { tan: Math.tan((40 * Math.PI) / 180), k: 0.5 }, off: { tan: 0, k: 0 } };
+  // the materials (repeating, at their own squares), painted at P dots a square
+  async function matTextures(C, P) {
+    const { gl } = C; const list = [];
+    for (const m of MATERIALS) { const img = await image(DIR + m.file); const sc = scaled(img, m.squares * P); list.push(tex(gl, 0, 0, sc, { repeat: true, mip: true })); sc.width = sc.height = 0; }
+    const ts = list.slice(); while (ts.length < 5) ts.push(ts[0]);
+    const sq = MATERIALS.slice(0, 5).map((m) => m.squares); while (sq.length < 5) sq.push(4);
+    return { list, sq, t: { mtl0: ts[0], mtl1: ts[1], mtl2: ts[2], mtl3: ts[3], mtl4: ts[4] } };
+  }
+
+  // Beta 3.25: the sharp tiles. Tiles lie on whole squares from the grid's origin (ts squares across), so they stay
+  // where they are when the drawing grows. A tile whose key is unchanged is kept as it is.
+  async function sharpTiles(C, R, a) {
+    const { gl } = C; const { map, lib, bx, loaded, pats, W, Hh, org, prev } = a;
+    const os = map.os; const { g, ox, oy, sx0, sy0, sx1, sy1 } = bx; const { P: PH, ts } = bx.sharp;
+    const TD = ts * PH; const kH = PH / g; const s = PH / bx.P;
+    const keep = new Set(prev && prev.P === PH && prev.ts === ts ? (prev.tiles || []).map((t) => t.h) : []);
+    const tiles = []; let M = null;
+    try {
+      for (let r = Math.floor(sy0 / ts); r <= Math.floor((sy1 - 1) / ts); r++) {
+        for (let c = Math.floor(sx0 / ts); c <= Math.floor((sx1 - 1) / ts); c++) {
+          const h = tileKey(map, lib, bx, c, r);
+          if (!h) continue; // (nothing shows there)
+          if (keep.has(h)) { tiles.push({ c, r, h }); continue; }
+          M = M || await matTextures(C, PH);
+          const tx0 = ox + c * ts * g; const ty0 = oy + r * ts * g;
+          const T = (x, y) => [(x - tx0) * kH, (y - ty0) * kH];
+          const fc = canvas(TD, TD); const sc = canvas(TD, TD);
+          paint(os, lib, T, kH, PH, [(ox - tx0) * kH, (oy - ty0) * kH], loaded, { fg: fc.getContext('2d'), sg: sc.getContext('2d') }, pats);
+          const tF = tex(gl, TD, TD, fc, { nearest: true }); const tS = tex(gl, TD, TD, sc, { nearest: true });
+          fc.width = fc.height = 0; sc.width = sc.height = 0;
+          const O = target(gl, TD, TD);
+          await runBands(C, prog(C, 'sharp', FS_SHARP), TD, TD, O.fb, { size: [TD, TD], tileO: [c * ts * PH, r * ts * PH], loSize: [W, Hh], orgLo: org, s, P: PH, matSq: M.sq, voidC: VOID }, { floorH: tF, solidH: tS, outJ: R.outJ, inJ: R.inJ, attrT: R.attrT, lightT: R.lightT, ...M.t }, R.pace);
+          const px = new Uint8Array(TD * TD * 4);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, O.fb); gl.readPixels(0, 0, TD, TD, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          gl.deleteTexture(tF); gl.deleteTexture(tS); gl.deleteTexture(O.t); gl.deleteFramebuffer(O.fb);
+          const oc = canvas(TD, TD); const o = oc.getContext('2d', CPU);
+          o.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), TD, TD), 0, 0);
+          drawDoors(o, os, T, PH);
+          const blob = await encode(oc);
+          oc.width = oc.height = 0;
+          tiles.push({ c, r, h, blob });
+        }
+      }
+    } finally {
+      if (M) for (const t of M.list) gl.deleteTexture(t);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+    return { P: PH, ts, tiles };
+  }
+  // doors: stone posts (Beta 3.25: the leaf is drawn live on both screens, shut or swung open: scene-view.js); secret
+  // doors show nothing; windows a strip of glass
   function drawDoors(o, os, T, P) {
     for (const d of os.doors) {
       if (d.door === 2) continue;
       const [x1, y1] = T(d.x1, d.y1); const [x2, y2] = T(d.x2, d.y2);
       const len = Math.hypot(x2 - x1, y2 - y1); if (len < 2) continue;
       o.save(); o.translate(x1, y1); o.rotate(Math.atan2(y2 - y1, x2 - x1));
-      const th = d.kind === 'window' ? P * 0.12 : P * 0.2; const post = P * 0.16;
+      const post = P * 0.2; const lw = Math.max(1, P * 0.035);
+      o.lineJoin = 'round';
       if (d.kind === 'window') {
-        o.fillStyle = 'rgba(150,200,230,0.75)'; o.fillRect(post, -th / 2, len - 2 * post, th);
-        o.strokeStyle = 'rgba(20,30,40,0.8)'; o.lineWidth = Math.max(1, P * 0.02); o.strokeRect(post, -th / 2, len - 2 * post, th);
-      } else {
-        o.shadowColor = 'rgba(0,0,0,0.7)'; o.shadowBlur = P * 0.12; o.shadowOffsetX = P * 0.05; o.shadowOffsetY = P * 0.07;
-        const gr = o.createLinearGradient(0, -th / 2, 0, th / 2); gr.addColorStop(0, '#8a5d34'); gr.addColorStop(0.5, '#6e4625'); gr.addColorStop(1, '#4c2f18');
-        o.fillStyle = gr; o.fillRect(post * 0.6, -th / 2, len - post * 1.2, th);
-        o.shadowColor = 'transparent';
-        o.strokeStyle = '#2a1a0d'; o.lineWidth = Math.max(1, P * 0.025); o.strokeRect(post * 0.6, -th / 2, len - post * 1.2, th);
-        for (let i = 1; i < 4; i++) { const xx = post * 0.6 + ((len - post * 1.2) * i) / 4; o.beginPath(); o.moveTo(xx, -th / 2); o.lineTo(xx, th / 2); o.stroke(); }
-        o.fillStyle = '#c9a25a'; o.beginPath(); o.arc(len * 0.72, 0, P * 0.035, 0, Math.PI * 2); o.fill();
+        const th = P * 0.16;
+        o.fillStyle = 'rgba(170,215,240,0.85)'; o.fillRect(post, -th / 2, len - 2 * post, th);
+        o.fillStyle = 'rgba(255,255,255,0.55)'; o.fillRect(post + len * 0.08, -th / 2 + th * 0.2, (len - 2 * post) * 0.35, th * 0.18); // (a glint)
+        o.strokeStyle = 'rgba(15,20,28,0.9)'; o.lineWidth = lw; o.strokeRect(post, -th / 2, len - 2 * post, th);
+      } else { // (the threshold under the leaf)
+        o.fillStyle = 'rgba(0,0,0,0.35)'; o.fillRect(post, -P * 0.07, len - 2 * post, P * 0.14);
       }
-      o.fillStyle = '#6f6a63'; o.strokeStyle = '#2b2925'; o.lineWidth = Math.max(1, P * 0.02);
-      for (const px of [0, len - post]) { o.fillRect(px, -post * 0.75, post, post * 1.5); o.strokeRect(px, -post * 0.75, post, post * 1.5); }
+      o.fillStyle = '#7a756d'; o.strokeStyle = '#1b1a17'; o.lineWidth = lw;
+      for (const px of [0, len - post]) { o.fillRect(px, -post * 0.8, post, post * 1.6); o.strokeRect(px, -post * 0.8, post, post * 1.6); }
       o.restore();
     }
   }
@@ -656,36 +936,156 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     }
     for (const d of os.doors) { const [x1, y1] = T(d.x1, d.y1); const [x2, y2] = T(d.x2, d.y2); sg.save(); sg.globalCompositeOperation = 'destination-out'; sg.lineWidth = Q * 1.2; sg.beginPath(); sg.moveTo(x1, y1); sg.lineTo(x2, y2); sg.stroke(); sg.restore(); }
     const F = fg.getImageData(0, 0, W, H).data; const A = ag.getImageData(0, 0, W, H).data; const S = sg.getImageData(0, 0, W, H).data;
-    const inF = (x, y) => x >= 0 && y >= 0 && x < W && y < H && F[(y * W + x) * 4 + 3] >= 128;
-    const inS = (x, y) => x >= 0 && y >= 0 && x < W && y < H && S[(y * W + x) * 4 + 3] >= 128;
-    const edgeAt = (x, y) => { // the edge style of the floor nearest to (x, y) inside
-      for (let r = 0; r <= 3; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-        const xx = Math.round(x + dx); const yy = Math.round(y + dy);
-        if (xx >= 0 && yy >= 0 && xx < W && yy < H && A[(yy * W + xx) * 4 + 3] >= 128) return Math.round(A[(yy * W + xx) * 4] / 40);
+    // Beta 3.25: the walls for sight lie in the middle of what is built, so the players see the near half of the walls
+    // (and not only darkness under the fog; the fog's soft edge shows a little more): the middle of a wall band (rock:
+    // of its first half square), between two floors the middle of the band that parts them, wall lines along their middle.
+    const N = W * H;
+    const floor = new Uint8Array(N); const code = new Uint8Array(N);
+    for (let i = 0; i < N; i++) { floor[i] = F[i * 4 + 3] >= 128 ? 1 : 0; code[i] = A[i * 4 + 3] >= 128 ? Math.round(A[i * 4] / 40) : 0; }
+    // small holes in a floor (where brush strokes almost meet, or a little bit erased) are a lump of wall in the
+    // picture: for sight they are like a pillar, a small block in their middle (not walls all round)
+    const holes = [];
+    {
+      const seen = new Uint8Array(N); const small = 3 * Q * Q; // (up to three squares)
+      for (let i0 = 0; i0 < N; i0++) {
+        if (floor[i0] || seen[i0]) continue;
+        const comp = [i0]; seen[i0] = 1; let border = false; let near = 0;
+        for (let c = 0; c < comp.length; c++) {
+          const i = comp[c]; const x = i % W; const y = (i - x) / W;
+          if (x === 0 || y === 0 || x === W - 1 || y === H - 1) border = true;
+          for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1]) {
+            if (j < 0) continue;
+            if (floor[j]) { near = code[j] || near; continue; }
+            if (!seen[j]) { seen[j] = 1; comp.push(j); }
+          }
+        }
+        if (!border && comp.length <= small) { holes.push(comp); for (const i of comp) { floor[i] = 1; code[i] = near; } }
       }
-      return 0;
-    };
+    }
+    const BAND = { [EDGE_CODE.walls]: 0.225 * Q + 0.5, [EDGE_CODE.rock]: 0.275 * Q + 0.5 }; // (half the band the picture draws)
+    const TMAX = 0.55 * Q + 2;
+    // for the dots near a floor: the nearest floor dot (seed) and how far it is (spread outward, nearest first)
+    const seed = new Int32Array(N).fill(-1); const dist = new Float32Array(N).fill(1e9);
+    let queue = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x; if (!floor[i]) continue;
+      seed[i] = i; dist[i] = 0;
+      if ((x > 0 && !floor[i - 1]) || (x < W - 1 && !floor[i + 1]) || (y > 0 && !floor[i - W]) || (y < H - 1 && !floor[i + W])) queue.push(i);
+    }
+    while (queue.length) {
+      const next = [];
+      for (const i of queue) {
+        const x = i % W; const y = (i - x) / W; const s0 = seed[i]; const sx = s0 % W; const sy = (s0 - sx) / W;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx; const yy = y + dy; if ((!dx && !dy) || xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+          const j = yy * W + xx; if (floor[j]) continue;
+          const d = Math.hypot(xx - sx, yy - sy); if (d > TMAX || d >= dist[j] - 1e-6) continue;
+          dist[j] = d; seed[j] = s0; next.push(j);
+        }
+      }
+      queue = next;
+    }
+    const inB = new Uint8Array(N); // the near half of the built band: walls, the first of the rock
+    for (let i = 0; i < N; i++) if (!floor[i] && seed[i] >= 0) { const t = BAND[code[seed[i]]]; if (t && dist[i] <= t) inB[i] = 1; }
+    const isB = (x, y) => x >= 0 && y >= 0 && x < W && y < H && inB[y * W + x] === 1;
+    const inV = (x, y) => x >= 0 && y >= 0 && x < W && y < H && (floor[y * W + x] === 1 || inB[y * W + x] === 1);
+    const inS = (x, y) => x >= 0 && y >= 0 && x < W && y < H && S[(y * W + x) * 4 + 3] >= 128;
     const out = [];
     const toMap = (x, y) => [X0 + x / k, Y0 + y / k];
-    const add = (pts, keep) => {
-      for (let i = 0; i < pts.length - 1; i++) {
-        const [a, b] = [pts[i], pts[i + 1]];
-        if (keep && !keep((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
-        const [x1, y1] = toMap(a[0], a[1]); const [x2, y2] = toMap(b[0], b[1]);
-        out.push([x1, y1, x2, y2]);
+    const addLine = (pts) => { for (let i = 0; i < pts.length - 1; i++) { const [x1, y1] = toMap(pts[i][0], pts[i][1]); const [x2, y2] = toMap(pts[i + 1][0], pts[i + 1][1]); out.push([x1, y1, x2, y2]); } };
+    const TOL = 1.4; // (about a ninth of a square: smooth, few corners, and still inside the band)
+    // (a) the middle of the walls: the outline of floors + near halves where the half is inside it
+    for (const loop of contours(W, H, inV)) {
+      const n = loop.length - 1; // (closed: the last corner is the first)
+      const keep = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        const [ax, ay] = loop[i]; const [bx, by] = loop[i + 1];
+        const mx = (ax + bx) / 2 - (by - ay) * 0.5; const my = (ay + by) / 2 + (bx - ax) * 0.5; // (the dot on the inside, to the right)
+        keep[i] = isB(Math.floor(mx), Math.floor(my)) ? 1 : 0;
       }
-    };
-    // floors: their outlines where the edge is built walls or rock
-    for (const loop of contours(W, H, inF)) {
-      const pts = simplify(loop, 0.6);
-      add(pts, (mx, my) => { const e = edgeAt(mx, my); return e === EDGE_CODE.walls || e === EDGE_CODE.rock; });
+      if (keep.every((v) => v)) { addLine(simplify(loop, TOL)); continue; }
+      let s0 = keep.indexOf(0); // (start where it is not kept, so a run never wraps)
+      let run = null;
+      for (let t = 1; t <= n; t++) {
+        const i = (s0 + t) % n;
+        if (keep[i]) { if (!run) run = [loop[i]]; run.push(loop[i + 1]); }
+        else if (run) { addLine(rdp(run, TOL)); run = null; }
+      }
+      if (run) addLine(rdp(run, TOL));
     }
-    for (const loop of contours(W, H, inS)) add(simplify(loop, 0.6));
-    // doors: the outline walls they lie on are cut there; the door is a wall of its own
+    // (b) between two floors parted by one band: its middle (where the nearest floor jumps from one side to the other)
+    // (and the two floors lie on either side: not just a step along one curved edge, which only gives a little tick)
+    const far = (i, j) => {
+      const a = seed[i]; const b = seed[j]; if (a < 0 || b < 0) return false;
+      const ax = a % W; const ay = (a - ax) / W; const bx = b % W; const by = (b - bx) / W;
+      if (Math.hypot(ax - bx, ay - by) <= 2.6) return false;
+      const xi = i % W; const xj = j % W; const mx = (xi + xj) / 2; const my = ((i - xi) / W + (j - xj) / W) / 2;
+      return (ax - mx) * (bx - mx) + (ay - my) * (by - my) < 0;
+    };
+    const ridge = new Map(); const rk = (x, y) => x * 100003 + y;
+    const link = (ax, ay, bx, by) => { for (const [p, q] of [[[ax, ay], [bx, by]], [[bx, by], [ax, ay]]]) { const key = rk(p[0], p[1]); if (!ridge.has(key)) ridge.set(key, []); ridge.get(key).push(q); } };
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x; if (!inB[i]) continue;
+      if (x + 1 < W && inB[i + 1] && far(i, i + 1)) link(x + 1, y, x + 1, y + 1);
+      if (y + 1 < H && inB[i + W] && far(i, i + W)) link(x, y + 1, x + 1, y + 1);
+    }
+    const take = (key, to) => { const l = ridge.get(key); const at = l.findIndex((q) => q[0] === to[0] && q[1] === to[1]); if (at >= 0) l.splice(at, 1); };
+    const walk = (startKey) => {
+      const sx = Math.floor(startKey / 100003); const pts = [[sx, startKey - sx * 100003]]; let key = startKey;
+      for (let guard = 0; guard < 1e6; guard++) {
+        const l = ridge.get(key); if (!l || !l.length) break;
+        const q = l.pop(); take(rk(q[0], q[1]), pts[pts.length - 1]); pts.push(q); key = rk(q[0], q[1]);
+      }
+      if (pts.length > 2) addLine(rdp(pts, TOL)); else if (pts.length === 2) addLine(pts);
+    };
+    for (const [key, l] of ridge) if (l.length === 1) walk(key); // (lines first, from their ends)
+    for (const [key, l] of ridge) while (l.length) walk(key); // (then the rest)
+    // (c) wall lines along their middle (where they stand: an erased bit or a door lets through); pillars as a smaller block
+    for (const it of os.items) {
+      if (it.kind === 'line') {
+        for (let i = 0; i < it.pts.length - 1; i++) {
+          const [a, b] = [T(...it.pts[i]), T(...it.pts[i + 1])]; const L = Math.hypot(b[0] - a[0], b[1] - a[1]); const n = Math.max(1, Math.ceil(L / 0.5));
+          let from = null;
+          for (let s2 = 0; s2 <= n; s2++) {
+            const u = s2 / n; const x = a[0] + (b[0] - a[0]) * u; const y = a[1] + (b[1] - a[1]) * u;
+            const on = inS(Math.min(W - 1, Math.floor(x)), Math.min(H - 1, Math.floor(y)));
+            if (on && !from) from = [x, y];
+            if ((!on || s2 === n) && from) { const end = on ? [x, y] : [a[0] + (b[0] - a[0]) * ((s2 - 1) / n), a[1] + (b[1] - a[1]) * ((s2 - 1) / n)]; if (Math.hypot(end[0] - from[0], end[1] - from[1]) > 0.5) addLine([from, end]); from = null; }
+          }
+        }
+      } else if (it.kind === 'pillar') {
+        const [[cx, cy]] = it.pts; const [px, py] = T(cx, cy);
+        if (!inS(Math.floor(px), Math.floor(py))) continue;
+        const r = it.r * 0.6; const n = it.round ? 6 : 4; const ring = [];
+        for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI * 2 + (it.round ? 0 : Math.PI / 4); const rr = it.round ? r : r * Math.SQRT2; ring.push(T(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr)); }
+        addLine(ring);
+      }
+    }
+    for (const comp of holes) {
+      const set = new Uint8Array(N); let x0 = W; let y0 = H; let x1 = 0; let y1 = 0;
+      for (const i of comp) { set[i] = 1; const x = i % W; const y = (i - x) / W; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      const core = (x, y) => { // (two and a half dots in from its rim)
+        if (x < x0 || y < y0 || x > x1 || y > y1 || !set[y * W + x]) return false;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const xx = x + dx; const yy = y + dy; if (dx * dx + dy * dy > 6.5) continue; if (xx < 0 || yy < 0 || xx >= W || yy >= H || !set[yy * W + xx]) return false; }
+        return true;
+      };
+      for (const loop of contours(W, H, core)) addLine(simplify(loop, TOL));
+    }
+    // doors: the walls they lie on are cut there; the door is a wall of its own, and where it meets a band, the band
+    // goes on beside it (its jambs: no looking around a shut door through the wall's thickness)
     const walls = [];
     const doors = os.doors.map((d) => ({ ...d }));
-    for (const s of out) for (const piece of cutByDoors(s, doors, g)) walls.push({ c: piece, key: `s${piece.map((v) => Math.round(v * 100)).join(',')}` });
-    for (const d of doors) walls.push({ c: [d.x1, d.y1, d.x2, d.y2], door: d.kind === 'window' ? 0 : d.door, kind: d.kind === 'window' ? 'window' : undefined, key: `d${d.id}` });
+    for (const s2 of out) for (const piece of cutByDoors(s2, doors, g)) walls.push({ c: piece, key: `s${piece.map((v) => Math.round(v * 100)).join(',')}` });
+    const J = 0.25 * g; // (to the middle of the wall beside the door)
+    for (const d of doors) {
+      walls.push({ c: [d.x1, d.y1, d.x2, d.y2], door: d.kind === 'window' ? 0 : d.door, kind: d.kind === 'window' ? 'window' : undefined, key: `d${d.id}` });
+      const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1; const ux = (d.x2 - d.x1) / L; const uy = (d.y2 - d.y1) / L;
+      for (const [ex, ey, sg2] of [[d.x1, d.y1, -1], [d.x2, d.y2, 1]]) {
+        const fx = ex + ux * J * sg2; const fy = ey + uy * J * sg2;
+        const [mx, my] = T((ex + fx) / 2, (ey + fy) / 2); const nx = -uy * 1.5; const ny = ux * 1.5;
+        if (isB(Math.floor(mx + nx), Math.floor(my + ny)) || isB(Math.floor(mx - nx), Math.floor(my - ny))) walls.push({ c: [ex, ey, fx, fy], key: `j${d.id}${sg2 > 0 ? 'b' : 'a'}` });
+      }
+    }
     return walls;
   }
   // the outlines of where inside(x, y) is true: closed loops along the dots' edges, the inside on the right
@@ -779,5 +1179,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     return null;
   }
 
-  return { DATA, FLOORS, MATERIALS, EDGES, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, supported: () => !!gl2(), DEFAULT_MAT };
+  // (noSharp: the self-test's software graphics are slow; it switches the sharp tiles off where they are not the point)
+  const api = { DATA, FLOORS, MATERIALS, EDGES, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, setSharp, stats, noSharp: false, sharpOf: (map) => { const b = boxOf(map); return b && b.sharp; }, supported: () => !!gl2(), DEFAULT_MAT };
+  return api;
 })();

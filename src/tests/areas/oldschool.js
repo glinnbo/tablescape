@@ -24,11 +24,12 @@ module.exports = (area) => {
   area.before(async (K) => {
     await K.openDemo();
     await K.until(() => K.g('!!document.createElement("canvas").getContext("webgl2")'), 8000, 'WebGL on your screen');
+    await K.g('Oldschool.noSharp = true'); // (software graphics here: the sharp tiles only where they are the point)
   });
 
-  area.quick('the tiles come with the app: eleven floors in Library → Tiles, five materials for walls, rock and cliffs', async (t) => {
+  area.quick('the tiles come with the app: twelve floors in Library → Tiles, five materials for walls, rock and cliffs', async (t) => {
     const list = t.lib('tiles').filter((x) => x.builtin);
-    t.eq(list.length, 11, 'floors in the library');
+    t.eq(list.length, 12, 'floors in the library');
     t.ok(list.every((x) => x.rel.startsWith('Tiles/Tablescape/') && fs.existsSync(x.path) && x.thumb && x.squares > 0), 'each with its picture, a small one and its squares', list[0]);
     t.ok(!list.some((x) => /stone_wall|hedge|Mossy rock/i.test(x.name)), 'the materials are not floors', list.map((x) => x.name));
     t.eq(await t.g('Oldschool.MATERIALS.map((m) => m.label).join()'), 'Stone,Dark stone,Hedge,Rock,Mossy rock', 'materials');
@@ -51,7 +52,7 @@ module.exports = (area) => {
     t.eq(await t.popTitle(), 'Draw', 'its panel');
     t.ok(await t.g(`!document.querySelector('#empty.on')`), 'no "no background" card in the way');
     t.ok(await t.g(`(() => { const b = document.querySelector('#rail [data-id="oldschool"]'); return !!b && !b.hidden && b.offsetParent !== null; })()`), 'Draw is on the rail');
-    t.eq(await t.count('.os-tools .tile'), 12, 'its tools');
+    t.eq(await t.count('.os-tools .tile'), 13, 'its tools');
     t.ok(await t.count('.os-floors .tile[data-v]') >= 11, 'the floors of the app');
     t.ok(await t.g(`!!document.querySelector('.map-tile[data-id="${own}"] .tile-thumb .i')`), 'its tile in the strip shows a pencil');
   });
@@ -115,7 +116,7 @@ module.exports = (area) => {
   area.deep('the Draw panel: each tool, a floor, the edge, where the light comes from', async (t) => {
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
     await t.g(`localStorage.removeItem('osPrefs')`);
-    for (const id of ['shape', 'round', 'corridor', 'brush', 'erase', 'floor', 'wall', 'pillar', 'stairs', 'door', 'piece', 'room']) {
+    for (const id of ['shape', 'round', 'corridor', 'brush', 'erase', 'floor', 'wall', 'pillar', 'stairs', 'door', 'piece', 'ground', 'room']) {
       await t.clickSel(`.os-tools .tile[data-v="${id}"]`);
       t.eq(await t.g('Play.ui.os.tool'), id, `tool ${id}`);
     }
@@ -130,7 +131,13 @@ module.exports = (area) => {
     t.handle('os.set', { mapId: own, sun: (sun + 90) % 360 });
     await t.settle();
     t.eq(M(t).os.sun, (sun + 90) % 360, 'the light from elsewhere');
-    await baked(t);
+    t.eq(M(t).os.shadows, 'short', 'short shadows at first');
+    await t.clickText('#pop .seg-btn', 'Long');
+    await t.until(() => M(t).os.shadows === 'long', 4000, 'long shadows');
+    await t.clickText('#pop .seg-btn', 'Short');
+    await t.until(() => M(t).os.shadows === 'short', 4000, 'and short again');
+    await baked(t, 150000);
+    t.note(`made in ${JSON.stringify(await t.g('Oldschool.stats.last'))}`);
   }, { ms: 180000 });
 
   area.deep('a shape clicked corner by corner, closed with Enter; a corridor along the grid; a door on a wall line', async (t) => {
@@ -180,9 +187,13 @@ module.exports = (area) => {
     const sees = (x, y) => t.t(`window.__table.sees(${x * k}, ${y * k})`);
     t.eq(await sees(5, 5), true, 'inside the room');
     t.eq(await sees(15, 6), false, 'not the other room through the walls and the shut door');
+    // (Beta 3.25) the door's leaf is drawn live: across the doorway, and it swings open
+    const leaf = () => t.t(`(() => { const g = document.querySelector('.sv-osdoors .osdoor > g'); return g ? g.getAttribute('transform') : null; })()`);
+    t.ok(/rotate\(0 /.test(await leaf() || ''), 'the leaf across the doorway on the TV', await leaf());
     t.handle('wall.door', { mapId: own, id: dw[0].id, open: true });
     await t.settle(); await t.sleep(600);
     t.eq(await sees(15, 6.5), true, 'through the open door and the corridor');
+    await t.until(async () => /rotate\(80/.test(await leaf() || ''), 4000, 'the leaf swung open');
     // a re-made picture keeps the door open
     t.handle('os.set', { mapId: own, sun: 200 });
     await t.settle(); await baked(t);
@@ -213,12 +224,12 @@ module.exports = (area) => {
       const g = c.getContext('2d'); g.drawImage(img, 0, 0);
       const at = (x, y) => { const u = Math.round((x - b.x) / b.scale); const v = Math.round((y - b.y) / b.scale); return [...g.getImageData(u, v, 1, 1).data]; };
       const k = m.grid.size;
-      return { floor: at(15 * k, 5 * k), void: at(b.x + 0.2 * k, b.y + 0.2 * k), wall: at(18.15 * k, 6 * k), size: [img.naturalWidth, img.naturalHeight] };
+      return { floor: at(16 * k, 5 * k), void: at(b.x + 0.2 * k, b.y + 0.2 * k), wall: at(18.15 * k, 6 * k), size: [img.naturalWidth, img.naturalHeight] };
     })()`);
     const lum = (p) => p[0] * 0.3 + p[1] * 0.59 + p[2] * 0.11;
     t.ok(px.void[3] < 10, 'outside: see-through (the table\'s dark shows)', px.void);
     t.ok(lum(px.floor) > 45, 'inside: the floor', px.floor);
-    t.ok(Math.abs(lum(px.wall) - lum(px.floor)) > 6, 'the wall differs from the floor', [px.wall, px.floor]);
+    t.ok(px.wall.slice(0, 3).reduce((n, v, i) => n + Math.abs(v - px.floor[i]), 0) > 20, 'the wall differs from the floor', [px.wall, px.floor]);
     t.ok(px.size[0] <= 4096 * 2 && m.bg.scale > 0, 'a sensible size', px.size);
   });
 
@@ -257,40 +268,73 @@ module.exports = (area) => {
     t.eq(await t.popTitle(), 'Draw', 'back in Draw');
   }, { ms: 120000 });
 
-  area.deep('Depth view: the heights come with the picture; on the TV the walls lean away from the middle; off shows the picture again', async (t) => {
+  area.deep('sharp tiles: as many dots a square as the TV shows; something drawn makes only the tiles near it again', async (t) => {
+    await t.g('Oldschool.noSharp = false');
     await clear(t);
-    t.handle('os.add', { mapId: own, items: [room(2, 2, 10, 9), room(24, 4, 30, 10), { kind: 'pillar', pts: [[6 * k, 5.5 * k]], r: 0.4 * k, mat: 'stone_wall' }] });
-    t.handle('os.set', { mapId: own, depth: true });
+    t.handle('os.add', { mapId: own, items: [room(2, 2, 10, 9), room(40, 4, 46, 10)] });
     await t.settle();
-    const m = await baked(t, 90000);
-    t.ok(m.bg.hm && fs.existsSync(m.bg.hm.path) && /-h\.png$/.test(m.bg.hm.path), 'the heights next to the picture', m.bg.hm);
-    t.ok(Array.isArray(m.bg.osIds) && m.bg.osIds.length === 3, 'the picture knows what it shows', m.bg.osIds);
+    const m = await baked(t, 120000);
+    const sh = m.bg.sharp;
+    t.ok(sh && sh.P >= 100 && sh.ts >= 4, 'sharp tiles on top of the picture', sh && { P: sh.P, ts: sh.ts });
+    t.ok(sh.P > 1 / (m.bg.scale / k) * 1.1, 'sharper than the picture', { P: sh.P, base: k / m.bg.scale });
+    t.ok(sh.tiles.length >= 2 && sh.tiles.every((x) => fs.existsSync(x.path)), 'a file each', sh.tiles.length);
+    t.ok(!sh.tiles.some((x) => x.c > 0 && x.c * sh.ts > 12 && (x.c + 1) * sh.ts < 38), 'none where nothing shows', sh.tiles.map((x) => [x.c, x.r]));
+    const before = new Map(sh.tiles.map((x) => [`${x.c},${x.r}`, x.h]));
+    t.handle('os.add', { mapId: own, items: [{ kind: 'pillar', pts: [[6 * k, 5.5 * k]], r: 0.4 * k, mat: 'stone_wall' }] });
+    await t.settle();
+    const m2 = await baked(t, 120000);
+    const after = new Map(m2.bg.sharp.tiles.map((x) => [`${x.c},${x.r}`, x.h]));
+    const far = [...after].filter(([pos]) => Number(pos.split(',')[0]) * sh.ts >= 30);
+    const near = [...after].filter(([pos]) => Number(pos.split(',')[0]) * sh.ts < 16);
+    t.ok(far.length && far.every(([pos, h]) => before.get(pos) === h), 'the far room\'s tiles are kept', far);
+    t.ok(near.length && near.some(([pos, h]) => before.get(pos) !== h), 'the tiles under the pillar are made again', near);
+    t.ok(m2.bg.sharp.tiles.every((x) => fs.existsSync(x.path)), 'their files there');
+    // on the TV: the tiles over the picture, all shown
     await t.send(own);
-    const d = await t.until(async () => { const x = await t.t('window.__table.depth()'); return x && x.on && x.stats.renders > 0 && x; }, 60000, 'the depth view on the TV');
-    t.ok(d.stats.k > 0, 'drawn', d.stats);
-    t.ok(await t.g(`!!(Play.view().depth && Play.view().bgLayer.classList.contains('sv-depth-on'))`), 'and on your screen');
-    // the middle of the table looks as the flat picture; a wall far from it leans: its face shows where its top was
-    const r = await t.g('Play.view().tableRectInMap()');
-    const flat = (x, y) => t.t(`(() => { const img = document.querySelector('.sv-bg img'); const b = ${JSON.stringify({ x: m.bg.x, y: m.bg.y, s: m.bg.scale })}; const c = document.createElement('canvas'); c.width = c.height = 1; const g = c.getContext('2d'); g.drawImage(img, Math.round((${x} - b.x) / b.s), Math.round((${y} - b.y) / b.s), 1, 1, 0, 0, 1, 1); return [...g.getImageData(0, 0, 1, 1).data]; })()`);
-    const near = (a, b, tol) => a && b && a.every((v, i) => Math.abs(v - b[i]) <= tol);
-    const far = { x: 30.2 * k, y: 7 * k }; // the outer wall of the room on the right, beyond the table's middle
-    const cx = r.x + r.w / 2; const cy = r.y + r.h / 2;
-    t.note(`table middle ${cx.toFixed(1)}, ${cy.toFixed(1)}`);
-    const fl = await flat(far.x, far.y); const dp = (await t.t(`window.__table.depth(${far.x}, ${far.y})`)).px;
-    t.ok(!near(fl, dp, 12), 'beyond the wall\'s top: its leaning top or face, not the flat picture', [fl, dp]);
-    const before = d.stats.renders;
-    t.handle('view.update', { mapId: own, x: (await t.g('Play.state().map.view.x')) - 3, y: await t.g('Play.state().map.view.y') });
+    await t.until(async () => (await t.t(`(() => { const im = [...document.querySelectorAll('.sv-sharp img')]; return im.length >= ${m2.bg.sharp.tiles.length} && im.every((i) => i.complete && i.naturalWidth > 0 && i.style.visibility !== 'hidden'); })()`)), 30000, 'the sharp tiles on the TV');
+    t.eq(await t.t(`document.querySelector('.sv-sharp img').naturalWidth`), m2.bg.sharp.ts * m2.bg.sharp.P, 'a tile is ts squares of P dots');
+    await t.sleep(600);
+    await t.shot(t.tv(), 'oldschool-sharp-tv');
+    t.note(`made in ${JSON.stringify(await t.g('Oldschool.stats.last'))}`);
+    await t.g('Oldschool.noSharp = true');
+  }, { ms: 300000 });
+
+  area.deep('Ground: water, lava, acid, magical darkness or swamp; a pool in the picture and its effect moving on it; erase takes it away', async (t) => {
+    await clear(t);
+    await t.g('Play.view().setPlaying(false)'); // (software graphics: moving effects would starve the picture here)
+    t.handle('os.add', { mapId: own, items: [room(14, 2, 24, 9)] });
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
+    await t.clickSel('.os-tools .tile[data-v="ground"]');
+    t.eq(await t.count('.os-grounds .tile'), 5, 'five kinds');
+    await t.clickSel('.os-grounds .tile[data-v="lava"]');
+    t.eq(await t.g('Play.ui.os.ground'), 'lava', 'lava picked');
+    const a = await t.scr(16 * k, 4 * k); const b = await t.scr(19 * k, 6 * k);
+    await t.drag(a, b, 10);
+    await t.until(() => M(t).os.items.some((x) => x.kind === 'ground'), 5000, 'the ground drawn');
+    const gi = M(t).os.items.find((x) => x.kind === 'ground');
+    t.eq([gi.preset, gi.shape], ['lava', 'rect'], 'a box of lava', gi);
+    const fx = M(t).fx.find((f) => f.os === gi.id);
+    t.ok(fx && fx.kind === 'region' && fx.preset === 'lava' && fx.strokes.some((st) => st.poly) && fx.strokes.some((st) => st.nm), 'its effect: the outline and dots inside', fx);
+    const m = await baked(t);
+    // the picture: lava (warm, dark) where the pool is, the floor beside it
+    const px = await t.g(`(async () => { const b = Play.state().map.bg; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d'); g.drawImage(img, 0, 0); const at = (x, y) => [...g.getImageData(Math.round((x - b.x) / b.scale), Math.round((y - b.y) / b.scale), 1, 1).data]; return { pool: at(17.5 * ${k}, 5 * ${k}), floor: at(21.5 * ${k}, 5 * ${k}) }; })()`);
+    t.ok(px.pool[0] > px.pool[2] + 10 && px.pool.slice(0, 3).reduce((n, v, i) => n + Math.abs(v - px.floor[i]), 0) > 30, 'the pool in the picture', px);
+    t.handle('fx.update', { mapId: own, id: fx.id, intensity: 0.5 });
+    t.handle('os.update', { mapId: own, id: gi.id, preset: 'water' });
     await t.settle();
-    await t.until(async () => (await t.t('window.__table.depth()')).stats.renders > before, 30000, 'drawn again around the new middle');
-    await t.sleep(800);
-    await t.shot(t.tv(), 'oldschool-depth-tv');
-    await t.shot(t.gm(), 'oldschool-depth-gm');
-    t.handle('os.set', { mapId: own, depth: false });
+    const fx2 = M(t).fx.find((f) => f.os === gi.id);
+    t.ok(fx2 && fx2.preset === 'water' && fx2.intensity === 0.5, 'changed to water, what was set on the effect kept', fx2);
+    // erase over it: the ground and its effect go
+    await t.clickSel('.os-tools .tile[data-v="erase"]');
+    await t.drag(await t.scr(15.5 * k, 3.5 * k), await t.scr(19.5 * k, 6.5 * k), 10);
+    await t.until(() => !M(t).os.items.some((x) => x.kind === 'ground'), 5000, 'erased');
+    t.ok(!M(t).fx.some((f) => f.os), 'its effect gone too');
+    t.handle('history.undo', { mapId: own }); t.handle('history.undo', { mapId: own });
     await t.settle();
-    await baked(t, 90000);
-    await t.until(async () => !(await t.t('window.__table.depth()')), 60000, 'the depth view gone');
-    t.ok(!M(t).bg.hm, 'no heights without it');
-    t.ok(await t.t(`getComputedStyle(document.querySelector('.sv-bg img')).visibility === 'visible'`), 'the picture shows again');
+    t.ok(M(t).os.items.some((x) => x.kind === 'ground') && M(t).fx.some((f) => f.os), 'undo brings both back');
+    await t.g('Play.view().setPlaying(true)');
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
+    await t.clickSel('.os-tools .tile[data-v="room"]');
   }, { ms: 300000 });
 
   area.deep('ready-made pieces: picked in the panel, stamped with a click (one undo step), a quarter turn turns them', async (t) => {
@@ -383,16 +427,6 @@ module.exports = (area) => {
     await t.settle(); await t.sleep(1500);
     await t.shot(t.gm(), 'oldschool-gm');
     await t.shot(t.tv(), 'oldschool-tv');
-    // and with the depth view
-    t.handle('os.set', { mapId: own, depth: true });
-    await t.settle();
-    await baked(t, 90000);
-    await t.until(async () => { const x = await t.t('window.__table.depth()'); return x && x.on && x.stats.renders > 0; }, 60000, 'the depth view');
-    await t.sleep(1200);
-    await t.shot(t.tv(), 'oldschool-depth-morning-tv');
-    t.handle('os.set', { mapId: own, depth: false });
-    await t.settle();
-    await baked(t, 90000);
     t.ok(true, 'pictures taken');
   }, { ms: 300000 });
 };

@@ -3839,11 +3839,14 @@ body.gm .sv-trees-over { opacity: 0.7; } /* (above the tokens: see-through on yo
 #roster.collapsed .drawn-chip { display: none; }
 body.gm[data-tool="oldschool"] #viewport { cursor: crosshair; }
 
-/* Beta 3.23: an Oldschool map's depth view: the picture drawn leaning by the graphics card, the picture itself hidden */
-.sv-bg.sv-depth-on > img { visibility: hidden; }
-.sv-bg > canvas.sv-depth { pointer-events: none; }
 /* Beta 3.23: an Oldschool map inks onto the table: the pen traces, the tile fills in, then the picture takes over */
 .sv-bg > svg.sv-osink { left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+/* Beta 3.25: an Oldschool map's doors, drawn live (shut or swung open) */
+.sv-bg > svg.sv-osdoors { left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.sv-osdoors .osdoor { filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.7)); }
+/* Beta 3.25: an Oldschool map's sharp tiles, on top of its picture */
+.sv-bg > .sv-sharp { left: 0; top: 0; width: 1px; height: 1px; pointer-events: none; }
+.sv-sharp > img { position: absolute; max-width: none; user-select: none; }
 .sv-osink .ink-pen { stroke: rgba(246, 230, 196, 0.95); stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1 1; stroke-dashoffset: 1; animation: osink-pen 0.65s ease-out forwards; }
 .sv-osink .ink-fill { opacity: 0; animation: osink-fill 0.6s ease-out 0.35s forwards; }
 .sv-osink .ink-paint { stroke-dasharray: 1 1; stroke-dashoffset: 1; animation: osink-pen 0.8s ease-in-out forwards; }
@@ -3855,6 +3858,10 @@ body.gm[data-tool="oldschool"] #viewport { cursor: crosshair; }
 .os-pieces .tile { padding: 5px 2px 6px; gap: 3px; min-height: 0; min-width: 0; }
 .os-pieces .tile img { width: 52px; height: 52px; border-radius: 6px; pointer-events: none; }
 .os-pieces .tile span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; font-size: 10.5px; }
+/* Beta 3.25: the Ground tool's kinds */
+.os-grounds .tile { padding: 6px 2px 5px; gap: 3px; min-height: 0; min-width: 0; font-size: 10.5px; }
+.os-grounds .tile .i { width: 18px; height: 18px; }
+.os-grounds .tile span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; text-align: center; }
 /* Beta 3.24 (a test): the TV's frame is moved by its tab, as in the Atlas */
 .frame-tab { pointer-events: auto; cursor: grab; display: inline-flex; align-items: center; gap: 5px; touch-action: none; user-select: none; }
 .frame-tab .i { width: 13px; height: 13px; flex: none; }

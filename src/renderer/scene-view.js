@@ -294,6 +294,7 @@ class SceneView {
     this.renderHandles();
     this.renderGizmo();
     this.renderWalls();
+    this.renderOsDoors();
     this.renderAreas();
     this.renderTrails();
     this.drawFrame();
@@ -337,7 +338,6 @@ class SceneView {
     }
     // nothing animated: the effects and the light are drawn once for the new place (4.8: held still, at most a few times a second)
     if (!this.raf) { const now = performance.now(); if (!this.stillHold || now - (this.stillDrawAt || 0) > 160) { this.stillDrawAt = now; this.drawFrame(); } }
-    if (this.depth) { const now = performance.now(); if (now - (this.depthAt || 0) > 120) { this.depthAt = now; this.syncDepth(); } }
     this.stats.liveMoves = (this.stats.liveMoves || 0) + 1;
   }
   endLive() {
@@ -373,7 +373,8 @@ class SceneView {
     this.map = null;
     if (this.bgNode) { this.bgNode.el.remove(); this.bgNode = null; }
     this.dropOldBg();
-    this.syncDepth(true);
+    if (this.sharpEl) { this.sharpEl.remove(); this.sharpEl = null; this.sharpTiles = null; }
+    if (this.osDoorSvg) { this.osDoorSvg.remove(); this.osDoorSvg = null; this.osDoorEls = null; }
     this.osInkClear();
     for (const n of this.nodes.values()) this.dropNode(n);
     this.nodes.clear();
@@ -511,29 +512,43 @@ class SceneView {
   // ---------- background (map space) ----------
   renderBg() {
     const bg = this.map.bg;
-    if (!bg) { if (this.bgNode) { this.bgNode.el.remove(); this.bgNode = null; } this.dropOldBg(); this.syncDepth(true); this.osInkPictured([]); this.broken.delete('bg'); return; }
+    if (!bg) { if (this.bgNode) { this.bgNode.el.remove(); this.bgNode = null; } this.dropOldBg(); this.renderSharp(); this.osInkPictured([]); this.broken.delete('bg'); return; }
     if (!this.bgNode || this.bgNode.url !== bg.url) {
       // Beta 3.22: a picture that follows a picture stays until the new one is there (a drawn map gets a new one with
       // every change: no blink in between)
       const old = this.bgNode;
-      this.dropOldBg();
-      if (old && old.kind === 'image' && bg.kind === 'image' && old.nw) this.bgOld = old; else if (old) old.el.remove();
+      if (old && !old.nw && this.bgOld && bg.kind === 'image') old.el.remove(); // (one that never showed: the one on screen stays)
+      else {
+        this.dropOldBg();
+        if (old && old.kind === 'image' && bg.kind === 'image' && old.nw) this.bgOld = old; else if (old) old.el.remove();
+      }
       const el = makeMedia(bg.kind, bg.url, bg.kind === 'video' ? this.videoOn() : this.playing);
       const node = { el, url: bg.url, kind: bg.kind, nw: 0, nh: 0, osIds: bg.osIds || null };
+      if (bg.kind !== 'video') el.style.visibility = 'hidden'; // (until it is decoded and in its place)
       this.bgNode = node;
       this.pinned = null; // a new background is fitted (and fixed) again
-      el.addEventListener(bg.kind === 'video' ? 'loadedmetadata' : 'load', () => {
+      el.addEventListener(bg.kind === 'video' ? 'loadedmetadata' : 'load', async () => {
+        // Beta 3.25: a big picture is decoded before it takes over, and the old one goes only once the new one has
+        // been shown (it used to go at once: the table was empty, black or white, while the new one was decoded)
+        if (bg.kind !== 'video' && el.decode) await el.decode().catch(() => {});
+        if (!el.isConnected) return; // (replaced or cleared meanwhile)
         node.nw = bg.kind === 'video' ? el.videoWidth : el.naturalWidth;
         node.nh = bg.kind === 'video' ? el.videoHeight : el.naturalHeight;
         this.broken.delete('bg');
         this.layoutBg();
-        if (this.bgNode === node) { this.dropOldBg(); this.osInkPictured(node.osIds); }
+        el.style.visibility = '';
+        if (this.bgNode === node) {
+          const old = this.bgOld;
+          if (old) requestAnimationFrame(() => requestAnimationFrame(() => { if (this.bgOld === old) this.dropOldBg(); }));
+          this.osInkPictured(node.osIds);
+        }
         this.layoutOverlays();
         this.emit('broken');
         this.emit('render');
       });
       el.addEventListener('error', () => { if (this.bgNode === node) this.dropOldBg(); this.broken.add('bg'); this.emit('broken'); });
-      this.bgLayer.appendChild(el);
+      // (under the sharp tiles and the ink, over the picture it replaces)
+      this.bgLayer.insertBefore(el, [this.sharpEl, this.osDoorSvg, this.osInkSvg].find((x) => x && x.parentNode === this.bgLayer) || null);
     }
     if (bg.kind === 'video') {
       const v = this.bgNode.el;
@@ -543,10 +558,107 @@ class SceneView {
       if (v.playbackRate !== (bg.rate || 1)) v.playbackRate = bg.rate || 1;
     }
     this.layoutBg();
+    this.renderSharp();
     this.osInkSync();
   }
 
+  // ---------- Beta 3.25: an Oldschool map's sharp tiles, on top of its picture ----------
+  // The picture (the base) has at most 80 dots a square; the tiles have as many as the TV shows. They lie on whole
+  // squares from the grid's origin. A tile with a new key loads hidden and takes its place once it is decoded (the old
+  // one goes a moment later), so nothing blinks; one that is no longer there goes at once.
+  renderSharp() {
+    const m = this.map; const bg = m && m.bg; const sh = bg && bg.kind === 'image' && bg.sharp;
+    if (!sh || !Array.isArray(sh.tiles) || !sh.tiles.length || this.bgTurn()) { if (this.sharpEl) { this.sharpEl.remove(); this.sharpEl = null; this.sharpTiles = null; } return; }
+    if (!this.sharpEl) { this.sharpEl = document.createElement('div'); this.sharpEl.className = 'sv-sharp'; this.sharpTiles = new Map(); }
+    // over the picture(s), under the doors and the ink
+    const above = [this.osDoorSvg, this.osInkSvg].find((x) => x && x.parentNode === this.bgLayer) || null;
+    if (this.sharpEl.parentNode !== this.bgLayer || this.sharpEl.nextSibling !== above) this.bgLayer.insertBefore(this.sharpEl, above);
+    const g0 = m.grid || {}; const ppi = this.ppi; const TD = sh.ts * sh.P;
+    this.sharpEl.style.transform = `translate(${(g0.ox || 0) * ppi}px, ${(g0.oy || 0) * ppi}px) scale(${((g0.size || 1) * ppi) / sh.P})`;
+    const want = new Map(sh.tiles.filter((t) => t && t.url).map((t) => [`${t.c},${t.r}`, t]));
+    for (const [pos, e] of this.sharpTiles) if (!want.has(pos)) { if (e.el) e.el.remove(); if (e.next) e.next.el.remove(); this.sharpTiles.delete(pos); }
+    for (const [pos, t] of want) {
+      let e = this.sharpTiles.get(pos);
+      if (e && e.h === t.h && e.td === TD) { if (e.next) { e.next.el.remove(); e.next = null; } continue; }
+      if (e && e.next && e.next.h === t.h && e.next.td === TD) continue; // (already coming)
+      const img = document.createElement('img'); img.draggable = false; img.alt = '';
+      img.style.cssText = `left:${t.c * TD}px;top:${t.r * TD}px;width:${TD}px;height:${TD}px;visibility:hidden`;
+      const n = { el: img, h: t.h, td: TD };
+      if (e) { if (e.next) e.next.el.remove(); e.next = n; } else { e = { el: null, h: null, td: 0, next: n }; this.sharpTiles.set(pos, e); }
+      img.addEventListener('load', async () => {
+        if (img.decode) await img.decode().catch(() => {});
+        const cur = this.sharpTiles && this.sharpTiles.get(pos);
+        if (!cur || cur.next !== n) return; // (replaced meanwhile)
+        img.style.visibility = '';
+        const old = cur.el; Object.assign(cur, { el: img, h: n.h, td: n.td, next: null });
+        if (old) requestAnimationFrame(() => requestAnimationFrame(() => old.remove()));
+      });
+      img.addEventListener('error', () => { const cur = this.sharpTiles && this.sharpTiles.get(pos); if (cur && cur.next === n) { cur.next = null; img.remove(); } });
+      img.src = t.url;
+      this.sharpEl.appendChild(img);
+    }
+  }
+
   dropOldBg() { if (this.bgOld) { this.bgOld.el.remove(); this.bgOld = null; } }
+
+  // ---------- Beta 3.25: an Oldschool map's doors, drawn live: shut across the doorway, or swung open ----------
+  // The picture has the posts; the leaf follows the door's wall (open or shut) and swings when it changes. Under the
+  // fog like the picture. Secret doors and windows stay in the picture alone.
+  renderOsDoors() {
+    const m = this.map; const os = m && m.os;
+    const doors = os && m.bg ? os.doors.filter((d) => d.door !== 2 && d.kind !== 'window') : [];
+    if (!doors.length) { if (this.osDoorSvg) { this.osDoorSvg.remove(); this.osDoorSvg = null; this.osDoorEls = null; } return; }
+    const NS = 'http://www.w3.org/2000/svg';
+    const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
+    if (!this.osDoorSvg) {
+      this.osDoorSvg = mk('svg', { class: 'sv-osdoors' }); this.osDoorEls = new Map();
+      const defs = mk('defs', {}); const gr = mk('linearGradient', { id: 'osdoor-wood', x1: '0', y1: '0', x2: '0', y2: '1' });
+      for (const [o, c] of [['0', '#a3713f'], ['0.5', '#86562c'], ['1', '#5c3a1c']]) gr.append(mk('stop', { offset: o, 'stop-color': c }));
+      defs.append(gr); this.osDoorG = mk('g', {}); this.osDoorSvg.append(defs, this.osDoorG);
+    }
+    // over the picture and its sharp tiles, under the ink
+    const before = this.osInkSvg && this.osInkSvg.parentNode === this.bgLayer ? this.osInkSvg : null;
+    if (this.osDoorSvg.parentNode !== this.bgLayer || (before && this.osDoorSvg.nextSibling !== before)) this.bgLayer.insertBefore(this.osDoorSvg, before);
+    this.osDoorG.setAttribute('transform', `scale(${this.ppi})`);
+    const sq = (m.grid && m.grid.size) || 1;
+    const open = new Map(m.walls.filter((w) => w.os && w.os[0] === 'd' && w.door).map((w) => [w.os.slice(1), !!w.open]));
+    const seen = new Set();
+    for (const d of doors) {
+      seen.add(d.id);
+      const len = Math.hypot(d.x2 - d.x1, d.y2 - d.y1); if (len < 1e-3) continue;
+      const geo = `${d.x1},${d.y1},${d.x2},${d.y2},${sq}`;
+      let e = this.osDoorEls.get(d.id);
+      if (!e || e.geo !== geo) {
+        if (e) e.g.remove();
+        const th = sq * 0.28; const post = sq * 0.2; const lw = sq * 0.035; const a0 = post * 0.6; const L = len - post * 1.2;
+        const g = mk('g', { transform: `translate(${d.x1} ${d.y1}) rotate(${(Math.atan2(d.y2 - d.y1, d.x2 - d.x1) * 180) / Math.PI})`, class: 'osdoor' });
+        const leaf = mk('g', {});
+        leaf.append(mk('rect', { x: a0, y: -th / 2, width: L, height: th, fill: 'url(#osdoor-wood)', stroke: '#1e1208', 'stroke-width': lw, 'stroke-linejoin': 'round' }));
+        for (let i = 1; i < 4; i++) leaf.append(mk('line', { x1: a0 + (L * i) / 4, y1: -th / 2, x2: a0 + (L * i) / 4, y2: th / 2, stroke: '#1e1208', 'stroke-width': sq * 0.02 }));
+        leaf.append(mk('circle', { cx: a0 + L * 0.84, cy: 0, r: sq * 0.045, fill: '#e0b866', stroke: '#1e1208', 'stroke-width': sq * 0.015 }));
+        g.append(leaf);
+        this.osDoorG.append(g);
+        e = { g, leaf, geo, hinge: [a0, 0], angle: null };
+        this.osDoorEls.set(d.id, e);
+      }
+      const want = open.get(d.id) ? 80 : 0;
+      if (e.angle === null) { e.angle = want; e.leaf.setAttribute('transform', `rotate(${want} ${e.hinge[0]} ${e.hinge[1]})`); }
+      else if (e.target !== want && e.angle !== want) this.swingDoor(e, want);
+      e.target = want;
+    }
+    for (const [id, e] of this.osDoorEls) if (!seen.has(id)) { e.g.remove(); this.osDoorEls.delete(id); }
+  }
+  swingDoor(e, want) {
+    const from = e.angle; const t0 = performance.now(); const ms = 420; e.target = want;
+    const step = (now) => {
+      if (e.target !== want) return; // (turned again meanwhile)
+      const u = Math.min(1, (now - t0) / ms); const k = u < 0.5 ? 2 * u * u : 1 - ((-2 * u + 2) ** 2) / 2;
+      e.angle = from + (want - from) * k;
+      e.leaf.setAttribute('transform', `rotate(${e.angle.toFixed(2)} ${e.hinge[0]} ${e.hinge[1]})`);
+      if (u < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
 
   // Placement in map inches. scale = map inches per source pixel.
   bgPlacement() {
@@ -598,26 +710,8 @@ class SceneView {
       this.pinned = `${this.map.id}|size`;
       this.emit('pin', { nw: p.nw, nh: p.nh });
     }
-    this.syncDepth();
   }
 
-  // ---------- Beta 3.23: an Oldschool map's depth view (oldschool-depth.js) ----------
-  // On while the map asks for it and its picture has a height map; the picture itself is hidden while the depth view
-  // shows it. Without WebGL 2 (or when it fails) the picture shows as it is.
-  syncDepth(off) {
-    const m = this.map; const bg = m && m.bg; const n = this.bgNode;
-    const on = !off && !this.depthOff && typeof OldschoolDepth === 'object' && !!(bg && bg.kind === 'image' && bg.os && bg.hm && bg.hm.url && m.os && m.os.depth);
-    if (!on) { if (this.depth) { this.depth.dispose(); this.depth = null; } this.bgLayer.classList.remove('sv-depth-on'); return; }
-    if (this.depth && this.depthMapId !== m.id) { this.depth.dispose(); this.depth = null; this.bgLayer.classList.remove('sv-depth-on'); } // (another map)
-    this.depthMapId = m.id;
-    if (!n || !n.nw || n.url !== bg.url) return; // (the picture is still coming: the last depth picture stays)
-    const p = this.bgPlacement(); if (!p) return;
-    if (!this.depth) { this.depth = OldschoolDepth.create(this); this.bgLayer.appendChild(this.depth.canvas); }
-    else if (this.depth.canvas.parentNode !== this.bgLayer) this.bgLayer.appendChild(this.depth.canvas);
-    const g = m.grid || {};
-    const ok = this.depth.set({ img: n.el, colUrl: n.url, hmUrl: bg.hm.url, place: p, sun: m.os.sun, P: (g.size || 1) / p.scale, org: [((g.ox || 0) - p.x) / p.scale, ((g.oy || 0) - p.y) / p.scale] });
-    if (!ok) this.depthFailed();
-  }
   // ---------- Beta 3.23: an Oldschool map inks onto the table (TV) ----------
   // What the GM draws reaches the TV as a drawing first: a pen traces its outline (a corridor, a wall line is painted
   // along), then its tile fills in. When the new picture is there and the pen has finished, the ink fades and the
@@ -682,6 +776,7 @@ class SceneView {
     };
     const fillOf = () => {
       if (it.kind === 'cut') return '#000';
+      if (it.kind === 'ground') return { water: '#2c6f7c', lava: '#c4501c', acid: '#6aa82a', darkness: '#050308', swamp: '#46522a' }[it.preset] || '#2c6f7c'; // (Beta 3.25)
       if (it.kind !== 'area') return '#8c877f';
       const t = Oldschool.tileInfo(it.tile, []);
       if (!t || !t.url) return '#7d7466';
@@ -697,7 +792,7 @@ class SceneView {
     };
     const g = mk('g', { class: 'ink-item' });
     if (it.kind === 'door') {
-      g.append(mk('line', { x1: it.x1, y1: it.y1, x2: it.x2, y2: it.y2, class: 'ink-paint', pathLength: 1, stroke: it.win ? '#9cc8e6' : '#b98a55', 'stroke-width': sq * 0.18 }));
+      g.append(mk('line', { x1: it.x1, y1: it.y1, x2: it.x2, y2: it.y2, class: 'ink-paint', pathLength: 1, stroke: it.win ? '#a8d4ee' : '#b98a55', 'stroke-width': sq * (it.win ? 0.16 : 0.28) }));
       return g;
     }
     // painted along: corridors, brush strokes, wall lines
@@ -713,12 +808,6 @@ class SceneView {
     g.append(f, o);
     return g;
   }
-
-  depthShown(url) { // (null: it could not be drawn, the picture shows)
-    if (url === null) this.bgLayer.classList.remove('sv-depth-on');
-    else if (this.bgNode && this.bgNode.url === url) this.bgLayer.classList.add('sv-depth-on');
-  }
-  depthFailed() { this.depthOff = true; if (this.depth) { this.depth.dispose(); this.depth = null; } this.bgLayer.classList.remove('sv-depth-on'); }
 
   // ---------- grid ----------
   setGridPreview(g) { this.gridPreview = g; this.renderGrid(true); }
@@ -2951,7 +3040,6 @@ class SceneView {
     // markers stay big enough to click on the GM screen
     this.root.style.setProperty('--anno-k', String(this.gm ? Math.max(1, 0.75 / this.cam.s) : this.hud));
     if (this.wideOn) this.layoutLayers(); // (Prototype 5: the effect layers follow the window)
-    if (this.depth) this.syncDepth();
     this.emit('render');
   }
   setCamera(c) { Object.assign(this.cam, c, { auto: false }); this.applyCamera(); }

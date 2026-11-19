@@ -456,6 +456,17 @@ const FX = (() => {
   }
   function drawStrokes(g, strokes, grow = 0, minR = 0) {
     for (const st of strokes) {
+      // Beta 3.25 (ground drawn into an Oldschool map): an outline filled (grown or shrunk by its edge), and dots that
+      // only carry what moves in it (no part of where it shows)
+      if (st.nm) continue;
+      if (st.poly) {
+        const q = st.pts; if (q.length < 6) continue;
+        g.beginPath(); g.moveTo(q[0], q[1]); for (let i = 2; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]); g.closePath();
+        g.fill();
+        if (grow > 0) { g.lineWidth = 2 * grow; g.stroke(); }
+        else if (grow < 0) { g.save(); g.globalCompositeOperation = 'destination-out'; g.lineWidth = -2 * grow; g.stroke(); g.restore(); }
+        continue;
+      }
       const r = Math.max(minR, st.r + grow);
       if (r <= 0 || !st.pts.length) continue;
       if (st.pts.length === 2) { g.beginPath(); g.arc(st.pts[0], st.pts[1], r, 0, TAU); g.fill(); continue; }
@@ -1024,6 +1035,7 @@ const FX = (() => {
   function samples(fx, step = 0.5) {
     const out = [];
     for (const st of fx.strokes || []) {
+      if (st.poly) continue; // (an outline: its dots carry it)
       const p = st.pts; const d0 = Math.max(0.05, st.r * step);
       for (let i = 0; i < p.length; i += 2) {
         if (i >= 2) {
@@ -1157,7 +1169,7 @@ const FX = (() => {
   }
   function regionRaw(ctx, fx, t) {
     const pts = [];
-    for (const st of fx.strokes || []) for (let i = 0; i < st.pts.length; i += 2) pts.push([st.pts[i], st.pts[i + 1], st.r]);
+    for (const st of fx.strokes || []) if (!st.poly) for (let i = 0; i < st.pts.length; i += 2) pts.push([st.pts[i], st.pts[i + 1], st.r]);
     if (!pts.length) return;
     const s = seedOf(fx.id);
     const I = fx.intensity ?? 1;

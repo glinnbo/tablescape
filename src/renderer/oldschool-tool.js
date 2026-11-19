@@ -29,6 +29,15 @@ const OldschoolTool = (() => {
     { id: 'stairs', label: 'Stairs', icon: 'stairs', tip: 'Drag where they go: they climb toward where you drag' },
     { id: 'door', label: 'Door', icon: 'door', tip: 'Click a grid line: a door there' },
     { id: 'piece', label: 'Pieces', icon: 'box', tip: 'Ready-made rooms: pick one, click the map' }, // (Beta 3.23)
+    { id: 'ground', label: 'Ground', icon: 'ripple', tip: 'Water, lava, acid, magical darkness or swamp: drag a box or a round, or paint it' }, // (Beta 3.25)
+  ];
+  // Beta 3.25: the ground the Ground tool lays (the effects of the same name, with a pool in the picture)
+  const GROUNDS = [
+    { id: 'water', label: 'Water', icon: 'ripple', color: 'rgba(40,110,125,0.85)' },
+    { id: 'lava', label: 'Lava', icon: 'volcano', color: 'rgba(220,80,20,0.9)' },
+    { id: 'acid', label: 'Acid', icon: 'flask', color: 'rgba(110,180,40,0.85)' },
+    { id: 'darkness', label: 'Magical darkness', icon: 'spiral', color: 'rgba(6,4,10,0.92)' },
+    { id: 'swamp', label: 'Swamp', icon: 'plant', color: 'rgba(70,84,40,0.9)' },
   ];
   const AREA_TOOLS = ['room', 'shape', 'round', 'corridor', 'brush'];
   const OWN = new Set(['osbox', 'ospath', 'osbrush', 'osline', 'osstairs']);
@@ -43,7 +52,7 @@ const OldschoolTool = (() => {
     const first = Oldschool.FLOORS[0];
     const prefs = {
       tool: 'room', snap: 'sq', level: 0, width: 1, brush: 1.5, erase: 'box', edge: 'walls', mats: { ...Oldschool.DEFAULT_MAT },
-      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', floorMode: 'tile', piece: 'tavern', turn: 0,
+      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box',
       floor: first ? { rel: Oldschool.relOf(first) } : null,
     };
     try { const saved = JSON.parse(localStorage.getItem('osPrefs') || '{}'); Object.assign(prefs, saved, { mats: { ...prefs.mats, ...(saved.mats || {}) }, line: { ...prefs.line, ...(saved.line || {}) }, pillar: { ...prefs.pillar, ...(saved.pillar || {}) } }); } catch {}
@@ -105,6 +114,8 @@ const OldschoolTool = (() => {
       if (t === 'door') { placeDoor(pt); return null; }
       if (t === 'piece') { stamp(pt); return null; }
       if (t === 'corridor' && !cut) { const p = snapCorr(pt); return { kind: 'ospath', pts: [[p.x, p.y]], cut }; }
+      if (t === 'ground' && O.groundShape === 'brush') return { kind: 'osbrush', pts: [[round(pt.x, 3), round(pt.y, 3)]], ground: O.ground, r: (O.brush * g()) / 2 };
+      if (t === 'ground') { const p = snapCorner(pt, free); return { kind: 'osbox', a: p, b: p, shape: O.groundShape === 'round' ? 'round' : 'rect', ground: O.ground, start: pt }; }
       if (t === 'brush' || (t === 'erase' && O.erase === 'brush')) return { kind: 'osbrush', pts: [[round(pt.x, 3), round(pt.y, 3)]], cut, r: (O.brush * g()) / 2 };
       if (t === 'wall') { const p = snapCorner(pt, e.altKey); return { kind: 'osline', a: p, b: p }; }
       if (t === 'stairs') { const p = snapCorner(pt, e.altKey); return { kind: 'osstairs', a: p, b: p }; }
@@ -150,11 +161,14 @@ const OldschoolTool = (() => {
           const c0 = snapCenter(d.start); const s = O.snap === 'half' ? g() / 2 : g();
           a = { x: c0.x - s / 2, y: c0.y - s / 2 }; b = { x: c0.x + s / 2, y: c0.y + s / 2 };
         }
+        if (d.ground) { add({ kind: 'ground', shape: d.shape, pts: [[a.x, a.y], [b.x, b.y]], preset: d.ground }); drawPreview(); return; }
         const item = { kind: d.cut ? 'cut' : 'area', shape: d.shape, pts: [[a.x, a.y], [b.x, b.y]], ...(d.cut ? {} : areaLook()) };
         add(item, d.cut ? 'Erased' : null);
         if (d.cut) dropDoorsIn(item);
       } else if (d.kind === 'ospath') {
         add({ kind: d.cut ? 'cut' : 'area', shape: 'path', pts: d.pts, r: (O.width * g()) / 2, ...(d.cut ? {} : areaLook()) });
+      } else if (d.kind === 'osbrush' && d.ground) {
+        add({ kind: 'ground', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r, preset: d.ground });
       } else if (d.kind === 'osbrush') {
         add({ kind: d.cut ? 'cut' : 'area', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r, ...(d.cut ? {} : areaLook()) }, d.cut ? 'Erased' : null);
       } else if (d.kind === 'osline') {
@@ -255,7 +269,10 @@ const OldschoolTool = (() => {
     function dropDoorsIn(item) {
       const [[ax, ay], [bx, by]] = item.pts;
       const x0 = Math.min(ax, bx); const x1 = Math.max(ax, bx); const y0 = Math.min(ay, by); const y1 = Math.max(ay, by);
-      const ids = map().os.doors.filter((d) => { const mx = (d.x1 + d.x2) / 2; const my = (d.y1 + d.y2) / 2; return mx >= x0 && mx <= x1 && my >= y0 && my <= y1; }).map((d) => d.id);
+      const inBox = (mx, my) => mx >= x0 && mx <= x1 && my >= y0 && my <= y1;
+      const ids = map().os.doors.filter((d) => inBox((d.x1 + d.x2) / 2, (d.y1 + d.y2) / 2)).map((d) => d.id);
+      // (Beta 3.25) and the ground whose middle is in it
+      for (const it of map().os.items) if (it.kind === 'ground') { const xs = it.pts.map((q) => q[0]); const ys = it.pts.map((q) => q[1]); if (inBox((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2)) ids.push(it.id); }
       if (ids.length) cmd('os.remove', { ids });
     }
 
@@ -291,6 +308,7 @@ const OldschoolTool = (() => {
       if (it.kind === 'door') return el('line', { x1: it.x1, y1: it.y1, x2: it.x2, y2: it.y2, stroke: '#8a5d34', 'stroke-width': g() * 0.2, ...extra });
       return null;
     }
+    const groundColor = (id) => (GROUNDS.find((x) => x.id === id) || GROUNDS[0]).color;
     function drawPreview(pt, d) {
       const v = view(); if (!v || !v.marks) return;
       if (!svg) { svg = el('svg', { class: 'os-preview' }); }
@@ -303,14 +321,45 @@ const OldschoolTool = (() => {
       const root = el('g', { transform: `matrix(${px.x - p0.x} ${px.y - p0.y} ${py.x - p0.x} ${py.y - p0.y} ${p0.x} ${p0.y})` });
       svg.append(root);
       const thin = (0.06 * g()).toFixed(4);
-      const look = (it) => (it.kind === 'cut' ? 'rgba(10,10,12,0.85)' : it.kind === 'line' || it.kind === 'pillar' || it.kind === 'stairs' ? 'rgba(140,135,128,0.95)' : patternFor(defs, it.tile));
+      const look = (it) => (it.kind === 'cut' ? 'rgba(10,10,12,0.85)' : it.kind === 'ground' ? groundColor(it.preset) : it.kind === 'line' || it.kind === 'pillar' || it.kind === 'stairs' ? 'rgba(140,135,128,0.95)' : patternFor(defs, it.tile));
       for (const it of pending) { const e2 = shapeEl(it, look(it), { opacity: '0.95' }); if (e2) root.append(e2); }
       // the one being drawn
       if (ui.tool !== 'oldschool') return;
+      // Beta 3.24: the grid line is hidden, so the squares show around the pointer (fading out), and what a click or a
+      // drag would make shows before it is made: its corner, the corridor's width, the brush, the floor that changes
+      if (pt) {
+        const G = grid(); const s = g(); const R = 3.5 * s; const cx = pt.x; const cy = pt.y;
+        const rg = el('radialGradient', { id: 'os-fade-g' });
+        rg.append(el('stop', { offset: '0', 'stop-color': '#fff', 'stop-opacity': '1' }), el('stop', { offset: '0.5', 'stop-color': '#fff', 'stop-opacity': '0.65' }), el('stop', { offset: '1', 'stop-color': '#fff', 'stop-opacity': '0' }));
+        const mk = el('mask', { id: 'os-fade', maskUnits: 'userSpaceOnUse', x: cx - R, y: cy - R, width: 2 * R, height: 2 * R });
+        mk.append(el('circle', { cx, cy, r: R, fill: 'url(#os-fade-g)' }));
+        defs.append(rg, mk);
+        let dp = '';
+        for (let x = G.ox + Math.ceil((cx - R - G.ox) / s) * s; x <= cx + R; x += s) dp += `M${x.toFixed(4)} ${(cy - R).toFixed(4)}V${(cy + R).toFixed(4)}`;
+        for (let y = G.oy + Math.ceil((cy - R - G.oy) / s) * s; y <= cy + R; y += s) dp += `M${(cx - R).toFixed(4)} ${y.toFixed(4)}H${(cx + R).toFixed(4)}`;
+        root.append(el('path', { d: dp, fill: 'none', stroke: 'rgba(244,232,206,0.6)', 'stroke-width': (thin * 0.55).toFixed(4), mask: 'url(#os-fade)' }));
+        if (!d) {
+          const t = O.tool; const ORANGE = '#f0b44a';
+          const cross = (q, r = 0.22) => root.append(el('path', { d: `M${q.x - s * r} ${q.y}H${q.x + s * r}M${q.x} ${q.y - s * r}V${q.y + s * r}`, stroke: ORANGE, 'stroke-width': thin, 'stroke-linecap': 'round' }), el('circle', { cx: q.x, cy: q.y, r: s * 0.06, fill: ORANGE }));
+          if (t === 'corridor') {
+            const q = snapCorr(pt); const w = O.width * s;
+            root.append(el('rect', { x: q.x - w / 2, y: q.y - w / 2, width: w, height: w, fill: patternFor(defs, O.floor), opacity: '0.6' }), el('rect', { x: q.x - w / 2, y: q.y - w / 2, width: w, height: w, fill: 'none', stroke: ORANGE, 'stroke-width': thin, 'stroke-dasharray': `${thin * 3} ${thin * 2}` }));
+          } else if (t === 'brush' || (t === 'erase' && O.erase === 'brush') || (t === 'ground' && O.groundShape === 'brush')) {
+            const r = (O.brush * s) / 2;
+            root.append(el('circle', { cx: pt.x, cy: pt.y, r, fill: t === 'erase' ? 'rgba(10,10,12,0.55)' : t === 'ground' ? groundColor(O.ground) : patternFor(defs, O.floor), opacity: t === 'brush' ? '0.55' : '0.8' }), el('circle', { cx: pt.x, cy: pt.y, r, fill: 'none', stroke: ORANGE, 'stroke-width': thin }));
+          } else if (t === 'wall') {
+            const q = snapCorner(pt); root.append(el('circle', { cx: q.x, cy: q.y, r: (O.line.w * s) / 2, fill: 'rgba(140,135,128,0.8)' })); cross(q);
+          } else if (t === 'floor') {
+            const a = Oldschool.areaAt(m.os, pt.x, pt.y);
+            if (a && O.floorMode !== 'edge') { const e2 = shapeEl(a, patternFor(defs, O.floor), { opacity: '0.6' }); if (e2) root.append(e2); }
+            if (a && a.shape !== 'path' && a.shape !== 'brush') { const e3 = shapeEl(a, 'none', { stroke: ORANGE, 'stroke-width': thin * 1.4, 'stroke-dasharray': `${thin * 3} ${thin * 2}` }); if (e3) root.append(e3); }
+          } else if (['room', 'round', 'shape', 'stairs', 'ground'].includes(t) || (t === 'erase' && O.erase !== 'brush')) cross(snapCorner(pt));
+        }
+      }
       let cur = null;
-      if (d && d.kind === 'osbox') cur = { kind: d.cut ? 'cut' : 'area', shape: d.shape, pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], tile: O.floor };
+      if (d && d.kind === 'osbox') cur = { kind: d.ground ? 'ground' : d.cut ? 'cut' : 'area', shape: d.shape, pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], tile: O.floor, preset: d.ground };
       else if (d && d.kind === 'ospath') cur = { kind: d.cut ? 'cut' : 'area', shape: 'path', pts: d.pts, r: (O.width * g()) / 2, tile: O.floor };
-      else if (d && d.kind === 'osbrush') cur = { kind: d.cut ? 'cut' : 'area', shape: 'brush', pts: d.pts, r: d.r, tile: O.floor };
+      else if (d && d.kind === 'osbrush') cur = { kind: d.ground ? 'ground' : d.cut ? 'cut' : 'area', shape: 'brush', pts: d.pts, r: d.r, tile: O.floor, preset: d.ground };
       else if (d && d.kind === 'osline') cur = { kind: 'line', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], w: O.line.w * g() };
       else if (d && d.kind === 'osstairs') cur = { kind: 'stairs', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]] };
       if (cur) { const e2 = shapeEl(cur, look(cur), { opacity: cur.kind === 'cut' ? '0.7' : '0.9', stroke: cur.kind === 'line' || cur.shape === 'path' || cur.shape === 'brush' ? undefined : '#f0b44a', 'stroke-width': thin, 'stroke-dasharray': `${thin * 3} ${thin * 2}` }); if (e2) root.append(e2); }
@@ -340,7 +389,7 @@ const OldschoolTool = (() => {
       }
     }
     let lastPt = null; let lastD = null;
-    function hover(e, pt) { lastPt = pt; if (ui.tool === 'oldschool' && (O.poly || O.tool === 'pillar' || O.tool === 'door' || O.tool === 'piece')) drawPreview(pt); }
+    function hover(e, pt) { lastPt = pt; if (ui.tool === 'oldschool') drawPreview(pt); } // (Beta 3.24: every tool shows where it would draw)
     function leave() { lastPt = null; if (ui.tool === 'oldschool') drawPreview(); }
     // the view moved or zoomed: the preview follows
     function redraw() { if (svg && (ui.tool === 'oldschool' || pending.length)) drawPreview(lastPt, lastD); }
@@ -355,11 +404,19 @@ const OldschoolTool = (() => {
       if (ui.tool === 'oldschool' || pending.length) drawPreview();
       // a tile of the library not known yet (or its squares): the library is read again first
       if (m.os.items.some((it) => it.tile && !Oldschool.tileInfo(it.tile, []) && !lib.some((x) => (it.tile.rel && x.rel === it.tile.rel) || (it.tile.path && x.path === it.tile.path)))) loadLib();
+      sharpFromTv(m);
       const want = Oldschool.hash(m, lib);
       const has = m.bg && !m.bg.missing ? m.bg.os : (m.os.items.length ? null : want);
       if (has === want) { if (status !== 'idle') { status = 'idle'; ctx.refreshPop(); } return; }
       clearTimeout(timer);
       timer = setTimeout(bake, 320);
+    }
+    // Beta 3.25: the sharp tiles get as many dots a square as the TV shows (a quarter more, for a closer look on this
+    // screen): the square's size on the table × the TV's dots an inch
+    function sharpFromTv(m) {
+      const v = S() && S().view; if (!v || !v.ppi) return;
+      const zoom = (m.view && m.view.zoom) || 1;
+      Oldschool.setSharp((m.grid.size || 1) * zoom * v.ppi * (v.dpr || 1) * 1.25);
     }
     async function bake() {
       if (baking) { again = true; return; }
@@ -368,11 +425,12 @@ const OldschoolTool = (() => {
       const mapId = m.id; const snap = structuredClone({ os: m.os, grid: m.grid });
       const want = Oldschool.hash(snap, lib);
       try {
-        const r = await Oldschool.bake(snap, lib);
+        const r = await Oldschool.bake(snap, lib, m.bg && m.bg.sharp);
         if (map() && map().id === mapId) {
           const data = r.blob ? new Uint8Array(await r.blob.arrayBuffer()) : null;
-          const hdata = r.hblob ? new Uint8Array(await r.hblob.arrayBuffer()) : null; // (Beta 3.23: the heights for the depth view)
-          await ts.cmd('os.baked', { mapId, hash: want, empty: !!r.empty, data, hdata, ids: [...snap.os.items.map((x) => x.id), ...snap.os.doors.map((x) => x.id)], x: r.x, y: r.y, scale: r.scale, nw: r.nw, nh: r.nh, walls: r.walls });
+          // (Beta 3.25) the sharp tiles: new ones with their picture, kept ones by their key alone
+          const sharp = r.sharp ? { P: r.sharp.P, ts: r.sharp.ts, tiles: await Promise.all(r.sharp.tiles.map(async (t) => ({ c: t.c, r: t.r, h: t.h, data: t.blob ? new Uint8Array(await t.blob.arrayBuffer()) : null }))) } : null;
+          await ts.cmd('os.baked', { mapId, hash: want, empty: !!r.empty, data, sharp, ids: [...snap.os.items.map((x) => x.id), ...snap.os.doors.map((x) => x.id)], x: r.x, y: r.y, scale: r.scale, nw: r.nw, nh: r.nh, walls: r.walls });
         }
         lastErr = null;
       } catch (err) { console.error(err); lastErr = String(err && err.message || err); }
@@ -515,6 +573,15 @@ const OldschoolTool = (() => {
         const paintP = () => { for (const b of box.children) b.classList.toggle('on', b.dataset.v === O.piece); };
         bind(paintP);
         opts.push(box, h('div', { class: 'row' }, btn('Turn', 'rotate-clockwise', () => turnPiece(), { tip: 'A quarter turn (also the mouse wheel with Ctrl)' })));
+      } else if (t === 'ground') { // (Beta 3.25)
+        const box = h('div', { class: 'tiles os-grounds' }, ...GROUNDS.map((x) => h('button', {
+          class: 'tile', dataset: { v: x.id }, 'aria-label': x.label,
+          onclick: () => { O.ground = x.id; save(); paintG(); },
+        }, iconEl(x.icon), h('span', {}, x.label))));
+        const paintG = () => { for (const b of box.children) b.classList.toggle('on', b.dataset.v === O.ground); };
+        bind(paintG);
+        opts.push(box, seg({ options: [{ value: 'box', label: 'Box', icon: 'square' }, { value: 'round', label: 'Round', icon: 'circle' }, { value: 'brush', label: 'Brush', icon: 'brush' }], get: () => O.groundShape, set: (v) => { O.groundShape = v; save(); ctx.refreshPop(); } }));
+        if (O.groundShape === 'brush') opts.push(slider({ label: 'Brush', min: 0.5, max: 6, step: 0.5, get: () => O.brush, set: (v) => { O.brush = v; save(); }, fmt: (v) => `${v} squares` }));
       } else if (t === 'floor') {
         opts.push(seg({ label: 'A click changes', options: [{ value: 'tile', label: 'Floor' }, { value: 'edge', label: 'Edge' }, { value: 'both', label: 'Both' }], get: () => O.floorMode, set: (v) => { O.floorMode = v; save(); } }));
       }
@@ -546,9 +613,9 @@ const OldschoolTool = (() => {
       const edgeMat = h('div', {}, matPicker(() => O.mats[O.edge], (v) => { O.mats[O.edge] = v; save(); }, O.edge === 'walls' ? ['stone_wall', 'dark_stone_wall', 'hedge'] : ['rock', 'cliff', 'stone_wall', 'dark_stone_wall']));
       bind(() => { edgeMat.hidden = O.edge === 'ledge'; });
       const light = slider({ label: 'Light from', min: 0, max: 355, step: 5, get: () => (360 - (map().os.sun ?? 135) + 90) % 360, set: (v, k) => ctx.send(k || 'os-sun', 'os.set', { sun: (360 - v + 90 + 360) % 360 }), fmt: (v) => ['above', 'top right', 'the right', 'bottom right', 'below', 'bottom left', 'the left', 'top left'][Math.round(v / 45) % 8] });
+      // Beta 3.25: how long the shadows are (short by default: calm on the table)
+      const shadows = seg({ cls: 'os-shadows', options: [{ value: 'short', label: 'Short' }, { value: 'long', label: 'Long' }, { value: 'off', label: 'Off' }], get: () => map().os.shadows || 'short', set: (v) => cmd('os.set', { shadows: v }) });
       const sight = toggle({ label: 'Walls for sight follow the drawing', get: () => map().os.sight !== false, set: (v) => cmd('os.set', { sight: v }) });
-      // Beta 3.23: walls lean away from the table's middle, their inner faces show (on this map; off at first)
-      const depth = toggle({ label: 'Depth view', get: () => map().os.depth === true, set: (v) => cmd('os.set', { depth: v }).then((r) => { if (r && r.ok) toast(v ? 'Depth view on: walls lean away from the middle of the table' : 'Depth view off', { ms: 2200 }); }) });
       const st = h('div', { class: 'row os-status' });
       bind(() => {
         const busy = baking || status === 'busy';
@@ -559,7 +626,7 @@ const OldschoolTool = (() => {
       return h('div', { class: 'stack' }, tools, ...opts, snapSeg, sep(),
         h('div', { class: 'ctl-label' }, 'Floor'), floorBox,
         h('div', { class: 'ctl-label' }, 'Edge'), edgeSeg, edgeMat,
-        sep(), light, depth, sight, st);
+        sep(), light, h('div', { class: 'ctl-label' }, 'Shadows'), shadows, sight, st);
     }
     function matPicker(get, set, ids) {
       const { bind } = c();
