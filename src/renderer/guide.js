@@ -24,6 +24,10 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.33', [
+      'Oldschool maps, doors and windows made new: drag along a wall with the Door tool for any length (two squares or more make a pair of leaves); a click still makes one square. Doors in wood, iron, stone or a portcullis; windows in glass, leaded, stained glass, shutters or bars. The frame is the wall\'s own stone, sits on the wall\'s middle and takes the map\'s light and shadow; the leaves swing into the room, a portcullis is raised',
+      'Drawing an Oldschool map: when painting the picture takes a moment, a pill at the top shows how far along it is (the maid runs along, as when animations are prepared). The Draw panel no longer says "Making the picture"',
+    ]],
     ['Beta 3.31', [
       'Drawing an Oldschool map is faster: a change re-makes only the picture tiles it can really reach (and they are smaller), each floor\'s mixing is worked out once and remembered, the picture underneath is made at half size from the start, and tiles are saved faster',
     ]],

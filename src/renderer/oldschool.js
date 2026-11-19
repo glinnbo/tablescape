@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // for every floor); a door: the wall line it opens
   const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 17; // (17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 18; // (18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -204,7 +204,7 @@ const Oldschool = (() => {
   function hash(map, lib) {
     const os = map.os; const bx = boxOf(map);
     const sharp = bx && bx.sharp ? [bx.sharp.P, bx.sharp.ts] : 0;
-    return fingerprint(JSON.stringify([os.items, os.doors, os.sun, os.shadows || 'short', os.sight, map.grid.size, map.grid.ox, map.grid.oy, tileKeys(os.items, lib), sharp, VERSION]));
+    return fingerprint(JSON.stringify([os.items, os.doors.map(noLeaf), os.sun, os.shadows || 'short', os.sight, map.grid.size, map.grid.ox, map.grid.oy, tileKeys(os.items, lib), sharp, VERSION]));
   }
   // Beta 3.31: how far a change of each thing can change the picture around it, in squares (it was 6.6 for every
   // floor). Outside a floor: what its edge builds there (any floor's edge may take the place: the widest counts) and
@@ -228,6 +228,7 @@ const Oldschool = (() => {
   const itemKeys = new WeakMap(); // (a thing's own fingerprint, worked out once: tiles ask for it again and again)
   const itemKey = (it) => { let h = itemKeys.get(it); if (!h) { h = fingerprint(JSON.stringify(it)); itemKeys.set(it, h); } return h; };
   // one sharp tile's key: what lies near it (in drawing order), the light, the grid, the dots a square
+  const noLeaf = (d) => { const { leaf, ...rest } = d; return rest; }; // (Beta 3.33: the leaf is drawn live)
   function tileKey(map, lib, bx, c, r) {
     const os = map.os; const { g, ox, oy, sharp } = bx;
     if (!bx.reach) { bx.reach = reaches(os, g); bx.boxes = new Map(os.items.map((it) => [it, itemBox(it)])); }
@@ -235,7 +236,7 @@ const Oldschool = (() => {
     const near = (q, m) => q[0] < x1 + m && q[2] > x0 - m && q[1] < y1 + m && q[3] > y0 - m;
     const items = os.items.filter((it) => near(bx.boxes.get(it), bx.reach.get(it) * g));
     if (!items.some((it) => it.kind !== 'cut' && near(bx.boxes.get(it), REACH * g))) return null; // (nothing shows here)
-    const doors = os.doors.filter((d) => near([Math.min(d.x1, d.x2), Math.min(d.y1, d.y2), Math.max(d.x1, d.x2), Math.max(d.y1, d.y2)], HALO_SOLID * g)); // (a door opens a wall line)
+    const doors = os.doors.map(noLeaf).filter((d) => near([Math.min(d.x1, d.x2), Math.min(d.y1, d.y2), Math.max(d.x1, d.x2), Math.max(d.y1, d.y2)], HALO_SOLID * g)); // (a door opens a wall line)
     return fingerprint(JSON.stringify([items.map(itemKey), doors, os.sun, os.shadows || 'short', g, ox, oy, tileKeys(items, lib), bx.P, sharp.P, sharp.ts, c, r, VERSION]));
   }
 
@@ -978,10 +979,14 @@ void main(){
   // { blob, x, y, scale, nw, nh, walls, sharp: { P, ts, tiles: [{ c, r, h, blob? }] } | null }.
   const stats = { last: null }; // (how long the last picture took, and its tiles: for the self-test and the log)
   const prof = { mix: 0, mixN: 0, maskMade: 0, maskKept: 0, tPaint: 0, tGl: 0, tEnc: 0 }; // (Beta 3.31: where the time goes, in ms)
-  async function bake(map, lib, prev) {
+  async function bake(map, lib, prev, onProgress) {
     const os = map.os;
     const bx = boxOf(map);
     if (!bx) return { empty: true, walls: [] };
+    // (Beta 3.32) how far along it is, 0 to 1, for the GM's progress pill: painting, light and shade, the sharp tiles
+    const ph = bx.sharp ? [0.08, 0.3, 0.97] : [0.2, 0.95, 0.95];
+    const say = (k) => { if (onProgress) try { onProgress(Math.min(1, Math.max(0, k))); } catch { /* */ } };
+    say(0.01);
     const t0 = performance.now(); Object.assign(prof, { mix: 0, mixN: 0, maskMade: 0, maskKept: 0, tPaint: 0, tGl: 0, tEnc: 0 });
     const { g, ox, oy, sx0, sy0, sx1, sy1, nsx, nsy, P } = bx;
     const W = nsx * P; const Hh = nsy * P;
@@ -994,6 +999,7 @@ void main(){
       if (it.kind === 'area' && it.tile) { const t = tileInfo(it.tile, lib); if (t && t.url) want.set(t.url, t); }
       if (it.kind === 'stairs') { const t = it.tile ? tileInfo(it.tile, lib) : matInfo(it.mat); if (t && t.url) want.set(t.url, t); }
     }
+    for (const d of os.doors) { if (d.door === 2) continue; const t = matInfo(doorPlace(os, d, g).mat); if (t) want.set(t.url, t); } // (Beta 3.33: their frames)
     const loaded = new Map();
     await Promise.all([...want.values()].map(async (t) => { try { loaded.set(t.url, await image(t.url)); } catch (err) { console.error(err); } }));
     // (Beta 3.31) their dots are unpacked now, all at once and off the drawing thread (after a pause they would be
@@ -1005,17 +1011,18 @@ void main(){
     const haloC = anyFade ? canvas(W, Hh) : canvas(1, 1);
     paint(os, lib, T, k, P, org, loaded, { fg: floorC.getContext('2d'), ag: attrC.getContext('2d', CPU), sg: solidC.getContext('2d'), tg: stairsC.getContext('2d'), hg: anyFade ? haloC.getContext('2d') : null }, pats);
     const tm = { paint: Math.round(performance.now() - t0), mixBase: Math.round(prof.mix) }; let tl = performance.now();
+    say(ph[0]);
     // ---- light and shadow (WebGL 2) ----
     const C = gl2();
     let out = null; let sharp = null; let saved = null;
     if (C) {
       try {
-        const r = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC, haloC }, async (R) => {
+        const r = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC, haloC, say: (f) => say(ph[0] + (ph[1] - ph[0]) * f) }, async (R) => {
           for (const c of [floorC, attrC, solidC, stairsC, haloC]) c.width = c.height = 0; // (let go before the tiles)
           tm.light = Math.round(performance.now() - tl); tl = performance.now();
           // (Beta 3.31) the base's file is made while the tiles are painted
-          drawDoors(R.outC.getContext('2d'), os, T, P, k); saved = { cv: R.outC, blob: encode(R.outC) };
-          if (bx.sharp) sharp = await sharpTiles(C, R, { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade });
+          drawDoors(R.outC.getContext('2d'), os, T, P, doorPaints(os, lib, P, org, loaded, pats, g)); saved = { cv: R.outC, blob: encode(R.outC) };
+          if (bx.sharp) sharp = await sharpTiles(C, R, { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade, say: (f) => say(ph[1] + (ph[2] - ph[1]) * f) });
           tm.tiles = Math.round(performance.now() - tl); tl = performance.now();
         });
         out = r;
@@ -1030,12 +1037,13 @@ void main(){
     const base = out; const bk = 1; // (Beta 3.31: with sharp tiles the base is half size already, see boxOf)
     let blob = null;
     if (saved && saved.cv === out) blob = await saved.blob;
-    else { drawDoors(out.getContext('2d'), os, T, P, k); blob = await encode(base); }
+    else { drawDoors(out.getContext('2d'), os, T, P, doorPaints(os, lib, P, org, loaded, pats, g)); blob = await encode(base); }
     tm.base = Math.round(performance.now() - tl);
     // the big paintings are let go at once: canvases can hold memory of the graphics card until they are collected,
     // and a drawing session makes many pictures
     for (const c of [floorC, attrC, solidC, stairsC, haloC, out, base]) c.width = c.height = 0;
     for (const p of pats.values()) if (p && p.cv) p.cv.width = p.cv.height = 0;
+    say(ph[2]);
     const tw0 = performance.now();
     const walls = sightWalls(os, map, lib, { X0, Y0, nsx, nsy, g });
     tm.sight = Math.round(performance.now() - tw0);
@@ -1061,13 +1069,18 @@ void main(){
 precision highp float; in vec2 v_uv; out vec4 o; uniform sampler2D a, s; uniform vec2 size;
 void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p, 0).a, texelFetch(s, p, 0).g); o = vec4(0.0, 0.0, 0.0, f >= 0.5 ? 1.0 : 0.0); }`), W, Hh, merged.fb, { size: [W, Hh] }, { a: tFloor, s: tStairs });
     const pace = pacer(gl);
+    const say = cv.say || (() => {});
     const outJ = await flood(C, W, Hh, merged.t, 0, 0, pace); // seeds: inside → for outside dots, the nearest floor
+    say(0.15);
     const inJ = await flood(C, W, Hh, merged.t, 0, 1, pace); // seeds: outside → for floor dots, the nearest edge
+    say(0.3);
     const solJ = await flood(C, W, Hh, tSolid, 1, 1, pace); // inside wall lines: how far to their side
+    say(0.4);
     gl.deleteTexture(merged.t); gl.deleteFramebuffer(merged.fb); // (what is no longer needed goes at once: a big map needs the room)
     const Ht = target(gl, W, Hh);
     await runBands(C, prog(C, 'height', FS_HEIGHT), W, Hh, Ht.fb, { size: [W, Hh], P, org, matSq: M.sq }, { floorT: tFloor, attrT: tAttr, solidT: tSolid, stairsT: tStairs, outJ, inJ, solJ, ...M.t }, pace);
     for (const t of [tSolid, tStairs, solJ]) gl.deleteTexture(t);
+    say(0.6);
     const a = ((os.sun ?? 135) * Math.PI) / 180; const el = (40 * Math.PI) / 180;
     const L = [Math.cos(a) * Math.cos(el), -Math.sin(a) * Math.cos(el), Math.sin(el)];
     const S = SHADOWS[os.shadows] || SHADOWS.short; // (Beta 3.25: short, soft shadows unless the map wants long ones)
@@ -1077,6 +1090,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
     await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq: M.sq, L, voidC: VOID, shT: S.tan, shK: S.k }, { hT: Ht.t, floorT: tFloor, attrT: tAttr, haloT: tHalo, outJ, inJ, ...M.t }, pace);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    say(1);
     // read back into a painting in memory (rows come out top first, as the paintings went in)
     const outC = document.createElement('canvas'); outC.width = W; outC.height = Hh;
     {
@@ -1111,17 +1125,24 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
   // Beta 3.25: the sharp tiles. Tiles lie on whole squares from the grid's origin (ts squares across), so they stay
   // where they are when the drawing grows. A tile whose key is unchanged is kept as it is.
   async function sharpTiles(C, R, a) {
-    const { gl } = C; const { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade } = a;
+    const { gl } = C; const { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade } = a; const say = a.say || (() => {});
     const os = map.os; const { g, ox, oy, sx0, sy0, sx1, sy1 } = bx; const { P: PH, ts } = bx.sharp;
     const TD = ts * PH; const kH = PH / g; const s = PH / bx.P;
     const sunA = ((os.sun ?? 135) * Math.PI) / 180; const sunE = (40 * Math.PI) / 180; const L = [Math.cos(sunA) * Math.cos(sunE), -Math.sin(sunA) * Math.cos(sunE), Math.sin(sunE)];
     const keep = new Set(prev && prev.P === PH && prev.ts === ts ? (prev.tiles || []).map((t) => t.h) : []);
     const tiles = []; let M = null; const saving = [];
+    // the tiles there are, and which of them must be made (for how far along it is)
+    const all = [];
+    for (let r = Math.floor(sy0 / ts); r <= Math.floor((sy1 - 1) / ts); r++) {
+      for (let c = Math.floor(sx0 / ts); c <= Math.floor((sx1 - 1) / ts); c++) {
+        const h = tileKey(map, lib, bx, c, r);
+        if (h) all.push({ c, r, h }); // (nothing shows where it has no key)
+      }
+    }
+    const toMake = all.filter((t) => !keep.has(t.h)).length; let madeN = 0;
     try {
-      for (let r = Math.floor(sy0 / ts); r <= Math.floor((sy1 - 1) / ts); r++) {
-        for (let c = Math.floor(sx0 / ts); c <= Math.floor((sx1 - 1) / ts); c++) {
-          const h = tileKey(map, lib, bx, c, r);
-          if (!h) continue; // (nothing shows there)
+      for (const { c, r, h } of all) {
+        {
           if (keep.has(h)) { tiles.push({ c, r, h }); continue; }
           M = M || await matTextures(C, PH);
           const tx0 = ox + c * ts * g; const ty0 = oy + r * ts * g;
@@ -1139,7 +1160,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
           gl.deleteTexture(tF); gl.deleteTexture(tS); gl.deleteTexture(tH); gl.deleteTexture(O.t); gl.deleteFramebuffer(O.fb);
           const oc = canvas(TD, TD); const o = oc.getContext('2d', CPU);
           o.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), TD, TD), 0, 0);
-          drawDoors(o, os, T, PH);
+          drawDoors(o, os, T, PH, doorPaints(os, lib, PH, [(ox - tx0) * kH, (oy - ty0) * kH], loaded, pats, g));
           let jpg = true; for (let i = 3; i < px.length; i += 4) if (px[i] !== 255) { jpg = false; break; }
           const tp2 = performance.now(); prof.tGl += tp2 - tp1;
           // (Beta 3.31) its file is made while the next tiles are painted, a few at a time
@@ -1148,6 +1169,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
           saving.push(job); tiles.push(tile);
           if (saving.length >= 6) await saving.shift();
           prof.tEnc += performance.now() - tp2;
+          say(++madeN / Math.max(1, toMake));
         }
       }
     } finally {
@@ -1157,28 +1179,99 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const te = performance.now(); await Promise.all(saving); prof.tEnc += performance.now() - te;
     return { P: PH, ts, tiles };
   }
-  // doors: stone posts (Beta 3.25: the leaf is drawn live on both screens, shut or swung open: scene-view.js); secret
-  // doors show nothing; windows a strip of glass
-  function drawDoors(o, os, T, P) {
+  // ---------- Beta 3.33: doors and windows of any length ----------
+  // Where a door sits and what its frame is made of. A door lies on a grid line; on a room's edge the wall lies outside
+  // the floor, so the frame goes onto the middle of that wall band (0.225 squares out); in a wall line, on its middle.
+  // The frame is the wall's own material; it is about 0.8 of the wall's thickness deep. `empty`: nothing lies beyond
+  // the wall there (the doorway then shows the room's floor).
+  function doorPlace(os, d, g) {
+    const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1; const ux = (d.x2 - d.x1) / L; const uy = (d.y2 - d.y1) / L;
+    const nx = -uy; const ny = ux; const mx = (d.x1 + d.x2) / 2; const my = (d.y1 + d.y2) / 2;
+    // a wall line along it
+    for (const it of os.items) {
+      if (it.kind !== 'line') continue;
+      for (let k2 = 0; k2 + 1 < it.pts.length; k2++) {
+        const [ax, ay] = it.pts[k2]; const [bx, by] = it.pts[k2 + 1]; const lx = bx - ax; const ly = by - ay; const ll = Math.hypot(lx, ly) || 1;
+        if (Math.abs((lx * uy - ly * ux) / ll) > 0.05) continue; // (not along it)
+        const t2 = ((mx - ax) * lx + (my - ay) * ly) / (ll * ll); const off = ((ax - mx) * nx + (ay - my) * ny);
+        if (t2 > -0.01 && t2 < 1.01 && Math.abs(off) < it.w / 2) return { off, thick: it.w, mat: it.mat || 'stone_wall', side: 0 };
+      }
+    }
+    // a room's edge: which side has floor just beyond the door's ends (the doorway itself may have floor on both)
+    const at = (x, y) => areaAt(os, x, y);
+    let pos = 0; let neg = 0; let room = null;
+    for (const [ex, ey] of [[d.x1 - ux * 0.3 * g, d.y1 - uy * 0.3 * g], [d.x2 + ux * 0.3 * g, d.y2 + uy * 0.3 * g], [mx, my]]) {
+      const a = at(ex + nx * 0.2 * g, ey + ny * 0.2 * g); const b = at(ex - nx * 0.2 * g, ey - ny * 0.2 * g);
+      if (a) { pos++; room = room || a; } if (b) { neg++; room = room || b; }
+    }
+    if (!room) return { off: 0, thick: 0.45 * g, mat: 'stone_wall', side: 0 };
+    const sgn = pos > neg ? -1 : neg > pos ? 1 : 0; // (the wall lies on the side with less floor)
+    const inside = sgn ? at(mx - nx * sgn * 0.2 * g, my - ny * sgn * 0.2 * g) || room : room;
+    const mat = inside.edge === 'walls' || inside.edge === 'rock' ? inside.mat || DEFAULT_MAT[inside.edge] : 'stone_wall';
+    const empty = sgn !== 0 && !at(mx + nx * sgn * 0.8 * g, my + ny * sgn * 0.8 * g);
+    return { off: sgn * 0.225 * g, thick: 0.45 * g, mat, side: sgn, empty, floor: inside };
+  }
+  // the frame: two jambs of the wall's material (a touch lighter than the lit wall), thin rails along the wall's faces,
+  // and for a window a sill between them; lit by the map's sun (a soft shadow, a lit edge, a fine dark rim). Secret
+  // doors show nothing. The leaf is drawn live on both screens (scene-view.js).
+  const DOOR_GEO = { jamb: 22 / 140, wjamb: 18 / 140, rail: 11 / 140, depth: 0.8 };
+  function drawDoors(o, os, T, P, dc) {
+    if (!dc) return;
+    const { g, org, matPat, floorPat } = dc;
+    const sun = (((os.sun ?? 135) * Math.PI) / 180); const sx = Math.cos(sun); const sy = -Math.sin(sun); // (toward the light)
+    const k = P / g;
     for (const d of os.doors) {
       if (d.door === 2) continue;
-      const [x1, y1] = T(d.x1, d.y1); const [x2, y2] = T(d.x2, d.y2);
-      const len = Math.hypot(x2 - x1, y2 - y1); if (len < 2) continue;
-      o.save(); o.translate(x1, y1); o.rotate(Math.atan2(y2 - y1, x2 - x1));
-      const post = P * 0.2; const lw = Math.max(1, P * 0.035);
-      o.lineJoin = 'round';
-      if (d.kind === 'window') {
-        const th = P * 0.16;
-        o.fillStyle = 'rgba(170,215,240,0.85)'; o.fillRect(post, -th / 2, len - 2 * post, th);
-        o.fillStyle = 'rgba(255,255,255,0.55)'; o.fillRect(post + len * 0.08, -th / 2 + th * 0.2, (len - 2 * post) * 0.35, th * 0.18); // (a glint)
-        o.strokeStyle = 'rgba(15,20,28,0.9)'; o.lineWidth = lw; o.strokeRect(post, -th / 2, len - 2 * post, th);
-      } else { // (the threshold under the leaf)
-        o.fillStyle = 'rgba(0,0,0,0.35)'; o.fillRect(post, -P * 0.07, len - 2 * post, P * 0.14);
+      const pl = doorPlace(os, d, g); const win = d.kind === 'window';
+      const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1); if (L * k < 2) continue;
+      const ux = (d.x2 - d.x1) / L; const uy = (d.y2 - d.y1) / L;
+      const [ax, ay] = T(d.x1 - uy * pl.off, d.y1 + ux * pl.off);
+      const S = L * k; const dd = Math.min(0.6 * g, Math.max(0.2 * g, DOOR_GEO.depth * pl.thick)) * k;
+      const jw = (win ? DOOR_GEO.wjamb : DOOR_GEO.jamb) * P; const rl = Math.max(1, DOOR_GEO.rail * P); const lw = Math.max(1, P / 140);
+      const ang = Math.atan2(uy, ux); const onGrid = new DOMMatrix().rotate((-ang * 180) / Math.PI).translate(org[0] - ax, org[1] - ay); // (patterns on the grid, as the wall's)
+      const mp = matPat(o, pl.mat, onGrid); if (!mp) continue; const lsx = sx * Math.cos(-ang) - sy * Math.sin(-ang); const lsy = sx * Math.sin(-ang) + sy * Math.cos(-ang); // (the sun, along / across it)
+      o.save(); o.translate(ax, ay); o.rotate(ang);
+      const box = (x0, y0, w, h, fill, tone) => {
+        o.fillStyle = fill; o.fillRect(x0, y0, w, h);
+        if (tone > 1) { o.save(); o.globalCompositeOperation = 'lighter'; o.globalAlpha = tone - 1; o.fillRect(x0, y0, w, h); o.restore(); } // (its own colours, brighter)
+        else if (tone < 1) { o.fillStyle = `rgba(0,0,0,${(1 - tone).toFixed(3)})`; o.fillRect(x0, y0, w, h); }
+      };
+      // the doorway: where nothing lies beyond, the room's floor goes on through the wall
+      if (!win && pl.empty && pl.floor) { const fp = floorPat(o, pl.floor, onGrid); if (fp) box(0, -dd / 2, S, dd, fp, 0.82); }
+      if (win) box(0, -dd / 2 + rl, S, dd - 2 * rl, mp, 0.78); // (the sill)
+      // shadows first (all parts at once), then the parts, then their edges
+      const parts = [[-jw, -dd / 2, jw, dd, 1.18], [S, -dd / 2, jw, dd, 1.18], [0, -dd / 2, S, rl, 1.05], [0, dd / 2 - rl, S, rl, 1.05]];
+      o.save(); o.shadowColor = 'rgba(0,0,0,0.5)'; o.shadowBlur = Math.max(1, 0.03 * P); o.shadowOffsetX = -sx * 0.018 * P; o.shadowOffsetY = -sy * 0.018 * P;
+      o.fillStyle = 'rgba(0,0,0,1)'; for (const [x0, y0, w, h] of parts) o.fillRect(x0, y0, w, h);
+      o.restore();
+      for (const [x0, y0, w, h, tone] of parts) box(x0, y0, w, h, mp, tone);
+      o.lineWidth = lw;
+      for (const [x0, y0, w, h] of parts) {
+        o.strokeStyle = 'rgba(255,246,230,0.2)'; o.beginPath(); // (the edges facing the sun)
+        if (lsy < 0) { o.moveTo(x0, y0 + lw / 2); o.lineTo(x0 + w, y0 + lw / 2); } else { o.moveTo(x0, y0 + h - lw / 2); o.lineTo(x0 + w, y0 + h - lw / 2); }
+        if (lsx < 0) { o.moveTo(x0 + lw / 2, y0); o.lineTo(x0 + lw / 2, y0 + h); } else { o.moveTo(x0 + w - lw / 2, y0); o.lineTo(x0 + w - lw / 2, y0 + h); }
+        o.stroke();
+        o.strokeStyle = 'rgba(12,11,10,0.5)'; o.strokeRect(x0 + lw / 2, y0 + lw / 2, w - lw, h - lw);
       }
-      o.fillStyle = '#7a756d'; o.strokeStyle = '#1b1a17'; o.lineWidth = lw;
-      for (const px of [0, len - post]) { o.fillRect(px, -post * 0.8, post, post * 1.6); o.strokeRect(px, -post * 0.8, post, post * 1.6); }
       o.restore();
     }
+  }
+  // what drawDoors needs to paint with: the walls' materials and the floors' tiles as patterns, on the grid
+  function doorPaints(os, lib, P, org, loaded, pats, g) {
+    const scaledOf = (url, squares) => {
+      const key = `${url}@${squares}@door@${P}`;
+      if (!pats.has(key)) { const im = loaded.get(url); if (!im) return null; pats.set(key, { cv: scaled(im, squares * P) }); }
+      return pats.get(key).cv;
+    };
+    return {
+      g, org,
+      matPat: (o, id, m) => { const t = matInfo(id); const cv = t && scaledOf(t.url, t.squares); if (!cv) return null; const p = o.createPattern(cv, 'repeat'); p.setTransform(m); return p; },
+      floorPat: (o, area, m) => {
+        const t = area.tile && tileInfo(area.tile, lib); if (!t) return null;
+        const cv = scaledOf(t.url, t.squares || 4); if (!cv) return null;
+        const p = o.createPattern(cv, 'repeat'); const off = t.off || [0, 0]; p.setTransform(m.translate(-off[0] * P, -off[1] * P)); return p;
+      },
+    };
   }
 
   // ---------- walls for line of sight ----------
@@ -1444,7 +1537,8 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     return null;
   }
 
-  // (noSharp: the self-test's software graphics are slow; it switches the sharp tiles off where they are not the point)
-  const api = { DATA, FLOORS, MATERIALS, EDGES, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, setSharp, stats, noSharp: false, sharpOf: (map) => { const b = boxOf(map); return b && b.sharp; }, supported: () => !!gl2(), DEFAULT_MAT };
+  // (noSharp: the self-test's software graphics are slow; it switches the sharp tiles off where they are not the point.
+  // noPill: and the progress pill, whose running maid would keep its window drawing all the while)
+  const api = { DATA, FLOORS, MATERIALS, EDGES, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, doorPlace, setSharp, stats, noSharp: false, noPill: false, sharpOf: (map) => { const b = boxOf(map); return b && b.sharp; }, supported: () => !!gl2(), DEFAULT_MAT };
   return api;
 })();

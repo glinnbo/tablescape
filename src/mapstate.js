@@ -54,6 +54,9 @@ const OS_SHAPES = ['rect', 'poly', 'round', 'path', 'brush'];
 // Beta 3.25: ground drawn into an Oldschool map (the Draw tool's Ground): the picture shows the pool, an effect of the
 // same kind (fx, key os) makes it move
 const GROUND_KINDS = ['water', 'lava', 'acid', 'darkness', 'swamp'];
+// Beta 3.33: what fills a door or a window (the pieces of tablescape_doors_windows_dynamic)
+const DOOR_LEAVES = ['wood', 'metal', 'stone', 'portcullis'];
+const WINDOW_LEAVES = ['clear', 'leaded', 'stained', 'shutter', 'bars'];
 // Beta 3.27: how a floor mixes into the floor already there, by opacity alone: mixW squares wide (0: not at all), the
 // line made uneven by mixU (0–1), squares pushed in or out along the grid by mixT (0–1). (3.26's 'stones' / 'soft'
 // become the defaults; 'off' stays off.)
@@ -100,9 +103,11 @@ function cleanOs(o) {
   if (!o || typeof o !== 'object') return null;
   const out = defaultOs();
   out.items = (Array.isArray(o.items) ? o.items : []).map(cleanOsItem).filter(Boolean);
-  out.doors = (Array.isArray(o.doors) ? o.doors : []).filter((d) => d && [d.x1, d.y1, d.x2, d.y2].every((v) => Number.isFinite(Number(v)))).map((d) => ({
-    id: typeof d.id === 'string' && d.id ? d.id : newId('od'), x1: r3(+d.x1), y1: r3(+d.y1), x2: r3(+d.x2), y2: r3(+d.y2), door: d.door === 2 ? 2 : 1, ...(d.kind === 'window' ? { kind: 'window' } : {}),
-  }));
+  out.doors = (Array.isArray(o.doors) ? o.doors : []).filter((d) => d && [d.x1, d.y1, d.x2, d.y2].every((v) => Number.isFinite(Number(v)))).map((d) => {
+    const win = d.kind === 'window';
+    const leaf = (win ? WINDOW_LEAVES : DOOR_LEAVES).includes(d.leaf) ? d.leaf : null; // (Beta 3.33; none: wood, or clear glass)
+    return { id: typeof d.id === 'string' && d.id ? d.id : newId('od'), x1: r3(+d.x1), y1: r3(+d.y1), x2: r3(+d.x2), y2: r3(+d.y2), door: d.door === 2 ? 2 : 1, ...(win ? { kind: 'window' } : {}), ...(leaf ? { leaf } : {}) };
+  });
   out.sun = Math.round(osNum(o.sun, 135, 0, 359));
   out.shadows = SHADOW_KINDS.includes(o.shadows) ? o.shadows : 'short';
   out.sight = o.sight !== false;
@@ -1078,6 +1083,7 @@ function apply(map, type, p, media) {
       if (!map.os) return { changed: null };
       const d = cleanOs({ doors: [{ ...p, id: newId('od') }] }).doors[0];
       if (!d) return { changed: null };
+      if (Array.isArray(p.replace)) { const gone = new Set(p.replace); map.os.doors = map.os.doors.filter((x) => !gone.has(x.id)); } // (Beta 3.33: the doors it lies over)
       map.os.doors.push(d);
       return { changed: 'all', label: d.kind === 'window' ? 'Window added' : d.door === 2 ? 'Secret door added' : 'Door added' };
     }

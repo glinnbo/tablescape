@@ -6,7 +6,7 @@
 //   Wall               drag a wall line from corner to corner
 //   Pillar             click a square
 //   Stairs             drag where they go: they climb toward where you drag
-//   Door               click a grid line: a door, a secret door or a window there
+//   Door               click a grid line: a door, a secret door or a window there; drag along it: one of any length
 //   (Beta 3.28: Corridor, Floor and Pieces are gone; what they made still draws. Beta 3.29: Ground is gone)
 // What is drawn is kept in map.os (mapstate.js); the picture is made from it here (oldschool.js) and sent to main,
 // which makes it the map's picture and its outlines the walls for sight. gm-play.js hands the pointer to this tool.
@@ -24,7 +24,7 @@ const OldschoolTool = (() => {
     { id: 'wall', label: 'Wall', icon: 'wall', tip: 'Drag a wall from corner to corner' },
     { id: 'pillar', label: 'Pillar', icon: 'square-dashed', tip: 'Click a square for a pillar' },
     { id: 'stairs', label: 'Stairs', icon: 'stairs', tip: 'Drag where they go: they climb toward where you drag' },
-    { id: 'door', label: 'Door', icon: 'door', tip: 'Click a grid line: a door there' },
+    { id: 'door', label: 'Door', icon: 'door', tip: 'Click a grid line: a door there; drag along it: a longer one' },
   ];
   // Beta 3.28: Corridor, Floor and Pieces left the toolbar (what they made still draws and erases)
   // Beta 3.25: the ground the Ground tool lays (the effects of the same name, with a pool in the picture)
@@ -36,7 +36,7 @@ const OldschoolTool = (() => {
     { id: 'swamp', label: 'Swamp', icon: 'plant', color: 'rgba(70,84,40,0.9)' },
   ];
   const AREA_TOOLS = ['room', 'shape', 'round', 'brush'];
-  const OWN = new Set(['osbox', 'ospath', 'osbrush', 'osline', 'osstairs']);
+  const OWN = new Set(['osbox', 'ospath', 'osbrush', 'osline', 'osstairs', 'osdoor']);
   const EDGE_LABEL = { walls: 'Walls', rock: 'Rock', ledge: 'Ledge', cliff: 'Cliff', fade: 'Fade' };
 
   function create(ctx) {
@@ -48,7 +48,7 @@ const OldschoolTool = (() => {
     const first = Oldschool.FLOORS[0];
     const prefs = {
       tool: 'room', snap: 'sq', level: 0, width: 1, brush: 1.5, erase: 'box', edge: 'walls', mats: { ...Oldschool.DEFAULT_MAT },
-      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box', mixW: 1.5, mixU: 0.5, mixT: 0.5, floorHow: 'click',
+      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', doorLeaf: 'wood', windowLeaf: 'clear', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box', mixW: 1.5, mixU: 0.5, mixT: 0.5, floorHow: 'click',
       floor: first ? { rel: Oldschool.relOf(first) } : null,
     };
     try { const saved = JSON.parse(localStorage.getItem('osPrefs') || '{}'); if ('mix' in saved && !('mixU' in saved)) { delete saved.mix; delete saved.mixW; } Object.assign(prefs, saved, { mats: { ...prefs.mats, ...(saved.mats || {}) }, line: { ...prefs.line, ...(saved.line || {}) }, pillar: { ...prefs.pillar, ...(saved.pillar || {}) } }); } catch {}
@@ -109,7 +109,7 @@ const OldschoolTool = (() => {
       if (t === 'floor' && O.floorHow === 'paint') return { kind: 'osbrush', pts: [[round(pt.x, 3), round(pt.y, 3)]], paint: true, r: (O.brush * g()) / 2 }; // (Beta 3.26)
       if (t === 'floor') { repaint(pt); return null; }
       if (t === 'pillar') { const p = snapCenter(pt, e.altKey); add({ kind: 'pillar', pts: [[p.x, p.y]], r: O.pillar.r * g(), round: O.pillar.round, mat: O.line.mat }); return null; }
-      if (t === 'door') { placeDoor(pt); return null; }
+      if (t === 'door') return { kind: 'osdoor', a: pt, b: pt }; // (Beta 3.33: a click, or a drag along a grid line)
       if (t === 'piece') { stamp(pt); return null; }
       if (t === 'corridor' && !cut) { const p = snapCorr(pt); return { kind: 'ospath', pts: [[p.x, p.y]], cut }; }
       if (t === 'ground' && O.groundShape === 'brush') return { kind: 'osbrush', pts: [[round(pt.x, 3), round(pt.y, 3)]], ground: O.ground, r: (O.brush * g()) / 2 };
@@ -123,6 +123,7 @@ const OldschoolTool = (() => {
       return { kind: 'osbox', a: p, b: p, shape, cut, start: pt };
     }
     function pointerMove(d, e, pt) {
+      if (d.kind === 'osdoor') { d.b = pt; lastD = d; drawPreview(pt, d); return; }
       if (d.kind === 'osbox' || d.kind === 'osstairs') {
         let b = snapCorner(pt, e.altKey && d.kind !== 'osbox');
         if (e.shiftKey && d.kind === 'osbox') { const s = Math.max(Math.abs(b.x - d.a.x), Math.abs(b.y - d.a.y)); b = { x: d.a.x + Math.sign(b.x - d.a.x || 1) * s, y: d.a.y + Math.sign(b.y - d.a.y || 1) * s }; }
@@ -153,6 +154,11 @@ const OldschoolTool = (() => {
     function pointerUp(d) {
       lastD = null;
       const m = map(); if (!m || !m.os) return;
+      if (d.kind === 'osdoor') { // (Beta 3.33) a click: a door of one square, or the one there goes; a drag: any length
+        const seg = doorSeg(d.a, d.b);
+        if (!seg) placeDoor(d.a); else putDoor(seg);
+        drawPreview(); return;
+      }
       if (d.kind === 'osbox') {
         let { a, b } = d;
         if (Math.abs(b.x - a.x) < 1e-4 || Math.abs(b.y - a.y) < 1e-4) { // a click: one square
@@ -261,9 +267,36 @@ const OldschoolTool = (() => {
       // a door already there: it goes (a click again takes it away)
       const old = map().os.doors.find((d) => Math.hypot((d.x1 + d.x2) / 2 - (x1 + x2) / 2, (d.y1 + d.y2) / 2 - (y1 + y2) / 2) < s * 0.2);
       if (old) { cmd('os.remove', { id: old.id }).then((r) => { if (r && r.ok) toast('Door removed', { ms: 1400, undo: () => cmd('history.undo') }); }); return; }
-      const p = { x1: round(x1, 4), y1: round(y1, 4), x2: round(x2, 4), y2: round(y2, 4), door: O.door === 'secret' ? 2 : 1, ...(O.door === 'window' ? { kind: 'window' } : {}) };
+      putDoor({ x1, y1, x2, y2 });
+    }
+    // Beta 3.33: a drag along a grid line: the door covers the squares (or half squares) it passes, on the line nearest to
+    // where it started; null for a click (shorter than a third of a square)
+    function doorSeg(a, b) {
+      const G = grid(); const s = g(); const st = O.snap === 'half' ? s / 2 : s;
+      if (Math.hypot(b.x - a.x, b.y - a.y) < s / 3) return null;
+      const horiz = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
+      const lo = (v, o) => o + Math.floor((v - o) / st + 1e-6) * st; const hi = (v, o) => o + Math.ceil((v - o) / st - 1e-6) * st;
+      if (horiz) {
+        const y = G.oy + Math.round((a.y - G.oy) / s) * s; let x1 = lo(Math.min(a.x, b.x), G.ox); let x2 = hi(Math.max(a.x, b.x), G.ox);
+        if (x2 - x1 < st) x2 = x1 + st;
+        return { x1, y1: y, x2, y2: y };
+      }
+      const x = G.ox + Math.round((a.x - G.ox) / s) * s; let y1 = lo(Math.min(a.y, b.y), G.oy); let y2 = hi(Math.max(a.y, b.y), G.oy);
+      if (y2 - y1 < st) y2 = y1 + st;
+      return { x1: x, y1, x2: x, y2 };
+    }
+    function putDoor({ x1, y1, x2, y2 }) {
+      const win = O.door === 'window'; const secret = O.door === 'secret';
+      const leaf = secret ? null : win ? O.windowLeaf : O.doorLeaf;
+      const p = { x1: round(x1, 4), y1: round(y1, 4), x2: round(x2, 4), y2: round(y2, 4), door: secret ? 2 : 1, ...(win ? { kind: 'window' } : {}), ...(leaf && leaf !== 'wood' && leaf !== 'clear' ? { leaf } : {}) };
+      // (doors it lies over go: a new door replaces them)
+      const ux = x2 - x1; const uy = y2 - y1; const L2 = ux * ux + uy * uy || 1;
+      const over = map().os.doors.filter((d) => {
+        const mx = (d.x1 + d.x2) / 2; const my = (d.y1 + d.y2) / 2; const t2 = ((mx - x1) * ux + (my - y1) * uy) / L2;
+        return t2 > 0 && t2 < 1 && Math.abs((mx - x1) * uy - (my - y1) * ux) / Math.sqrt(L2) < g() * 0.2;
+      });
       pending.push({ kind: 'door', ...p, at: Date.now() }); drawPreview();
-      cmd('os.door', p).then((r) => { if (r && r.ok) toast(r.label || 'Door added', { ms: 1400, undo: () => cmd('history.undo') }); });
+      cmd('os.door', { ...p, ...(over.length ? { replace: over.map((d) => d.id) } : {}) }).then((r) => { if (r && r.ok) toast(r.label || 'Door added', { ms: 1400, undo: () => cmd('history.undo') }); });
     }
     // erasing a box or a round takes the doors in it away too
     function dropDoorsIn(item) {
@@ -362,6 +395,7 @@ const OldschoolTool = (() => {
       else if (d && d.kind === 'osbrush') cur = { kind: d.ground ? 'ground' : d.cut ? 'cut' : 'area', shape: 'brush', pts: d.pts, r: d.r, tile: O.floor, preset: d.ground };
       else if (d && d.kind === 'osline') cur = { kind: 'line', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], w: O.line.w * g() };
       else if (d && d.kind === 'osstairs') cur = { kind: 'stairs', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], tile: O.floor };
+      else if (d && d.kind === 'osdoor') { const q = doorSeg(d.a, d.b); if (q) root.append(el('line', { x1: q.x1, y1: q.y1, x2: q.x2, y2: q.y2, stroke: '#f0b44a', 'stroke-width': g() * 0.18, 'stroke-linecap': 'round' })); }
       if (cur && (cur.kind === 'line' || cur.shape === 'path' || cur.shape === 'brush')) {
         // (Beta 3.28) a stroke shows at its real width while dragging, with an orange rim (it used to vanish)
         const w = cur.kind === 'line' ? cur.w : cur.r * 2;
@@ -383,7 +417,7 @@ const OldschoolTool = (() => {
         root.append(el('rect', { x: P.x0, y: P.y0, width: P.w * g(), height: P.h * g(), fill: 'none', stroke: '#f0b44a', 'stroke-width': thin, 'stroke-dasharray': `${thin * 3} ${thin * 2}` }));
       }
       // where a click would go (pillars and doors)
-      if (pt && !d && (O.tool === 'pillar' || O.tool === 'door')) {
+      if (pt && (!d || (d.kind === 'osdoor' && !doorSeg(d.a, d.b))) && (O.tool === 'pillar' || O.tool === 'door')) {
         if (O.tool === 'pillar') { const q = snapCenter(pt); root.append(shapeEl({ kind: 'pillar', pts: [[q.x, q.y]], r: O.pillar.r * g(), round: O.pillar.round }, 'rgba(240,180,74,0.5)')); }
         else {
           const G = grid(); const s = g(); const u = (pt.x - G.ox) / s; const v2 = (pt.y - G.oy) / s;
@@ -398,6 +432,40 @@ const OldschoolTool = (() => {
     function leave() { lastPt = null; if (ui.tool === 'oldschool') drawPreview(); }
     // the view moved or zoomed: the preview follows
     function redraw() { if (svg && (ui.tool === 'oldschool' || pending.length)) drawPreview(lastPt, lastD); }
+
+    // ---------- Beta 3.32: how far the picture is, in a pill at the top (the one of the prepared animations: the maid runs
+    // along). Only when it takes a while: on a quick machine it never shows.
+    const pill = (() => {
+      let el = null; let maid = null; let text = null; let showT = 0; let hideT = 0; let k = 0; let on = false;
+      const build = () => {
+        maid = h('img', { class: 'anim-maid', src: 'maid-run.webp', alt: '' });
+        text = h('span', { class: 'anim-text' });
+        el = h('div', { class: 'anim-pill os-pill', role: 'status', 'aria-live': 'polite', hidden: true }, h('span', { class: 'anim-track' }, h('span', { class: 'anim-fill' }), maid), text);
+        document.body.appendChild(el);
+      };
+      const paint = () => { el.style.setProperty('--k', k.toFixed(3)); text.textContent = `Painting the map ${Math.round(k * 100)} %`; };
+      const show = () => {
+        if (!el) build();
+        clearTimeout(hideT); hideT = 0;
+        const anim = document.querySelector('.anim-pill:not(.os-pill)');
+        el.classList.toggle('below', !!(anim && !anim.hidden)); // (under the animations' pill, when that shows too)
+        el.classList.remove('done', 'out'); if (!maid.src.endsWith('maid-run.webp')) maid.src = 'maid-run.webp';
+        paint(); el.hidden = false; on = true;
+      };
+      return {
+        start() { k = 0; clearTimeout(showT); if (Oldschool.noPill) return; if (on) show(); else showT = setTimeout(show, 700); },
+        progress(v) { k = Math.max(k, v); if (on) paint(); },
+        end(ok) {
+          clearTimeout(showT); showT = 0;
+          if (!on) return;
+          k = 1; paint();
+          if (ok) { el.classList.add('done'); maid.src = 'maid.webp'; text.textContent = 'Map painted ✓'; }
+          clearTimeout(hideT);
+          hideT = setTimeout(() => { el.classList.add('out'); hideT = setTimeout(() => { el.hidden = true; on = false; el.classList.remove('out', 'done'); }, 500); }, ok ? 900 : 0);
+        },
+        get shown() { return on; },
+      };
+    })();
 
     // ---------- making the picture ----------
     let baking = false; let again = false; let timer = 0; let status = 'idle'; let lastErr = null;
@@ -414,7 +482,7 @@ const OldschoolTool = (() => {
       const has = m.bg && !m.bg.missing ? m.bg.os : (m.os.items.length ? null : want);
       if (has === want) { if (status !== 'idle') { status = 'idle'; ctx.refreshPop(); } return; }
       clearTimeout(timer);
-      timer = setTimeout(bake, 320);
+      timer = setTimeout(() => { timer = 0; bake(); }, 320);
     }
     // Beta 3.25: the sharp tiles get as many dots a square as the TV shows (a quarter more, for a closer look on this
     // screen): the square's size on the table × the TV's dots an inch
@@ -429,21 +497,23 @@ const OldschoolTool = (() => {
       baking = true; status = 'busy'; ctx.refreshPop();
       const mapId = m.id; const snap = structuredClone({ os: m.os, grid: m.grid });
       const want = Oldschool.hash(snap, lib);
+      pill.start(); let ok = false;
       try {
-        const r = await Oldschool.bake(snap, lib, m.bg && m.bg.sharp);
+        const r = await Oldschool.bake(snap, lib, m.bg && m.bg.sharp, (v) => pill.progress(v * 0.97));
         if (map() && map().id === mapId) {
           const data = r.blob ? new Uint8Array(await r.blob.arrayBuffer()) : null;
           // (Beta 3.25) the sharp tiles: new ones with their picture, kept ones by their key alone
           const sharp = r.sharp ? { P: r.sharp.P, ts: r.sharp.ts, tiles: await Promise.all(r.sharp.tiles.map(async (t) => ({ c: t.c, r: t.r, h: t.h, jpg: !!(t.blob && t.jpg), data: t.blob ? new Uint8Array(await t.blob.arrayBuffer()) : null }))) } : null;
           await ts.cmd('os.baked', { mapId, hash: want, empty: !!r.empty, data, sharp, ids: [...snap.os.items.map((x) => x.id), ...snap.os.doors.map((x) => x.id)], x: r.x, y: r.y, scale: r.scale, nw: r.nw, nh: r.nh, walls: r.walls });
         }
-        lastErr = null;
+        lastErr = null; ok = true;
       } catch (err) { console.error(err); lastErr = String(err && err.message || err); }
+      if (!again) pill.end(ok); // (another change waits: the pill goes on with it)
       baking = false; status = 'idle';
       pending = pending.filter((x) => Date.now() - x.at < 300);
       drawPreview();
       ctx.refreshPop();
-      if (again) { again = false; update(); }
+      if (again) { again = false; update(); if (!timer && !baking) pill.end(ok); } // (nothing left to make after all)
     }
 
     // ---------- tiles: the squares a tile spans, set once ----------
@@ -569,7 +639,10 @@ const OldschoolTool = (() => {
         }
         opts.push(h('div', { class: 'ctl-label' }, 'Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; save(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff']));
       } else if (t === 'door') {
-        opts.push(seg({ options: [{ value: 'door', label: 'Door', icon: 'door' }, { value: 'secret', label: 'Secret', icon: 'eye-off' }, { value: 'window', label: 'Window', icon: 'window' }], get: () => O.door, set: (v) => { O.door = v; save(); } }));
+        opts.push(seg({ options: [{ value: 'door', label: 'Door', icon: 'door' }, { value: 'secret', label: 'Secret', icon: 'eye-off' }, { value: 'window', label: 'Window', icon: 'window' }], get: () => O.door, set: (v) => { O.door = v; save(); ctx.refreshPop(); } }));
+        // (Beta 3.33) what fills it
+        if (O.door === 'door') opts.push(seg({ cls: 'seg-4', options: [{ value: 'wood', label: 'Wood' }, { value: 'metal', label: 'Iron' }, { value: 'stone', label: 'Stone' }, { value: 'portcullis', label: 'Portcullis' }], get: () => O.doorLeaf, set: (v) => { O.doorLeaf = v; save(); } }));
+        if (O.door === 'window') opts.push(seg({ cls: 'seg-5', options: [{ value: 'clear', label: 'Glass' }, { value: 'leaded', label: 'Leaded' }, { value: 'stained', label: 'Stained' }, { value: 'shutter', label: 'Shutters' }, { value: 'bars', label: 'Bars' }], get: () => O.windowLeaf, set: (v) => { O.windowLeaf = v; save(); } }));
       }
       const snapSeg = seg({ options: [{ value: 'sq', label: 'Squares' }, { value: 'half', label: 'Half' }, { value: 'free', label: 'Free' }], get: () => O.snap, set: (v) => { O.snap = v; save(); } });
       // the floor tiles: those of the app, then those of the library
@@ -604,10 +677,10 @@ const OldschoolTool = (() => {
       const sight = toggle({ label: 'Walls for sight follow the drawing', get: () => map().os.sight !== false, set: (v) => cmd('os.set', { sight: v }) });
       const st = h('div', { class: 'row os-status' });
       bind(() => {
-        const busy = baking || status === 'busy';
-        const txt = lastErr ? 'The picture could not be made (see the log)' : busy ? 'Making the picture …' : map().os.items.length ? 'Picture up to date' : 'Draw a room to start';
+        // (Beta 3.32: how far the picture is shows in the pill at the top, as when animations are prepared)
+        const txt = lastErr ? 'The picture could not be made (see the log)' : map().os.items.length ? '' : 'Draw a room to start';
         if (st.dataset.t === txt) return; st.dataset.t = txt;
-        st.replaceChildren(h('span', { class: `grow hint ${busy ? 'busy' : ''}` }, txt), btn('Clear', 'trash', async () => { if (!map().os.items.length) return; const r = await cmd('os.clear', {}); if (r && r.ok) toast('Drawing cleared', { undo: () => cmd('history.undo') }); }, { kind: 'small', tip: 'Take everything drawn away (undo brings it back)' }));
+        st.replaceChildren(h('span', { class: 'grow hint' }, txt), btn('Clear', 'trash', async () => { if (!map().os.items.length) return; const r = await cmd('os.clear', {}); if (r && r.ok) toast('Drawing cleared', { undo: () => cmd('history.undo') }); }, { kind: 'small', tip: 'Take everything drawn away (undo brings it back)' }));
       });
       return h('div', { class: 'stack' }, tools, ...opts, snapSeg, sep(),
         h('div', { class: 'ctl-label' }, 'Floor'), floorBox,
@@ -651,7 +724,7 @@ const OldschoolTool = (() => {
     const hashOf = (m) => Oldschool.hash(m, lib); // (for the self-test)
     // (Beta 3.28: Pieces left, so the wheel is the map's again)
     const wheel = () => false;
-    return { hashOf, wheel, owns, pointerDown, pointerMove, pointerUp, hover, leave, redraw, update, buildPop, cancel, rightClick, dblClick, useTile, dropTile, loadLib, get busy() { return baking; }, TOOLS };
+    return { pill, hashOf, wheel, owns, pointerDown, pointerMove, pointerUp, hover, leave, redraw, update, buildPop, cancel, rightClick, dblClick, useTile, dropTile, loadLib, get busy() { return baking; }, TOOLS };
   }
   return { create };
 })();

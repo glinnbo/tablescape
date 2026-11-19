@@ -2380,6 +2380,8 @@ body.capturing .snap-pop, body.capturing #menu, body.capturing .modal-back { vis
 /* the little maid runs along while they are baked (bottom left, above the map bar while playing) */
 .anim-pill { position: fixed; left: 50%; top: max(18px, calc(var(--topbar-bottom, 0px) + 10px)); translate: -50% 0; z-index: 160; display: flex; align-items: center; gap: 12px; padding: 6px 16px 6px 12px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 999px; box-shadow: var(--shadow); animation: toast-in 0.2s ease-out; transition: opacity 0.5s; }
 .anim-pill.out { opacity: 0; }
+/* Beta 3.32: the Draw tool's pill (painting a drawn map), under the animations' one when both show */
+.anim-pill.os-pill.below { top: calc(max(18px, calc(var(--topbar-bottom, 0px) + 10px)) + 58px); }
 .anim-track { position: relative; width: 132px; height: 34px; flex: none; }
 .anim-track::before { content: ""; position: absolute; left: 0; right: 0; bottom: 3px; height: 5px; border-radius: 3px; background: var(--line-2); }
 .anim-fill { position: absolute; left: 0; bottom: 3px; height: 5px; border-radius: 3px; background: var(--torch); width: calc(var(--k, 0) * 100%); transition: width 0.3s linear; }
@@ -3826,8 +3828,6 @@ body.gm .sv-trees-over { opacity: 0.7; } /* (above the tokens: see-through on yo
 .os-more .i { width: 22px; height: 22px; margin: 11px 0; }
 .os-mats { grid-template-columns: repeat(4, 1fr); }
 .os-status .hint { font-size: 12px; }
-.os-status .hint.busy { color: var(--torch); animation: os-busy 1.2s ease-in-out infinite; }
-@keyframes os-busy { 50% { opacity: 0.45; } }
 .os-squares p { margin: 0 0 4px; color: var(--faint); font-size: 13px; }
 .os-squares { min-width: 0; }
 .os-squares canvas { width: 100%; height: auto; aspect-ratio: 1; border-radius: 8px; align-self: center; background: #111; cursor: move; touch-action: none; }
@@ -3843,7 +3843,7 @@ body.gm[data-tool="oldschool"] #viewport { cursor: crosshair; }
 .sv-bg > svg.sv-osink { left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 /* Beta 3.25: an Oldschool map's doors, drawn live (shut or swung open) */
 .sv-bg > svg.sv-osdoors { left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
-.sv-osdoors .osdoor { filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.7)); }
+.sv-osdoors .osdoor image { image-rendering: auto; }
 /* Beta 3.25: an Oldschool map's sharp tiles, on top of its picture */
 .sv-bg > .sv-sharp { left: 0; top: 0; width: 1px; height: 1px; pointer-events: none; }
 .sv-sharp > img { position: absolute; max-width: none; user-select: none; }

@@ -23,6 +23,69 @@ const FOG_M = 40; // fog canvas overhangs the table so the soft edge never shows
 const FOG_BLUR = 6; // the fog's soft edge in table pixels (drawn into the fog picture, 4.4)
 const T0 = 1.7e9; // seconds; keeps animation time small so the trig stays smooth
 
+// Beta 3.33: an Oldschool map's door and window leaves, from the pictures in doors/ (made at 140 dots a square):
+// strips of any length (an end, the middle as often as it fits, the other end), slimmed to about 0.12 squares of
+// body; glass a little brighter, so it reads as a window. parts(): the leaves of one opening, in map inches.
+const OsLeaves = (() => {
+  const DIR = new URL('doors/', document.baseURI).href;
+  const leafOf = (pre, more) => ({ pre, ends: ['hinge', 'latch'], ...more });
+  const DOOR = { h: 40, end: 18, piv: 5, k: 0.6 }; const WIN = { h: 22, end: 12, piv: 4, k: 0.745 };
+  const KIND = {
+    wood: leafOf('leaf_wood', DOOR), metal: leafOf('leaf_metal', DOOR), stone: leafOf('leaf_stone', DOOR),
+    portcullis: { pre: 'portcullis', ends: ['end_left', 'end_right'], h: 30, end: 14, k: 0.6, lift: true },
+    clear: leafOf('glass_clear', { ...WIN, glass: true }), leaded: leafOf('glass_leaded', { ...WIN, glass: true }), stained: leafOf('glass_stained', { ...WIN, glass: true }),
+    shutter: leafOf('shutter_wood', WIN),
+    bars: { pre: 'window_bars', ends: ['end_left', 'end_right'], h: 22, end: 12, k: 0.745, fixed: true },
+  };
+  const imgs = new Map(); let loading = null; const waiting = new Set();
+  const names = () => Object.values(KIND).flatMap((K) => [`${K.pre}_${K.ends[0]}`, `${K.pre}_middle`, `${K.pre}_${K.ends[1]}`]);
+  function ready(cb) {
+    if (imgs.size && [...imgs.values()].every((i) => i.complete && i.naturalWidth)) return true;
+    waiting.add(cb);
+    if (!loading) {
+      loading = Promise.all(names().map((n) => new Promise((res) => { const i = new Image(); i.onload = res; i.onerror = res; i.src = `${DIR}${n}.png`; imgs.set(n, i); })))
+        .then(() => { const w = [...waiting]; waiting.clear(); for (const f of w) try { f(); } catch (err) { console.error(err); } });
+    }
+    return false;
+  }
+  const urls = new Map();
+  function strip(kind, n, mirror) {
+    const key = `${kind}|${n}|${mirror ? 1 : 0}`;
+    if (urls.has(key)) return urls.get(key);
+    const K = KIND[kind]; const H = Math.max(4, Math.round(K.h * K.k));
+    const c = document.createElement('canvas'); c.width = Math.max(2, n); c.height = H;
+    const g = c.getContext('2d', { willReadFrequently: !!K.glass }); g.imageSmoothingQuality = 'high';
+    if (mirror) { g.translate(c.width, 0); g.scale(-1, 1); }
+    const a = imgs.get(`${K.pre}_${K.ends[0]}`); const mid = imgs.get(`${K.pre}_middle`); const b = imgs.get(`${K.pre}_${K.ends[1]}`);
+    const e = Math.min(K.end, c.width / 2);
+    g.drawImage(a, 0, 0, a.naturalWidth, a.naturalHeight, 0, 0, e, H);
+    for (let x = e; x < c.width - e; x += mid.naturalWidth) { const w = Math.min(mid.naturalWidth, c.width - e - x); g.drawImage(mid, 0, 0, w, mid.naturalHeight, x, 0, w, H); }
+    g.drawImage(b, 0, 0, b.naturalWidth, b.naturalHeight, c.width - e, 0, e, H);
+    if (K.glass) {
+      const d = g.getImageData(0, 0, c.width, H); const p = d.data;
+      for (let i = 0; i < p.length; i += 4) { p[i] = p[i] * 1.18 + 12; p[i + 1] = p[i + 1] * 1.18 + 12; p[i + 2] = p[i + 2] * 1.18 + 12; p[i + 3] = p[i + 3] * 1.15; }
+      g.putImageData(d, 0, 0);
+    }
+    const url = c.toDataURL('image/png'); c.width = c.height = 0;
+    if (urls.size > 300) urls.clear();
+    urls.set(key, url); return url;
+  }
+  // one opening of len map inches (sq: a square): [{ url, x, w, h, hinge: [x, 0], turn: 1 | -1 | 0, lift? }]
+  function parts(leaf, win, len, sq) {
+    const kind = KIND[leaf] ? leaf : win ? 'clear' : 'wood'; const K = KIND[kind];
+    const u = sq / 140; const H = Math.max(4, Math.round(K.h * K.k)) * u;
+    if (K.lift || K.fixed) return [{ url: strip(kind, Math.round(len / u), false), x: 0, w: len, h: H, hinge: [0, 0], turn: 0, lift: !!K.lift }];
+    const gap = 2 * u; const dg = 2 * u;
+    if (len / sq < 1.75) { const L = len - 2 * gap; return [{ url: strip(kind, Math.round(L / u), false), x: gap, w: L, h: H, hinge: [gap + K.piv * u, 0], turn: 1 }]; }
+    const L = (len - 2 * gap - dg) / 2; const n = Math.round(L / u);
+    return [
+      { url: strip(kind, n, false), x: gap, w: L, h: H, hinge: [gap + K.piv * u, 0], turn: 1 },
+      { url: strip(kind, n, true), x: len - gap - L, w: L, h: H, hinge: [len - gap - K.piv * u, 0], turn: -1 },
+    ];
+  }
+  return { ready, parts, KIND };
+})();
+
 class SceneView {
   constructor(host, { gm = false } = {}) {
     this.gm = gm;
@@ -604,51 +667,74 @@ class SceneView {
   dropOldBg() { if (this.bgOld) { this.bgOld.el.remove(); this.bgOld = null; } }
 
   // ---------- Beta 3.25: an Oldschool map's doors, drawn live: shut across the doorway, or swung open ----------
-  // The picture has the posts; the leaf follows the door's wall (open or shut) and swings when it changes. Under the
-  // fog like the picture. Secret doors and windows stay in the picture alone.
+  // The picture has the frame (Beta 3.33: of the wall's own material, on the wall's middle); the leaves follow the
+  // door's wall (open or shut) and swing when it changes, into the room. Beta 3.33: the leaves are pictures (doors/:
+  // wood, iron, stone, a portcullis that is gone when open; windows: glass, leaded, stained, shutters, bars), any
+  // length, two leaves from 1.75 squares on. Under the fog like the picture. Secret doors stay in the picture alone.
   renderOsDoors() {
     const m = this.map; const os = m && m.os;
-    const doors = os && m.bg ? os.doors.filter((d) => d.door !== 2 && d.kind !== 'window') : [];
-    if (!doors.length) { if (this.osDoorSvg) { this.osDoorSvg.remove(); this.osDoorSvg = null; this.osDoorEls = null; } return; }
+    const doors = os && m.bg ? os.doors.filter((d) => d.door !== 2) : [];
+    if (!doors.length || typeof Oldschool === 'undefined') { if (this.osDoorSvg) { this.osDoorSvg.remove(); this.osDoorSvg = null; this.osDoorEls = null; } return; }
+    if (!OsLeaves.ready(() => this.renderOsDoors())) return; // (their pictures first)
     const NS = 'http://www.w3.org/2000/svg';
     const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
+    const sq = (m.grid && m.grid.size) || 1;
     if (!this.osDoorSvg) {
-      this.osDoorSvg = mk('svg', { class: 'sv-osdoors' }); this.osDoorEls = new Map();
-      const defs = mk('defs', {}); const gr = mk('linearGradient', { id: 'osdoor-wood', x1: '0', y1: '0', x2: '0', y2: '1' });
-      for (const [o, c] of [['0', '#a3713f'], ['0.5', '#86562c'], ['1', '#5c3a1c']]) gr.append(mk('stop', { offset: o, 'stop-color': c }));
-      defs.append(gr); this.osDoorG = mk('g', {}); this.osDoorSvg.append(defs, this.osDoorG);
+      this.osDoorSvg = mk('svg', { class: 'sv-osdoors' }); this.osDoorEls = new Map(); this.osDoorPl = new Map();
+      const defs = mk('defs', {}); const f = mk('filter', { id: 'osdoor-sh', x: '-1', y: '-1', width: '3', height: '3', 'color-interpolation-filters': 'sRGB' });
+      this.osDoorSh = mk('feDropShadow', { dx: '0', dy: '0', stdDeviation: '0', 'flood-color': '#000', 'flood-opacity': '0.5' });
+      f.append(this.osDoorSh); defs.append(f); this.osDoorG = mk('g', {}); this.osDoorSvg.append(defs, this.osDoorG);
     }
     // over the picture and its sharp tiles, under the ink
     const before = this.osInkSvg && this.osInkSvg.parentNode === this.bgLayer ? this.osInkSvg : null;
     if (this.osDoorSvg.parentNode !== this.bgLayer || (before && this.osDoorSvg.nextSibling !== before)) this.bgLayer.insertBefore(this.osDoorSvg, before);
     this.osDoorG.setAttribute('transform', `scale(${this.ppi})`);
-    const sq = (m.grid && m.grid.size) || 1;
+    // their shadows fall away from the map's sun
+    const sun = ((os.sun ?? 135) * Math.PI) / 180;
+    this.osDoorSh.setAttribute('dx', (-Math.cos(sun) * sq * 0.035).toFixed(4)); this.osDoorSh.setAttribute('dy', (Math.sin(sun) * sq * 0.035).toFixed(4));
+    this.osDoorSh.setAttribute('stdDeviation', (sq * 0.025).toFixed(4));
     const open = new Map(m.walls.filter((w) => w.os && w.os[0] === 'd' && w.door).map((w) => [w.os.slice(1), !!w.open]));
     const seen = new Set();
     for (const d of doors) {
       seen.add(d.id);
       const len = Math.hypot(d.x2 - d.x1, d.y2 - d.y1); if (len < 1e-3) continue;
-      const geo = `${d.x1},${d.y1},${d.x2},${d.y2},${sq}`;
+      // where the frame is: on the wall's middle (as the picture, made for the same drawing)
+      const pk = `${m.bg.os || ''}|${d.x1},${d.y1},${d.x2},${d.y2},${sq}`;
+      let pl = this.osDoorPl.get(d.id);
+      if (!pl || pl.key !== pk) { try { pl = { key: pk, ...Oldschool.doorPlace(os, d, sq) }; } catch { pl = { key: pk, off: 0, side: 0 }; } this.osDoorPl.set(d.id, pl); }
+      const win = d.kind === 'window'; const leaf = d.leaf || (win ? 'clear' : 'wood');
+      const geo = `${pk}|${pl.off}|${leaf}|${win}`;
       let e = this.osDoorEls.get(d.id);
       if (!e || e.geo !== geo) {
-        if (e) e.g.remove();
-        const th = sq * 0.28; const post = sq * 0.2; const lw = sq * 0.035; const a0 = post * 0.6; const L = len - post * 1.2;
-        const g = mk('g', { transform: `translate(${d.x1} ${d.y1}) rotate(${(Math.atan2(d.y2 - d.y1, d.x2 - d.x1) * 180) / Math.PI})`, class: 'osdoor' });
-        const leaf = mk('g', {});
-        leaf.append(mk('rect', { x: a0, y: -th / 2, width: L, height: th, fill: 'url(#osdoor-wood)', stroke: '#1e1208', 'stroke-width': lw, 'stroke-linejoin': 'round' }));
-        for (let i = 1; i < 4; i++) leaf.append(mk('line', { x1: a0 + (L * i) / 4, y1: -th / 2, x2: a0 + (L * i) / 4, y2: th / 2, stroke: '#1e1208', 'stroke-width': sq * 0.02 }));
-        leaf.append(mk('circle', { cx: a0 + L * 0.84, cy: 0, r: sq * 0.045, fill: '#e0b866', stroke: '#1e1208', 'stroke-width': sq * 0.015 }));
-        g.append(leaf);
-        this.osDoorG.append(g);
-        e = { g, leaf, geo, hinge: [a0, 0], angle: null };
+        if (e) e.w.remove();
+        const ux = (d.x2 - d.x1) / len; const uy = (d.y2 - d.y1) / len; const ox = -uy * pl.off; const oy = ux * pl.off;
+        const w = mk('g', { class: 'osdoor-w', filter: 'url(#osdoor-sh)' });
+        // (into the room: away from the wall's outer side)
+        const g = mk('g', { transform: `translate(${d.x1 + ox} ${d.y1 + oy}) rotate(${(Math.atan2(uy, ux) * 180) / Math.PI})${pl.side > 0 ? ' scale(1 -1)' : ''}`, class: 'osdoor' });
+        const parts = OsLeaves.parts(leaf, win, len, sq);
+        const els = parts.map((pt) => {
+          const lg = mk('g', { transform: `rotate(0 ${pt.hinge[0]} 0)` });
+          lg.append(mk('image', { href: pt.url, x: pt.x, y: -pt.h / 2, width: pt.w, height: pt.h, preserveAspectRatio: 'none' }));
+          g.append(lg); return { g: lg, ...pt };
+        });
+        w.append(g); this.osDoorG.append(w);
+        e = { w, g, parts: els, geo, angle: null };
         this.osDoorEls.set(d.id, e);
       }
-      const want = open.get(d.id) ? 80 : 0;
-      if (e.angle === null) { e.angle = want; e.leaf.setAttribute('transform', `rotate(${want} ${e.hinge[0]} ${e.hinge[1]})`); }
+      const want = !win && open.get(d.id) ? 80 : 0;
+      if (e.angle === null) { e.angle = want; this.leafAt(e, want); }
       else if (e.target !== want && e.angle !== want) this.swingDoor(e, want);
       e.target = want;
     }
-    for (const [id, e] of this.osDoorEls) if (!seen.has(id)) { e.g.remove(); this.osDoorEls.delete(id); }
+    for (const [id, e] of this.osDoorEls) if (!seen.has(id)) { e.w.remove(); this.osDoorEls.delete(id); }
+  }
+  // the leaves at an angle (0: shut, 80: open); the right one of a pair turns the other way; a portcullis is raised:
+  // gone, not turned
+  leafAt(e, a) {
+    for (const p of e.parts) {
+      if (p.lift) { p.g.setAttribute('transform', `rotate(0 ${p.hinge[0]} 0)`); p.g.style.opacity = String(1 - a / 80); continue; }
+      p.g.setAttribute('transform', `rotate(${Math.round(a * p.turn * 100) / 100} ${p.hinge[0]} 0)`);
+    }
   }
   swingDoor(e, want) {
     const from = e.angle; const t0 = performance.now(); const ms = 420; e.target = want;
@@ -656,7 +742,7 @@ class SceneView {
       if (e.target !== want) return; // (turned again meanwhile)
       const u = Math.min(1, (now - t0) / ms); const k = u < 0.5 ? 2 * u * u : 1 - ((-2 * u + 2) ** 2) / 2;
       e.angle = from + (want - from) * k;
-      e.leaf.setAttribute('transform', `rotate(${e.angle.toFixed(2)} ${e.hinge[0]} ${e.hinge[1]})`);
+      this.leafAt(e, e.angle);
       if (u < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);

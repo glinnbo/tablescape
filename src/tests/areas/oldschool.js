@@ -25,6 +25,7 @@ module.exports = (area) => {
     await K.openDemo();
     await K.until(() => K.g('!!document.createElement("canvas").getContext("webgl2")'), 8000, 'WebGL on your screen');
     await K.g('Oldschool.noSharp = true'); // (software graphics here: the sharp tiles only where they are the point)
+    await K.g('Oldschool.noPill = true'); // (and no running maid: drawing it all the while starves the picture here)
   });
 
   area.quick('the tiles come with the app: 49 floors in Library → Tiles (Beta 3.30: 37 more), five materials for walls, rock and cliffs', async (t) => {
