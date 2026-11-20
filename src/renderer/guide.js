@@ -24,6 +24,10 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.36', [
+      'Oldschool maps, walls with details, made from the drawing: a pillar at every corner of a room and every bend of a wall line, a thicker block each side of a door or portcullis, a low sill under a window on the room side',
+      'Stone and Dark stone walls are now built from wall kits: capstones laid along every wall (also round rooms and wall lines), a capstone on each corner pillar, door blocks, sills and finished wall ends, lit by the map\'s light. Other wall materials look as before',
+    ]],
     ['Beta 3.35', [
       'Draw panel in a new order: the tool\'s choices first (each tool shows only what it uses), then its tiles, the last 8 used in two rows with List … for all of them (folders, On this map, Recent), then its sliders; the map\'s own settings at the bottom',
       'Map settings: where the light comes from on a dial (drag the sun round it), Shadow length on a slider (instead of Short / Long / Off), and Shadows all around: every wall and pillar darkens the floor near it, for caves',
