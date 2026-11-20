@@ -216,7 +216,7 @@ module.exports = (area) => {
     // (Beta 3.38) heights stack: Higher and Lower step a level, the middle shows it and puts it back
     await t.clickSel('#pop .os-level [data-v="higher"]'); await t.clickSel('#pop .os-level [data-v="higher"]');
     t.eq([await t.g('Play.ui.os.level'), await t.g(`document.querySelector('#pop .os-level-now').textContent`), await t.g(`document.querySelector('#pop .os-prev .cap').textContent.includes('2 levels up')`)], [2, '+2', true], 'twice Higher: two levels up, shown in the middle and under the picture');
-    t.ok(await t.g(`document.querySelector('#pop .os-blend').hidden`), 'no Blending for a floor off floor level (floors blend at floor level only)');
+    t.ok(!(await t.g(`document.querySelector('#pop .os-blend').hidden`)), 'Blending stays for a floor off floor level (Beta 3.40: it blends with the floors at its own height)');
     await t.clickSel('#pop .os-level [data-v="higher"]'); await t.clickSel('#pop .os-level [data-v="higher"]');
     t.eq([await t.g('Play.ui.os.level'), await t.g(`document.querySelector('#pop .os-level [data-v="higher"]').disabled`)], [3, true], 'three up is the top');
     await t.clickSel('#pop .os-level [data-v="now"]');
@@ -466,6 +466,93 @@ module.exports = (area) => {
     t.ok(mid > far * 1.01, 'and it is a touch lighter than the floor it stands on', [mid, far]);
     t.handle('os.set', { mapId: own, sun: sunWas });
     await t.settle();
+  }, { ms: 300000 });
+
+  area.deep('Beta 3.40: stairs climb every level between the floors they join; floors at one height blend, a step stays between heights', async (t) => {
+    await clear(t);
+    const T = (n) => ({ rel: `Tiles/Tablescape/${n}.webp` });
+    const sunWas = M(t).os.sun;
+    t.handle('os.set', { mapId: own, sun: 135 });
+    const flat = { edge: 'ledge', mixW: 0 }; const MIX = { mixW: 1.5, mixU: 0.5, mixT: 0.5 };
+    const stairs = (x0, y0, x1, y1) => ({ kind: 'stairs', pts: [[x0 * k, y0 * k], [x1 * k, y1 * k]], dir: 2, tile: T('Slate') });
+    t.handle('os.add', { mapId: own, items: [
+      room(10, 1, 32, 16, { ...flat, tile: T('Meadow'), edge: 'fade' }),
+      // a platform one up and one three up, each with stairs two squares long
+      room(11.5, 2.5, 15, 6.5, { ...flat, tile: T('Slate'), level: 1 }), stairs(15, 3.5, 17, 5.5),
+      room(19.5, 2.5, 23, 6.5, { ...flat, tile: T('Slate'), level: 3 }), stairs(23, 3.5, 25, 5.5),
+      // grass over cobbles, both one up; and the same with the grass another level up
+      room(11.5, 9, 20, 14, { ...flat, level: 1 }), room(16, 9, 20, 14, { ...flat, level: 1, tile: T('Mossy court'), ...MIX }),
+      room(22, 9, 30.5, 14, { ...flat, level: 1 }), room(26.5, 9, 30.5, 14, { ...flat, level: 2, tile: T('Mossy court'), ...MIX }),
+    ] });
+    await t.settle();
+    await baked(t);
+    // (the picture, read in squares: how many risers a strip crosses from left to right; how green a patch is)
+    const pic = (what, x0, y0, x1, y1) => t.g(`(async () => { const b = Play.state().map.bg; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0);
+      const X = (v) => Math.round((v * ${k} - b.x) / b.scale); const Y = (v) => Math.round((v * ${k} - b.y) / b.scale); const w = X(${x1}) - X(${x0}); const h = Y(${y1}) - Y(${y0}); const d = g.getImageData(X(${x0}), Y(${y0}), w, h).data;
+      if (${JSON.stringify(what)} === 'green') { let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i + 1] - d[i]; return sum / (d.length / 4); }
+      const col = []; for (let x = 0; x < w; x++) { let sum = 0; for (let y = 0; y < h; y++) { const i = (y * w + x) * 4; sum += d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; } col.push(sum / h); }
+      let n = 0; for (let i = 0; i + 3 < col.length;) { if (col[i + 3] - col[i] < -25) { n++; i += 5; } else i++; } return n; })()`);
+    const one = await pic('risers', 14.9, 3.8, 17.1, 5.2); const three = await pic('risers', 22.9, 3.8, 25.1, 5.2);
+    t.note(`steps in stairs two squares long: ${one} to one level up, ${three} to three up`);
+    t.eq(one, 4, 'one level up: four steps, as before');
+    t.ok(three >= 8, 'three levels up: more steps, they climb all three', three);
+    const near = await pic('green', 15.1, 9.5, 15.9, 13.5); const inside = await pic('green', 12, 9.5, 14, 13.5);
+    const near2 = await pic('green', 25.6, 9.5, 26.3, 13.5); const inside2 = await pic('green', 22.5, 9.5, 24.5, 13.5);
+    t.note(`how green the cobbles are next to the grass: ${Math.round(near - inside)} more than further in at one height, ${Math.round(near2 - inside2)} with a step between`);
+    t.ok(near - inside > 8, 'two floors at the same height (one up) blend', [near, inside]);
+    t.ok(Math.abs(near2 - inside2) < 6, 'a floor another level up does not: a step stays', [near2, inside2]);
+    t.handle('os.set', { mapId: own, sun: sunWas });
+    await t.settle();
+  }, { ms: 300000 });
+
+  area.deep('Beta 3.40: a door or a window on any wall: a slanted side, a round room, a slanted wall line; on the grid as before', async (t) => {
+    await clear(t);
+    const P = (pts) => pts.map(([x, y]) => [x * k, y * k]);
+    t.handle('os.add', { mapId: own, items: [
+      { ...room(0, 0, 1, 1, { mixW: 0 }), shape: 'poly', pts: P([[14, 2], [17, 2], [19, 4], [19, 7], [17, 9], [14, 9], [12, 7], [12, 4]]) },
+      { ...room(0, 0, 1, 1, { mixW: 0 }), shape: 'round', pts: P([[21, 3], [26, 8]]) },
+      { kind: 'line', pts: P([[13.5, 5], [17.5, 8]]), w: 0.5 * k, h: 1, mat: 'stone_wall' },
+    ] });
+    await t.settle();
+    await baked(t);
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
+    const doors = () => M(t).os.doors; const sq = (d) => [d.x1, d.y1, d.x2, d.y2].map((v) => v / k);
+    const near = (a, b, tol = 0.02) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= tol);
+    const click = async (x, y) => { const p = await t.scr(x * k, y * k); await t.click(p.x, p.y); await t.settle(); };
+    await tool(t, 'door');
+    // the slanted side from (17, 2) to (19, 4): a click a little off it gives a door of one square in its middle
+    await click(18.1, 2.9);
+    await t.until(() => doors().length === 1, 4000, 'the door on the slanted side');
+    const h = Math.SQRT1_2 / 2;
+    t.ok(near(sq(doors()[0]), [18 - h, 3 - h, 18 + h, 3 + h]), 'one square long, along the slanted side, in its middle', sq(doors()[0]));
+    // the straight side beside it is on a grid line: as before
+    await click(19, 5.4);
+    await t.until(() => doors().length === 2, 4000, 'the door on the straight side');
+    t.eq(sq(doors()[1]), [19, 5, 19, 6], 'a wall on a grid line: the square of the line, as before');
+    // a drag along the slanted wall line: two squares of it
+    const a = await t.scr(14.78 * k, 5.96 * k); const b = await t.scr(16.22 * k, 7.04 * k);
+    await t.drag(a, b, 8);
+    await t.until(() => doors().length === 3, 4000, 'the door in the wall line');
+    t.ok(near(sq(doors()[2]), [14.7, 5.9, 16.3, 7.1]), 'two squares of the slanted wall line', sq(doors()[2]));
+    // a window in the round room (middle 23.5 5.5, two and a half squares to its wall)
+    await tool(t, 'window');
+    await click(23.5 + 2.6 * Math.SQRT1_2, 5.5 + 2.6 * Math.SQRT1_2);
+    await t.until(() => doors().length === 4, 4000, 'the window in the round room');
+    const w = doors()[3]; const far = (x, y) => Math.hypot(x / k - 23.5, y / k - 5.5);
+    t.eq(w.kind, 'window', 'a window');
+    t.ok(Math.abs(far(w.x1, w.y1) - 2.5) < 0.02 && Math.abs(far(w.x2, w.y2) - 2.5) < 0.02, 'both its ends on the round wall', [far(w.x1, w.y1), far(w.x2, w.y2)]);
+    t.ok(Math.abs(Math.hypot(w.x2 - w.x1, w.y2 - w.y1) / k - 1) < 0.02, 'one square long', sq(w));
+    await baked(t);
+    const dw = wallsOf(t).filter((x) => x.door);
+    t.eq(dw.length, 3, 'the three doors are doors in the walls for sight (the window is none)');
+    t.ok(dw.some((x) => Math.abs(Math.abs(x.x2 - x.x1) - Math.abs(x.y2 - x.y1)) < 0.05 * k && Math.abs(x.x2 - x.x1) > 0.5 * k), 'one of them slanted, as its wall', dw.map((x) => sq(x)));
+    // a click on a door on a slanted wall takes it away
+    await tool(t, 'door');
+    await click(18.1, 2.9);
+    await t.until(() => doors().length === 3, 4000, 'the door on the slanted side gone');
+    t.ok(!doors().some((d) => near(sq(d), [18 - h, 3 - h, 18 + h, 3 + h])), 'a click on it again: it goes');
+    await baked(t);
+    await tool(t, 'room');
   }, { ms: 300000 });
 
   area.deep('floors mix by opacity: a soft line, uneven, tiled along the grid (insides and joints); off', async (t) => {

@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // for every floor); a door: the wall line it opens
   const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 24; // (24: Beta 3.39, steps between floors of different height show on every side; 23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 25; // (25: Beta 3.40, stairs climb all the levels between their floors, floors blend at any height; 24: Beta 3.39, steps between floors of different height show on every side; 23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -363,7 +363,7 @@ const Oldschool = (() => {
   // the shadows; through mixing: its own soft line, and that of any mixing floor drawn after it that it touches (three of
   // its blurs, and the square; floors drawn before it do not look at it).
   const EDGE_REACH = { walls: 0.65, rock: 3.0, cliff: 3.2, ledge: 0.3, fade: 1.8 };
-  const mixes = (it) => (it.kind === 'area' && it.mixW > 0 && !(it.level || 0)) || it.kind === 'paint';
+  const mixes = (it) => (it.kind === 'area' && it.mixW > 0) || it.kind === 'paint'; // (Beta 3.40: at any height, with the floors at the same one)
   function reaches(os, g) {
     const S = shadowOf(os); const light = Math.max(0.7, S.tan ? 2.2 / S.tan : 0, S.all > 0 ? 2.7 : 0);
     let edge = 0; for (const it of os.items) if (it.kind === 'area') edge = Math.max(edge, EDGE_REACH[it.edge] ?? 3.2);
@@ -585,9 +585,10 @@ void main(){
       if (dIn < r) { float t = clamp(dIn / r, 0.0, 1.0); h += 0.22 * P * sqrt(clamp((1.0 - t) * 3.0, 0.0, 1.0)) * smoothstep(0.0, 0.35, t); kind = 7.0; }
     }
     if (st.g > 0.5) { // stairs: steps up toward where they climb
-      float steps = max(2.0, floor(st.b * 255.0));
-      float si = floor(st.r * steps); // (Beta 3.37: the lowest step rises out of the floor, no edge where they meet)
-      h = base + si / steps * LV + LV / steps * (si < 0.5 ? smoothstep(0.0, 0.8, fract(st.r * steps)) : 1.0); kind = 6.0;
+      float steps = max(2.0, floor(st.b * 255.0 + 0.5));
+      float rise = 1.0 + floor((1.0 - st.g) * 25.5 + 0.5); // (Beta 3.40: how many levels they climb)
+      float si = min(floor(st.r * steps), steps - 1.0); // (Beta 3.37: the lowest step rises out of the floor, no edge where they meet)
+      h = base + (si / steps + (si < 0.5 ? smoothstep(0.0, 0.8, fract(st.r * steps)) : 1.0) / steps) * LV * rise; kind = 6.0;
     }
   } else if (edge == 2) { // built walls: a band outside the floor
     float T = 0.45 * P;
@@ -965,6 +966,24 @@ void main(){
         // the new floor through the mask, over the floor that is there
         const nf = mk(ww, hh); const ng = nf.getContext('2d'); ng.translate(-x0, -y0); ng.fillStyle = pat; ng.fillRect(x0, y0, ww, hh); ng.setTransform(1, 0, 0, 1, 0, 0);
         ng.globalCompositeOperation = 'destination-in'; ng.drawImage(A, 0, 0);
+        if (!paintOnly && M.other) {
+          // (Beta 3.40) floors of another height lie here: the soft line stays among the floors at this one's height,
+          // and where the floor covers one of another height it is drawn whole (a step is there)
+          const lvl = it.level || 0; const TL = (X, Y) => { const p = T(X, Y); return [p[0] - x0, p[1] - y0]; };
+          const same = mk(ww, hh); const s2 = same.getContext('2d');
+          for (let n = 0; n < before.n; n++) {
+            const o = before.items[n];
+            if (o.kind !== 'area' && o.kind !== 'ground' && o.kind !== 'cut') continue;
+            if (o.kind === 'cut' || (o.kind === 'area' && (o.level || 0) !== lvl)) paintArea(s2, o, TL, k, null, true); else paintArea(s2, o, TL, k, '#fff', false);
+          }
+          const whole = mk(ww, hh); const w2 = whole.getContext('2d'); paintArea(w2, it, TL, k, '#fff', false);
+          w2.globalCompositeOperation = 'destination-out'; w2.drawImage(same, 0, 0); // (the floor itself, less where its own height lies under it)
+          w2.globalCompositeOperation = 'source-in'; w2.translate(-x0, -y0); w2.fillStyle = pat; w2.fillRect(x0, y0, ww, hh); w2.setTransform(1, 0, 0, 1, 0, 0);
+          paintArea(s2, it, TL, k, '#fff', false);
+          ng.globalCompositeOperation = 'destination-in'; ng.drawImage(same, 0, 0);
+          ng.globalCompositeOperation = 'source-over'; ng.drawImage(whole, 0, 0);
+          same.width = same.height = 0; whole.width = whole.height = 0;
+        }
         fg.save(); fg.globalCompositeOperation = 'source-atop'; fg.drawImage(nf, x0, y0); fg.restore();
         A.width = A.height = 0; nf.width = nf.height = 0;
       }
@@ -991,12 +1010,17 @@ void main(){
     // the floors drawn before it that lie in this box (their shapes are part of what the mask is)
     const prior = [];
     const X0 = ox + (lx / DQ) * g; const Y0 = oy + (ly / DQ) * g; const X1 = X0 + (nw / DQ) * g; const Y1 = Y0 + (nh / DQ) * g;
+    // (Beta 3.40) a floor blends with the floors at its own height only: a floor higher or lower under it is a step,
+    // where nothing fades. A painted tile goes into whatever lies under the brush
+    const lvl = paintOnly ? null : it.level || 0;
+    const apart = (o) => lvl !== null && o.kind === 'area' && (o.level || 0) !== lvl;
+    let other = false;
     for (let n = 0; n < before.n; n++) {
       const o = before.items[n];
       if (o.kind !== 'area' && o.kind !== 'ground' && o.kind !== 'cut') continue;
-      const b = itemBox(o); if (b[0] < X1 && b[2] > X0 && b[1] < Y1 && b[3] > Y0) prior.push(o);
+      const b = itemBox(o); if (b[0] < X1 && b[2] > X0 && b[1] < Y1 && b[3] > Y0) { prior.push(o); if (apart(o)) other = true; }
     }
-    const key = fingerprint(JSON.stringify([shapeKey(it), paintOnly ? 1 : 0, round4(w / P), prior.map(shapeKey), round4(g), round4(ox), round4(oy), DQ]));
+    const key = fingerprint(JSON.stringify([shapeKey(it), paintOnly ? 1 : 0, round4(w / P), prior.map(shapeKey), prior.map((o) => (apart(o) ? 1 : 0)), round4(g), round4(ox), round4(oy), DQ]));
     const had = MASKS.get(key);
     if (had) { MASKS.delete(key); MASKS.set(key, had); prof.maskKept++; return had; }
     prof.maskMade++;
@@ -1008,7 +1032,7 @@ void main(){
     const Hc = mk(nw, nh); paintArea(Hc.getContext('2d', CPU), paintOnly ? { ...it, r: Math.max(it.r * 0.3, it.r - 0.3 * (w / k)) } : it, Tl0, kq, '#fff', false); // (a brush: full in its middle; the soft edge takes 0.3 of its width from it)
     // (the floor drawn before it, from the drawing itself: the same on every tile, also beyond its edge)
     const Fc = mk(nw, nh); const fgc = Fc.getContext('2d', CPU);
-    for (const o of prior) { if (o.kind === 'cut') paintArea(fgc, o, Tl0, kq, null, true); else paintArea(fgc, o, Tl0, kq, '#fff', false); }
+    for (const o of prior) { if (o.kind === 'cut' || apart(o)) paintArea(fgc, o, Tl0, kq, null, true); else paintArea(fgc, o, Tl0, kq, '#fff', false); }
     fgc.drawImage(Hc, 0, 0);
     const blurred = (src) => { const c = mk(nw, nh); const g2 = c.getContext('2d', CPU); g2.filter = `blur(${Math.max(0.3, sig).toFixed(3)}px)`; g2.drawImage(src, 0, 0); g2.filter = 'none'; return c; };
     const Hb = blurred(Hc); const Fb = blurred(Fc);
@@ -1080,7 +1104,7 @@ void main(){
     // a touch softer; kept (the oldest masks make room)
     const cv = mk(nw, nh); { const sg = cv.getContext('2d', CPU); sg.filter = 'blur(0.4px)'; sg.drawImage(Bc, 0, 0); sg.filter = 'none'; }
     for (const c of [Hc, Fc, Hb, Fb]) c.width = c.height = 0;
-    const M = { cv, lx, ly, nw, nh, dq: DQ, tx0: bx0, ty0: by0, tx1: bx1, ty1: by1, px: nw * nh };
+    const M = { cv, lx, ly, nw, nh, dq: DQ, tx0: bx0, ty0: by0, tx1: bx1, ty1: by1, px: nw * nh, other };
     MASKS.set(key, M); maskPx += M.px;
     for (const [k0, m0] of MASKS) { if (maskPx <= MASK_MAX || k0 === key) break; MASKS.delete(k0); maskPx -= m0.px; } // (a picture being made may still hold one: it is let go when nothing does)
     return M;
@@ -1108,7 +1132,7 @@ void main(){
       const it = os.items[n]; const before = { items: os.items, n }; // (what was drawn before it: for mixing)
       if (it.kind === 'area') {
         const t = tileInfo(it.tile, lib) || tileInfo({ rel: relOf(FLOORS[0]) });
-        if (it.mixW > 0 && !(it.level || 0)) mixArea(fg, it, T, k, P, org, patOf(t), it.mixW * P, false, before); // (Beta 3.27)
+        if (it.mixW > 0) mixArea(fg, it, T, k, P, org, patOf(t), it.mixW * P, false, before); // (Beta 3.27; 3.40: at any height)
         else paintArea(fg, it, T, k, patOf(t), false);
         if (hg && it.edge === 'fade') paintHalo(hg, it, T, k, patOf(t), FADE_R * P);
         if (ag) paintArea(ag, it, T, k, `rgb(${EDGE_CODE[it.edge] * 40},${128 + it.level * 30},${matCode(it.mat || DEFAULT_MAT[it.edge])})`, false);
@@ -1126,11 +1150,24 @@ void main(){
         if (ag) { ag.save(); ag.globalCompositeOperation = 'destination-over'; paintArea(ag, it, T, k, `rgb(${EDGE_CODE.ledge * 40},128,${matCode('stone_wall')})`, false); ag.restore(); } // (on nothing: a pool in the dark)
       } else if (it.kind === 'stairs') {
         const [x, y, w, h] = stairsBox(it, T);
-        const len = it.dir % 2 === 0 ? w : h; const steps = Math.max(2, Math.round((len / P) * 2)); // (Beta 3.29: two steps a square)
+        const len = it.dir % 2 === 0 ? w : h;
+        // Beta 3.40: they climb as many levels as lie between the floor at their foot and the floor beyond their top
+        // (one, as before, where no higher floor is there). Read from what is drawn so far: the floor's edge, level
+        // and material under a dot
+        const attrAt = (px2, py2) => { if (!ag) return null; const W = ag.canvas.width; const Hh = ag.canvas.height; if (px2 < 0 || py2 < 0 || px2 >= W || py2 >= Hh) return null; const d = ag.getImageData(Math.round(px2), Math.round(py2), 1, 1).data; return d[3] > 128 ? d : null; };
+        const along2 = (a) => (it.dir === 0 ? [x + a, y + h / 2] : it.dir === 2 ? [x + w - a, y + h / 2] : it.dir === 1 ? [x + w / 2, y + a] : [x + w / 2, y + h - a]);
+        const foot = attrAt(...along2(Math.min(len * 0.25, P * 0.2))) || attrAt(x + w / 2, y + h / 2);
+        const top = attrAt(...along2(len + P * 0.3));
+        const lv = (d) => Math.round((d[1] - 128) / 30);
+        const rise = foot && top ? Math.max(1, Math.min(6, lv(top) - lv(foot))) : 1;
+        const steps = Math.min(120, Math.max(2, Math.round((len / P) * 2), rise * 3)); // (Beta 3.29: two steps a square; 3.40: at least three a level)
         if (tg) {
+          // (whole dots, so that no dot at its rim carries half a number)
+          const bx = Math.round(x); const by = Math.round(y); const bw = Math.max(1, Math.round(x + w) - bx); const bh = Math.max(1, Math.round(y + h) - by);
           const gr = it.dir === 0 ? tg.createLinearGradient(x, 0, x + w, 0) : it.dir === 2 ? tg.createLinearGradient(x + w, 0, x, 0) : it.dir === 1 ? tg.createLinearGradient(0, y, 0, y + h) : tg.createLinearGradient(0, y + h, 0, y);
-          gr.addColorStop(0, `rgb(0,255,${steps})`); gr.addColorStop(1, `rgb(255,255,${steps})`);
-          tg.fillStyle = gr; tg.fillRect(x, y, w, h);
+          const gcode = 255 - 10 * (rise - 1); // (green: it is stairs, and how many levels they climb)
+          gr.addColorStop(0, `rgb(0,${gcode},${steps})`); gr.addColorStop(1, `rgb(255,${gcode},${steps})`);
+          tg.fillStyle = gr; tg.fillRect(bx, by, bw, bh);
         }
         // the steps themselves (Beta 3.29: of the floor picked, stairs from before of their material): from dark at the
         // bottom to bright at the top, each step's front (the riser, toward the bottom of the stairs) a dark band with a
@@ -1176,12 +1213,8 @@ void main(){
         fg.fillStyle = grad(0, along, [[0, 'rgba(0,0,0,0)'], [Math.min(0.99, e0), 'rgba(0,0,0,0.45)'], [1, 'rgba(0,0,0,0.45)']]);
         if (it.dir % 2 === 0) { fg.fillRect(x, y, w, side); fg.fillRect(x, y + h - side, w, side); } else { fg.fillRect(x, y, side, h); fg.fillRect(x + w - side, y, side, h); }
         fg.restore();
-        // stairs count as floor, at the level of the floor they stand on
-        if (ag) {
-          const W = ag.canvas.width; const Hh = ag.canvas.height;
-          const id = ag.getImageData(Math.max(0, Math.min(W - 1, Math.round(x + w / 2))), Math.max(0, Math.min(Hh - 1, Math.round(y + h / 2))), 1, 1).data;
-          ag.fillStyle = id[3] > 128 ? `rgb(${id[0]},${id[1]},${id[2]})` : `rgb(80,128,${matCode('stone_wall')})`; ag.fillRect(x, y, w, h);
-        }
+        // stairs count as floor, at the level of the floor at their foot (3.40; before: the floor under their middle)
+        if (ag) { ag.fillStyle = foot ? `rgb(${foot[0]},${foot[1]},${foot[2]})` : `rgb(80,128,${matCode('stone_wall')})`; ag.fillRect(x, y, w, h); }
       }
     }
     // doors: an opening in wall lines (the door itself is drawn on top at the end). Beta 3.34: not a window (it sits

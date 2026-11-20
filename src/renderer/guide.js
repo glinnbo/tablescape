@@ -24,6 +24,11 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.40', [
+      'Oldschool maps: stairs follow the heights. They climb every level between the floor at their foot and the floor at their top, with more steps the higher they go (before, they always climbed one level and ended in a step). Maps drawn before are made anew with it',
+      'Blending on raised and lowered floors: a floor blends with the floors at its own height, on a platform or in a pit as on floor level. Where a higher or lower floor begins, the step stays sharp',
+      'Doors and windows on any wall: the slanted side of a Shape, a round room, a slanted wall line, a room drawn off the grid. The mark snaps to the nearest wall; a click gives one square, a drag a longer one, a click on it takes it away again. On a round room a door is never longer than fits in the wall',
+    ]],
     ['Beta 3.39', [
       'Oldschool maps: a step between floors of different height now shows on every side, not only where the sun\'s shadow falls. A soft dark lies at the foot of every step; the upper edge is bevelled, lighter where it looks at the sun and darker where it looks away; higher floors are a touch lighter, lower ones darker. Maps drawn before are made anew with it',
     ]],

@@ -28,8 +28,8 @@ const OldschoolTool = (() => {
     { id: 'wall', label: 'Wall', icon: 'wall', tip: 'Drag a wall from corner to corner' },
     { id: 'pillar', label: 'Pillar', icon: 'square-dashed', tip: 'Click a square for a pillar' },
     { id: 'stairs', label: 'Stairs', icon: 'stairs', tip: 'Drag where they go: they climb toward where you drag' },
-    { id: 'door', label: 'Door', icon: 'door', tip: 'Click a grid line: a door there; drag along it: a longer one' },
-    { id: 'window', label: 'Window', icon: 'window', tip: 'Click a grid line: a window there; drag along it: a longer one' },
+    { id: 'door', label: 'Door', icon: 'door', tip: 'Click a wall or a grid line: a door there; drag along it: a longer one' },
+    { id: 'window', label: 'Window', icon: 'window', tip: 'Click a wall or a grid line: a window there; drag along it: a longer one' },
   ];
   // Beta 3.28: Corridor, Floor and Pieces left the toolbar (what they made still draws and erases)
   // Beta 3.25: the ground the Ground tool lays (the effects of the same name, with a pool in the picture)
@@ -164,8 +164,14 @@ const OldschoolTool = (() => {
       lastD = null;
       const m = map(); if (!m || !m.os) return;
       if (d.kind === 'osdoor') { // (Beta 3.33) a click: a door of one square, or the one there goes; a drag: any length
-        const seg = doorSeg(d.a, d.b);
-        if (!seg) placeDoor(d.a); else putDoor(seg);
+        const seg = doorFor(d.a, d.b);
+        if (!seg) placeDoor(d.a);
+        else if (seg.wall && Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) < g() / 3) { // (a click on a wall off the grid: a door there, or the one there goes)
+          const on = (x) => { const lx = x.x2 - x.x1; const ly = x.y2 - x.y1; const L2 = lx * lx + ly * ly || 1; const u = Math.max(0, Math.min(1, ((d.a.x - x.x1) * lx + (d.a.y - x.y1) * ly) / L2)); return Math.hypot(d.a.x - x.x1 - lx * u, d.a.y - x.y1 - ly * u); };
+          const old = m.os.doors.filter((x) => on(x) < g() * 0.6).sort((p, q) => on(p) - on(q))[0];
+          if (old) cmd('os.remove', { id: old.id }).then((r) => { if (r && r.ok) toast('Door removed', { ms: 1400, undo: () => cmd('history.undo') }); });
+          else putDoor(seg);
+        } else putDoor(seg);
         drawPreview(); return;
       }
       if (d.kind === 'osbox') {
@@ -265,6 +271,69 @@ const OldschoolTool = (() => {
       cmd('os.add', { items: P.items, doors: P.doors }).then((r) => { if (r && r.ok) toast(`${P.p.label} placed`, { ms: 1600, undo: () => cmd('history.undo') }); });
     }
     function turnPiece() { O.turn = ((O.turn || 0) + 1) % 4; save(); drawPreview(lastPt); }
+    // Beta 3.40: doors and windows on any wall, not only on grid lines: the slanted side of a Shape, a round room's
+    // wall, a slanted wall line, a room drawn off the grid (Half, Free). The wall nearest to the pointer within reach
+    // (a wall on a grid line is left to the grid, as before: where one is nearer, it wins); null: none there
+    function wallAt(pt) {
+      const m = map(); if (!m || !m.os) return null;
+      const s = g(); const G = grid(); let best = null;
+      const onLine = (v, o) => Math.abs((v - o) / s - Math.round((v - o) / s)) < 0.02;
+      const seg = (ax, ay, bx, by, reach) => {
+        const lx = bx - ax; const ly = by - ay; const L = Math.hypot(lx, ly); if (L < s * 0.3) return;
+        const onGrid = (Math.abs(lx) < s * 0.02 && onLine(ax, G.ox)) || (Math.abs(ly) < s * 0.02 && onLine(ay, G.oy));
+        const t = ((pt.x - ax) * lx + (pt.y - ay) * ly) / L; const slack = onGrid ? 0 : s * 0.25; if (t < -slack || t > L + slack) return;
+        const dist = Math.abs((pt.x - ax) * ly - (pt.y - ay) * lx) / L; if (dist > reach) return;
+        if (!best || dist < best.dist) best = onGrid ? { dist, grid: true } : { dist, ax, ay, ux: lx / L, uy: ly / L, L, t: Math.max(0, Math.min(L, t)) };
+      };
+      for (const it of m.os.items) {
+        if (it.kind === 'line') { for (let i = 0; i + 1 < it.pts.length; i++) seg(it.pts[i][0], it.pts[i][1], it.pts[i + 1][0], it.pts[i + 1][1], (it.w || s * 0.5) / 2 + s * 0.25); continue; }
+        if (it.kind !== 'area') continue;
+        if (it.shape === 'poly') it.pts.forEach((q, i) => { const n = it.pts[(i + 1) % it.pts.length]; seg(q[0], q[1], n[0], n[1], s * 0.6); });
+        else if (it.shape === 'rect') {
+          const [[x0, y0], [x1, y1]] = it.pts; const c = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+          c.forEach((q, i) => { const n = c[(i + 1) % 4]; seg(q[0], q[1], n[0], n[1], s * 0.6); });
+        } else if (it.shape === 'round') {
+          const [[x0, y0], [x1, y1]] = it.pts; const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2; const rx = Math.abs(x1 - x0) / 2; const ry = Math.abs(y1 - y0) / 2;
+          if (rx < s * 0.6 || ry < s * 0.6) continue;
+          const a = Math.atan2((pt.y - cy) / ry, (pt.x - cx) / rx);
+          const dist = Math.hypot(pt.x - (cx + rx * Math.cos(a)), pt.y - (cy + ry * Math.sin(a)));
+          if (dist <= s * 0.6 && (!best || dist < best.dist)) best = { dist, round: { cx, cy, rx, ry, a } };
+        }
+      }
+      return best && !best.grid ? best : null;
+    }
+    // the door on that wall: one square where a click went, or from a to b along it. It moves in half steps counted from
+    // the wall's middle, so a door can sit in the middle of a wall of any length; on a round wall the steps go round
+    // from its four sides, and the door is the chord there, never so long that it would leave the wall
+    function wallDoor(w, a, b) {
+      const s = g(); const st = O.snap === 'half' ? s / 2 : s;
+      const drag = b && Math.hypot(b.x - a.x, b.y - a.y) >= s / 3;
+      if (w.round) {
+        const { cx, cy, rx, ry } = w.round; const r = (rx + ry) / 2;
+        const at = (q) => Math.atan2((q.y - cy) / ry, (q.x - cx) / rx);
+        const cap = 2 * Math.sqrt(2 * r * 0.12 * s); // (its middle stays within 0.12 squares of the wall)
+        let ang = w.round.a; let len = Math.min(s, cap);
+        if (drag) { const a0 = at(a); let da = at(b) - a0; da = Math.atan2(Math.sin(da), Math.cos(da)); ang = a0 + da / 2; len = Math.min(cap, Math.max(st, 2 * r * Math.sin(Math.min(Math.PI / 2, Math.abs(da) / 2)))); }
+        else { const step = (2 * Math.PI) / (Math.max(1, Math.round((2 * Math.PI * r) / (st / 2) / 8)) * 8); ang = Math.round(ang / step) * step; }
+        const h = Math.asin(Math.min(1, len / 2 / r));
+        return { x1: cx + rx * Math.cos(ang - h), y1: cy + ry * Math.sin(ang - h), x2: cx + rx * Math.cos(ang + h), y2: cy + ry * Math.sin(ang + h) };
+      }
+      let t0; let t1; const h = st / 2; const mid = w.L / 2;
+      if (drag) {
+        const tb = Math.max(0, Math.min(w.L, (b.x - w.ax) * w.ux + (b.y - w.ay) * w.uy));
+        t0 = mid + Math.round((Math.min(w.t, tb) - mid) / h) * h; t1 = mid + Math.round((Math.max(w.t, tb) - mid) / h) * h;
+        if (t1 - t0 < st) { const c = (t0 + t1) / 2; t0 = c - st / 2; t1 = c + st / 2; }
+      } else { const c = mid + Math.round((w.t - mid) / h) * h; t0 = c - s / 2; t1 = c + s / 2; }
+      if (t1 > w.L) { t0 -= t1 - w.L; t1 = w.L; } // (it stays on the wall)
+      if (t0 < 0) { t1 = Math.min(w.L, t1 - t0); t0 = 0; }
+      return { x1: w.ax + w.ux * t0, y1: w.ay + w.uy * t0, x2: w.ax + w.ux * t1, y2: w.ay + w.uy * t1 };
+    }
+    // the door a click or a drag gives: on a wall off the grid if one is there, else on the grid line as before (null: a
+    // click on the grid, which placeDoor takes)
+    function doorFor(a, b) {
+      const w = wallAt(a);
+      return w ? { ...wallDoor(w, a, b), wall: true } : doorSeg(a, b);
+    }
     // a door on the grid line nearest to the click, one square long
     function placeDoor(pt) {
       const G = grid(); const s = g();
@@ -404,7 +473,7 @@ const OldschoolTool = (() => {
       else if (d && d.kind === 'osbrush') cur = { kind: d.ground ? 'ground' : d.cut ? 'cut' : 'area', shape: 'brush', pts: d.pts, r: d.r, tile: O.floor, preset: d.ground };
       else if (d && d.kind === 'osline') cur = { kind: 'line', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], w: O.line.w * g() };
       else if (d && d.kind === 'osstairs') cur = { kind: 'stairs', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], tile: O.floor };
-      else if (d && d.kind === 'osdoor') { const q = doorSeg(d.a, d.b); if (q) root.append(el('line', { x1: q.x1, y1: q.y1, x2: q.x2, y2: q.y2, stroke: '#f0b44a', 'stroke-width': g() * 0.18, 'stroke-linecap': 'round' })); }
+      else if (d && d.kind === 'osdoor') { const q = doorFor(d.a, d.b); if (q) root.append(el('line', { x1: q.x1, y1: q.y1, x2: q.x2, y2: q.y2, stroke: '#f0b44a', 'stroke-width': g() * 0.18, 'stroke-linecap': 'round' })); }
       if (cur && (cur.kind === 'line' || cur.shape === 'path' || cur.shape === 'brush')) {
         // (Beta 3.28) a stroke shows at its real width while dragging, with an orange rim (it used to vanish)
         const w = cur.kind === 'line' ? cur.w : cur.r * 2;
@@ -426,9 +495,12 @@ const OldschoolTool = (() => {
         root.append(el('rect', { x: P.x0, y: P.y0, width: P.w * g(), height: P.h * g(), fill: 'none', stroke: '#f0b44a', 'stroke-width': thin, 'stroke-dasharray': `${thin * 3} ${thin * 2}` }));
       }
       // where a click would go (pillars and doors)
-      if (pt && (!d || (d.kind === 'osdoor' && !doorSeg(d.a, d.b))) && (O.tool === 'pillar' || O.tool === 'door' || O.tool === 'window')) {
+      if (pt && (!d || (d.kind === 'osdoor' && !doorFor(d.a, d.b))) && (O.tool === 'pillar' || O.tool === 'door' || O.tool === 'window')) {
         if (O.tool === 'pillar') { const q = pillarAt(pt); root.append(shapeEl({ kind: 'pillar', pts: [[q.x, q.y]], r: O.pillar.r * g(), round: O.pillar.round }, 'rgba(240,180,74,0.5)')); }
-        else {
+        else if (wallAt(pt)) { // (Beta 3.40: on a wall off the grid)
+          const q = wallDoor(wallAt(pt), pt, null);
+          root.append(el('line', { x1: q.x1, y1: q.y1, x2: q.x2, y2: q.y2, stroke: '#f0b44a', 'stroke-width': g() * 0.18, 'stroke-linecap': 'round' }));
+        } else {
           const G = grid(); const s = g(); const u = (pt.x - G.ox) / s; const v2 = (pt.y - G.oy) / s;
           const vert = Math.abs(u - Math.round(u)) <= Math.abs(v2 - Math.round(v2));
           const a = vert ? [G.ox + Math.round(u) * s, G.oy + Math.floor(v2) * s] : [G.ox + Math.floor(u) * s, G.oy + Math.round(v2) * s];
@@ -842,8 +914,8 @@ const OldschoolTool = (() => {
         wordSlider({ name: 'Mix width', lo: 'sharp', hi: 'soft', min: 0, max: 3, step: 0.5, get: () => O.mixW, set: (v) => { O.mixW = v; upd(); }, fmt: (v) => (v ? `${v} square${v === 1 ? '' : 's'}` : 'off') }),
         wordSlider({ name: 'Uneven', lo: 'straight', hi: 'wild', min: 0, max: 1, step: 0.05, get: () => O.mixU, set: (v) => { O.mixU = v; upd(); }, fmt: pct }),
         wordSlider({ name: 'Tiled', lo: 'smooth', hi: 'stone by stone', min: 0, max: 1, step: 0.05, get: () => O.mixT, set: (v) => { O.mixT = v; upd(); }, fmt: pct })];
-      // Blending: four looks to pick from; the small button opens the sliders. Floors only blend at floor level, so a
-      // floor about to be drawn higher or lower does not show it
+      // Blending: four looks to pick from; the small button opens the sliders (Beta 3.40: at any height: a floor blends
+      // with the floors at its own height)
       let usesBlend = false;
       const blending = () => {
         usesBlend = true;
@@ -853,7 +925,6 @@ const OldschoolTool = (() => {
           options: () => LOOKS.map((l) => ({ value: l.id, label: l.label, art: lookArt(l.id, tileUrl(tileNow()), other()) })),
           get: lookNow, set: (v) => { const l = LOOKS.find((x) => x.id === v); O.mixW = l.mixW; if (l.mixW) { O.mixU = l.mixU; O.mixT = l.mixT; } upd(); } });
         const box = h('div', { class: 'stack os-blend' }, h('div', { class: 'os-hd' }, h('span', { class: 'ctl-label' }, 'Blending'), fine), row);
-        bind(() => { box.hidden = AREA_TOOLS.includes(O.tool) && !!O.level; });
         return box;
       };
       const madeOf = () => [h('div', { class: 'ctl-label' }, 'Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; upd(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff'])];

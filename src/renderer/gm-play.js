@@ -645,7 +645,7 @@ const Play = (() => {
       'Edges: Walls are built around the floor; Rock carves rooms out of stone; Ledge and Cliff drop into darkness; Fade lets the floor fade into the dark. One can see across Ledge, Cliff and Fade.',
       'Wall, Pillar, Stairs, Door and Window come out beside Room when you pick it.',
       'Higher and Lower step a floor up or down, a level a click (three each way): platforms and pits. The button between them puts it back to floor level. Stairs climb toward where you drag, in the floor you picked. Doors sit on grid lines: click one again to take it away.',
-      'Blending is how a floor runs into the floors around it: Sharp, Soft, Natural or Tiled; the small button beside it fine-tunes. Floors blend at floor level only.',
+      'Blending is how a floor runs into the floors around it: Sharp, Soft, Natural or Tiled; the small button beside it fine-tunes. A floor blends with the floors at its own height; where a higher or lower one begins there is a step.',
       'Doors open and shut on the table: the leaf swings when you open a door.',
       'Your own tiles go into the library\'s Tiles section; the first time you use one, you set its grid. Right-click any floor → Adjust grid: its joints are the squares. Drag a tile from the library onto a floor to give it that tile.'],
     map: ['Drag the map to move it; Alt + wheel scales it. Fog, grid, tokens and effects move with it.', 
@@ -755,7 +755,7 @@ const Play = (() => {
   }
   // Prototype 25: one line with what you cannot guess, shown for a few seconds when a tool is picked (Options → This screen)
   const TOOL_HINTS = {
-    oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a grid line · again: the door goes' }[ui.os && ui.os.tool] || ''),
+    oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a wall · drag: a longer one · again: the door goes', window: 'Click a wall · drag: a longer one · again: the window goes' }[ui.os && ui.os.tool] || ''),
     map: 'Drag moves the map · Alt + wheel scales it · Space-drag moves your view',
     fx: () => ({ place: 'Click places it · drag its marker to move it · right-click for more', paint: '[ and ] change the brush size', light: 'Click the map or a token to place a light', weather: '' }[ui.fxMode] || ''),
     asset: 'Click stamps · drag scatters · Ctrl + wheel turns · [ and ] resize · Shift + click selects several',
