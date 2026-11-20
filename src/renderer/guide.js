@@ -24,6 +24,15 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.38', [
+      'Draw menu: Wall, Pillar, Stairs, Door and Window now come out in a second column, in blue, when Room is picked, and stay while one of them is in use. The other tools show one column of six',
+      'Floor heights stack: Lower and Higher step one level a click, from three down to three up. The button between them shows the level and puts it back to floor level',
+      'Blending replaces the sliders on the left: pick how a floor runs into its neighbours from four looks (Sharp, Soft, Natural, Tiled). The small button beside it opens the three sliders for fine-tuning',
+      'Tile tool: it blends too. A whole floor takes the tile together with the look; a painted tile has a soft edge as wide as the look says (Sharp gives a clean edge)',
+      'Draw → Tiles → List …: a switch to sort by Name, Colour (greys first, then round the colour wheel) or Newest. The choice is kept',
+      'Draw menu: the tool tabs slide out from behind the panel when it opens, one after the other; Room\'s parts slide out from behind the tools when you pick Room',
+      'Tablescape settings, Campaign settings and the home screen\'s panels slide in more slowly, and slide out again when you close them (before, they just vanished). Going from Campaign settings to Tablescape settings and back, the panel stays where it is',
+    ]],
     ['Beta 3.37', [
       'The Draw menu made new: the tools are tabs along the panel\'s right edge; at the top a picture of what is about to be drawn; height and edge are little drawings to pick from; the sliders for where floors meet stand upright beside the panel with words at their ends (the number shows as you hover); Map settings (light, shadows, walls for sight, Clear) open from one button at the bottom',
       'Draw → Tile, a new tool that changes a floor\'s tile and nothing else (not its height, edge or shape): click a floor for the whole of it, or paint the tile on with the brush',

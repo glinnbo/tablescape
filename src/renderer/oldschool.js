@@ -367,7 +367,7 @@ const Oldschool = (() => {
   function reaches(os, g) {
     const S = shadowOf(os); const light = Math.max(0.7, S.tan ? 2.2 / S.tan : 0, S.all > 0 ? 2.7 : 0);
     let edge = 0; for (const it of os.items) if (it.kind === 'area') edge = Math.max(edge, EDGE_REACH[it.edge] ?? 3.2);
-    const mixers = []; os.items.forEach((it, n) => { if (mixes(it)) mixers.push({ n, box: itemBox(it), pad: (it.kind === 'paint' ? 1.2 * (it.r / g) : 1.35 * it.mixW) + 0.85 }); });
+    const mixers = []; os.items.forEach((it, n) => { if (mixes(it)) mixers.push({ n, box: itemBox(it), pad: (it.kind === 'paint' ? 1.2 * (it.mixW != null ? it.mixW : it.r / g) : 1.35 * it.mixW) + 0.85 }); });
     const out = new Map();
     os.items.forEach((it, n) => {
       if (it.kind === 'line' || it.kind === 'pillar') { out.set(it, light + 0.4); return; }
@@ -978,7 +978,7 @@ void main(){
     // (1) the soft line: of the floor around a place (the floor there and the new one), how much is new. So the line runs
     // along the edge between the two floors, and where both end at the dark or a wall nothing fades
     const kq = DQ / g; const Tl0 = (x, y) => [(x - ox) * kq - lx, (y - oy) * kq - ly];
-    const Hc = mk(nw, nh); paintArea(Hc.getContext('2d', CPU), paintOnly ? { ...it, r: it.r * 0.7 } : it, Tl0, kq, '#fff', false); // (a brush: full in its middle)
+    const Hc = mk(nw, nh); paintArea(Hc.getContext('2d', CPU), paintOnly ? { ...it, r: Math.max(it.r * 0.3, it.r - 0.3 * (w / k)) } : it, Tl0, kq, '#fff', false); // (a brush: full in its middle; the soft edge takes 0.3 of its width from it)
     // (the floor drawn before it, from the drawing itself: the same on every tile, also beyond its edge)
     const Fc = mk(nw, nh); const fgc = Fc.getContext('2d', CPU);
     for (const o of prior) { if (o.kind === 'cut') paintArea(fgc, o, Tl0, kq, null, true); else paintArea(fgc, o, Tl0, kq, '#fff', false); }
@@ -1093,7 +1093,7 @@ void main(){
         paintSolid(sg, it, T, k, `rgb(255,${Math.round((it.h || 1) * 100)},${matCode(it.mat)})`, false);
       } else if (it.kind === 'paint') { // (Beta 3.26) a floor painted into the floors under the brush
         const t = tileInfo(it.tile, lib) || tileInfo({ rel: relOf(FLOORS[0]) });
-        mixArea(fg, it, T, k, P, org, patOf(t), it.r * k, true, before);
+        mixArea(fg, it, T, k, P, org, patOf(t), it.mixW != null ? Math.max(0.05, it.mixW) * P : it.r * k, true, before); // (Beta 3.38: a soft edge of its own width; before: as wide as the brush)
       } else if (it.kind === 'ground') { // (Beta 3.25) a pool of water, lava, acid or swamp; magical darkness is the effect alone
         if (it.preset !== 'darkness') paintGround(fg, it, T, k, P, org);
         if (ag) { ag.save(); ag.globalCompositeOperation = 'destination-over'; paintArea(ag, it, T, k, `rgb(${EDGE_CODE.ledge * 40},128,${matCode('stone_wall')})`, false); ag.restore(); } // (on nothing: a pool in the dark)

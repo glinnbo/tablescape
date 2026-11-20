@@ -865,7 +865,8 @@ const App = (() => {
   function openCampaignSettings(section) { return openPanel('camp', section); }
   function openPanel(scope, section, flash) {
     if (scope === 'camp' && !(S && S.campaign)) { UI.toast('Open a campaign first'); return; }
-    if (setupEl && optScope !== scope) closeOptions();
+    const swap = !!(setupEl && optScope !== scope);
+    if (swap) closeOptions(true); // (from one to the other: no sliding out and in)
     optScope = scope;
     const list = sectionsOf(scope);
     if (section && list.some((x) => x.id === section)) {
@@ -900,7 +901,8 @@ const App = (() => {
       const edgeSvg = document.createElementNS(ns, 'svg');
       edgeSvg.setAttribute('class', 'hm-dr-edge opt-edge'); edgeSvg.setAttribute('aria-hidden', 'true');
       for (const cls of ['glow', 'line']) { const l = document.createElementNS(ns, 'line'); l.setAttribute('x1', '90'); l.setAttribute('y1', '0'); l.setAttribute('x2', '0'); l.setAttribute('y2', '100%'); l.setAttribute('class', cls); edgeSvg.append(l); }
-      setupEl = h('div', { class: 'modal-back options-back', onpointerdown: (e) => { if (e.target === setupEl) closeOptions(); } }, edgeSvg, panel);
+      if (optLeaving) { optLeaving.remove(); optLeaving = null; } // (one still sliding out: gone at once)
+      setupEl = h('div', { class: `modal-back options-back${swap ? ' still' : ''}`, onpointerdown: (e) => { if (e.target === setupEl) closeOptions(); } }, edgeSvg, panel);
       document.body.append(setupEl);
     }
     fillOptions();
@@ -942,10 +944,14 @@ const App = (() => {
     };
     step();
   }
-  function closeOptions() {
+  let optLeaving = null;
+  function closeOptions(quick) {
     if (!setupEl) return;
     UI.closeMenu();
-    setupEl.remove();
+    // (Beta 3.38) it slides out the way it came in (quick: gone at once, when another panel takes its place)
+    const gone = setupEl;
+    if (optLeaving) optLeaving.remove();
+    if (quick === true) { gone.remove(); optLeaving = null; } else { optLeaving = gone; gone.classList.add('out'); setTimeout(() => { gone.remove(); if (optLeaving === gone) optLeaving = null; }, 380); }
     setupEl = null;
     setupRefs = [];
     if (previewAudio) { previewAudio.pause(); previewAudio = null; }

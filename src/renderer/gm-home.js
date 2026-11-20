@@ -500,10 +500,12 @@ const Home = (() => {
     }
     return svg;
   }
+  let leaving = null;
   async function drawer(kind, opts = {}) {
     if (kind === 'check') { closeDrawer(true); App.openOptions('check'); return; } // (Beta 3.19: Tablescape settings → Table check)
     if (!(await ensureOpen())) return;
     closeDrawer(true);
+    if (leaving) { leaving.remove(); leaving = null; } // (one still sliding out: gone at once)
     refs = [];
     if (kind === 'screens' || kind === 'settings') { campaignSettings(kind === 'screens' ? 'screens' : 'campaign'); return; } // (Beta 3.18: in Campaign settings)
     if (kind === 'players') playersDrawer(opts);
@@ -516,8 +518,11 @@ const Home = (() => {
     cur = null;
     refs = [];
     if (quick) { back.remove(); return; }
+    // (Beta 3.38) it slides out the way it came; one still on its way out goes at once when the next one closes
+    if (leaving) leaving.remove();
+    leaving = back;
     back.classList.add('out');
-    setTimeout(() => back.remove(), 220);
+    setTimeout(() => { back.remove(); if (leaving === back) leaving = null; }, 380);
   }
 
   // ---------- Players: who plays, who is here today ----------

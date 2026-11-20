@@ -11,7 +11,8 @@ const PickList = (() => {
   // o: { bind, items () → [{ path, name, kind, thumb, rel }], pathOf (it) → [folders] (4.11; before: folderOf), rootLabel, memKey,
   //      shortName (it) → its name inside its folder, shelves [{ id, label, has (it) }],
   //      round (round thumbs: tokens), pick (it), state (it) → { on, badge }, ready { chapter (), has (path), toggle (it, on) },
-  //      extra (it) → element, empty (text), foot [elements], dragCat }
+  //      extra (it) → element, empty (text), foot [elements], dragCat,
+  //      sorts [{ id, label, tip, cmp (a, b) }] (Beta 3.38: a switch at the top; the first is how it starts, the pick is kept) }
   function build(o) {
     let q = ''; let filter = 'all';
     // 4.11: the folder you are in (all its subfolders show too), kept for next time; chips for the folders in it
@@ -26,6 +27,12 @@ const PickList = (() => {
     const chips = h('div', { class: 'pl-chips' });
     const grid = h('div', { class: `pl-grid ${o.round ? 'round' : ''}` });
     search.addEventListener('input', () => { q = search.value.trim().toLowerCase(); draw(); });
+    // Beta 3.38: the order of what is shown, picked at the top and kept for next time
+    const sorts = o.sorts || []; const sortKey = o.memKey ? `pickSort:${o.memKey}` : null;
+    let sortId = sorts.length ? sorts[0].id : null;
+    try { const had = sortKey && localStorage.getItem(sortKey); if (had && sorts.some((x) => x.id === had)) sortId = had; } catch {}
+    const sortSeg = sorts.length > 1 ? h('div', { class: 'seg pl-sort', role: 'radiogroup', 'aria-label': 'Sort by' }, ...sorts.map((x) => h('button', { class: 'seg-btn', role: 'radio', dataset: { v: x.id }, 'data-tip': x.tip || null,
+      onclick: () => { sortId = x.id; try { if (sortKey) localStorage.setItem(sortKey, sortId); } catch {} draw(); } }, h('span', {}, x.label)))) : null;
     const shelves = o.shelves || [];
     const inside = (it, segs) => { const p = pathOf(it); return segs.every((sg, i) => p[i] === sg); };
     function drawChips(all) {
@@ -58,6 +65,9 @@ const PickList = (() => {
       const words = q ? q.split(/\s+/).filter(Boolean) : [];
       const list = all.filter((it) => (!shelf || shelf.has(it)) && (words.length ? words.every((w) => String(it.name).toLowerCase().includes(w) || pathOf(it).some((f) => f.toLowerCase().includes(w))) : inside(it, at)));
       const ch = o.ready ? o.ready.chapter() : null;
+      const sort = sorts.find((x) => x.id === sortId);
+      if (sort && sort.cmp) list.sort(sort.cmp);
+      if (sortSeg) for (const b of sortSeg.children) { const on = b.dataset.v === sortId; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); }
       const shown = list.slice(0, MAX);
       const sig = JSON.stringify([shown.map((it) => { const st = o.state ? o.state(it) : {}; return [it.path, nameOf(it), !!st.on, st.badge || null, ch && o.ready.has(it.path), o.extraSig ? o.extraSig(it) : null]; }), ch && ch.id, ch && ch.name]);
       count.textContent = list.length > MAX ? `${MAX} of ${list.length}` : list.length === all.length ? `${all.length}` : `${list.length} of ${all.length}`;
@@ -86,7 +96,7 @@ const PickList = (() => {
       }));
     }
     o.bind(draw);
-    return h('div', { class: 'pl' }, h('div', { class: 'pl-top' }, search, count), crumbs, chips, grid, o.foot && o.foot.length ? h('div', { class: 'pl-foot' }, ...o.foot) : null);
+    return h('div', { class: 'pl' }, h('div', { class: 'pl-top' }, search, sortSeg, count), crumbs, chips, grid, o.foot && o.foot.length ? h('div', { class: 'pl-foot' }, ...o.foot) : null);
   }
   // a library item's folder for the chips: "Villains" for Portraits/Villains/…, a pack's name for Packs/<pack>/…
   function folderOf(it, top) {

@@ -211,7 +211,12 @@ module.exports = (area) => {
     await t.until(async () => !(await t.g('App.optionsOpen()')), 3000, 'Campaign settings closes with Esc');
     await t.until(() => !t.state.brk, 3000, 'and the TV leaves the break again');
     await t.g(`App.openCampaignSettings('campaign')`); // (it opens on Campaign next time; the Break tab is remembered)
-    await t.g('App.closeOptions()');
+    // (Beta 3.38) it slides out the way it came in: still there for a moment, on its way, then gone
+    const out = await t.g(`(() => { App.closeOptions(); const b = document.querySelector('.options-back'); const p = b && b.querySelector('.modal.options'); return b ? { open: App.optionsOpen(), cls: b.className, slide: getComputedStyle(p).animationName, secs: parseFloat(getComputedStyle(p).animationDuration), clicks: getComputedStyle(b).pointerEvents } : null; })()`);
+    t.eq(out, { open: false, cls: 'modal-back options-back out', slide: 'hm-slide-out', secs: 0.36, clicks: 'none' }, 'closed at once, and seen sliding out (nothing of it in the way of a click)', out);
+    await t.until(async () => !(await t.count('.options-back')), 3000, 'then gone');
+    const inn = await t.g(`(() => { App.openCampaignSettings('campaign'); const p = document.querySelector('.modal.options'); const r = { slide: getComputedStyle(p).animationName, secs: parseFloat(getComputedStyle(p).animationDuration) }; App.closeOptions(true); return { ...r, left: document.querySelectorAll('.options-back').length }; })()`);
+    t.eq(inn, { slide: 'hm-slide', secs: 0.55, left: 0 }, 'it slides in over a good half second; closed in a hurry it is gone at once', inn);
   });
 
   area.quick('Players: several at once with commas; who is here today', async (t) => {

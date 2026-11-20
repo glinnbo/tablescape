@@ -80,7 +80,8 @@ function cleanOsItem(it) {
   if (kind === 'paint') { // (Beta 3.26) a floor painted into the floors under a brush
     if (pts.length < 1) return null;
     const m = mixOf(it);
-    return { id, kind, shape: 'brush', pts, r: r3(osNum(it.r, 0.75, 0.05, 50)), tile: refOf(it.tile), mixU: m.mixU, mixT: m.mixT };
+    // (Beta 3.38: its soft edge as wide as the panel says; a tile painted before has none and keeps the brush's own)
+    return { id, kind, shape: 'brush', pts, r: r3(osNum(it.r, 0.75, 0.05, 50)), tile: refOf(it.tile), ...(it.mixW !== undefined && it.mixW !== null ? { mixW: m.mixW } : {}), mixU: m.mixU, mixT: m.mixT };
   }
   if (kind === 'area' || kind === 'cut') {
     const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'poly';

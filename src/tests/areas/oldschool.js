@@ -10,6 +10,15 @@ module.exports = (area) => {
   const L = require('../../library');
   let own = null; let k = 1;
   const M = (t) => t.store.map(own);
+  // (Beta 3.38) Wall, Pillar, Stairs, Door and Window come out of Room: pick Room first when they are not showing
+  const PARTS = ['wall', 'pillar', 'stairs', 'door', 'window'];
+  // (the tabs slide out from behind the panel: a click waits until they have arrived)
+  const tabsOut = (t) => t.until(() => t.g(`document.getAnimations().every((a) => { const e = a.effect && a.effect.target; return !(e && e.closest && e.closest('#pop .os-tabs')) || a.playState === 'finished'; })`), 4000, 'the tabs to come out');
+  const tab = async (t, id) => { await tabsOut(t); await t.clickSel(`.os-tools .tile[data-v="${id}"]`); };
+  const tool = async (t, id) => {
+    if (PARTS.includes(id) && !(await t.count(`.os-tabs2 .tile[data-v="${id}"]`))) await tab(t, 'room');
+    await tab(t, id);
+  };
   const wallsOf = (t) => M(t).walls.filter((w) => w.os);
   const clear = async (t) => { t.handle('os.clear', { mapId: own }); await t.settle(); await baked(t); };
   // the picture of what is drawn now has come back from the GM screen
@@ -54,11 +63,28 @@ module.exports = (area) => {
     t.eq(await t.popTitle(), 'Draw', 'its panel');
     t.ok(await t.g(`!document.querySelector('#empty.on')`), 'no "no background" card in the way');
     t.ok(await t.g(`(() => { const b = document.querySelector('#rail [data-id="oldschool"]'); return !!b && !b.hidden && b.offsetParent !== null; })()`), 'Draw is on the rail');
-    t.eq(await t.count('.os-tools .tile'), 11, 'its tools (Beta 3.28: no Corridor, Floor or Pieces; 3.29: no Ground; 3.35: Window of its own; 3.37: Tile)');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((c) => [...c.querySelectorAll('.tile')].map((b) => b.dataset.v))`), [['room', 'shape', 'round', 'brush', 'floor', 'erase'], ['wall', 'pillar', 'stairs', 'door', 'window']], 'its tools: six, and with Room picked its five parts beside it (Beta 3.38)');
     t.eq(await t.count('.os-floors .tile[data-v]'), 8, 'the last 8 tiles used (Beta 3.35)');
     await t.clickSel('.os-tile-list');
     await t.until(async () => (await t.count('.fp[data-id="ostiles"] .pl-it')) >= 11, 4000, 'List …: all the tiles of the app');
     t.ok(await t.g(`(() => { const g = document.querySelector('.fp[data-id="ostiles"] .pl-grid').getBoundingClientRect(); return [...document.querySelectorAll('.fp[data-id="ostiles"] .pl-it')].filter((e) => { const r = e.getBoundingClientRect(); return r.top >= g.top - 1 && r.bottom <= g.bottom + 1; }).length; })()`) >= 15, 'as wide as the Tokens list: rows of five (Beta 3.37)');
+    // (Beta 3.38) the list in an order of your choice: by name, by colour, the newest first; kept for next time
+    const names = () => t.g(`[...document.querySelectorAll('.fp[data-id="ostiles"] .pl-it')].map((e) => e.getAttribute('aria-label'))`);
+    const sorted = (l) => [...l].sort((x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' }));
+    t.eq(await t.g(`[...document.querySelectorAll('.fp[data-id="ostiles"] .pl-sort .seg-btn')].map((b) => [b.textContent, b.classList.contains('on')])`), [['Name', true], ['Colour', false], ['Newest', false]], 'a switch: Name, Colour, Newest');
+    const byName = await names();
+    t.eq(byName, sorted(byName), 'by name at first');
+    await t.clickText('.fp[data-id="ostiles"] .pl-sort .seg-btn', 'Colour');
+    await t.until(async () => (await t.g(`Object.keys(JSON.parse(localStorage.getItem('osTileTints') || '{}')).length`)) >= byName.length, 8000, 'every tile\'s colour read');
+    await t.sleep(300);
+    const byColour = await names();
+    t.ok(byColour.join() !== byName.join() && sorted(byColour).join() === byName.join(), 'by colour: the same tiles in another order', byColour.slice(0, 6));
+    t.ok(byColour.indexOf('Slate') < byColour.indexOf('Mossy court') && byColour.indexOf('Slate') < byColour.indexOf('Lava field'), 'greys first', byColour.slice(0, 8));
+    await t.clickText('.fp[data-id="ostiles"] .pl-sort .seg-btn', 'Newest');
+    const byNew = await names();
+    t.ok(byNew.indexOf('Old cobblestone') > byNew.indexOf('Lava field'), 'the newest first: the tiles that came last before the first ones', byNew.slice(0, 5));
+    t.eq(await t.g(`localStorage.getItem('pickSort:ostiles')`), 'newest', 'the order is kept');
+    await t.clickText('.fp[data-id="ostiles"] .pl-sort .seg-btn', 'Name');
     await t.clickSel('.fp[data-id="ostiles"] .fp-close');
     t.ok(await t.g(`!!document.querySelector('.map-tile[data-id="${own}"] .tile-thumb .i')`), 'its tile in the strip shows a pencil');
   });
@@ -66,7 +92,7 @@ module.exports = (area) => {
   area.quick('a room dragged on the grid becomes the map\'s picture, on the TV too; its outline the walls for sight', async (t) => {
     await t.cmd('edit.open', { id: own });
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
-    await t.clickSel('.os-tools .tile[data-v="room"]');
+    await tool(t, 'room');
     const a = await t.scr(15 * k, 3 * k); const b = await t.scr(21 * k, 7 * k);
     await t.drag(a, b, 12);
     await t.until(() => M(t).os.items.length === 1, 5000, 'the room drawn');
@@ -123,11 +149,11 @@ module.exports = (area) => {
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
     await t.g(`localStorage.removeItem('osPrefs')`);
     for (const id of ['shape', 'round', 'brush', 'floor', 'erase', 'wall', 'pillar', 'stairs', 'door', 'window', 'room']) {
-      await t.clickSel(`.os-tools .tile[data-v="${id}"]`);
+      await tool(t, id);
       t.eq(await t.g('Play.ui.os.tool'), id, `tool ${id}`);
     }
     // (Beta 3.35) the choices come first; the door's leaf follows Door / Secret; a window has a tool of its own
-    await t.clickSel('.os-tools .tile[data-v="door"]');
+    await tool(t, 'door');
     await t.clickText('#pop .seg-btn', 'Iron');
     t.eq(await t.g('Play.ui.os.doorLeaf'), 'metal', 'an iron door');
     await t.clickText('#pop .seg-btn', 'Secret');
@@ -135,30 +161,69 @@ module.exports = (area) => {
     await t.clickText('#pop .seg-btn', 'Door');
     t.ok(await t.g(`!document.querySelector('#pop .os-leaf').hidden`), 'a door has');
     t.eq(await t.count('#pop .os-floors'), 0, 'no tiles for doors');
-    await t.clickSel('.os-tools .tile[data-v="window"]');
+    await tool(t, 'window');
     await t.clickText('#pop .seg-btn', 'Bars');
     t.eq(await t.g('Play.ui.os.windowLeaf'), 'bars', 'bars in a window');
     // (Beta 3.37) the Tile tool changes a floor's tile and nothing else
-    await t.clickSel('.os-tools .tile[data-v="floor"]');
+    await tool(t, 'floor');
     t.eq(await t.count('#pop .os-level'), 0, 'the Tile tool has no level to pick');
+    t.eq(await t.count('#pop .os-looks .os-pick'), 4, 'but Blending, also for the whole floor (Beta 3.38)');
     t.eq(await t.count('#pop .os-floors .tile[data-v]'), 8, 'but the tiles');
     await t.clickText('#pop .seg-btn', 'Brush');
     t.eq(await t.g('Play.ui.os.floorHow'), 'paint', 'painted on with the brush');
+    t.eq(await t.count('#pop .os-looks .os-pick'), 4, 'with Blending as well');
     await t.clickText('#pop .seg-btn', 'Whole floor');
     t.eq([await t.g('Play.ui.os.floorHow'), await t.g('Play.ui.os.floorMode')], ['click', 'tile'], 'or the whole floor clicked: its tile alone');
-    await t.clickSel('.os-tools .tile[data-v="pillar"]');
+    await tool(t, 'pillar');
     t.eq(await t.g(`Number(document.querySelector('#pop input[aria-label="Size"]').max)`), 8, 'pillars up to 8 squares');
-    // (Beta 3.37) the menu made new: the tools as tabs on the panel's edge, the sliders upright in a rail, a picture of what comes
-    const popX = () => t.g(`Math.round(document.querySelector('#pop').getBoundingClientRect().x)`);
+    // (Beta 3.37) the menu made new: the tools as tabs on the panel's edge, a picture of what comes
     t.eq(await t.g(`document.querySelector('#pop .os-prev b').textContent`), 'Stone pillar', 'a picture of the pillar to come, with its name');
-    const xPillar = await popX();
-    t.eq(await t.count('#pop .os-rail'), 0, 'no rail of sliders for a pillar');
-    await t.clickSel('.os-tools .tile[data-v="room"]');
+    // (Beta 3.38) Room's parts: a second column while Room or one of them is picked, Room stays marked
+    t.ok(await t.g(`(() => { const two = document.querySelector('#pop .os-tabs2'); const one = document.querySelector('#pop .os-tabs:not(.os-tabs2)'); const room = one.querySelector('[data-v="room"]'); const a = one.getBoundingClientRect(); const b = two.getBoundingClientRect(); return room.classList.contains('open') && !room.classList.contains('on') && two.querySelector('[data-v="pillar"]').classList.contains('on') && b.left >= a.right - 10 && Math.abs(b.top - a.top) < 3; })()`), 'the pillar among Room\'s parts, beside the tools, Room marked as open');
+    t.eq(await t.g(`getComputedStyle(document.querySelector('#pop .os-tabs2 .tile:not(.on)')).color === getComputedStyle(document.querySelector('.g-build .rail-head')).color`), true, 'the parts in the blue of Build');
+    await tool(t, 'shape');
+    t.eq(await t.count('#pop .os-tabs2'), 0, 'another tool: the parts go');
+    // (Beta 3.38) the tabs come out from behind the panel when it opens; Room's parts from behind the tools when Room is picked
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => e.classList.contains('slide'))`), [false], 'a tool picked: the tabs stay where they are');
+    t.ok(await t.g(`document.querySelector('#pop .os-tabs .tile[data-v="shape"]').classList.contains('pick')`), 'the picked one comes out a little further');
+    await tab(t, 'room');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => [e.classList.contains('slide'), getComputedStyle(e.querySelector('.tile:last-child')).animationName])`), [[false, 'none'], [true, 'os-part-out']], 'Room picked: its parts slide out, the tools stay');
+    await tab(t, 'door');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => e.classList.contains('slide'))`), [false, false], 'a part picked: nothing slides again');
+    await t.g(`Play.closePop(), Play.openPop('oldschool')`);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => [e.classList.contains('slide'), getComputedStyle(e.querySelector('.tile')).animationName])`), [[true, 'os-tab-out'], [true, 'os-part-out']], 'the panel opened anew: all of them come out from behind it');
+    t.ok(await t.g(`(() => { const p = document.querySelector('#pop').getBoundingClientRect(); return [...document.querySelectorAll('#pop .os-tabs')].every((e) => /inset/.test(getComputedStyle(e).clipPath)) && document.querySelector('#pop .os-tabs').getBoundingClientRect().left >= p.right - 2; })()`), 'cut at the panel\'s edge, so they come from behind it');
+    await tool(t, 'shape');
+    await tool(t, 'room');
     t.ok(await t.g(`(() => { const p = document.querySelector('#pop'); const at = (sel) => [...p.querySelectorAll('*')].indexOf(p.querySelector(sel)); return at('.os-prev') < at('.os-level') && at('.os-level') < at('.os-floors') && at('.os-floors') < at('.os-mapbtn'); })()`), 'the picture, the choices, the tiles, then the button to the map\'s settings');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-rail input[type=range]')].map((x) => x.getAttribute('aria-label'))`), ['Mix width', 'Uneven', 'Tiled'], 'where floors meet: three upright sliders in the rail');
-    t.eq(await popX(), xPillar, 'the panel stays where it is, rail or not (the tabs do not jump)');
-    t.ok(await t.g(`(() => { const p = document.querySelector('#pop').getBoundingClientRect(); const tb = document.querySelector('#pop .os-tabs').getBoundingClientRect(); const r = document.querySelector('#pop .os-rail').getBoundingClientRect(); return Math.abs(tb.left - p.right) < 3 && Math.abs(r.right - p.left) < 3 && r.left >= 0 && tb.bottom <= p.bottom + 2; })()`), 'tabs along its right edge, the rail on its left');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-level .os-pick')].map((b) => [b.textContent, !!b.querySelector('svg')])`), [['Lower', true], ['Floor', true], ['Raised', true]], 'the height as three little drawings');
+    // (Beta 3.38) Blending: four looks; the sliders behind a small button, in a card
+    t.eq(await t.count('#pop .os-rail'), 0, 'no rail of sliders any more');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-looks .os-pick')].map((b) => [b.textContent, b.classList.contains('on'), !!b.querySelector('.os-look')])`), [['Sharp', false, true], ['Soft', false, true], ['Natural', true, true], ['Tiled', false, true]], 'Blending: four looks as pictures, Natural at first');
+    await t.clickText('#pop .os-looks .os-pick', 'Sharp');
+    t.eq(await t.g('Play.ui.os.mixW'), 0, 'Sharp: no soft line');
+    await t.clickText('#pop .os-looks .os-pick', 'Tiled');
+    t.eq(await t.g('[Play.ui.os.mixW, Play.ui.os.mixU, Play.ui.os.mixT]'), [1.5, 0.5, 1], 'Tiled: stone by stone');
+    await t.clickSel('#pop .os-fine');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fly input[type=range]')].map((x) => x.getAttribute('aria-label'))`), ['Mix width', 'Uneven', 'Tiled'], 'the small button: the three sliders in a card');
+    await t.g(`(() => { const i = document.querySelector('#pop .os-fly input[aria-label="Uneven"]'); i.value = '0.8'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    t.eq([await t.g('Play.ui.os.mixU'), await t.count('#pop .os-looks .os-pick.on')], [0.8, 0], 'fine-tuned: none of the four looks');
+    await t.clickText('#pop .os-looks .os-pick', 'Natural');
+    t.eq(await t.g('[Play.ui.os.mixW, Play.ui.os.mixU, Play.ui.os.mixT]'), [1.5, 0.5, 0.5], 'and Natural again');
+    await t.clickSel('#pop .os-fly .icon-btn');
+    t.eq(await t.count('#pop .os-fly'), 0, 'the card away');
+    t.ok(await t.g(`(() => { const p = document.querySelector('#pop').getBoundingClientRect(); const tb = document.querySelector('#pop .os-tabs').getBoundingClientRect(); return Math.abs(tb.left - p.right) < 3 && tb.bottom <= p.bottom + 2; })()`), 'tabs along its right edge');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-level .os-pick')].map((b) => [b.textContent, !!b.querySelector('svg')])`), [['Lower', true], ['Floor', true], ['Higher', true]], 'the height as three little drawings');
+    // (Beta 3.38) heights stack: Higher and Lower step a level, the middle shows it and puts it back
+    await t.clickSel('#pop .os-level [data-v="higher"]'); await t.clickSel('#pop .os-level [data-v="higher"]');
+    t.eq([await t.g('Play.ui.os.level'), await t.g(`document.querySelector('#pop .os-level-now').textContent`), await t.g(`document.querySelector('#pop .os-prev .cap').textContent.includes('2 levels up')`)], [2, '+2', true], 'twice Higher: two levels up, shown in the middle and under the picture');
+    t.ok(await t.g(`document.querySelector('#pop .os-blend').hidden`), 'no Blending for a floor off floor level (floors blend at floor level only)');
+    await t.clickSel('#pop .os-level [data-v="higher"]'); await t.clickSel('#pop .os-level [data-v="higher"]');
+    t.eq([await t.g('Play.ui.os.level'), await t.g(`document.querySelector('#pop .os-level [data-v="higher"]').disabled`)], [3, true], 'three up is the top');
+    await t.clickSel('#pop .os-level [data-v="now"]');
+    t.eq([await t.g('Play.ui.os.level'), await t.g(`document.querySelector('#pop .os-level-now').textContent`)], [0, 'Floor'], 'the middle: back to floor level');
+    for (let i = 0; i < 4; i++) await t.g(`document.querySelector('#pop .os-level [data-v="lower"]').click()`);
+    t.eq([await t.g('Play.ui.os.level'), await t.g(`document.querySelector('#pop .os-level-now').textContent`)], [-3, '\u22123'], 'three down is the bottom');
+    await t.clickSel('#pop .os-level [data-v="now"]');
     t.eq(await t.count('#pop .os-edges .os-pick .os-art'), 5, 'the five edges as pictures');
     await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Slate.webp"]');
     t.eq(await t.g('Play.ui.os.floor.rel'), 'Tiles/Tablescape/Slate.webp', 'a floor picked');
@@ -198,7 +263,7 @@ module.exports = (area) => {
   area.deep('a shape clicked corner by corner, closed with Enter; a passage drawn on; a door on a wall line', async (t) => {
     await clear(t);
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
-    await t.clickSel('.os-tools .tile[data-v="shape"]');
+    await tool(t, 'shape');
     for (const [x, y] of [[15, 3], [21, 3], [21, 8], [15, 8]]) { const p = await t.scr(x * k, y * k); await t.click(p.x, p.y); }
     t.gm().webContents.focus();
     await t.key('Enter');
@@ -210,7 +275,7 @@ module.exports = (area) => {
     await t.until(() => M(t).os.items.length === 2, 4000, 'the passage');
     await baked(t);
     const n = wallsOf(t).length;
-    await t.clickSel('.os-tools .tile[data-v="door"]');
+    await tool(t, 'door');
     const d = await t.scr(21 * k, 5.4 * k);
     await t.click(d.x, d.y);
     await t.until(() => M(t).os.doors.length === 1, 4000, 'the door');
@@ -304,7 +369,7 @@ module.exports = (area) => {
     const file = path.join(L.root, 'Tiles', 'Test pebbles.webp');
     fs.copyFileSync(L.resolveRef({ rel: 'Tiles/Tablescape/Ice.webp' }), file);
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
-    await t.clickSel('.os-tools .tile[data-v="room"]');
+    await tool(t, 'room');
     await t.clickSel('.os-tile-list'); // (Beta 3.35: Tiles → List … → Library …)
     await t.until(() => t.rect('.os-more'), 4000, 'Library …');
     await t.g(`document.querySelector('.os-more').scrollIntoView({ block: 'center' })`);
@@ -367,7 +432,7 @@ module.exports = (area) => {
     t.eq(old.fx.map((f) => f.id), ['f1'], 'its effect too, the others stay');
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
     t.ok(!(await t.g(`!!document.querySelector('.os-tools .tile[data-v="ground"]')`)), 'no Ground tool');
-    await t.clickSel('.os-tools .tile[data-v="stairs"]');
+    await tool(t, 'stairs');
     t.ok(!(await t.g(`document.querySelector('#pop').textContent.includes('Steps of')`)), 'no "Steps of": they take the floor');
     await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Slate.webp"]');
     t.handle('os.add', { mapId: own, items: [room(14, 2, 24, 9)] });
@@ -378,16 +443,16 @@ module.exports = (area) => {
     t.eq(st.tile && st.tile.rel, 'Tiles/Tablescape/Slate.webp', 'of the picked floor', st);
     await baked(t);
     await t.shot(t.gm(), 'oldschool-stairs');
-    await t.clickSel('.os-tools .tile[data-v="room"]');
+    await tool(t, 'room');
   }, { ms: 300000 });
 
   area.deep('floors mix by opacity: a soft line, uneven, tiled along the grid (insides and joints); off', async (t) => {
     await clear(t);
     const T = (n) => ({ rel: `Tiles/Tablescape/${n}.webp` });
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
-    await t.clickSel('.os-tools .tile[data-v="room"]');
+    await tool(t, 'room');
     t.eq(await t.g('[Play.ui.os.mixW, Play.ui.os.mixU, Play.ui.os.mixT]'), [1.5, 0.5, 0.5], 'width 1½, uneven and tiled at a half at first');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-rail input[type=range]')].map((x) => x.getAttribute('aria-label'))`), ['Mix width', 'Uneven', 'Tiled'], 'the three sliders beside the panel');
+    t.eq(await t.g(`(document.querySelector('#pop .os-looks .os-pick.on') || {}).textContent`), 'Natural', 'which is the look Natural');
     t.handle('os.add', { mapId: own, items: [room(14, 2, 26, 9, { tile: T('Desert sand') }), room(14, 2, 20, 9, { tile: T('Mossy court') })] });
     await t.settle();
     const items = M(t).os.items;
@@ -402,7 +467,24 @@ module.exports = (area) => {
     await t.settle();
     t.eq(M(t).os.items[1].mixW, 0, 'off for one floor (width 0)');
     await baked(t);
-    await t.clickSel('.os-tools .tile[data-v="room"]');
+    // (Beta 3.38) the Tile tool blends too: a whole floor takes the tile and the look; a painted tile its own soft width
+    await tool(t, 'floor');
+    await t.clickText('#pop .seg-btn', 'Whole floor');
+    await t.clickText('#pop .os-looks .os-pick', 'Soft');
+    await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Slate.webp"]');
+    const at = await t.scr(17 * k, 5 * k); await t.click(at.x, at.y);
+    await t.until(() => M(t).os.items[1].tile.rel === 'Tiles/Tablescape/Slate.webp', 5000, 'the floor clicked takes the tile');
+    const f1 = M(t).os.items[1];
+    t.eq([f1.mixW, f1.mixU, f1.mixT, f1.level, f1.edge], [1.5, 0, 0, 0, 'walls'], 'and the look Soft with it; its height and edge stay', f1);
+    await t.clickText('#pop .seg-btn', 'Brush');
+    await t.clickText('#pop .os-looks .os-pick', 'Sharp');
+    const p0 = await t.scr(22 * k, 4 * k); const p1 = await t.scr(24 * k, 6 * k);
+    await t.drag(p0, p1, 8);
+    await t.until(() => M(t).os.items.some((x) => x.kind === 'paint'), 5000, 'a tile painted on');
+    t.eq(M(t).os.items.find((x) => x.kind === 'paint').mixW, 0, 'with a sharp edge, as the look says');
+    await baked(t);
+    await t.clickText('#pop .os-looks .os-pick', 'Natural');
+    await tool(t, 'room');
   }, { ms: 300000 });
 
   area.deep('the TV inks what is drawn: a pen traces it, its tile fills in, then the picture takes over; a secret door never shows', async (t) => {

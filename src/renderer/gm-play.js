@@ -643,7 +643,9 @@ const Play = (() => {
       'Room and Round: drag (Shift: square, circle). Shape: click the corners; click the first again, double-click, Enter or right-click closes it.',
       'Alt with a floor tool erases instead. Erase also takes wall lines, pillars and doors away. Ctrl + Z brings anything back.',
       'Edges: Walls are built around the floor; Rock carves rooms out of stone; Ledge and Cliff drop into darkness; Fade lets the floor fade into the dark. One can see across Ledge, Cliff and Fade.',
-      'Raised and Lower make platforms and pits; Stairs climb toward where you drag, in the floor you picked. Doors sit on grid lines: click one again to take it away.',
+      'Wall, Pillar, Stairs, Door and Window come out beside Room when you pick it.',
+      'Higher and Lower step a floor up or down, a level a click (three each way): platforms and pits. The button between them puts it back to floor level. Stairs climb toward where you drag, in the floor you picked. Doors sit on grid lines: click one again to take it away.',
+      'Blending is how a floor runs into the floors around it: Sharp, Soft, Natural or Tiled; the small button beside it fine-tunes. Floors blend at floor level only.',
       'Doors open and shut on the table: the leaf swings when you open a door.',
       'Your own tiles go into the library\'s Tiles section; the first time you use one, you set its grid. Right-click any floor → Adjust grid: its joints are the squares. Drag a tile from the library onto a floor to give it that tile.'],
     map: ['Drag the map to move it; Alt + wheel scales it. Fog, grid, tokens and effects move with it.', 
@@ -788,7 +790,7 @@ const Play = (() => {
     fog: { title: 'Fog of war', icon: 'cloud-fog', build: buildFogPop, tips: FOG_TIPS },
     fx: { title: 'Effects', icon: 'flame', build: buildFxPop, tips: TIPS.fx },
     walls: { title: 'Walls and doors', icon: 'wall', build: () => Walls.buildPop(), tips: TIPS.walls },
-    oldschool: { title: 'Draw', icon: 'pencil', build: () => OS.buildPop(), around: () => OS.around(), tips: TIPS.oldschool }, // (Beta 3.22; 3.37: its tools, sliders and Map settings stand around it)
+    oldschool: { title: 'Draw', icon: 'pencil', build: (o) => OS.buildPop(o), around: () => OS.around(), tips: TIPS.oldschool }, // (Beta 3.22; 3.37: its tools, sliders and Map settings stand around it)
     party: { title: 'Party marker', icon: 'users-group', build: () => Party.buildPop(), tips: TIPS.party },
     spell: { title: 'Spells', icon: 'wand', build: buildSpellPop, tips: TIPS.spell },
     asset: { title: 'Assets', icon: 'trees', build: buildAssetPop, tips: TIPS.asset },
@@ -857,6 +859,7 @@ const Play = (() => {
     if (ui.drawer) Drawer.close();
     // (Beta 3.37) a panel with things standing around it (Draw: tool tabs, a slider rail) scrolls in its body
     const scroller = () => (els.pop.classList.contains('with-sides') && els.pop.querySelector('.pop-body')) || els.pop;
+    const again = popId === id; // (the same panel built anew: nothing slides out a second time)
     const scroll = popId === id ? scroller().scrollTop : 0;
     popId = id;
     refreshers = [];
@@ -864,7 +867,7 @@ const Play = (() => {
     els.pop.innerHTML = '';
     // a panel that fails to build still opens, with a note (2.4: before, it stayed invisible); the error goes into the log
     let body;
-    try { body = p.build(); } catch (err) {
+    try { body = p.build({ again }); } catch (err) {
       console.error(`panel ${id}: ${err && err.stack ? err.stack : err}`);
       refreshers = [];
       body = h('div', { class: 'stack' }, hint('This panel ran into a problem. Close it and try again (the log: Guide → Report a problem).'));
