@@ -449,16 +449,59 @@ const FX = (() => {
     let e = strokeGeo.get(S);
     if (!e || e.base !== base) {
       let hsh = 0;
-      for (const st of S) { const q = st.pts; hsh = (hsh * 31 + Math.round((st.r || 0) * 1000)) | 0; for (let i = 0; i < q.length; i++) hsh = (hsh * 31 + Math.round(q[i] * 1000)) | 0; }
+      for (const st of S) { const q = st.pts; hsh = (hsh * 31 + Math.round((st.r || 0) * 1000) + (st.cut ? 7 : 0)) | 0; for (let i = 0; i < q.length; i++) hsh = (hsh * 31 + Math.round(q[i] * 1000)) | 0; }
       e = { base, hsh }; strokeGeo.set(S, e);
     }
     return `${base}:${e.hsh}`;
+  }
+  // Beta 3.41: for every stroke, what was erased after it (null: nothing), and whether a point lies in that. What
+  // moves in an area (bubbles, embers, its light) starts at points along its strokes: not where they were erased
+  const laterCuts = new WeakMap();
+  function cutsAfter(strokes) {
+    let e = laterCuts.get(strokes);
+    if (!e) {
+      e = new Array(strokes.length).fill(null); let later = null;
+      for (let i = strokes.length - 1; i >= 0; i--) { if (strokes[i].cut) later = later ? [strokes[i], ...later] : [strokes[i]]; else e[i] = later; }
+      laterCuts.set(strokes, e);
+    }
+    return e;
+  }
+  function inCut(cuts, x, y) {
+    if (!cuts) return false;
+    for (const c of cuts) {
+      const q = c.pts;
+      if (c.poly) { let inside = false; for (let i = 0, j = q.length - 2; i < q.length; j = i, i += 2) if ((q[i + 1] > y) !== (q[j + 1] > y) && x < ((q[j] - q[i]) * (y - q[i + 1])) / (q[j + 1] - q[i + 1]) + q[i]) inside = !inside; if (inside) return true; continue; }
+      const rr = c.r * c.r;
+      if (q.length === 2) { if ((x - q[0]) ** 2 + (y - q[1]) ** 2 <= rr) return true; continue; }
+      for (let i = 0; i + 3 < q.length; i += 2) {
+        const ax = q[i]; const ay = q[i + 1]; const bx = q[i + 2]; const by = q[i + 3]; const L = (bx - ax) ** 2 + (by - ay) ** 2;
+        const u = L ? Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L)) : 0;
+        if ((x - ax - (bx - ax) * u) ** 2 + (y - ay - (by - ay) * u) ** 2 <= rr) return true;
+      }
+    }
+    return false;
   }
   function drawStrokes(g, strokes, grow = 0, minR = 0) {
     for (const st of strokes) {
       // Beta 3.25 (ground drawn into an Oldschool map): an outline filled (grown or shrunk by its edge), and dots that
       // only carry what moves in it (no part of where it shows)
       if (st.nm) continue;
+      // Beta 3.41 (Erase in Paint effect): a stroke that takes away what was painted before it, a box, a round or a
+      // brush line. Where the painted shape is shrunk for its soft edge, what is taken away grows by as much
+      if (st.cut) {
+        const q = st.pts; const more = Math.max(0, -grow);
+        g.save(); g.globalCompositeOperation = 'destination-out';
+        if (st.poly) {
+          if (q.length >= 6) {
+            g.beginPath(); g.moveTo(q[0], q[1]); for (let i = 2; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]); g.closePath();
+            g.fill();
+            if (more > 0) { g.lineWidth = 2 * more; g.stroke(); }
+          }
+        } else if (q.length === 2) { g.beginPath(); g.arc(q[0], q[1], st.r + more, 0, TAU); g.fill(); }
+        else if (q.length > 2) { g.lineWidth = 2 * (st.r + more); g.beginPath(); g.moveTo(q[0], q[1]); for (let i = 2; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]); g.stroke(); }
+        g.restore();
+        continue;
+      }
       if (st.poly) {
         const q = st.pts; if (q.length < 6) continue;
         g.beginPath(); g.moveTo(q[0], q[1]); for (let i = 2; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]); g.closePath();
@@ -518,6 +561,7 @@ const FX = (() => {
     const m = ctx.getTransform(); const W = ctx.canvas.width; const H = ctx.canvas.height;
     let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
     for (const st of fx.strokes || []) {
+      if (st.cut) continue; // (what was erased adds no room)
       const r = st.r + pad;
       for (let i = 0; i < st.pts.length; i += 2) {
         const x = st.pts[i]; const y = st.pts[i + 1];
@@ -850,7 +894,8 @@ const FX = (() => {
     return f;
   }
   function flowLines(fx) {
-    return (fx.strokes || []).map((st, i) => (st.pts.length >= 4 ? smoothLine(st, `${fx.id}|${st.sid || i}`) : null)).filter((f) => f && f.len > 0.05);
+    // (Beta 3.41) a box or a round flows along the line through its middle (the way it was dragged), not round its outline
+    return (fx.strokes || []).map((st, i) => (st.cut || st.nm ? null : st.poly ? (st.line ? smoothLine({ sid: st.sid, r: st.lr, pts: st.line }, `${fx.id}|${st.sid || i}`) : null) : st.pts.length >= 4 ? smoothLine(st, `${fx.id}|${st.sid || i}`) : null)).filter((f) => f && f.len > 0.05);
   }
   // a point on the curve and its direction, both changing smoothly
   function along(f, d) {
@@ -894,6 +939,27 @@ const FX = (() => {
     const dark = mix(base, '#000000', 0.45);
     const drops = Math.min(4, Math.max(0.2, fx.density ?? 1));
     (fx.strokes || []).forEach((st, si) => {
+      // (Beta 3.41) what was erased goes, with a clean edge; a box or a round is a pool of that shape, its dots the lumps in it
+      if (st.cut) { g.globalAlpha = 1; g.fillStyle = g.strokeStyle = '#000'; g.lineCap = g.lineJoin = 'round'; drawStrokes(g, [st], 0); return; }
+      if (st.poly) {
+        g.globalAlpha = Math.min(1, 0.92 * I); g.fillStyle = g.strokeStyle = base; g.lineJoin = 'round'; drawStrokes(g, [st], 0);
+        // (darker where it is deep: soft patches at some of its dots, in one go and kept inside its outline)
+        const S = fx.strokes; const q = st.pts; let any = false;
+        g.save();
+        g.beginPath(); g.moveTo(q[0], q[1]); for (let i = 2; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]); g.closePath(); g.clip();
+        g.globalAlpha = Math.min(1, 0.55 * I); g.fillStyle = dark; g.filter = `blur(${Math.max(1, 0.16 * m.a).toFixed(1)}px)`;
+        g.beginPath();
+        for (let j = si + 1; j < S.length && S[j].nm; j++) {
+          const d = S[j]; const sd = s0 + si * 97 + j * 3.1; if (h(sd) < 0.3) continue;
+          const rr = d.r * (0.35 + 0.5 * h(sd + 1.7)); const x = d.pts[0] + (h(sd + 2.9) - 0.5) * d.r * 0.8; const y = d.pts[1] + (h(sd + 4.3) - 0.5) * d.r * 0.8;
+          g.moveTo(x + rr, y); g.arc(x, y, rr, 0, TAU); any = true;
+        }
+        if (any) g.fill();
+        g.filter = 'none';
+        g.restore();
+        return;
+      }
+      if (st.nm) return; // (a shape's dots: drawn with it, above)
       const grow = ages[si] >= 1.6 ? 1 : 1 - (1 - Math.min(1, ages[si] / 1.6)) ** 2; // spreads out when freshly painted
       const r = st.r * (0.35 + 0.65 * grow);
       // points along the stroke, a little apart
@@ -1026,25 +1092,36 @@ const FX = (() => {
   // the middle of a painted area (for things that turn around it)
   function centreOf(fx) {
     let x = 0; let y = 0; let n = 0;
-    for (const st of fx.strokes || []) for (let i = 0; i < st.pts.length; i += 2) { x += st.pts[i]; y += st.pts[i + 1]; n++; }
+    for (const st of fx.strokes || []) if (!st.cut) for (let i = 0; i < st.pts.length; i += 2) { x += st.pts[i]; y += st.pts[i + 1]; n++; }
     return n ? { x: x / n, y: y / n } : { x: 0, y: 0 };
+  }
+
+  // Beta 3.41: where a painted area's handle sits on the GM screen: its first point that was not erased afterwards
+  function anchor(fx) {
+    const S = fx.strokes || []; const later = cutsAfter(S); let first = null;
+    for (let si = 0; si < S.length; si++) {
+      const st = S[si]; if (st.cut) continue;
+      for (let i = 0; i + 1 < st.pts.length; i += 2) { const q = { x: st.pts[i], y: st.pts[i + 1] }; if (!first) first = q; if (!inCut(later[si], q.x, q.y)) return q; }
+    }
+    return first;
   }
 
   // ---------- Beta 2: helpers for the new painted areas ----------
   // points along the painted strokes, about step × brush radius apart: [x, y, r]
   function samples(fx, step = 0.5) {
-    const out = [];
-    for (const st of fx.strokes || []) {
-      if (st.poly) continue; // (an outline: its dots carry it)
-      const p = st.pts; const d0 = Math.max(0.05, st.r * step);
+    const out = []; const S = fx.strokes || []; const later = cutsAfter(S);
+    S.forEach((st, si) => {
+      if (st.poly || st.cut) return; // (an outline: its dots carry it; what was erased carries nothing)
+      const p = st.pts; const d0 = Math.max(0.05, st.r * step); const cuts = later[si];
+      const put = (x, y) => { if (!inCut(cuts, x, y)) out.push([x, y, st.r]); };
       for (let i = 0; i < p.length; i += 2) {
         if (i >= 2) {
           const px = p[i - 2]; const py = p[i - 1]; const d = Math.hypot(p[i] - px, p[i + 1] - py);
-          for (let k = d0; k < d; k += d0) out.push([px + ((p[i] - px) * k) / d, py + ((p[i + 1] - py) * k) / d, st.r]);
+          for (let k = d0; k < d; k += d0) put(px + ((p[i] - px) * k) / d, py + ((p[i + 1] - py) * k) / d);
         }
-        out.push([p[i], p[i + 1], st.r]);
+        put(p[i], p[i + 1]);
       }
-    }
+    });
     return out;
   }
   // a part of an area that does not move, drawn once into its own small canvas (the box the area covers)
@@ -1149,7 +1226,7 @@ const FX = (() => {
     const sig = strokeSig(fx);
     let e = unitStrokes.get(fx.strokes);
     if (!e || e.k !== k || e.sig !== sig) {
-      e = { k, sig, strokes: fx.strokes.map((st) => ({ ...st, r: st.r / k, pts: st.pts.map((v) => v / k) })) };
+      e = { k, sig, strokes: fx.strokes.map((st) => ({ ...st, r: st.r / k, pts: st.pts.map((v) => v / k), ...(st.line ? { line: st.line.map((v) => v / k), lr: st.lr / k } : {}) })) };
       unitStrokes.set(fx.strokes, e);
     }
     return { ...fx, strokes: e.strokes };
@@ -1168,8 +1245,8 @@ const FX = (() => {
     return out;
   }
   function regionRaw(ctx, fx, t) {
-    const pts = [];
-    for (const st of fx.strokes || []) if (!st.poly) for (let i = 0; i < st.pts.length; i += 2) pts.push([st.pts[i], st.pts[i + 1], st.r]);
+    const pts = []; const later = cutsAfter(fx.strokes || []);
+    (fx.strokes || []).forEach((st, si) => { if (!st.poly && !st.cut) for (let i = 0; i < st.pts.length; i += 2) if (!inCut(later[si], st.pts[i], st.pts[i + 1])) pts.push([st.pts[i], st.pts[i + 1], st.r]); });
     if (!pts.length) return;
     const s = seedOf(fx.id);
     const I = fx.intensity ?? 1;
@@ -2884,5 +2961,5 @@ const FX = (() => {
     }
   }
 
-  return { setQuality, emitter, waveOf, ventLevel, region, regionLights, sway, roof, lightMask, windowIcon, darkness, glow, weather, flashes, strike, weatherOn, spell, ghost, envelope, seedOf, sprite, rgba, mix, skinOf, flowTurn };
+  return { setQuality, emitter, waveOf, ventLevel, region, regionLights, anchor, sway, roof, lightMask, windowIcon, darkness, glow, weather, flashes, strike, weatherOn, spell, ghost, envelope, seedOf, sprite, rgba, mix, skinOf, flowTurn };
 })();

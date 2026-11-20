@@ -130,6 +130,47 @@ function syncGround(map) {
     else { f.preset = it.preset; if (JSON.stringify(f.strokes) !== JSON.stringify(strokes)) f.strokes = strokes; }
   }
 }
+// Beta 3.41 (Erase in Paint effect): the box a list of strokes covers; whether a point lies in one of the erasing
+// strokes; and whether anything of a painted area is left after what was erased from it (looked at in points: along its
+// brush lines, on a fine grid in its boxes and rounds)
+function strokesBox(strokes) {
+  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+  for (const st of strokes) { const r = st.r || 0; const q = st.pts || []; for (let i = 0; i + 1 < q.length; i += 2) { x0 = Math.min(x0, q[i] - r); x1 = Math.max(x1, q[i] + r); y0 = Math.min(y0, q[i + 1] - r); y1 = Math.max(y1, q[i + 1] + r); } }
+  return x1 >= x0 ? { x0, y0, x1, y1 } : null;
+}
+function inPoly(q, x, y) { let c = false; for (let i = 0, j = q.length - 2; i < q.length; j = i, i += 2) if ((q[i + 1] > y) !== (q[j + 1] > y) && x < ((q[j] - q[i]) * (y - q[i + 1])) / (q[j + 1] - q[i + 1]) + q[i]) c = !c; return c; }
+function inCuts(cuts, x, y) {
+  for (const c of cuts) {
+    const q = c.pts;
+    if (c.poly) { if (inPoly(q, x, y)) return true; continue; }
+    const rr = c.r * c.r;
+    if (q.length === 2) { if ((x - q[0]) ** 2 + (y - q[1]) ** 2 <= rr) return true; continue; }
+    for (let i = 0; i + 3 < q.length; i += 2) {
+      const ax = q[i]; const ay = q[i + 1]; const bx = q[i + 2]; const by = q[i + 3]; const L = (bx - ax) ** 2 + (by - ay) ** 2;
+      const u = L ? Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L)) : 0;
+      if ((x - ax - (bx - ax) * u) ** 2 + (y - ay - (by - ay) * u) ** 2 <= rr) return true;
+    }
+  }
+  return false;
+}
+function regionLeft(fx, g) {
+  const S = fx.strokes || [];
+  for (let i = 0; i < S.length; i++) {
+    const st = S[i]; if (st.cut || st.nm) continue;
+    const cuts = S.slice(i + 1).filter((x) => x.cut);
+    if (!cuts.length) return true;
+    const q = st.pts;
+    if (st.poly) {
+      const b = strokesBox([st]); if (!b) continue;
+      const step = Math.max(Math.min(g * 0.2, (b.x1 - b.x0) / 6, (b.y1 - b.y0) / 6), Math.sqrt(((b.x1 - b.x0) * (b.y1 - b.y0)) / 900) || 0.01);
+      for (let y = b.y0 + step / 2; y < b.y1; y += step) for (let x = b.x0 + step / 2; x < b.x1; x += step) if (inPoly(q, x, y) && !inCuts(cuts, x, y)) return true;
+      continue;
+    }
+    const r = (st.r || 0) * 0.75; const hop = Math.max(2, Math.ceil(q.length / 2 / 150) * 2);
+    for (let k = 0; k + 1 < q.length; k += hop) for (const [dx, dy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) if (!inCuts(cuts, q[k] + dx, q[k + 1] + dy)) return true;
+  }
+  return false;
+}
 // the effect's strokes: a corridor or brush is a stroke already; a box, round or shape is its outline (filled: where
 // the effect shows) and dots about a square apart inside it (for what moves in it: bubbles, embers), each no bigger
 // than its room to the edge
@@ -400,7 +441,7 @@ function turnMap(map, p) {
       pt(l);
       if (l.role === 'asset') l.rotation = turnAngle(l.rotation); // tokens stay upright, furniture turns with the room
     }
-    for (const f of map.fx) if (f.kind === 'region') for (const st of f.strokes || []) flat(st.pts);
+    for (const f of map.fx) if (f.kind === 'region') for (const st of f.strokes || []) { flat(st.pts); flat(st.line); }
     for (const sp of map.spells) { if (!sp.attachTo) pt(sp); sp.angle = turnAngle(sp.angle); }
     for (const op of map.fog.ops) {
       if (op.shape === 'mask') { // a folded fog turns round its centre
@@ -480,7 +521,7 @@ function placeScene(D, map) {
     if (!f.attachTo) mv(f, f.imported ? TP : T);
     const TT = f.imported ? TP : T;
     if (f.angle != null && TT && !f.attachTo) f.angle = normDeg(f.angle + TT.d);
-    if (f.kind === 'region') for (const st of f.strokes || []) flat(st.pts, T);
+    if (f.kind === 'region') for (const st of f.strokes || []) { flat(st.pts, T); flat(st.line, T); }
   }
   // the picture (its centre goes along, it turns by the same angle) and its grid follow every turn of the picture
   const b = out.bg;
@@ -831,6 +872,54 @@ function apply(map, type, p, media) {
       if (!s) { s = { sid: p.sid, r: p.r, pts: [], t0: Date.now() }; fx.strokes.push(s); }
       s.pts.push(...p.pts);
       return { changed: 'all' };
+    }
+    case 'fx.shape': { // Beta 3.41: a painted effect as a box or a round, dragged on the grid
+      const w = Number(p.w); const hh = Number(p.h); const x = Number(p.x); const y = Number(p.y);
+      if (!(w > 0 && hh > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return { changed: null };
+      let fx = map.fx.find((f) => f.id === p.id);
+      if (!fx) {
+        fx = { id: p.id, kind: 'region', preset: String(p.preset || 'mist'), strokes: [], intensity: p.intensity ?? 1, hidden: false, color: p.color || null, density: p.density ?? 1, speed: p.speed ?? 1 };
+        map.fx.push(fx);
+      }
+      if (fx.kind !== 'region') return { changed: null };
+      // (its outline, filled: where it shows; and dots inside it for what moves in it)
+      // (no time of painting: a box of blood lies there at once, it does not spread out dab by dab)
+      const made = groundStrokes({ shape: p.shape === 'round' ? 'round' : 'rect', pts: [[x, y], [x + w, y + hh]] }, (map.grid && map.grid.size) || 1);
+      // which way it flows (a river, wind over grass): along its longer side, toward where it was dragged. A line
+      // through its middle, as if painted with a brush as wide as the shape
+      const horiz = w >= hh; const lr = Math.min(w, hh) / 2; const cx = x + w / 2; const cy = y + hh / 2;
+      const half = Math.max((horiz ? w : hh) / 2 - lr, Math.max(w, hh) * 0.25) * ((horiz ? Number(p.dx) : Number(p.dy)) < 0 ? -1 : 1);
+      made[0].line = (horiz ? [cx - half, cy, cx + half, cy] : [cx, cy - half, cx, cy + half]).map(r3); made[0].lr = r3(lr);
+      for (const st of made) fx.strokes.push({ ...st, sid: `${p.sid}-${st.sid}` });
+      return { changed: 'all', label: 'Effect painted' };
+    }
+    case 'fx.cut': { // Beta 3.41: Erase. A brush line (p.pts, piece p.n of the stroke p.sid) or a box or a round takes away
+      // what was painted there before, in every painted area it reaches; an area with nothing left goes
+      let cut;
+      if (p.shape) {
+        const w = Number(p.w); const hh = Number(p.h); const x = Number(p.x); const y = Number(p.y);
+        if (!(w > 0 && hh > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return { changed: null };
+        cut = { sid: String(p.sid), r: 0, poly: true, cut: true, pts: groundStrokes({ shape: p.shape === 'round' ? 'round' : 'rect', pts: [[x, y], [x + w, y + hh]] }, 1)[0].pts };
+      } else {
+        const pts = (Array.isArray(p.pts) ? p.pts : []).map(Number);
+        if (pts.length < 2 || pts.length % 2 || pts.some((v) => !Number.isFinite(v)) || !(p.r > 0)) return { changed: null };
+        cut = { sid: String(p.sid), r: r3(p.r), cut: true, pts: pts.map(r3), n: Number(p.n) || 0 };
+      }
+      const cb = strokesBox([cut]);
+      let n = 0; const gone = [];
+      for (const fx of map.fx) {
+        if (fx.kind !== 'region' || fx.os || !fx.strokes) continue;
+        const b = strokesBox(fx.strokes.filter((st) => !st.cut));
+        if (!b || b.x1 < cb.x0 || b.x0 > cb.x1 || b.y1 < cb.y0 || b.y0 > cb.y1) continue;
+        const last = fx.strokes[fx.strokes.length - 1];
+        if (!cut.poly && last && last.cut && !last.poly && last.sid === cut.sid && last.n === cut.n - 1) { last.pts.push(...cut.pts.slice(2)); last.n = cut.n; } // (the stroke goes on)
+        else fx.strokes.push({ ...cut, pts: cut.pts.slice() });
+        n++;
+        if (!regionLeft(fx, (map.grid && map.grid.size) || 1)) gone.push(fx.id);
+      }
+      if (!n) return { changed: null };
+      if (gone.length) map.fx = map.fx.filter((f) => !gone.includes(f.id));
+      return { changed: 'all', label: 'Effect erased' };
     }
     case 'fx.remove': {
       const fx = map.fx.find((x) => x.id === p.id);

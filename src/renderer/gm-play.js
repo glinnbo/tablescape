@@ -20,6 +20,7 @@ const Play = (() => {
     align: null, expanded: null, viewChapterId: null, lastEditId: null,
     // effects tool
     fxMode: 'place', emitter: 'torch', region: 'mist', light: 'torch', fxSize: 1, paintIn: 2, regionIds: {},
+    paintShape: 'brush', // (Beta 3.41) how a painted effect is put down: brush, box, round; erase takes it away
     look: { color: null, intensity: 1, density: 1, speed: 1, flicker: true, angle: null, variant: null, wave: null }, // the next effect you place
     // assets tool
     brush: null, assetMode: 'stamp', assetCells: 2, assetRot: 0, scatterIn: 3, scatterGap: 1.2, scatterTurn: true, scatterVary: 0.25, selAsset: null, selAssets: [],
@@ -757,7 +758,7 @@ const Play = (() => {
   const TOOL_HINTS = {
     oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a wall · drag: a longer one · again: the door goes', window: 'Click a wall · drag: a longer one · again: the window goes' }[ui.os && ui.os.tool] || ''),
     map: 'Drag moves the map · Alt + wheel scales it · Space-drag moves your view',
-    fx: () => ({ place: 'Click places it · drag its marker to move it · right-click for more', paint: '[ and ] change the brush size', light: 'Click the map or a token to place a light', weather: '' }[ui.fxMode] || ''),
+    fx: () => ({ place: 'Click places it · drag its marker to move it · right-click for more', paint: { box: 'Drag a box · Shift: square · Alt: erase', round: 'Drag a round · Shift: circle · Alt: erase', erase: 'Drag over what should go · [ and ] change the size' }[ui.paintShape] || '[ and ] change the brush size · Alt: erase', light: 'Click the map or a token to place a light', weather: '' }[ui.fxMode] || ''),
     asset: 'Click stamps · drag scatters · Ctrl + wheel turns · [ and ] resize · Shift + click selects several',
     walls: () => ({ wall: 'Click corner to corner · double-click ends · Alt places freely', room: 'Drag from corner to corner', door: 'Click a wall for a door', edit: 'Drag a corner or a wall · Delete removes', erase: 'Click a wall, or drag a box' }[ui.walls && ui.walls.mode] || ''),
     token: 'Click drops one · Alt places freely · Ctrl + D duplicates',
@@ -879,7 +880,7 @@ const Play = (() => {
       h('div', { class: 'pop-body' }, body));
     let around = null;
     try { around = p.around ? p.around() : null; } catch (err) { console.error(`panel ${id}: ${err && err.stack ? err.stack : err}`); }
-    els.pop.classList.toggle('with-sides', !!around); els.pop.style.marginLeft = '';
+    els.pop.classList.toggle('with-sides', !!around); els.pop.classList.remove('os-docked'); els.pop.style.marginLeft = '';
     if (around) { els.pop.append(...around.els.filter(Boolean)); if (around.left) els.pop.style.marginLeft = `${around.left}px`; if (around.after) requestAnimationFrame(around.after); }
     els.pop.classList.add('on');
     const btn = anchor && anchor.offsetParent ? anchor : railButton(id);
@@ -904,7 +905,7 @@ const Play = (() => {
     popTicker = null;
     if (ui.tb && ui.tb !== 'home') ui.tb = 'home'; // the toolbox opens on its tiles next time
     refreshers = [];
-    els.pop.classList.remove('on', 'with-sides'); els.pop.style.marginLeft = '';
+    els.pop.classList.remove('on', 'with-sides', 'os-docked'); els.pop.style.marginLeft = '';
     els.pop.innerHTML = '';
     renderRail();
   }
@@ -1360,10 +1361,14 @@ const Play = (() => {
         lookSection());
     } else if (ui.fxMode === 'paint') {
       body.push(
-        tiles(REGIONS, () => ui.region, (v) => { ui.region = v; refreshPop(); }),
-        slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` }),
-        row(btn('Start a new area', 'plus', () => { delete ui.regionIds[`${S.editMapId}:${ui.region}`]; toast('The next strokes start a new area.'); }, { tip: 'Strokes of the same kind join one area until you start a new one' })),
-        lookSection());
+        // (Beta 3.41) how it is put down: a brush as before, a box or a round dragged on the grid; Erase takes it away
+        seg({ cls: 'seg-4 seg-sub', options: [{ value: 'brush', label: 'Brush', icon: 'brush' }, { value: 'box', label: 'Box', icon: 'square', tip: 'Drag a box on the grid. Shift: a square. Alt: erase a box' },
+          { value: 'round', label: 'Round', icon: 'circle', tip: 'Drag a round on the grid. Shift: a circle. Alt: erase a round' }, { value: 'erase', label: 'Erase', icon: 'eraser', tip: 'Brush away any painted effect. With Box or Round, hold Alt to erase that shape' }],
+        get: () => ui.paintShape, set: (v) => { ui.paintShape = v; refreshPop(); updateBrushCursor(); showToolHint(); } }),
+        shownIf(() => ui.paintShape !== 'erase', tiles(REGIONS, () => ui.region, (v) => { ui.region = v; refreshPop(); })),
+        shownIf(() => ui.paintShape === 'brush' || ui.paintShape === 'erase', slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` })),
+        shownIf(() => ui.paintShape !== 'erase', row(btn('Start a new area', 'plus', () => { delete ui.regionIds[`${S.editMapId}:${ui.region}`]; toast('The next strokes start a new area.'); }, { tip: 'Strokes of the same kind join one area until you start a new one' }))),
+        shownIf(() => ui.paintShape !== 'erase' || !!lookTarget(), lookSection()));
     } else if (ui.fxMode === 'light') {
       const tints = h('div', { class: 'swatches' }, ...FXDATA.TINTS.map((t) => h('button', {
         class: 'swatch', style: `background:${t.hex}`, dataset: { v: t.hex }, 'aria-label': t.label, 'data-tip': t.label, onclick: () => cmd('light.update', { tint: t.hex }),
@@ -3899,7 +3904,8 @@ const Play = (() => {
   function updateBrushCursor() {
     if (!brushCursor) { brushCursor = h('div', { class: 'brush-cursor' }); view.marks.appendChild(brushCursor); }
     const fog = ui.tool === 'fog' && ui.fogShape === 'brush' && !(drag && drag.kind === 'rect');
-    const paint = (ui.tool === 'fx' && ui.fxMode === 'paint') || (ui.tool === 'asset' && ui.assetMode === 'scatter' && !!activeBrush());
+    const fxPaint = ui.tool === 'fx' && ui.fxMode === 'paint';
+    const paint = (fxPaint && (ui.paintShape === 'brush' || ui.paintShape === 'erase') && !(drag && drag.kind === 'fxrect')) || (ui.tool === 'asset' && ui.assetMode === 'scatter' && !!activeBrush());
     const show = (fog || paint) && lastPointer && !ui.align && S && S.map;
     brushCursor.style.display = show ? '' : 'none';
     if (!show) return;
@@ -3909,6 +3915,7 @@ const Play = (() => {
     Object.assign(brushCursor.style, { left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${d}px`, height: `${d}px`, borderWidth: `${1.5 / view.cam.s}px` });
     brushCursor.classList.toggle('cover', fog && ui.fogMode === 'cover');
     brushCursor.classList.toggle('paint', paint);
+    brushCursor.classList.toggle('erase', fxPaint && paint && (ui.paintShape === 'erase' || !!(drag && drag.kind === 'paint' && drag.erase)));
   }
 
   function bindViewport() {
@@ -4099,6 +4106,8 @@ const Play = (() => {
         }
       } else if (drag.kind === 'rect') {
         updateRect(drag, pt);
+      } else if (drag.kind === 'fxrect') {
+        updateFxRect(drag, pt, e.shiftKey);
       } else if (drag.kind === 'align') {
         updateAlign(drag, pt);
       } else if (drag.kind === 'brush' || drag.kind === 'paint') {
@@ -4171,8 +4180,18 @@ const Play = (() => {
         if (r.w * zoom() > 0.1 && r.h * zoom() > 0.1) cmd('fog.op', { mode: d.mode, shape: 'rect', ...r });
       } else if (d.kind === 'brush') {
         flushBrush(d);
+      } else if (d.kind === 'fxrect') { // (Beta 3.41) a box or a round of the effect, or of what goes
+        d.rect.remove();
+        const r = updateFxRect(d, pt, e.shiftKey);
+        updateBrushCursor();
+        if (r.w > 0 && r.h > 0) {
+          const L = ui.look;
+          if (d.erase) cmd('fx.cut', { sid: d.sid, shape: d.round ? 'round' : 'rect', x: r.x, y: r.y, w: r.w, h: r.h });
+          else cmd('fx.shape', { id: d.id, preset: d.preset, sid: d.sid, shape: d.round ? 'round' : 'rect', ...r, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed });
+        }
       } else if (d.kind === 'paint') {
         flushPaint(d);
+        updateBrushCursor();
       } else if (d.kind === 'align') {
         d.line.remove();
         finishAlign(d.p0, pt);
@@ -4301,8 +4320,20 @@ const Play = (() => {
       placeEmitter(EMITTERS.find((x) => x.id === ui.emitter) || EMITTERS[0], pt);
     } else if (ui.fxMode === 'paint') {
       const k = `${S.editMapId}:${ui.region}`;
-      if (!ui.regionIds[k] || !fxOf(ui.regionIds[k])) ui.regionIds[k] = uid('r');
-      drag = { kind: 'paint', id: ui.regionIds[k], preset: ui.region, sid: uid('w'), r: ui.paintIn / 2 / zoom(), buf: [pt.x, pt.y], last: pt };
+      const erase = ui.paintShape === 'erase' || e.altKey; // (Beta 3.41: Alt erases with the shape in hand)
+      if (!erase && (!ui.regionIds[k] || !fxOf(ui.regionIds[k]))) ui.regionIds[k] = uid('r');
+      if (ui.paintShape === 'box' || ui.paintShape === 'round') {
+        const round = ui.paintShape === 'round';
+        const pre = h('div', { class: `rect-preview fx ${round ? 'round' : ''} ${erase ? 'erase' : ''}` });
+        view.marks.appendChild(pre);
+        const a = paintSnap(pt);
+        drag = { kind: 'fxrect', round, erase, id: ui.regionIds[k], preset: ui.region, sid: uid('w'), x0: a.x, y0: a.y, rect: pre };
+        updateFxRect(drag, pt, e.shiftKey);
+        updateBrushCursor();
+        return;
+      }
+      drag = { kind: 'paint', erase, n: 0, id: ui.regionIds[k], preset: ui.region, sid: uid(erase ? 'e' : 'w'), r: ui.paintIn / 2 / zoom(), buf: [pt.x, pt.y], last: pt };
+      updateBrushCursor();
       flushPaint();
     } else if (ui.fxMode === 'light') {
       const d = LIGHTS.find((x) => x.id === ui.light) || LIGHTS[1];
@@ -4826,7 +4857,28 @@ const Play = (() => {
     const pts = d.buf;
     d.buf = [];
     const L = ui.look;
+    if (d.erase) { // (Beta 3.41) Erase: the stroke goes out in pieces, each beginning where the one before ended
+      cmd('fx.cut', { sid: d.sid, n: d.n++, r: d.r, pts: d.tail ? [...d.tail, ...pts] : pts, coalesce: d.sid });
+      d.tail = pts.slice(-2);
+      return;
+    }
     cmd('fx.stroke', { id: d.id, preset: d.preset, sid: d.sid, r: d.r, pts, coalesce: d.sid, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed });
+  }
+  // Beta 3.41: a box or a round of a painted effect snaps to the grid's lines and half squares (a grid that is not
+  // turned); Shift makes it a square or a circle. Returns the box in map units
+  function paintSnap(p) {
+    const G = grid(); const st = (G.size || 1) / 2;
+    if (G.angle || (G.type && G.type !== 'square')) return { x: p.x, y: p.y };
+    return { x: (G.ox || 0) + Math.round((p.x - (G.ox || 0)) / st) * st, y: (G.oy || 0) + Math.round((p.y - (G.oy || 0)) / st) * st };
+  }
+  function updateFxRect(d, p, square) {
+    const b = paintSnap(p);
+    let w = b.x - d.x0; let hh = b.y - d.y0;
+    if (square) { const m = Math.max(Math.abs(w), Math.abs(hh)); w = (w < 0 ? -1 : 1) * m; hh = (hh < 0 ? -1 : 1) * m; }
+    const r = { x: Math.min(d.x0, d.x0 + w), y: Math.min(d.y0, d.y0 + hh), w: Math.abs(w), h: Math.abs(hh), dx: Math.sign(w) || 1, dy: Math.sign(hh) || 1 }; // (dx, dy: which way it was dragged)
+    const a = view.mapToPx(r.x, r.y); const k = view.ppi * zoom();
+    Object.assign(d.rect.style, { left: `${a.x}px`, top: `${a.y}px`, width: `${r.w * k}px`, height: `${r.h * k}px`, borderWidth: `${2 / view.cam.s}px` });
+    return r;
   }
   function rectOf(d, p) { return { x: Math.min(d.x0, p.x), y: Math.min(d.y0, p.y), w: Math.abs(p.x - d.x0), h: Math.abs(p.y - d.y0) }; }
   function updateRect(d, p) {

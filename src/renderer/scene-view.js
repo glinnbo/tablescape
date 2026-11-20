@@ -2565,7 +2565,7 @@ class SceneView {
     const scale = this.ppi * this.v.zoom;
     for (const f of list) {
       let p = this.fxPos(f);
-      if (f.kind === 'region') { const s = f.strokes[0]; if (!s || !s.pts.length) continue; p = { x: s.pts[0], y: s.pts[1] }; }
+      if (f.kind === 'region') { const a0 = FX.anchor(f); if (!a0) continue; p = a0; } // (Beta 3.41: not where it was erased)
       const at = this.mapToPx(p.x, p.y);
       if ((f.kind === 'light' && this.showHandles === 'all') || (f.kind === 'emitter' && f.bright > 0 && f.id === this.selectedFx)) {
         for (const [ft, cls] of [[f.dim, 'dim'], [f.bright, 'bright']]) {

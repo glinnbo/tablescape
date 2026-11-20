@@ -153,6 +153,59 @@ module.exports = (area) => {
     await t.until(async () => (await t.t(`window.__table.coverage('atmo')`)) > 0.002, 8000, 'the mist on the TV');
   });
 
+  area.deep('Beta 3.41: Paint → Box and Round snap to the grid; Erase takes painted effects away, with the brush or (Alt) with a box', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    // (in squares of the map's grid, which need not begin at the map's corner)
+    const ox = m.grid.ox || 0; const oy = m.grid.oy || 0; const X = (n) => ox + n * k; const Y = (n) => oy + n * k;
+    const sq = (pts) => pts.map((v, i) => Math.round(((v - (i % 2 ? oy : ox)) / k) * 100) / 100);
+    await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'paint'; Play.ui.paintShape = 'brush'; Play.openPop('fx')`);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .seg-sub .seg-btn')].map((b) => b.textContent)`), ['Brush', 'Box', 'Round', 'Erase'], 'four ways under Paint');
+    await t.clickText('#pop .tile', 'Acid');
+    await t.clickText('#pop .seg-sub .seg-btn', 'Box');
+    t.eq(await t.g(`(() => { const l = [...document.querySelectorAll('#pop *')].filter((e) => !e.children.length && /^Brush size/.test(e.textContent)); return [l.length > 0, l.every((e) => !!e.closest('[hidden]'))]; })()`), [true, true], 'no brush size for a box');
+    // a drag that begins and ends a little off the grid's lines: the box lies on them
+    await t.drag(await t.scr(X(16.2), Y(5.1)), await t.scr(X(20.9), Y(8.8)), 8);
+    const acid = () => M(t).fx.find((f) => f.kind === 'region' && f.preset === 'acid');
+    await t.until(() => acid(), 3000, 'the box of acid');
+    const outline = acid().strokes[0];
+    t.ok(outline.poly && !outline.cut, 'an outline, filled');
+    t.eq(sq(outline.pts), [16, 5, 21, 5, 21, 9, 16, 9], 'on the grid\'s lines');
+    t.ok(outline.line && outline.line[2] > outline.line[0] && outline.line[1] === outline.line[3], 'it flows along its longer side, the way it was dragged', outline.line);
+    const alpha = (x, y) => t.t(`(window.__table.probeMap('atmo', ${X(x)}, ${Y(y)}) || [0, 0, 0, 0])[3]`);
+    await t.until(async () => (await alpha(18.5, 7)) > 40, 8000, 'the acid on the TV');
+    t.ok((await alpha(22.5, 7)) < 8 && (await alpha(18.5, 10.5)) < 8 && (await alpha(14.5, 7)) < 8, 'nothing of it outside the box', [await alpha(22.5, 7), await alpha(18.5, 10.5), await alpha(14.5, 7)]);
+    // a round with Shift: a circle; it joins the same area
+    await t.clickText('#pop .seg-sub .seg-btn', 'Round');
+    await t.drag(await t.scr(X(23), Y(5)), await t.scr(X(25.9), Y(9.2)), 8, ['shift']);
+    await t.until(() => acid().strokes.filter((st) => st.poly).length === 2, 3000, 'the round');
+    const ring = acid().strokes.filter((st) => st.poly)[1].pts; const xs = ring.filter((_, i) => i % 2 === 0); const ys = ring.filter((_, i) => i % 2 === 1);
+    t.eq(sq([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]), [23, 5, 27, 9], 'a circle four squares across (the longer side of the drag)');
+    t.eq(M(t).fx.filter((f) => f.kind === 'region').length, 1, 'box and round are one area');
+    // Alt with Box erases a box: the middle of the acid goes, its rim stays
+    await t.clickText('#pop .seg-sub .seg-btn', 'Box');
+    await t.drag(await t.scr(X(17.5), Y(6)), await t.scr(X(19.5), Y(8)), 8, ['alt']);
+    await t.until(() => acid().strokes.some((st) => st.cut), 3000, 'the erased box');
+    const cut = acid().strokes.find((st) => st.cut);
+    t.eq(sq(cut.pts), [17.5, 6, 19.5, 6, 19.5, 8, 17.5, 8], 'half squares too');
+    await t.until(async () => (await alpha(18.5, 7)) < 8, 8000, 'the middle free of acid on the TV');
+    t.ok((await alpha(16.6, 7)) > 40 && (await alpha(20.4, 7)) > 40, 'the rest stays', [await alpha(16.6, 7), await alpha(20.4, 7)]);
+    // Erase: the brush takes the round away altogether, in one step that undo brings back
+    await t.clickText('#pop .seg-sub .seg-btn', 'Erase');
+    t.ok(await t.g(`document.querySelector('#pop .tiles').hidden`), 'no effects to pick while erasing');
+    await t.g('Play.ui.paintIn = 8'); // (a brush as wide as the round, on a table zoomed as it is)
+    const r0 = await t.g(`Play.ui.paintIn / 2 / Play.state().map.view.zoom`);
+    for (let y = 5; y <= 9; y += Math.max(0.5, (r0 / k) * 1.2)) await t.drag(await t.scr(X(22.5), Y(y)), await t.scr(X(27.5), Y(y)), 6);
+    await t.until(async () => (await alpha(25, 7)) < 8, 8000, 'the round gone from the TV');
+    t.ok((await alpha(16.6, 7)) > 40, 'the box is still there', await alpha(16.6, 7));
+    // what is erased everywhere leaves no empty area behind
+    t.handle('fx.cut', { mapId: own, sid: 'all', shape: 'rect', x: X(10), y: Y(2), w: 22 * k, h: 12 * k });
+    await t.settle();
+    t.eq(M(t).fx.filter((f) => f.kind === 'region').length, 0, 'an area with nothing left goes');
+    t.handle('history.undo', { mapId: own }); await t.settle();
+    t.eq(M(t).fx.filter((f) => f.kind === 'region').length, 1, 'undo brings it back');
+    await t.g(`Play.ui.paintIn = 2; Play.ui.paintShape = 'brush'`);
+  }, { ms: 120000 });
+
   area.deep('on the TV the effects lie under the fog, the weather above it', async (t) => {
     await clean(t);
     const order = await t.t(`(() => { const w = document.querySelector('.tv-layer.shown .sv-world'); return [...w.querySelectorAll('canvas')].map((e) => (e.className.baseVal ?? e.className).split(' ').pop()); })()`);

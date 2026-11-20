@@ -24,6 +24,13 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.41', [
+      'Effects → Paint: four ways to put an effect down, in a row under Paint. Brush as before; Box and Round are dragged on the grid and snap to its lines and half squares (Shift: a square or a circle); Erase brushes away any painted effect. Holding Alt with Brush, Box or Round erases with that shape',
+      'A box or a round of River current, Surf, Grass in the wind or Sway flows along its longer side, the way you dragged it. An area with nothing left after erasing goes; one stroke of Erase is one step for undo',
+      'Draw menu: Room\'s parts (Wall, Pillar, Stairs, Door, Window) stand close together as one block that is filled up to the tools, so nothing of the map shows between the two columns',
+      'Draw menu: the Blending card and Map settings line up with the panel: joined to its edge at the bottom, they slide out from behind it like a drawer and back when closed',
+      'Draw menu: the scroll bar is gone (its grey line stood beside the tabs); the wheel scrolls the panel as before',
+    ]],
     ['Beta 3.40', [
       'Oldschool maps: stairs follow the heights. They climb every level between the floor at their foot and the floor at their top, with more steps the higher they go (before, they always climbed one level and ended in a step). Maps drawn before are made anew with it',
       'Blending on raised and lowered floors: a floor blends with the floors at its own height, on a platform or in a pit as on floor level. Where a higher or lower floor begins, the step stays sharp',

@@ -781,6 +781,7 @@ const OldschoolTool = (() => {
     // How floors meet is picked from four looks (Blending); a small button opens the three sliders in a card.
     let sides = null; let flyOpen = null; // (the card beside the tabs: 'map' the map's settings, 'blend' the sliders)
     let lastTool = null; // (the tool the panel was built for last: what is new slides out from behind the panel)
+    let shownFly = null; let flyEl = null; // (Beta 3.41: the card shown at the last build, so a new one slides out and a closed one slides back)
     const osNow = () => (map() && map().os) || null; // (the panel may be asked to refresh while another map comes up)
     const PARTS = ['wall', 'pillar', 'stairs', 'door', 'window'];
     const LEVEL_MAX = 3; // (what a map keeps: three down to three up)
@@ -1020,11 +1021,27 @@ const OldschoolTool = (() => {
       const note = h('span', { class: 'grow hint' });
       bind(() => { const o = osNow(); note.textContent = !o ? '' : lastErr ? 'The picture could not be made (see the log)' : o.items.length ? '' : 'Draw a room to start'; });
       if (fly && parts) fly.classList.add('past-parts'); // (beyond the second column of tabs)
+      // Beta 3.41: the card slides out from behind the panel like the tabs (when it opens, or with the panel), and back
+      // behind it when it is closed
+      let leaving = null;
+      if (fly && (!again || shownFly !== flyOpen)) fly.classList.add('slide');
+      if (!fly && again && shownFly && flyEl) { leaving = flyEl; leaving.classList.remove('slide'); leaving.classList.add('out'); const gone = leaving; setTimeout(() => gone.remove(), 240); }
+      shownFly = flyOpen; flyEl = fly;
       sides = {
-        els: [tools, parts, fly],
+        els: [tools, parts, fly, leaving],
         after: () => { // (the card beside its button where the panel is tall enough, else from the top)
-          if (!fly || !fly.parentNode) return;
-          const tall = fly.parentNode.offsetHeight >= fly.offsetHeight; fly.style.bottom = tall ? '0' : 'auto'; fly.style.top = tall ? 'auto' : '0';
+          const pop = tools.parentNode; if (!pop) return;
+          if (!fly) { // (a card sliding back keeps the panel's corner as it was until it is gone)
+            const was = !!(leaving && leaving.classList.contains('docked')); pop.classList.toggle('os-docked', was);
+            if (was) setTimeout(() => { if (!flyEl) pop.classList.remove('os-docked'); }, 240);
+            return;
+          }
+          const tall = pop.offsetHeight >= fly.offsetHeight; fly.style.bottom = tall ? '0' : 'auto'; fly.style.top = tall ? 'auto' : '0';
+          // Beta 3.41: where it fits under the tabs it lines up with the panel, joined to its edge like a drawer pulled
+          // out of it; a panel too short for that keeps the card beside the tabs
+          const tabsEnd = Math.max(0, ...[tools, parts].filter(Boolean).map((el) => el.offsetTop + el.offsetHeight));
+          const docked = tall && pop.offsetHeight - fly.offsetHeight >= tabsEnd + 8;
+          fly.classList.toggle('docked', docked); pop.classList.toggle('os-docked', docked);
         },
       };
       return h('div', { class: 'stack' }, previewCard(), ...choices,

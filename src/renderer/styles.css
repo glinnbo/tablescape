@@ -117,6 +117,9 @@ input[type=color] { width: 30px; height: 26px; padding: 0 2px; border: 1px solid
 .seg-3 .seg-btn, .seg-4 .seg-btn, .seg-5 .seg-btn { padding: 7px 2px; flex-direction: column; gap: 3px; font-size: 11.5px; }
 .seg-5 .seg-btn { font-size: 10.5px; min-width: 0; }
 .seg-icons .seg-btn { padding: 7px 0; }
+/* Beta 3.41: a choice inside the picked tab (Paint: Brush, Box, Round, Erase), in blue as Room's parts in Draw */
+.seg-sub .seg-btn { color: var(--prep); }
+.seg-sub .seg-btn.on { background: #1c2440; color: var(--prep); box-shadow: inset 0 0 0 1px var(--prep); font-weight: 600; }
 .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .tile {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 8px 2px 7px; min-height: 62px;
@@ -426,10 +429,15 @@ body.wall-grab.dragging #viewport { cursor: grabbing !important; }
 .rect-preview { position: absolute; border: 2px dashed var(--torch); background: rgba(227, 150, 62, 0.12); pointer-events: none; }
 .rect-preview.cover { border-color: var(--prep); background: rgba(0, 0, 0, 0.35); }
 .rect-preview.select { border-color: var(--prep); background: rgba(147, 169, 230, 0.12); }
+/* Beta 3.41: a box or a round of a painted effect being dragged; what Erase takes away */
+.rect-preview.fx { border-color: #9fe3ff; background: rgba(159, 227, 255, 0.14); }
+.rect-preview.fx.round { border-radius: 50%; }
+.rect-preview.fx.erase { border-color: #ff8f7a; background: rgba(255, 110, 90, 0.16); }
 .align-line { position: absolute; transform-origin: 0 50%; background: var(--torch); border-radius: 3px; pointer-events: none; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55); }
 .brush-cursor { position: absolute; border: 1.5px solid rgba(255, 255, 255, 0.9); border-radius: 50%; pointer-events: none; transform: translate(-50%, -50%); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
 .brush-cursor.cover { border-color: var(--prep); }
 .brush-cursor.paint { border-color: #9fe3ff; border-style: dashed; }
+.brush-cursor.erase { border-color: #ff8f7a; }
 
 /* ---------- live / prep frame ---------- */
 #frame { position: absolute; pointer-events: none; display: none; z-index: 5; border-radius: 2px; }
@@ -902,6 +910,8 @@ body.table { background: #000; cursor: none; }
   .tv-layer { transition-duration: 0.2s; }
   #table-mapink.in .mi-band, #table-mapink.out .mi-band { animation-duration: 0.3s; }
   #pop.on, #drawer.on, .toast, .os-tabs.slide .tile, .os-tabs .tile.pick { animation: none; }
+  .os-fly.slide { animation: none; }
+  .os-fly.out { display: none; }
   .radial-item, .radial-center { transition: none; }
 }
 
@@ -3836,9 +3846,10 @@ body.gm .sv-trees-over { opacity: 0.7; } /* (above the tokens: see-through on yo
 #pop.with-sides { overflow: visible; }
 #pop.on.with-sides { display: flex; flex-direction: column; min-height: min(290px, calc(100% - var(--roster-h) - 24px)); } /* (as tall as its tabs, so they always stand along its edge) */
 #pop.with-sides > .pop-head { position: static; flex: none; border-radius: 14px 14px 0 0; }
-#pop.with-sides > .pop-body { overflow-y: auto; min-height: 0; flex: 1; display: flex; flex-direction: column; }
+#pop.with-sides > .pop-body { overflow-y: auto; min-height: 0; flex: 1; display: flex; flex-direction: column; scrollbar-width: none; } /* (Beta 3.41: no scroll bar: its grey line stood beside the tabs; the wheel scrolls) */
+#pop.with-sides > .pop-body::-webkit-scrollbar { display: none; }
 #pop.with-sides > .pop-body > .stack { flex: 1 0 auto; display: flex; flex-direction: column; gap: 10px; }
-.os-tabs { position: absolute; left: 100%; top: 8px; display: flex; flex-direction: column; gap: 3px; z-index: 1; clip-path: inset(-12px -40px -24px 0); } /* (Beta 3.38: cut at the panel's edge, so the tabs come out from behind it) */
+.os-tabs { position: absolute; left: 100%; top: 8px; display: flex; flex-direction: column; gap: 3px; z-index: 2; clip-path: inset(-12px -40px -24px 0); } /* (Beta 3.38: cut at the panel's edge, so the tabs come out from behind it) */
 .os-tabs.slide .tile { animation: os-tab-out 0.3s cubic-bezier(0.2, 0.8, 0.25, 1) both; animation-delay: calc(var(--i, 0) * 26ms); }
 .os-tabs .tile.pick { animation: os-tab-pick 0.22s cubic-bezier(0.2, 0.8, 0.25, 1) both; }
 @keyframes os-tab-out { from { transform: translateX(-106%); } }
@@ -3853,14 +3864,29 @@ body.gm .sv-trees-over { opacity: 0.7; } /* (above the tokens: see-through on yo
 .os-ws { position: relative; grid-template-columns: 1fr; }
 .os-ws output { right: 0; top: -4px; }
 .os-ws-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; font-size: 11px; color: var(--faint); }
-.os-fly { position: absolute; left: calc(100% + 76px); width: 292px; padding: 11px 14px 13px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: var(--shadow); }
-.os-fly.past-parts { left: calc(100% + 144px); }
+.os-fly { --off: 76px; position: absolute; left: calc(100% + var(--off)); width: 292px; padding: 11px 14px 13px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: var(--shadow); z-index: 0; }
+.os-fly.past-parts { --off: 144px; }
+/* Beta 3.41: the card comes out from behind the panel, under the tabs, and goes back behind it when closed. It is cut
+   at the panel's edge all the way (the cut moves against the card, so it stays on the edge) */
+.os-fly.slide { animation: os-fly-out 0.34s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; }
+.os-fly.out { animation: os-fly-in 0.22s cubic-bezier(0.5, 0, 0.8, 0.4) forwards; pointer-events: none; }
+/* (lined up with the panel: joined to its edge, the panel's shadow on it, the panel's corner square where they meet) */
+.os-fly.docked { --off: 0px; bottom: -1px !important; border-left: 0; border-radius: 0 14px 14px 0; box-shadow: var(--shadow), inset 12px 0 10px -8px rgba(0, 0, 0, 0.6); }
+#pop.os-docked { border-bottom-right-radius: 0; }
+#pop.os-docked .os-status { border-bottom-right-radius: 0; }
+@keyframes os-fly-out { from { transform: translateX(calc(-300px - var(--off))); clip-path: inset(-60px -60px -60px 300px); } to { transform: none; clip-path: inset(-60px -60px -60px calc(-1 * var(--off))); } }
+@keyframes os-fly-in { from { transform: none; clip-path: inset(-60px -60px -60px calc(-1 * var(--off))); } to { transform: translateX(calc(-300px - var(--off))); clip-path: inset(-60px -60px -60px 300px); } }
 .os-fly-head { display: flex; align-items: center; }
 /* Beta 3.38: Room's parts in a second column, in the blue of Build; heights that stack; Blending as four looks */
 .os-tabs .tile.open { width: 66px; border-color: var(--torch); color: var(--torch); }
-.os-tabs2 { left: calc(100% + 68px); z-index: 0; clip-path: inset(-12px -40px -24px -10px); } /* (under the tools: Room's parts come out from behind them) */
-.os-tabs2 .tile { color: var(--prep); }
-.os-tabs2 .tile.on { border-color: var(--prep); color: var(--prep); background: linear-gradient(90deg, var(--panel), #1c2440); }
+.os-tabs2 { left: calc(100% + 44px); z-index: 1; gap: 0; clip-path: inset(-12px -40px -24px 0); } /* (under the tools: Room's parts come out from behind them) */
+/* Beta 3.41: Room's parts stand close together, one block, and are filled up to the tools: each begins under the
+   tools' column (which is 58 wide, 66 where a tool is picked), its picture and name sit in the part that shows */
+.os-tabs2 .tile { color: var(--prep); width: 82px; padding-left: 22px; border-radius: 0 9px 9px 0; margin-top: -1px; box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.35); }
+.os-tabs2 .tile:first-child { margin-top: 0; }
+.os-tabs2 .tile.on { width: 90px; border-color: var(--prep); color: var(--prep); background: linear-gradient(90deg, var(--panel) 24px, #1c2440); z-index: 1; }
+.os-tabs2 .tile.pick { animation-name: os-part-pick; }
+@keyframes os-part-pick { from { width: 82px; } }
 .os-level .os-pick:disabled { opacity: 0.35; }
 .os-level-now span { font-variant-numeric: tabular-nums; }
 .os-level-now:not([data-level="0"]) span { font-size: 13px; }

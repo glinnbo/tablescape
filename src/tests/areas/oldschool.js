@@ -15,6 +15,9 @@ module.exports = (area) => {
   // (the tabs slide out from behind the panel: a click waits until they have arrived)
   const tabsOut = (t) => t.until(() => t.g(`document.getAnimations().every((a) => { const e = a.effect && a.effect.target; return !(e && e.closest && e.closest('#pop .os-tabs')) || a.playState === 'finished'; })`), 4000, 'the tabs to come out');
   const tab = async (t, id) => { await tabsOut(t); await t.clickSel(`.os-tools .tile[data-v="${id}"]`); };
+  // (Beta 3.41) the card beside the tabs slides out from behind the panel, and back when closed: wait for either
+  const cardOut = (t) => t.until(() => t.g(`(() => { const e = document.querySelector('#pop .os-fly'); return !!e && !e.classList.contains('out') && e.getAnimations().every((a) => a.playState === 'finished'); })()`), 4000, 'the card to come out');
+  const cardGone = (t) => t.until(async () => (await t.count('#pop .os-fly')) === 0, 4000, 'the card to go');
   const tool = async (t, id) => {
     if (PARTS.includes(id) && !(await t.count(`.os-tabs2 .tile[data-v="${id}"]`))) await tab(t, 'room');
     await tab(t, id);
@@ -179,7 +182,10 @@ module.exports = (area) => {
     // (Beta 3.37) the menu made new: the tools as tabs on the panel's edge, a picture of what comes
     t.eq(await t.g(`document.querySelector('#pop .os-prev b').textContent`), 'Stone pillar', 'a picture of the pillar to come, with its name');
     // (Beta 3.38) Room's parts: a second column while Room or one of them is picked, Room stays marked
-    t.ok(await t.g(`(() => { const two = document.querySelector('#pop .os-tabs2'); const one = document.querySelector('#pop .os-tabs:not(.os-tabs2)'); const room = one.querySelector('[data-v="room"]'); const a = one.getBoundingClientRect(); const b = two.getBoundingClientRect(); return room.classList.contains('open') && !room.classList.contains('on') && two.querySelector('[data-v="pillar"]').classList.contains('on') && b.left >= a.right - 10 && Math.abs(b.top - a.top) < 3; })()`), 'the pillar among Room\'s parts, beside the tools, Room marked as open');
+    t.ok(await t.g(`(() => { const two = document.querySelector('#pop .os-tabs2'); const one = document.querySelector('#pop .os-tabs:not(.os-tabs2)'); const room = one.querySelector('[data-v="room"]'); const a = one.getBoundingClientRect(); const b = two.getBoundingClientRect(); return room.classList.contains('open') && !room.classList.contains('on') && two.querySelector('[data-v="pillar"]').classList.contains('on') && b.left < a.right && b.right > a.right + 40 && Math.abs(b.top - a.top) < 3; })()`), 'the pillar among Room\'s parts, beside the tools, Room marked as open');
+    // (Beta 3.41) Room's parts stand close together and begin under the tools, so nothing of the map shows between; no scroll bar beside the tabs
+    t.ok(await t.g(`(() => { const r = [...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.getBoundingClientRect()); const one = document.querySelector('#pop .os-tabs:not(.os-tabs2) [data-v="shape"]').getBoundingClientRect(); return r.length === 5 && r.every((b, i) => !i || Math.abs(b.top - r[i - 1].bottom) <= 1.5) && r.every((b) => b.left <= one.right - 8); })()`), 'the parts in one block, filled up to the tools');
+    t.eq(await t.g(`getComputedStyle(document.querySelector('#pop .pop-body')).scrollbarWidth`), 'none', 'no scroll bar in the panel');
     t.eq(await t.g(`getComputedStyle(document.querySelector('#pop .os-tabs2 .tile:not(.on)')).color === getComputedStyle(document.querySelector('.g-build .rail-head')).color`), true, 'the parts in the blue of Build');
     await tool(t, 'shape');
     t.eq(await t.count('#pop .os-tabs2'), 0, 'another tool: the parts go');
@@ -204,12 +210,16 @@ module.exports = (area) => {
     await t.clickText('#pop .os-looks .os-pick', 'Tiled');
     t.eq(await t.g('[Play.ui.os.mixW, Play.ui.os.mixU, Play.ui.os.mixT]'), [1.5, 0.5, 1], 'Tiled: stone by stone');
     await t.clickSel('#pop .os-fine');
+    t.ok(await t.g(`document.querySelector('#pop .os-fly').classList.contains('slide')`), 'the card slides out from behind the panel (Beta 3.41)');
+    await cardOut(t);
     t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fly input[type=range]')].map((x) => x.getAttribute('aria-label'))`), ['Mix width', 'Uneven', 'Tiled'], 'the small button: the three sliders in a card');
     await t.g(`(() => { const i = document.querySelector('#pop .os-fly input[aria-label="Uneven"]'); i.value = '0.8'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     t.eq([await t.g('Play.ui.os.mixU'), await t.count('#pop .os-looks .os-pick.on')], [0.8, 0], 'fine-tuned: none of the four looks');
     await t.clickText('#pop .os-looks .os-pick', 'Natural');
     t.eq(await t.g('[Play.ui.os.mixW, Play.ui.os.mixU, Play.ui.os.mixT]'), [1.5, 0.5, 0.5], 'and Natural again');
     await t.clickSel('#pop .os-fly .icon-btn');
+    t.ok(await t.g(`(() => { const e = document.querySelector('#pop .os-fly'); return !e || e.classList.contains('out'); })()`), 'closed: it slides back behind the panel');
+    await cardGone(t);
     t.eq(await t.count('#pop .os-fly'), 0, 'the card away');
     t.ok(await t.g(`(() => { const p = document.querySelector('#pop').getBoundingClientRect(); const tb = document.querySelector('#pop .os-tabs').getBoundingClientRect(); return Math.abs(tb.left - p.right) < 3 && tb.bottom <= p.bottom + 2; })()`), 'tabs along its right edge');
     t.eq(await t.g(`[...document.querySelectorAll('#pop .os-level .os-pick')].map((b) => [b.textContent, !!b.querySelector('svg')])`), [['Lower', true], ['Floor', true], ['Higher', true]], 'the height as three little drawings');
@@ -242,10 +252,12 @@ module.exports = (area) => {
     // (Beta 3.35) the light on a dial; how long the shadows are, and shadows all around (caves), on sliders
     t.eq(await t.count('#pop .os-sun-dial'), 0, 'the map\'s settings out of the way at first (Beta 3.37)');
     await t.clickSel('#pop .os-mapbtn');
+    await cardOut(t);
     t.ok(await t.g(`!!document.querySelector('#pop .os-fly .os-sun-dial')`), 'behind their button: the light on a dial');
     t.ok(await t.g(`['Shadow length', 'Shadows all around', 'Walls for sight', 'Clear'].every((l) => document.querySelector('#pop .os-fly').textContent.includes(l))`), 'the shadows, walls for sight and Clear with it');
-    t.ok(await t.g(`(() => { const f = document.querySelector('#pop .os-fly').getBoundingClientRect(); const tb = document.querySelector('#pop .os-tabs').getBoundingClientRect(); return f.left >= tb.right && f.right <= innerWidth && f.top >= 0; })()`), 'in a card beside the tabs');
+    t.ok(await t.g(`(() => { const f = document.querySelector('#pop .os-fly').getBoundingClientRect(); const tb = document.querySelector('#pop .os-tabs').getBoundingClientRect(); const p = document.querySelector('#pop').getBoundingClientRect(); const docked = Math.abs(f.left - p.right) <= 2 && f.top >= tb.bottom && Math.abs(f.bottom - p.bottom) <= 2; return (docked || f.left >= tb.right) && f.right <= innerWidth && f.top >= 0; })()`), 'in a card lined up with the panel under the tabs (Beta 3.41), or beside the tabs where the panel is short');
     await t.clickSel('#pop .os-fly .icon-btn');
+    await cardGone(t);
     t.eq(await t.count('#pop .os-fly'), 0, 'and away again');
     t.eq([M(t).os.shadowLen, M(t).os.shadowAll], [0.35, 0], 'shadows of the length of "short" at first, none all around');
     t.handle('os.set', { mapId: own, shadowLen: 0.75, shadowAll: 0.6 });
