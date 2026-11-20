@@ -446,6 +446,28 @@ module.exports = (area) => {
     await tool(t, 'room');
   }, { ms: 300000 });
 
+  area.deep('Beta 3.39: a step between floors of different height shows on every side, also the one the sun shines on', async (t) => {
+    await clear(t);
+    // a platform one up on a floor of the same tile; the sun stands top left, so its shadow falls to the bottom right only
+    const sunWas = M(t).os.sun; // (a check before this one turned the light)
+    t.handle('os.set', { mapId: own, sun: 135 });
+    t.handle('os.add', { mapId: own, items: [room(12, 2, 28, 14, { edge: 'ledge', mixW: 0 }), room(17, 5, 23, 11, { edge: 'ledge', level: 1, mixW: 0 })] });
+    await t.settle();
+    await baked(t);
+    // (how light a strip of the picture is, in squares)
+    const lum = (x0, y0, x1, y1) => t.g(`(async () => { const b = Play.state().map.bg; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0); const X = (v) => Math.round((v * ${k} - b.x) / b.scale); const Y = (v) => Math.round((v * ${k} - b.y) / b.scale); const d = g.getImageData(X(${x0}), Y(${y0}), Math.max(1, X(${x1}) - X(${x0})), Math.max(1, Y(${y1}) - Y(${y0}))).data; let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; return sum / (d.length / 4); })()`);
+    const far = await lum(17.5, 3.4, 22.5, 3.9);
+    const footTop = await lum(17.5, 4.86, 22.5, 4.97); const footLeft = await lum(16.86, 5.5, 16.97, 10.5);
+    t.note(`the floor: ${Math.round(far)} away from the platform, ${Math.round(footTop)} at its foot on the sun's side (top), ${Math.round(footLeft)} (left)`);
+    t.ok(footTop < far * 0.85 && footLeft < far * 0.85, 'the floor is darker at the platform\'s foot on the sides the sun shines on (no shadow falls there)', [far, footTop, footLeft]);
+    const edgeTop = await lum(17.5, 5.02, 22.5, 5.1); const edgeBottom = await lum(17.5, 10.9, 22.5, 10.98); const mid = await lum(19, 7, 21, 9);
+    t.note(`the platform: ${Math.round(mid)} in its middle, ${Math.round(edgeTop)} along its top edge, ${Math.round(edgeBottom)} along its bottom edge`);
+    t.ok(edgeTop > edgeBottom * 1.15, 'its edge toward the sun is lighter than the one away from it (bevelled)', [edgeTop, edgeBottom]);
+    t.ok(mid > far * 1.01, 'and it is a touch lighter than the floor it stands on', [mid, far]);
+    t.handle('os.set', { mapId: own, sun: sunWas });
+    await t.settle();
+  }, { ms: 300000 });
+
   area.deep('floors mix by opacity: a soft line, uneven, tiled along the grid (insides and joints); off', async (t) => {
     await clear(t);
     const T = (n) => ({ rel: `Tiles/Tablescape/${n}.webp` });

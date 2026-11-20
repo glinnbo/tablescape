@@ -24,6 +24,9 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.39', [
+      'Oldschool maps: a step between floors of different height now shows on every side, not only where the sun\'s shadow falls. A soft dark lies at the foot of every step; the upper edge is bevelled, lighter where it looks at the sun and darker where it looks away; higher floors are a touch lighter, lower ones darker. Maps drawn before are made anew with it',
+    ]],
     ['Beta 3.38', [
       'Draw menu: Wall, Pillar, Stairs, Door and Window now come out in a second column, in blue, when Room is picked, and stay while one of them is in use. The other tools show one column of six',
       'Floor heights stack: Lower and Higher step one level a click, from three down to three up. The button between them shows the level and puts it back to floor level',

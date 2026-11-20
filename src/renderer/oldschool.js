@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // for every floor); a door: the wall line it opens
   const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 23; // (23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 24; // (24: Beta 3.39, steps between floors of different height show on every side; 23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -733,7 +733,34 @@ void main(){
     ao += clamp((H(px + vec2(cos(a), sin(a)) * r) - h) / (0.9 * P), 0.0, 1.0);
   }
   ao = 1.0 - 0.45 * ao / 12.0;
-  float light = (0.5 + 0.5 * lam) * (1.0 - shK * sh) * (1.0 - 0.65 * shA * sa) * ao;
+  // Beta 3.39: a step between floors of different height shows on every side, not only where the sun's shadow falls
+  // (Glinn: "the way shadows are cast makes it look like one side is normal"; of five ways tried on a test zone he took
+  // all together): a soft dark at the foot of the step all around; the upper edge a little lit, and bevelled: lighter
+  // where it looks at the sun, darker where it looks away; higher floors a touch lighter, lower ones darker
+  float stepF = 1.0;
+  if (kind == 1.0 || kind == 6.0 || kind == 7.0) {
+    float LV = 0.35 * P;
+    float own = kind == 6.0 ? h / LV : (texelFetch(attrT, ip, 0).g * 255.0 - 128.0) / 30.0; // (its height in levels; stairs by their steps)
+    float foot = 0.0; float nearDn = 0.0; float dn = 0.0; vec2 dnDir = vec2(0.0);
+    for (int k = 0; k < 4; k++) { // (four rings round the dot, to 0.46 squares: what is higher or lower there)
+      float r = (k == 0 ? 0.05 : k == 1 ? 0.13 : k == 2 ? 0.27 : 0.46) * P;
+      float u = 0.0; float d = 0.0;
+      for (int i = 0; i < 12; i++) {
+        float a = float(i) * 0.5236 + float(k) * 0.26; vec2 dir = vec2(cos(a), sin(a)); vec2 p2 = clamp(px + dir * r, vec2(0.0), size - 1.0);
+        float k2 = K(p2); if (!(k2 == 1.0 || k2 == 6.0 || k2 == 7.0)) continue; // (floors only: walls and rock have their own look)
+        float lv2 = k2 == 6.0 ? H(p2) / LV : (texelFetch(attrT, ivec2(p2), 0).g * 255.0 - 128.0) / 30.0;
+        float dh = lv2 - own;
+        if (dh > 0.5) u = max(u, min(dh, 3.0));
+        if (dh < -0.5) { d = max(d, min(-dh, 3.0)); if (k <= 1) dnDir += dir; }
+      }
+      foot += (u > 0.0 ? 1.0 : 0.0) * (k == 0 ? 0.36 : k == 1 ? 0.3 : k == 2 ? 0.22 : 0.12) * (0.75 + 0.25 * min(u, 2.0));
+      if (k == 0) nearDn = d;
+      if (k <= 1) dn = max(dn, d);
+    }
+    float bevel = dn > 0.0 && length(dnDir) > 0.01 ? dot(normalize(dnDir), normalize(L.xy)) : 0.0; // (1: this edge looks at the sun)
+    stepF = (1.0 - 0.38 * pow(clamp(foot, 0.0, 1.0), 1.15)) * (nearDn > 0.0 ? 1.14 : 1.0) * (dn > 0.0 ? 0.98 + 0.24 * bevel : 1.0) * (1.0 + 0.04 * clamp(own, -3.0, 3.0));
+  }
+  float light = (0.5 + 0.5 * lam) * (1.0 - shK * sh) * (1.0 - 0.65 * shA * sa) * ao * stepF;
   o2 = vec4(clamp(light * 0.5, 0.0, 1.0), 0.0, 0.0, 1.0); // (the light alone, halved: the sharp tiles take it)
   vec3 c = alb * light;
   // the cliff fades into darkness; beyond the drawing the picture is see-through (the table's own dark shows there)
