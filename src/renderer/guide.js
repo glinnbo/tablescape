@@ -24,6 +24,14 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.37', [
+      'The Draw menu made new: the tools are tabs along the panel\'s right edge; at the top a picture of what is about to be drawn; height and edge are little drawings to pick from; the sliders for where floors meet stand upright beside the panel with words at their ends (the number shows as you hover); Map settings (light, shadows, walls for sight, Clear) open from one button at the bottom',
+      'Draw → Tile, a new tool that changes a floor\'s tile and nothing else (not its height, edge or shape): click a floor for the whole of it, or paint the tile on with the brush',
+      'Draw → Tiles → List … is as wide as the Tokens list: rows of five, twenty tiles at a glance',
+      'Stairs: the lowest step goes over into the floor softly (no line where they meet); the shadows between the steps are stronger',
+      'Oldschool maps: the shadow at the foot of wall lines and pillars is soft now. Before, it was a hard band that showed as a grey box around them on light floors such as ice',
+      'Oldschool maps: the walls for sight snap. They run straight through the middle of the drawn walls with square corners; a door or window lies on that line where its leaves hang and joins the walls at both ends; a wall line drawn up to a room meets its wall. No more gaps or stubs beside doors',
+    ]],
     ['Beta 3.36', [
       'Oldschool maps, walls with details, made from the drawing: a pillar at every corner of a room and every bend of a wall line, a thicker block each side of a door or portcullis, a low sill under a window on the room side',
       'Stone and Dark stone walls are now built from wall kits: capstones laid along every wall (also round rooms and wall lines), a capstone on each corner pillar, door blocks, sills and finished wall ends, lit by the map\'s light. Other wall materials look as before',

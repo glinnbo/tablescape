@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // for every floor); a door: the wall line it opens
   const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 21; // (21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 23; // (23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -586,7 +586,8 @@ void main(){
     }
     if (st.g > 0.5) { // stairs: steps up toward where they climb
       float steps = max(2.0, floor(st.b * 255.0));
-      h = base + floor(st.r * steps) / steps * LV + LV / steps; kind = 6.0;
+      float si = floor(st.r * steps); // (Beta 3.37: the lowest step rises out of the floor, no edge where they meet)
+      h = base + si / steps * LV + LV / steps * (si < 0.5 ? smoothstep(0.0, 0.8, fract(st.r * steps)) : 1.0); kind = 6.0;
     }
   } else if (edge == 2) { // built walls: a band outside the floor
     float T = 0.45 * P;
@@ -816,8 +817,13 @@ void main(){
   int ms = clamp(int(floor(so.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
   float r1 = max(1.5, 0.025 * P); float r2 = max(2.0, 0.08 * P);
   float nIn = min(min(SA(px + vec2(r1, 0.0)), SA(px - vec2(r1, 0.0))), min(SA(px + vec2(0.0, r1)), SA(px - vec2(0.0, r1))));
-  float nOut = max(max(SA(px + vec2(r2, 0.0)), SA(px - vec2(r2, 0.0))), max(SA(px + vec2(0.0, r2)), SA(px - vec2(0.0, r2))));
-  if (so.a < 0.5 && nOut > 0.5) col *= 0.72;
+  // (Beta 3.36: soft, round at the corners: how much of what lies around is wall; before, a hard band 0.08 squares wide
+  // that showed as a grey box on light floors)
+  if (so.a < 0.5) {
+    float occ = 0.0;
+    for (int i = 0; i < 12; i++) { float an = float(i) * 0.5236; vec2 d = vec2(cos(an), sin(an)); occ += SA(px + d * r2 * 0.45) * 0.6 + SA(px + d * r2) * 0.4; }
+    col *= 1.0 - 0.42 * occ / 12.0;
+  }
   if (so.a > 0.0) { vec3 sc = (kt.a > 0.5 ? kt.rgb * kitRel(px, P, L) : matCol(ms, q)) * li; if (nIn < 0.5) sc *= 0.5; col = mix(col, sc, so.a); a = max(a, so.a); }
   o = vec4(clamp(col, 0.0, 1.0), a);
 }`;
@@ -1114,20 +1120,33 @@ void main(){
         };
         const at = (a) => (it.dir === 0 ? [x + a, 0] : it.dir === 2 ? [x + w - a, 0] : it.dir === 1 ? [0, y + a] : [0, y + h - a]); // (a point on the climb)
         const grad = (a0, a1, stops) => { const g0 = at(a0); const g1 = at(a1); const gr = fg.createLinearGradient(g0[0], g0[1], g1[0], g1[1]); for (const [o, c] of stops) gr.addColorStop(o, c); return gr; };
+        const BLEND = 0.8; // (Beta 3.37: the lowest step goes over into the floor along this much of its depth)
         for (let i = 0; i < steps; i++) {
-          const a0 = i * depth;
-          fg.filter = `brightness(${(0.55 + (0.6 * i) / Math.max(1, steps - 1)).toFixed(3)})`; // (dark down, bright up)
+          const a0 = i * depth; const br = 0.55 + (0.6 * i) / Math.max(1, steps - 1); // (dark down, bright up)
+          if (i === 0) {
+            // the lowest step meets the floor: no line there, it comes in softly (its tile and its darkness), in thin slices
+            const n = Math.max(4, Math.min(48, Math.ceil((depth * BLEND) / 2)));
+            for (let j = 0; j < n; j++) {
+              const u = (j + 0.5) / n; const f = u * u * (3 - 2 * u);
+              fg.globalAlpha = f; fg.filter = `brightness(${(1 + (br - 1) * f).toFixed(3)})`;
+              fg.fillStyle = look; fg.fillRect(...rect((j / n) * depth * BLEND, ((j + 1) / n) * depth * BLEND + 0.5));
+            }
+            fg.globalAlpha = 1; fg.filter = `brightness(${br.toFixed(3)})`; fg.fillStyle = look; fg.fillRect(...rect(depth * BLEND, depth));
+            fg.filter = 'none';
+            // (where no floor lies under it: its own tile, whole)
+            fg.globalCompositeOperation = 'destination-over'; fg.fillStyle = look; fg.fillRect(...rect(0, depth * BLEND)); fg.globalCompositeOperation = 'source-over';
+            continue;
+          }
+          fg.filter = `brightness(${br.toFixed(3)})`;
           fg.fillStyle = look; fg.fillRect(...rect(a0, a0 + depth));
           fg.filter = 'none';
-          if (i > 0) { // (the lowest step meets the floor)
-            // the step above throws a soft shadow onto this one's back, and its edge catches the light
-            fg.fillStyle = grad(a0 - depth * 0.45, a0, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0.62)']]); fg.fillRect(...rect(a0 - depth * 0.45, a0));
-            fg.fillStyle = grad(a0, a0 + depth * 0.16, [[0, 'rgba(255,244,228,0.34)'], [1, 'rgba(255,244,228,0)']]); fg.fillRect(...rect(a0, a0 + depth * 0.16));
-          }
+          // the step above throws a soft shadow onto this one's back, and its edge catches the light (3.37: stronger)
+          fg.fillStyle = grad(a0 - depth * 0.55, a0, [[0, 'rgba(0,0,0,0)'], [0.6, 'rgba(0,0,0,0.3)'], [1, 'rgba(0,0,0,0.78)']]); fg.fillRect(...rect(a0 - depth * 0.55, a0));
+          fg.fillStyle = grad(a0, a0 + depth * 0.16, [[0, 'rgba(255,244,228,0.36)'], [1, 'rgba(255,244,228,0)']]); fg.fillRect(...rect(a0, a0 + depth * 0.16));
         }
-        // its sides a little dark (the stairs stand apart from the floor)
-        const side = Math.max(1, P * 0.05);
-        fg.fillStyle = 'rgba(0,0,0,0.35)';
+        // its sides a little dark (the stairs stand apart from the floor), coming in with the lowest step
+        const side = Math.max(1, P * 0.06); const e0 = (depth * BLEND) / along;
+        fg.fillStyle = grad(0, along, [[0, 'rgba(0,0,0,0)'], [Math.min(0.99, e0), 'rgba(0,0,0,0.45)'], [1, 'rgba(0,0,0,0.45)']]);
         if (it.dir % 2 === 0) { fg.fillRect(x, y, w, side); fg.fillRect(x, y + h - side, w, side); } else { fg.fillRect(x, y, side, h); fg.fillRect(x + w - side, y, side, h); }
         fg.restore();
         // stairs count as floor, at the level of the floor they stand on
@@ -1176,7 +1195,7 @@ void main(){
     // the pictures it needs
     const want = new Map();
     for (const it of os.items) {
-      if (it.kind === 'area' && it.tile) { const t = tileInfo(it.tile, lib); if (t && t.url) want.set(t.url, t); }
+      if ((it.kind === 'area' || it.kind === 'paint') && it.tile) { const t = tileInfo(it.tile, lib); if (t && t.url) want.set(t.url, t); } // (Beta 3.37: a painted tile's picture too; it came out grey when no floor used it)
       if (it.kind === 'stairs') { const t = it.tile ? tileInfo(it.tile, lib) : matInfo(it.mat); if (t && t.url) want.set(t.url, t); }
     }
     const kits = kitsOf(os); for (const m of kits) for (const p of KIT_PIECES) want.set(kitUrl(m, p), { url: kitUrl(m, p) }); // (Beta 3.36)
@@ -1602,6 +1621,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     };
     for (const [key, l] of ridge) if (l.length === 1) walk(key); // (lines first, from their ends)
     for (const [key, l] of ridge) while (l.length) walk(key); // (then the rest)
+    const traced = out.length; // (Beta 3.36.1: what (a) and (b) traced, to be snapped)
     // (c) wall lines along their middle (where they stand: an erased bit or a door lets through); pillars as a smaller block
     for (const it of os.items) {
       if (it.kind === 'line') {
@@ -1633,19 +1653,97 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
       };
       for (const loop of contours(W, H, core)) addLine(simplify(loop, TOL));
     }
-    // doors: the walls they lie on are cut there; the door is a wall of its own, and where it meets a band, the band
-    // goes on beside it (its jambs: no looking around a shut door through the wall's thickness)
+    // Beta 3.36.1: everything snaps. The walls traced on the small painting lie a little off the lines the picture draws
+    // (up to a ninth of a square, their corners cut off): their corners go onto those lines (the middle of the wall band
+    // of rooms drawn as a rectangle or a shape, of rock's first half; the middle of wall lines), at a corner onto the
+    // crossing of two.
+    const snapL = [];
+    for (const it of os.items) {
+      if (it.kind === 'area' && (it.edge === 'walls' || it.edge === 'rock') && (it.shape === 'rect' || it.shape === 'poly')) {
+        const poly = outlineOf(it, g); if (!poly || poly.length < 3) continue;
+        const o = (it.edge === 'walls' ? 0.225 : 0.275) * g; const n = poly.length;
+        let A2 = 0; poly.forEach((p, i) => { const q = poly[(i + 1) % n]; A2 += p[0] * q[1] - q[0] * p[1]; });
+        const sgn = A2 > 0 ? 1 : -1;
+        poly.forEach((p, i) => {
+          const q = poly[(i + 1) % n]; const L = Math.hypot(q[0] - p[0], q[1] - p[1]); if (!L) return;
+          const ux = (q[0] - p[0]) / L; const uy = (q[1] - p[1]) / L;
+          snapL.push({ x: p[0] + uy * sgn * o, y: p[1] - ux * sgn * o, ux, uy, a: -o - 0.3 * g, b: L + o + 0.3 * g });
+        });
+      } else if (it.kind === 'line') {
+        for (let i = 0; i + 1 < it.pts.length; i++) {
+          const [p, q] = [it.pts[i], it.pts[i + 1]]; const L = Math.hypot(q[0] - p[0], q[1] - p[1]); if (!L) continue;
+          snapL.push({ x: p[0], y: p[1], ux: (q[0] - p[0]) / L, uy: (q[1] - p[1]) / L, a: -it.w / 2 - 0.3 * g, b: L + it.w / 2 + 0.3 * g });
+        }
+      }
+    }
+    const snapPt = (x, y) => {
+      const near = [];
+      for (const l of snapL) {
+        const t = (x - l.x) * l.ux + (y - l.y) * l.uy; if (t < l.a || t > l.b) continue;
+        const d = Math.abs((x - l.x) * l.uy - (y - l.y) * l.ux); if (d < 0.17 * g) near.push({ l, d });
+      }
+      if (!near.length) return [x, y];
+      near.sort((p, q) => p.d - q.d); const A = near[0].l;
+      for (const { l: B } of near.slice(1)) {
+        const cr = A.ux * B.uy - A.uy * B.ux; if (Math.abs(cr) < 0.3) continue;
+        const t = ((B.x - A.x) * B.uy - (B.y - A.y) * B.ux) / cr; const ix = A.x + A.ux * t; const iy = A.y + A.uy * t;
+        if (Math.hypot(ix - x, iy - y) < 0.3 * g) return [ix, iy];
+      }
+      const t = (x - A.x) * A.ux + (y - A.y) * A.uy; return [A.x + A.ux * t, A.y + A.uy * t];
+    };
+    const segs = [];
+    out.forEach((s2, i) => {
+      const c = i < traced ? [...snapPt(s2[0], s2[1]), ...snapPt(s2[2], s2[3])] : s2;
+      if (Math.hypot(c[2] - c[0], c[3] - c[1]) > 0.02 * g) segs.push(c);
+    });
+    // doors: on the line they are drawn on (the middle of the wall: where their leaves hang), the walls cut there; the
+    // door is a wall of its own, and from each end the wall goes on to the nearest wall along it (half a square at most):
+    // no gap beside a door, nothing overlapping it
     const walls = [];
-    const doors = os.doors.map((d) => ({ ...d }));
-    for (const s2 of out) for (const piece of cutByDoors(s2, doors, g)) walls.push({ c: piece, key: `s${piece.map((v) => Math.round(v * 100)).join(',')}` });
-    const J = 0.25 * g; // (to the middle of the wall beside the door)
+    const doors = os.doors.map((d) => {
+      const pl = doorPlace(os, d, g); const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1;
+      const nx = -(d.y2 - d.y1) / L; const ny = (d.x2 - d.x1) / L;
+      return { ...d, x1: d.x1 + nx * pl.off, y1: d.y1 + ny * pl.off, x2: d.x2 + nx * pl.off, y2: d.y2 + ny * pl.off };
+    });
+    for (const s2 of segs) for (const piece of cutByDoors(s2, doors, g)) walls.push({ c: piece, key: `s${piece.map((v) => Math.round(v * 100)).join(',')}` });
+    // how far along from (x, y) the nearest wall lies (one on the same line: where it starts)
+    const hitAlong = (x, y, ux, uy, max, list, skip) => {
+      let best = Infinity;
+      for (const w of list) {
+        if (w === skip) continue;
+        const [x1, y1, x2, y2] = w.c; const vx = x2 - x1; const vy = y2 - y1; const den = ux * vy - uy * vx;
+        if (Math.abs(den) < 1e-6 * (Math.hypot(vx, vy) || 1)) {
+          if (Math.abs((x1 - x) * uy - (y1 - y) * ux) > 0.02 * g) continue;
+          const t1 = (x1 - x) * ux + (y1 - y) * uy; const t2 = (x2 - x) * ux + (y2 - y) * uy;
+          if (Math.max(t1, t2) < -1e-6) continue;
+          best = Math.min(best, Math.max(0, Math.min(t1, t2))); continue;
+        }
+        const wx = x1 - x; const wy = y1 - y; const t = (wx * vy - wy * vx) / den; const s3 = (wx * uy - wy * ux) / den;
+        if (t >= -1e-6 && s3 >= -1e-6 && s3 <= 1 + 1e-6) best = Math.min(best, Math.max(0, t));
+      }
+      return best <= max ? best : null;
+    };
+    const solid = walls.slice();
     for (const d of doors) {
-      walls.push({ c: [d.x1, d.y1, d.x2, d.y2], door: d.kind === 'window' ? 0 : d.door, kind: d.kind === 'window' ? 'window' : undefined, key: `d${d.id}` });
+      const dw = { c: [d.x1, d.y1, d.x2, d.y2], door: d.kind === 'window' ? 0 : d.door, kind: d.kind === 'window' ? 'window' : undefined, key: `d${d.id}` };
+      walls.push(dw);
       const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1; const ux = (d.x2 - d.x1) / L; const uy = (d.y2 - d.y1) / L;
       for (const [ex, ey, sg2] of [[d.x1, d.y1, -1], [d.x2, d.y2, 1]]) {
-        const fx = ex + ux * J * sg2; const fy = ey + uy * J * sg2;
-        const [mx, my] = T((ex + fx) / 2, (ey + fy) / 2); const nx = -uy * 1.5; const ny = ux * 1.5;
-        if (isB(Math.floor(mx + nx), Math.floor(my + ny)) || isB(Math.floor(mx - nx), Math.floor(my - ny))) walls.push({ c: [ex, ey, fx, fy], key: `j${d.id}${sg2 > 0 ? 'b' : 'a'}` });
+        const t = hitAlong(ex, ey, ux * sg2, uy * sg2, 0.6 * g, solid, null);
+        if (t !== null && t > 0.01 * g) walls.push({ c: [ex, ey, ex + ux * sg2 * t, ey + uy * sg2 * t], key: `j${d.id}${sg2 > 0 ? 'b' : 'a'}` });
+      }
+    }
+    // a wall that ends just short of another (a wall line drawn up to a room, a traced wall beside a corner) goes on to it
+    const ends = new Map(); const ek = (x, y) => `${Math.round(x / g * 50)},${Math.round(y / g * 50)}`;
+    for (const w of walls) for (const [x, y] of [[w.c[0], w.c[1]], [w.c[2], w.c[3]]]) ends.set(ek(x, y), (ends.get(ek(x, y)) || 0) + 1);
+    for (const w of walls.slice()) {
+      if (w.door !== undefined) continue;
+      const [x1, y1, x2, y2] = w.c; const L = Math.hypot(x2 - x1, y2 - y1); if (!L) continue;
+      const ux = (x2 - x1) / L; const uy = (y2 - y1) / L;
+      for (const [x, y, sg2] of [[x1, y1, -1], [x2, y2, 1]]) {
+        if (ends.get(ek(x, y)) > 1) continue; // (it meets another there)
+        const t = hitAlong(x, y, ux * sg2, uy * sg2, 0.35 * g, walls, w);
+        if (t !== null && t > 0.005 * g) walls.push({ c: [x, y, x + ux * sg2 * t, y + uy * sg2 * t], key: `e${Math.round(x * 100)},${Math.round(y * 100)}` });
       }
     }
     return walls;

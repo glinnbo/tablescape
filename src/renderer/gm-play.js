@@ -788,7 +788,7 @@ const Play = (() => {
     fog: { title: 'Fog of war', icon: 'cloud-fog', build: buildFogPop, tips: FOG_TIPS },
     fx: { title: 'Effects', icon: 'flame', build: buildFxPop, tips: TIPS.fx },
     walls: { title: 'Walls and doors', icon: 'wall', build: () => Walls.buildPop(), tips: TIPS.walls },
-    oldschool: { title: 'Draw', icon: 'pencil', build: () => OS.buildPop(), tips: TIPS.oldschool }, // (Beta 3.22)
+    oldschool: { title: 'Draw', icon: 'pencil', build: () => OS.buildPop(), around: () => OS.around(), tips: TIPS.oldschool }, // (Beta 3.22; 3.37: its tools, sliders and Map settings stand around it)
     party: { title: 'Party marker', icon: 'users-group', build: () => Party.buildPop(), tips: TIPS.party },
     spell: { title: 'Spells', icon: 'wand', build: buildSpellPop, tips: TIPS.spell },
     asset: { title: 'Assets', icon: 'trees', build: buildAssetPop, tips: TIPS.asset },
@@ -855,7 +855,9 @@ const Play = (() => {
     if (id !== 'toolbox' || popId !== 'toolbox') popTicker = null;
     if (id === 'toolbox' && popId !== 'toolbox' && !anchor && !ui.tbKeep) ui.tb = ui.tb || 'home';
     if (ui.drawer) Drawer.close();
-    const scroll = popId === id ? els.pop.scrollTop : 0;
+    // (Beta 3.37) a panel with things standing around it (Draw: tool tabs, a slider rail) scrolls in its body
+    const scroller = () => (els.pop.classList.contains('with-sides') && els.pop.querySelector('.pop-body')) || els.pop;
+    const scroll = popId === id ? scroller().scrollTop : 0;
     popId = id;
     refreshers = [];
     const p = POPS[id];
@@ -872,12 +874,16 @@ const Play = (() => {
         p.tips ? UI.helpTip(p.title, p.tips) : null, // 4.3: a "?" with the handy things
         h('button', { class: 'icon-btn', 'aria-label': 'Close', 'data-tip': 'Close', 'data-key': 'Esc', onclick: closePop }, iconEl('x'))),
       h('div', { class: 'pop-body' }, body));
+    let around = null;
+    try { around = p.around ? p.around() : null; } catch (err) { console.error(`panel ${id}: ${err && err.stack ? err.stack : err}`); }
+    els.pop.classList.toggle('with-sides', !!around); els.pop.style.marginLeft = '';
+    if (around) { els.pop.append(...around.els.filter(Boolean)); if (around.left) els.pop.style.marginLeft = `${around.left}px`; if (around.after) requestAnimationFrame(around.after); }
     els.pop.classList.add('on');
     const btn = anchor && anchor.offsetParent ? anchor : railButton(id);
     popWant = btn.getBoundingClientRect().top - els.stage.getBoundingClientRect().top - 6;
     els.pop.style.left = '10px';
     placePop();
-    els.pop.scrollTop = scroll;
+    scroller().scrollTop = scroll;
     renderRail();
   }
   // level with its rail button where it fits, but always above the map bar (also when it grows)
@@ -895,7 +901,7 @@ const Play = (() => {
     popTicker = null;
     if (ui.tb && ui.tb !== 'home') ui.tb = 'home'; // the toolbox opens on its tiles next time
     refreshers = [];
-    els.pop.classList.remove('on');
+    els.pop.classList.remove('on', 'with-sides'); els.pop.style.marginLeft = '';
     els.pop.innerHTML = '';
     renderRail();
   }
