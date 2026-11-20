@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // for every floor); a door: the wall line it opens
   const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 25; // (25: Beta 3.40, stairs climb all the levels between their floors, floors blend at any height; 24: Beta 3.39, steps between floors of different height show on every side; 23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 26; // (26: Beta 3.42, living tiles: the picture comes with a map of where water, lava and grass lie; 25: Beta 3.40, stairs climb all the levels between their floors, floors blend at any height; 24: Beta 3.39, steps between floors of different height show on every side; 23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -46,7 +46,7 @@ const Oldschool = (() => {
     const b = builtinByRel.get(ref.rel);
     if (b) {
       const o = lib && lib.find((x) => x.builtin && x.rel === ref.rel);
-      return { url: DIR + b.file, small: DIR + b.small, squares: (o && o.squares) || b.squares, off: (o && o.off) || b.off || [0, 0], label: b.label, builtin: true, id: b.id };
+      return { url: DIR + b.file, small: DIR + b.small, squares: (o && o.squares) || b.squares, off: (o && o.off) || b.off || [0, 0], label: b.label, builtin: true, id: b.id, live: b.live || null };
     }
     const it = lib && lib.find((x) => (ref.rel && x.rel === ref.rel) || (ref.path && x.path === ref.path));
     const p = (it && it.path) || ref.path;
@@ -1116,7 +1116,21 @@ void main(){
   // pillars (sg), stairs (tg). T: map inches → dots, k: dots an inch, P: dots a square, org: the grid's origin in dots.
   // ag and tg may be left out (the sharp tiles need only the floors and the solids).
   function paint(os, lib, T, k, P, org, loaded, cx, pats) {
-    const { fg, ag, sg, tg, hg } = cx; // (hg: the Fade floors' tiles beyond their edge, Beta 3.29)
+    const { fg, ag, sg, tg, hg, lg } = cx; // (hg: the Fade floors' tiles beyond their edge, Beta 3.29; lg: where living tiles lie, Beta 3.42)
+    // Beta 3.42, living tiles: a small painting beside the floors that says what lies where: red water, green lava,
+    // blue grass (the bluer the longer its blades), black anything else. What is drawn later covers what lies under
+    // it, as on the map: a bridge over a river, a wall on a meadow. A blended edge is soft here too.
+    const liveCol = (t) => { const v = t && t.live ? String(t.live) : ''; return v === 'water' ? '#ff0000' : v === 'lava' ? '#00ff00' : v.startsWith('grass') ? `rgb(0,0,${Math.round(255 * Math.min(1, Math.max(0.2, Number(v.split(':')[1]) || 1)))})` : '#000000'; };
+    const liveArea = (it, t, soft) => {
+      if (!lg) return;
+      lg.save();
+      const reach = it.kind === 'area' ? (it.edge === 'walls' ? 0.5 : it.edge === 'rock' ? 1.0 : it.edge === 'cliff' ? 0.6 : 0) : 0; // (what it builds beyond its edge lies on the floors around it)
+      if (reach && !(it.shape === 'path' || it.shape === 'brush')) { lg.strokeStyle = '#000000'; lg.lineWidth = 2 * reach * P; lg.lineJoin = 'round'; lg.stroke(shapePath(it, T)); }
+      if (soft) lg.filter = `blur(${Math.max(1, 0.2 * P * lg.getTransform().a).toFixed(1)}px)`;
+      paintArea(lg, it, T, k, liveCol(t), false);
+      lg.restore();
+      if (liveCol(t) !== '#000000') lg.any = true;
+    };
     const patOf = (t) => {
       if (!t || !loaded.has(t.url)) return '#5a5650';
       const off = t.off || [0, 0];
@@ -1137,14 +1151,18 @@ void main(){
         if (hg && it.edge === 'fade') paintHalo(hg, it, T, k, patOf(t), FADE_R * P);
         if (ag) paintArea(ag, it, T, k, `rgb(${EDGE_CODE[it.edge] * 40},${128 + it.level * 30},${matCode(it.mat || DEFAULT_MAT[it.edge])})`, false);
         if (tg) paintArea(tg, it, T, k, '#000', true); // (a floor drawn over stairs takes them away)
+        liveArea(it, t, it.mixW > 0);
       } else if (it.kind === 'cut') {
         for (const c of [fg, ag, tg]) if (c) paintArea(c, it, T, k, null, true);
+        if (lg) paintArea(lg, it, T, k, '#000000', false);
         sg.save(); sg.globalCompositeOperation = 'destination-out'; if (it.shape === 'path' || it.shape === 'brush') stroke(sg, it, T, k, '#000'); else sg.fill(shapePath(it, T)); sg.restore();
       } else if (it.kind === 'line' || it.kind === 'pillar') {
         paintSolid(sg, it, T, k, `rgb(255,${Math.round((it.h || 1) * 100)},${matCode(it.mat)})`, false);
+        if (lg) paintSolid(lg, it, T, k, '#000000', false);
       } else if (it.kind === 'paint') { // (Beta 3.26) a floor painted into the floors under the brush
         const t = tileInfo(it.tile, lib) || tileInfo({ rel: relOf(FLOORS[0]) });
         mixArea(fg, it, T, k, P, org, patOf(t), it.mixW != null ? Math.max(0.05, it.mixW) * P : it.r * k, true, before); // (Beta 3.38: a soft edge of its own width; before: as wide as the brush)
+        liveArea(it, t, true);
       } else if (it.kind === 'ground') { // (Beta 3.25) a pool of water, lava, acid or swamp; magical darkness is the effect alone
         if (it.preset !== 'darkness') paintGround(fg, it, T, k, P, org);
         if (ag) { ag.save(); ag.globalCompositeOperation = 'destination-over'; paintArea(ag, it, T, k, `rgb(${EDGE_CODE.ledge * 40},128,${matCode('stone_wall')})`, false); ag.restore(); } // (on nothing: a pool in the dark)
@@ -1269,7 +1287,11 @@ void main(){
     const anyFade = os.items.some((it) => it.kind === 'area' && it.edge === 'fade');
     const haloC = anyFade ? canvas(W, Hh) : canvas(1, 1);
     const kitC = kits.size ? canvas(W, Hh) : canvas(1, 1); // (Beta 3.36: the wall kits, where they lie)
-    paint(os, lib, T, k, P, org, loaded, { fg: floorC.getContext('2d'), ag: attrC.getContext('2d', CPU), sg: solidC.getContext('2d'), tg: stairsC.getContext('2d'), hg: anyFade ? haloC.getContext('2d') : null, kg: kits.size ? kitC.getContext('2d') : null }, pats);
+    // (Beta 3.42) where living tiles lie, at half the picture's size; only made when one is drawn
+    const LS = 0.5; const anyLive = os.items.some((it) => (it.kind === 'area' || it.kind === 'paint') && it.tile && (tileInfo(it.tile, lib) || {}).live);
+    const liveC = anyLive ? canvas(Math.max(1, Math.round(W * LS)), Math.max(1, Math.round(Hh * LS))) : null; let lg = null;
+    if (liveC) { lg = liveC.getContext('2d'); lg.fillStyle = '#000000'; lg.fillRect(0, 0, liveC.width, liveC.height); lg.setTransform(LS, 0, 0, LS, 0, 0); }
+    paint(os, lib, T, k, P, org, loaded, { lg, fg: floorC.getContext('2d'), ag: attrC.getContext('2d', CPU), sg: solidC.getContext('2d'), tg: stairsC.getContext('2d'), hg: anyFade ? haloC.getContext('2d') : null, kg: kits.size ? kitC.getContext('2d') : null }, pats);
     const tm = { paint: Math.round(performance.now() - t0), mixBase: Math.round(prof.mix) }; let tl = performance.now();
     say(ph[0]);
     // ---- light and shadow (WebGL 2) ----
@@ -1308,7 +1330,10 @@ void main(){
     const walls = sightWalls(os, map, lib, { X0, Y0, nsx, nsy, g });
     tm.sight = Math.round(performance.now() - tw0);
     stats.last = { ms: Math.round(performance.now() - t0), ...tm, mix: Math.round(prof.mix), mixN: prof.mixN, maskMade: prof.maskMade, maskKept: prof.maskKept, tilePaint: Math.round(prof.tPaint), tileGl: Math.round(prof.tGl), tileEnc: Math.round(prof.tEnc), dots: W * Hh, P, sharpP: sharp ? sharp.P : 0, made: sharp ? sharp.tiles.filter((x) => x.blob).length : 0, kept: sharp ? sharp.tiles.filter((x) => !x.blob).length : 0 };
-    return { blob, x: X0, y: Y0, scale: (g / P) * bk, nw: Math.round(W / bk), nh: Math.round(Hh / bk), walls, sharp };
+    // (Beta 3.42) the living tiles' map goes along as a file of its own (exact, not squeezed with losses)
+    let live = null;
+    if (liveC) { if (lg.any) live = await new Promise((res) => liveC.toBlob(res, 'image/png')); liveC.width = liveC.height = 0; }
+    return { blob, x: X0, y: Y0, scale: (g / P) * bk, nw: Math.round(W / bk), nh: Math.round(Hh / bk), walls, sharp, live };
   }
 
   // the base's light and shadow; then (more) is given what the sharp tiles need while it is still on the card

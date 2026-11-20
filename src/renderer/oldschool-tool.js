@@ -585,7 +585,8 @@ const OldschoolTool = (() => {
           const data = r.blob ? new Uint8Array(await r.blob.arrayBuffer()) : null;
           // (Beta 3.25) the sharp tiles: new ones with their picture, kept ones by their key alone
           const sharp = r.sharp ? { P: r.sharp.P, ts: r.sharp.ts, tiles: await Promise.all(r.sharp.tiles.map(async (t) => ({ c: t.c, r: t.r, h: t.h, jpg: !!(t.blob && t.jpg), data: t.blob ? new Uint8Array(await t.blob.arrayBuffer()) : null }))) } : null;
-          await ts.cmd('os.baked', { mapId, hash: want, empty: !!r.empty, data, sharp, ids: [...snap.os.items.map((x) => x.id), ...snap.os.doors.map((x) => x.id)], x: r.x, y: r.y, scale: r.scale, nw: r.nw, nh: r.nh, walls: r.walls });
+          const live = r.live ? new Uint8Array(await r.live.arrayBuffer()) : null; // (Beta 3.42: where its living tiles lie)
+          await ts.cmd('os.baked', { mapId, hash: want, empty: !!r.empty, data, sharp, live, ids: [...snap.os.items.map((x) => x.id), ...snap.os.doors.map((x) => x.id)], x: r.x, y: r.y, scale: r.scale, nw: r.nw, nh: r.nh, walls: r.walls });
         }
         lastErr = null; ok = true;
       } catch (err) { console.error(err); lastErr = String(err && err.message || err); }
@@ -1009,26 +1010,35 @@ const OldschoolTool = (() => {
       }
       if (flyOpen === 'map') {
         const pctOff = (v) => (v > 0 ? `${Math.round(v * 100)} %` : 'off');
+        const liveNow = () => (map() && map().live) || {};
+        const pct1 = (v) => `${Math.round(v * 100)} %`;
+        const grass = (label, f, min, max) => slider({ label, min, max, step: 0.05, get: () => (map() ? (liveNow()[f] != null ? liveNow()[f] : 1) : null), set: (v, k) => ctx.send(k || `live-${f}`, 'live.set', { [f]: v }), fmt: pct1 });
+        const grassBox = h('div', { class: 'stack os-grass' }, grass('Grass', 'amount', 0, 1.5), grass('Grass length', 'length', 0.3, 2.5), grass('Grass in a breeze', 'breeze', 0.3, 2.5));
+        bind(() => { grassBox.hidden = liveNow().on === false; });
         fly = h('div', { class: 'os-fly stack' },
           h('div', { class: 'os-fly-head' }, h('b', {}, 'Map settings'), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => { flyOpen = null; ctx.openPop('oldschool'); } }, iconEl('x'))),
           sunDial(),
           slider({ label: 'Shadow length', min: 0, max: 1, step: 0.05, get: () => (osNow() ? Oldschool.shadowOf(osNow()).len : null), set: (v, k) => ctx.send(k || 'os-shlen', 'os.set', { shadowLen: v }), fmt: pctOff }),
           slider({ label: 'Shadows all around', min: 0, max: 1, step: 0.05, get: () => (osNow() ? Oldschool.shadowOf(osNow()).all : null), set: (v, k) => ctx.send(k || 'os-shall', 'os.set', { shadowAll: v }), fmt: pctOff }),
           toggle({ label: 'Walls for sight follow the drawing', get: () => !osNow() || osNow().sight !== false, set: (v) => cmd('os.set', { sight: v }) }),
+          // (Beta 3.42) living tiles: water, lava and grass that move; the grass can be tuned
+          toggle({ label: 'Living tiles', get: () => liveNow().on !== false, set: (v) => cmd('live.set', { on: v }) }),
+          grassBox,
           h('div', { class: 'row' }, btn('Clear', 'trash', async () => { if (!osNow() || !osNow().items.length) return; const r = await cmd('os.clear', {}); if (r && r.ok) toast('Drawing cleared', { undo: () => cmd('history.undo') }); }, { kind: 'small', tip: 'Take everything drawn away (undo brings it back)' })));
       }
       const mapBtn = btn('Map settings', 'sun', () => { flyOpen = flyOpen === 'map' ? null : 'map'; ctx.openPop('oldschool'); }, { kind: `small os-mapbtn${flyOpen === 'map' ? ' on' : ''}`, tip: 'Where the light comes from, the shadows, walls for sight, Clear' });
       const note = h('span', { class: 'grow hint' });
       bind(() => { const o = osNow(); note.textContent = !o ? '' : lastErr ? 'The picture could not be made (see the log)' : o.items.length ? '' : 'Draw a room to start'; });
-      if (fly && parts) fly.classList.add('past-parts'); // (beyond the second column of tabs)
       // Beta 3.41: the card slides out from behind the panel like the tabs (when it opens, or with the panel), and back
-      // behind it when it is closed
+      // behind it when it is closed. (Beta 3.42) It stands in a frame that is cut at the panel's edge and does not
+      // move, and only the card moves in it: before, the cut moved with the card and could land inside the panel
+      const wrap = fly ? h('div', { class: `os-flywrap${parts ? ' past-parts' : ''}` }, fly) : null; // (past-parts: beyond the second column of tabs)
+      const slideIn = !!fly && (!again || shownFly !== flyOpen);
       let leaving = null;
-      if (fly && (!again || shownFly !== flyOpen)) fly.classList.add('slide');
-      if (!fly && again && shownFly && flyEl) { leaving = flyEl; leaving.classList.remove('slide'); leaving.classList.add('out'); const gone = leaving; setTimeout(() => gone.remove(), 240); }
+      if (!fly && again && shownFly && flyEl && flyEl.parentNode) { leaving = flyEl.parentNode; flyEl.classList.remove('slide'); flyEl.classList.add('out'); const gone = leaving; setTimeout(() => gone.remove(), 240); }
       shownFly = flyOpen; flyEl = fly;
       sides = {
-        els: [tools, parts, fly, leaving],
+        els: [tools, parts, wrap, leaving],
         after: () => { // (the card beside its button where the panel is tall enough, else from the top)
           const pop = tools.parentNode; if (!pop) return;
           if (!fly) { // (a card sliding back keeps the panel's corner as it was until it is gone)
@@ -1036,12 +1046,13 @@ const OldschoolTool = (() => {
             if (was) setTimeout(() => { if (!flyEl) pop.classList.remove('os-docked'); }, 240);
             return;
           }
-          const tall = pop.offsetHeight >= fly.offsetHeight; fly.style.bottom = tall ? '0' : 'auto'; fly.style.top = tall ? 'auto' : '0';
+          const tall = pop.offsetHeight >= fly.offsetHeight; wrap.style.bottom = tall ? '0' : 'auto'; wrap.style.top = tall ? 'auto' : '0';
           // Beta 3.41: where it fits under the tabs it lines up with the panel, joined to its edge like a drawer pulled
           // out of it; a panel too short for that keeps the card beside the tabs
           const tabsEnd = Math.max(0, ...[tools, parts].filter(Boolean).map((el) => el.offsetTop + el.offsetHeight));
           const docked = tall && pop.offsetHeight - fly.offsetHeight >= tabsEnd + 8;
-          fly.classList.toggle('docked', docked); pop.classList.toggle('os-docked', docked);
+          wrap.classList.toggle('docked', docked); fly.classList.toggle('docked', docked); pop.classList.toggle('os-docked', docked);
+          if (slideIn) fly.classList.add('slide'); // (only now: how far it has to come is known)
         },
       };
       return h('div', { class: 'stack' }, previewCard(), ...choices,

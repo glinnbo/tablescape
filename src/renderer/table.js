@@ -534,6 +534,7 @@ const Table = (() => {
       fx: lv ? { ...lv.view.stats, animating: !!lv.view.raf } : null,
       assets: lv ? [...lv.view.assetsEl.children, ...lv.view.assetsFrontEl.children].filter((el) => el.style.display !== 'none').length : 0,
       trees: lv ? { ...(lv.view.stats.trees || {}), live: Trees.supported(), mask: (lv.view.tcv.over && lv.view.tcv.over.mask) || '' } : null, // (Beta 3.20)
+      living: lv ? { ...(lv.view.stats.living || {}), want: lv.view.livingOn(), mask: !!(lv.view.map && lv.view.map.bg && lv.view.map.bg.live), can: Living.supported(), moving: !!lv.view.treeRaf, playing: !!lv.view.playing } : null, // (Beta 3.42: living tiles)
       // 2.3: animated assets drawn from frame sheets, videos still playing, assets resting off the table
       anim: lv ? lv.view.animInfo() : null,
       mapView: lv && lv.view.map ? { ...lv.view.map.view, bg: lv.view.map.bg ? { path: lv.view.map.bg.path, x: lv.view.map.bg.x, y: lv.view.map.bg.y, scale: lv.view.map.bg.scale, rotation: lv.view.map.bg.rotation || 0 } : null, grid: { size: lv.view.map.grid.size, ox: lv.view.map.grid.ox, oy: lv.view.map.grid.oy } } : null,

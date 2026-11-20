@@ -24,6 +24,14 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.42', [
+      'Living tiles on Oldschool maps: some tiles now move by themselves. Water ripples and glints over its bed, lava glows and pulses, grass waves as fine blades in the map\'s wind (the same wind as the living trees, a storm included). The effect belongs to the tile: it shows exactly where the tile shows, so a bridge laid over a river covers it, and floors at other heights stay as they are',
+      'Living so far: River pebbles, River stones, Sandy shallows, Deep water, Bath mosaic and Bog (water); Lava flow, Lava crust, Lava field and Lava veins (lava); Tall grass and Meadow (grass). Maps drawn before come alive when they are opened',
+      'Draw → Map settings: Living tiles turns them off for a map; Grass, Grass length and Grass in a breeze tune the blades (how many, how long, how well they show when the wind is light)',
+      '13 new floors under Draw → Tiles: River pebbles, River stones, Sandy shallows, Deep water, Bath mosaic, Bog, Lava flow, Lava crust, Rune floor, Glowing cave, Frozen lake, Tall grass and Dune sand',
+      'Living tiles need a graphics card (as the living trees do); without one the map shows as a still picture. With your screen set to still they stand still on the GM screen; with Effects quality on Low the TV shows half the blades',
+      'Draw menu: the Blending card and Map settings no longer jump or show a cut edge while they slide out and in',
+    ]],
     ['Beta 3.41', [
       'Effects → Paint: four ways to put an effect down, in a row under Paint. Brush as before; Box and Round are dragged on the grid and snap to its lines and half squares (Shift: a square or a circle); Erase brushes away any painted effect. Holding Alt with Brush, Box or Round erases with that shape',
       'A box or a round of River current, Surf, Grass in the wind or Sway flows along its longer side, the way you dragged it. An area with nothing left after erasing goes; one stroke of Erase is one step for undo',

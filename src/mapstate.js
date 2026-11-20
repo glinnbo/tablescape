@@ -29,6 +29,16 @@ function cleanRings(rings) {
 // lean 0..1, branches and rustle 0..3.
 const WIND_RANGE = { dir: [0, 360], strength: [0, 3], lean: [0, 1], branches: [0, 3], rustle: [0, 3] };
 function defaultWind() { return { auto: true, storm: false, dir: 30, strength: 1, lean: 0, branches: 1, rustle: 1 }; }
+// Beta 3.42, living tiles (water, lava and grass that move on an Oldschool map): on or off for this map, and how the
+// grass is: how many blades (amount), how long (length), how soon they show in a light wind (breeze). Each about 1.
+function defaultLive() { return { on: true, amount: 1, length: 1, breeze: 1 }; }
+function cleanLive(v) {
+  const out = defaultLive();
+  if (!v || typeof v !== 'object') return out;
+  out.on = v.on !== false;
+  for (const [k, [a, b]] of Object.entries({ amount: [0, 1.5], length: [0.3, 2.5], breeze: [0.3, 2.5] })) { const n = Number(v[k]); if (Number.isFinite(n)) out[k] = Math.round(Math.min(b, Math.max(a, n)) * 100) / 100; }
+  return out;
+}
 function cleanWind(w) {
   const out = defaultWind();
   if (!w || typeof w !== 'object') return out;
@@ -213,6 +223,7 @@ function emptyMap(name = 'New map') {
     fx: [], spells: [],
     weather: { layers: [], fade: 0, name: 'None' }, // a mix of weather layers over the whole table (fade: seconds new weather takes to come in)
     wind: defaultWind(), // (Beta 3.20) the wind in the living trees
+    live: defaultLive(), // (Beta 3.42) living tiles
     light: { darkness: 0, tint: '#03040a', memory: false, seen: [] },
     draw: [], // pen strokes and text labels
     marks: [], // pins, crosses, numbered dots, counters, GM notes
@@ -248,6 +259,7 @@ function normalize(m) {
   out.spells = Array.isArray(out.spells) ? out.spells : [];
   out.weather = normalizeWeather(m && m.weather);
   out.wind = cleanWind(m && m.wind);
+  out.live = cleanLive(m && m.live);
   for (const l of out.layers) { // (Beta 3.20: a living tree is known by its picture; anything else has no "tree")
     if (l.role === 'asset' && treeOf(l)) l.tree = cleanTree(l.tree, l); else if (l.tree) delete l.tree;
   }
@@ -990,6 +1002,12 @@ function apply(map, type, p, media) {
       if (JSON.stringify(map.wind) === before) return { changed: null };
       return { changed: 'all' };
     }
+    case 'live.set': { // (Beta 3.42) living tiles: on or off, and how the grass is
+      const before = JSON.stringify(map.live);
+      map.live = cleanLive({ ...map.live, ...pick(p, ['on', 'amount', 'length', 'breeze']) });
+      if (JSON.stringify(map.live) === before) return { changed: null };
+      return { changed: 'all' };
+    }
     case 'wind.storm': {
       map.wind = cleanWind({ ...map.wind, storm: 'on' in p ? !!p.on : !map.wind.storm });
       return { changed: 'all', label: map.wind.storm ? 'Storm in the trees' : 'The storm has passed' };
@@ -1202,6 +1220,7 @@ function apply(map, type, p, media) {
         if (Array.isArray(p.ids)) map.bg.osIds = p.ids.map(String).slice(0, 5000); // (Beta 3.23) what the picture already shows (the TV inks the rest)
         // (Beta 3.25) the sharp tiles on top of the picture: P dots a square, ts squares across, at whole squares from
         // the grid's origin (c, r)
+        if (p.bg.live) map.bg.live = media(p.bg.live); // (Beta 3.42) where its living tiles lie
         if (p.bg.sharp && p.bg.sharp.P > 0 && p.bg.sharp.ts > 0 && Array.isArray(p.bg.sharp.tiles)) map.bg.sharp = { P: p.bg.sharp.P, ts: p.bg.sharp.ts, tiles: p.bg.sharp.tiles.map((t) => ({ c: t.c, r: t.r, h: t.h, ...media(t.path) })) };
       }
       else if (p.empty) map.bg = null;

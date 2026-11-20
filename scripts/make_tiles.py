@@ -76,6 +76,21 @@ TILES = [
     ('bloody_grey_stone', 'Bloody grey stone', 'floor', 6),
     ('bloody_checkerboard', 'Bloody checkerboard', 'floor', 8),
     ('bloody_planks', 'Bloody planks', 'floor', 8),
+    # (Beta 3.42: Glinn's set for the living tiles: beds for water without painted waves, lava, glow, ice, grass, sand,
+    # all in flat light. Until the living layer is built they are still tiles like the others)
+    ('river_pebbles', 'River pebbles', 'floor', 8),
+    ('river_stones', 'River stones', 'floor', 5),
+    ('sandy_shallows', 'Sandy shallows', 'floor', 8),
+    ('deep_water', 'Deep water', 'floor', 8),
+    ('bath_mosaic', 'Bath mosaic', 'floor', 4),
+    ('bog', 'Bog', 'floor', 6),
+    ('lava_flow', 'Lava flow', 'floor', 6),
+    ('lava_crust', 'Lava crust', 'floor', 6),
+    ('rune_floor', 'Rune floor', 'floor', 4),
+    ('glowing_cave', 'Glowing cave', 'floor', 6),
+    ('frozen_lake', 'Frozen lake', 'floor', 6),
+    ('tall_grass', 'Tall grass', 'floor', 5),
+    ('dune_sand', 'Dune sand', 'floor', 8),
     # what walls, rock and cliffs are made of
     ('stone_wall', 'Stone', 'material', 4),
     ('dark_stone_wall', 'Dark stone', 'material', 5),
@@ -83,6 +98,14 @@ TILES = [
     ('rock', 'Rock', 'material', 6),
     ('cliff', 'Mossy rock', 'material', 8),
 ]
+# Beta 3.42, living tiles: a floor of one of these moves on the GM screen and the TV. 'water': its picture is the bed,
+# seen through moving water; 'lava': what glows in it crawls and pulses; 'grass': blades stand on it and lean with the
+# wind (the number after it: how long they are, 1 = tall grass)
+LIVE = {
+    'river_pebbles': 'water', 'river_stones': 'water', 'sandy_shallows': 'water', 'deep_water': 'water', 'bath_mosaic': 'water', 'bog': 'water',
+    'lava_flow': 'lava', 'lava_crust': 'lava', 'lava_field': 'lava', 'lava_veins': 'lava',
+    'tall_grass': 'grass:1', 'meadow': 'grass:0.5',
+}
 BIG = 2048  # (Beta 3.25: their full size; the sharp tiles show up to 200 dots a square)
 SMALL = 256
 
@@ -122,7 +145,7 @@ def main():
             im.resize((BIG, BIG), Image.LANCZOS).save(big, 'WEBP', quality=82, method=6)
             im.resize((SMALL, SMALL), Image.LANCZOS).save(small, 'WEBP', quality=80, method=6)
         total += os.path.getsize(big) + os.path.getsize(small)
-    data = {'tiles': [{'id': t, 'label': l, 'kind': k, 'squares': s, 'off': joints(os.path.join(OUT, f'{t}.webp'), s), 'file': f'{t}.webp', 'small': f'{t}-small.webp'} for t, l, k, s in TILES]}
+    data = {'tiles': [{'id': t, 'label': l, 'kind': k, 'squares': s, 'off': joints(os.path.join(OUT, f'{t}.webp'), s), 'file': f'{t}.webp', 'small': f'{t}-small.webp', **({'live': LIVE[t]} if t in LIVE else {})} for t, l, k, s in TILES]}
     js = ('// Oldschool maps (Beta 3.22): the tiles that come with the app. Made by scripts/make_tiles.py: do not edit by hand.\n'
           "'use strict';\nconst TILE_DATA = " + json.dumps(data, separators=(',', ':')) + ';\n'
           "if (typeof module !== 'undefined' && module.exports) module.exports = TILE_DATA;\n")

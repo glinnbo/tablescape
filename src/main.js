@@ -2271,7 +2271,7 @@ function devtoolsShortcut(win) {
 // =====================================================================
 // Commands
 // =====================================================================
-const MAP_CMD = /^(bg|view|layer|grid|fog|fx|light|weather|wind|spell|draw|mark|round|wall|vision|area|scene|atlasmap|os)\./;
+const MAP_CMD = /^(bg|view|layer|grid|fog|fx|light|weather|wind|live|spell|draw|mark|round|wall|vision|area|scene|atlasmap|os)\./;
 
 // ---------- walls from files, and what the party has seen ----------
 const sightLast = new Map(); // mapId -> Map(eyeId -> what was last recorded into the fog)
@@ -2460,7 +2460,7 @@ const dragSightAt = new Map(); // mapId → when the fog last followed a drag
 function osBaked(p) {
   const map = store.map(p.mapId);
   if (!map || !map.os || !store.cur) return { ok: false };
-  let file = null; let sharp = null;
+  let file = null; let sharp = null; let live = null;
   if (p.data && !p.empty) {
     const dir = path.join(store.cur.dir, 'drawn');
     const hash = String(p.hash || Date.now()).replace(/[^a-z0-9]/gi, '').slice(0, 16) || 'x';
@@ -2468,6 +2468,8 @@ function osBaked(p) {
     try {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(file, Buffer.from(p.data));
+      // (Beta 3.42) where its living tiles lie: a small picture beside it, named after it
+      if (p.live && p.live.length) { live = path.join(dir, `${map.id}-${hash}-live.png`); fs.writeFileSync(live, Buffer.from(p.live)); }
       // (Beta 3.25) the sharp tiles: a file each, named by its key; kept ones are there already
       if (p.sharp && Array.isArray(p.sharp.tiles)) {
         const tiles = [];
@@ -2485,10 +2487,12 @@ function osBaked(p) {
       }
       const keep = osKept(map.id);
       for (const t of sharp ? sharp.tiles : []) keep.add(path.basename(t.path));
+      if (live) keep.add(path.basename(live));
+      for (const f of [...keep]) if (f.endsWith('.webp')) keep.add(f.replace(/\.webp$/, '-live.png')); // (a kept picture keeps its living tiles)
       for (const f of fs.readdirSync(dir)) if (f.startsWith(`${map.id}-`) && path.join(dir, f) !== file && !keep.has(f)) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* */ } }
     } catch (err) { applog.log.warn(`drawn map not saved: ${err.message}`); return { ok: false, error: err.message }; }
   }
-  const res = mapstate.apply(map, 'os.result', { bg: file ? { path: file, x: p.x, y: p.y, scale: p.scale, nw: p.nw, nh: p.nh, sharp } : null, empty: !!p.empty, hash: p.hash, ids: p.ids, walls: p.walls }, library.media);
+  const res = mapstate.apply(map, 'os.result', { bg: file ? { path: file, x: p.x, y: p.y, scale: p.scale, nw: p.nw, nh: p.nh, sharp, live } : null, empty: !!p.empty, hash: p.hash, ids: p.ids, walls: p.walls }, library.media);
   if (!res.changed) return { ok: false };
   bumpRev(map.id);
   store.touch(map.id);

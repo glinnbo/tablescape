@@ -287,6 +287,7 @@ class SceneView {
       c.el.style.left = `${r.x}px`; c.el.style.top = `${r.y}px`;
     }
     for (const c of Object.values(this.tcv)) this.sizeTrees(c);
+    if (this.lcv) this.sizeTrees(this.lcv);
     this.gridSig = ''; this._seen = null;
     if (this.map) { this.renderGrid(true); this.redrawSoon(); }
   }
@@ -471,6 +472,7 @@ class SceneView {
     cancelAnimationFrame(this.treeRaf); this.treeRaf = 0;
     for (const c of Object.values(this.tcv)) { c.L.free(); c.el.remove(); }
     this.tcv = {};
+    if (this.lcv) { this.lcv.L.destroy(); this.lcv.el.remove(); this.lcv = null; } // (Beta 3.42: the living tiles)
     cancelAnimationFrame(this.bakedRaf); this.bakedRaf = 0;
     for (const n of this.nodes.values()) { this.dropSheet(n); if (n.media) { n.media.removeAttribute('src'); n.media.load?.(); } }
     if (this.bgNode && this.bgNode.kind === 'video') { this.bgNode.el.removeAttribute('src'); this.bgNode.el.load(); }
@@ -537,7 +539,7 @@ class SceneView {
     // (Beta 3.28: the living trees take it in their own drawing; standing still, they are drawn again once)
     if (this.treeN && !this.treeRaf) requestAnimationFrame(() => { if (!this.dead && !this.treeRaf && this.map) this.drawTrees(); });
     // (Beta 3.2: the Sway layer too: it shows the map picture moving, and showed it without the look)
-    if (!L) { this.bgLayer.style.filter = ''; this.cv.sway.el.style.filter = ''; this.assetsEl.style.filter = ''; this.assetsFrontEl.style.filter = ''; this.assetsOverEl.style.filter = ''; return; }
+    if (!L) { this.bgLayer.style.filter = ''; this.cv.sway.el.style.filter = ''; if (this.lcv) this.lcv.el.style.filter = ''; this.assetsEl.style.filter = ''; this.assetsFrontEl.style.filter = ''; this.assetsOverEl.style.filter = ''; return; }
     if (!this.lookEl) {
       SceneView.lookN = (SceneView.lookN || 0) + 1;
       this.lookId = `sv-look-${SceneView.lookN}`;
@@ -554,7 +556,7 @@ class SceneView {
     }
     this.lookEl.setAttribute('values', L.join(' '));
     const url = `url(#${this.lookId})`;
-    this.bgLayer.style.filter = url; this.cv.sway.el.style.filter = url; this.assetsEl.style.filter = url; this.assetsFrontEl.style.filter = url; this.assetsOverEl.style.filter = url;
+    this.bgLayer.style.filter = url; this.cv.sway.el.style.filter = url; if (this.lcv) this.lcv.el.style.filter = url; this.assetsEl.style.filter = url; this.assetsFrontEl.style.filter = url; this.assetsOverEl.style.filter = url;
   }
   // hold to see the map without its look (the Map tool's "Original" button)
   setPeek(on) { this.peek = !!on; this.renderLook(); }
@@ -2010,20 +2012,50 @@ class SceneView {
   // Living trees never stand still, but they must not make the rest draw: a map with trees and nothing else that moves
   // (its light, its mist, its weather all still) would otherwise draw every layer sixty times a second. So the trees
   // have a loop of their own that draws only them; the other layers keep drawing only when something of theirs moves.
-  treesMove() { return this.treeN > 0 && this.playing && !!this.map && !(this.gm && this.fxMode === 'still'); }
+  treesMove() { return (this.treeN > 0 || this.livingOn()) && this.playing && !!this.map && !(this.gm && this.fxMode === 'still'); }
   updateTreeLoop() {
     const on = this.treesMove();
     if (on && !this.treeRaf) this.treeRaf = requestAnimationFrame(this.treeLoop);
     if (!on && this.treeRaf) { cancelAnimationFrame(this.treeRaf); this.treeRaf = 0; }
+    if (!on && this.lcv && !this.livingOn()) this.drawLiving(0); // (living tiles turned off: nothing of them stays on the picture)
   }
   treeLoop(ms) {
     this.treeRaf = 0;
-    if (this.dead || !this.treesMove()) return;
+    if (this.dead) return;
+    if (!this.treesMove()) { if (this.lcv && !this.livingOn()) this.drawLiving(0); return; }
     this.treeRaf = requestAnimationFrame(this.treeLoop);
     const gap = this.gm ? (this.fxMode === 'smooth' ? 0 : 80) : this.frameGap || 0; // (as the effects: about 12 a second on your screen unless set to full speed; 30 on the TV on Low)
     if (ms - (this.treeFrame || 0) < gap) return;
     this.treeFrame = ms;
     this.drawTrees();
+  }
+  // ---------- living tiles (Beta 3.42) ----------
+  // Water, lava and grass of an Oldschool map that move (living.js): one canvas right above the map picture, under
+  // the grid, the assets and the tokens, drawn in the trees' loop and in their wind.
+  livingOn() {
+    const m = this.map; const b = m && m.bg;
+    return !!(b && b.os && b.live && b.live.url && !this.peek && !(m.live && m.live.on === false) && typeof Living === 'object' && Living.supported() && !this.bgTurn());
+  }
+  drawLiving(dt) {
+    const st = { on: false, blades: 0, kinds: null }; this.stats.living = st;
+    const on = this.livingOn(); const p = on ? this.bgPlacement() : null;
+    if (!on || !p || !this.bgNode) { if (this.lcv) { this.lcv.L.clear(); this.lcv.L.source(null); } return; }
+    if (!this.lcv) {
+      const el = document.createElement('canvas'); el.className = 'sv-canvas sv-living';
+      const L = Living.layer(el, () => { if (!this.dead) { this.redrawSoon(); this.updateTreeLoop(); } });
+      if (!L) return;
+      this.world.insertBefore(el, this.cv.sway.el.nextSibling);
+      el.style.filter = this.cv.sway.el.style.filter;
+      this.lcv = { el, L, res: 1 }; this.sizeTrees(this.lcv);
+    }
+    const c = this.lcv; const m = this.map; const v = this.v;
+    if (c.step !== this.cam.s) { c.step = this.cam.s; this.sizeTrees(c); }
+    const g = m.grid && m.grid.size > 0 ? m.grid.size : 1;
+    c.L.source({ key: `${m.bg.url}|${m.bg.live.url}`, pic: m.bg.url, mask: m.bg.live.url, x: p.x, y: p.y, w: p.w, h: p.h, g, P: g / (m.bg.scale || 1) });
+    const k = this.ppi * v.zoom * c.res; const R = c.rect;
+    const ok = c.L.frame({ dt, wind: this.treeWindNow || { dir: 30, strength: 1 }, matrix: [k, (v.x * this.ppi - R.x) * c.res, (v.y * this.ppi - R.y) * c.res], set: m.live || {}, few: (this.qres || 1) < 0.75 });
+    st.on = !!ok; st.state = c.L.state || ''; st.blades = c.L.shown || 0; st.kinds = ok ? { ...c.L.kinds } : null; st.time = c.L.time;
+    if (ok && this.livingProbe) { const q = this.livingProbe; st.px = c.L.read(q.x * k + (v.x * this.ppi - R.x) * c.res, q.y * k + (v.y * this.ppi - R.y) * c.res); }
   }
   treeCanvas(lev) {
     if (this.tcv[lev]) return this.tcv[lev];
@@ -2057,19 +2089,20 @@ class SceneView {
     this.treeAt = now;
     const st = { n: 0, drawn: 0, levels: [], cover: 0 }; // cover: how much of the table the trees take, layers and all (what they cost)
     this.stats.trees = st;
-    if (!m) return;
+    if (!m) { if (this.lcv) this.drawLiving(0); return; }
     const list = m.layers.filter((l) => this.liveTree(l) && (this.gm || !l.hidden));
     st.n = list.length;
+    // the wind: the map's own or the weather's, never with a jump
+    const to = Trees.windOf(m);
+    this.treeWindNow = moving && this.treeWindMap === m.id ? Trees.ease(this.treeWindNow, to, dt) : Trees.ease(null, to, 0);
+    this.treeWindMap = m.id;
+    this.drawLiving(dt); // (Beta 3.42: living tiles, in the same wind)
     if (!list.length && !Object.keys(this.tcv).length) return;
     { const k = this.ppi * this.v.zoom; const all = this.W * this.H; const T = this.tableRectInMap();
       for (const l of list) {
         const w = l.w || 1; if (l.x + w < T.x || l.y + w < T.y || l.x - w > T.x + T.w || l.y - w > T.y + T.h) continue; // (off the table)
         const vv = Trees.variant(l.tree.v); st.cover += ((w * k) ** 2 / all) * (vv ? (vv.layers.length - l.tree.base) / 6 : 1);
       } }
-    // the wind: the map's own or the weather's, never with a jump
-    const to = Trees.windOf(m);
-    this.treeWindNow = moving && this.treeWindMap === m.id ? Trees.ease(this.treeWindNow, to, dt) : Trees.ease(null, to, 0);
-    this.treeWindMap = m.id;
     st.wind = { ...to, now: this.treeWindNow.strength };
     const rad = Math.PI / 180;
     const v = this.v;

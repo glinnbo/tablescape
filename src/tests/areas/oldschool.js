@@ -40,9 +40,9 @@ module.exports = (area) => {
     await K.g('Oldschool.noPill = true'); // (and no running maid: drawing it all the while starves the picture here)
   });
 
-  area.quick('the tiles come with the app: 49 floors in Library → Tiles (Beta 3.30: 37 more), five materials for walls, rock and cliffs', async (t) => {
+  area.quick('the tiles come with the app: 62 floors in Library → Tiles (Beta 3.30: 37 more; Beta 3.42: 13 for the living tiles), five materials for walls, rock and cliffs', async (t) => {
     const list = t.lib('tiles').filter((x) => x.builtin);
-    t.eq(list.length, 49, 'floors in the library');
+    t.eq(list.length, 62, 'floors in the library');
     t.eq(L.tileOf({ rel: 'Tiles/Tablescape/Grassy flagstones.webp' }).squares, 7, 'a new one, known by name');
     t.ok(list.every((x) => x.rel.startsWith('Tiles/Tablescape/') && fs.existsSync(x.path) && x.thumb && x.squares > 0), 'each with its picture, a small one and its squares', list[0]);
     t.ok(!list.some((x) => /stone_wall|hedge|Mossy rock/i.test(x.name)), 'the materials are not floors', list.map((x) => x.name));
@@ -211,6 +211,8 @@ module.exports = (area) => {
     t.eq(await t.g('[Play.ui.os.mixW, Play.ui.os.mixU, Play.ui.os.mixT]'), [1.5, 0.5, 1], 'Tiled: stone by stone');
     await t.clickSel('#pop .os-fine');
     t.ok(await t.g(`document.querySelector('#pop .os-fly').classList.contains('slide')`), 'the card slides out from behind the panel (Beta 3.41)');
+    // (Beta 3.42) it is cut at the panel's edge by a frame that stands still, and only moves itself: before, the cut moved along and could land inside the panel
+    t.ok(await t.g(`(() => { const w = document.querySelector('#pop .os-flywrap'); const e = w.querySelector('.os-fly'); const p = document.querySelector('#pop').getBoundingClientRect(); const cut = getComputedStyle(w).clipPath; const moves = e.getAnimations().flatMap((a) => a.effect.getKeyframes().flatMap((f) => Object.keys(f))); return Math.abs(w.getBoundingClientRect().left - p.right) <= 1.5 && /inset\\(.* 0px\\)$/.test(cut) && getComputedStyle(w).animationName === 'none' && moves.includes('transform') && !moves.includes('clipPath'); })()`), 'cut at the panel\'s edge, whatever the card does');
     await cardOut(t);
     t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fly input[type=range]')].map((x) => x.getAttribute('aria-label'))`), ['Mix width', 'Uneven', 'Tiled'], 'the small button: the three sliders in a card');
     await t.g(`(() => { const i = document.querySelector('#pop .os-fly input[aria-label="Uneven"]'); i.value = '0.8'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -632,6 +634,90 @@ module.exports = (area) => {
     t.eq(await t.t(`document.querySelectorAll('.sv-osink .ink-item').length`), 0, 'no ink for a secret door');
     await baked(t, 90000);
   }, { ms: 300000 });
+
+  // Beta 3.42: living tiles. A tile can be water, lava or grass: where it shows in the picture it moves, drawn above
+  // the picture by the graphics card (living.js). What lies on top of it (a bridge) covers it; the grass is blades.
+  area.deep('Beta 3.42: living tiles: water, lava and grass move where their tile shows, a bridge over the water covers it; on the TV too; off with one switch', async (t) => {
+    await clear(t);
+    const T = (n) => ({ rel: `Tiles/Tablescape/${n}.webp` });
+    const A = (x0, y0, x1, y1, tile, level) => ({ kind: 'area', shape: 'rect', pts: [[x0 * k, y0 * k], [x1 * k, y1 * k]], tile: T(tile), edge: 'ledge', mat: 'stone_wall', level, mixW: 0 });
+    t.handle('os.add', { mapId: own, items: [room(2, 2, 12, 8), A(3, 3, 6, 7, 'Deep water', -1), A(3, 4.5, 6, 5.5, 'Old cobblestone', 1), A(7, 3, 9, 5, 'Lava flow', 0), A(9, 5, 11, 7, 'Tall grass', 0)] });
+    await t.settle(); let m = await baked(t);
+    // the picture comes with a small map of where the living tiles show
+    t.ok(m.bg.live && /-live\.png$/.test(m.bg.live.path) && fs.existsSync(m.bg.live.path), 'the picture comes with a map of its living tiles', m.bg.live && m.bg.live.path);
+    const px = await t.g(`(async () => {
+      const m = Play.state().map; const b = m.bg; const k = m.grid.size;
+      const pic = new Image(); pic.src = b.url; await pic.decode();
+      const img = new Image(); img.src = b.live.url; await img.decode();
+      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+      const f = img.naturalWidth / pic.naturalWidth;
+      const at = (x, y) => [...g.getImageData(Math.round(((x * k - b.x) / b.scale) * f), Math.round(((y * k - b.y) / b.scale) * f), 1, 1).data];
+      return { water: at(4.5, 3.7), bridge: at(4.5, 5), lava: at(8, 4), grass: at(10, 6), floor: at(11.5, 2.6), f, same: Math.abs(img.naturalHeight / pic.naturalHeight - f) < 0.01 };
+    })()`);
+    t.ok(px.f <= 0.51 && px.same, 'it is small: half the picture each way', px.f);
+    t.ok(px.water[0] > 200 && px.water[1] < 30 && px.water[2] < 30, 'water where the water tile shows', px.water);
+    t.ok(px.lava[1] > 200 && px.lava[0] < 30, 'lava where the lava tile shows', px.lava);
+    t.ok(px.grass[2] > 200 && px.grass[0] < 30, 'grass where the grass tile shows', px.grass);
+    t.ok(px.bridge[0] + px.bridge[1] + px.bridge[2] < 30, 'a floor laid over the water covers it (a bridge)', px.bridge);
+    t.ok(px.floor[0] + px.floor[1] + px.floor[2] < 30, 'nothing on a plain floor', px.floor);
+    // on a screen with a graphics card they move (here: in software, allowed for this check)
+    const still = await t.g('Play.view().stats.living');
+    t.ok(!still || !still.on, 'without a graphics card the picture shows as it is', still);
+    await t.g('Trees.allowSoft(true)');
+    const nudge = async (dir) => { t.handle('wind.set', { mapId: own, auto: false, dir, strength: 1.6, lean: 0.4 }); await t.settle(); };
+    await nudge(20);
+    const spot = (x, y) => t.g(`(async () => { const v = Play.view(); v.livingProbe = { x: ${x * k}, y: ${y * k} }; await new Promise((r) => setTimeout(r, 900)); const s = v.stats.living; v.livingProbe = null; return s && s.px; })()`);
+    let gm = await t.until(async () => { const s = await t.g('Play.view().stats.living'); return s && s.on && s.blades > 0 && s; }, 30000, 'the living tiles on the GM screen');
+    t.ok(gm.kinds.water && gm.kinds.lava && gm.kinds.grass, 'water, lava and grass are found', gm.kinds);
+    const full = gm.blades;
+    t.ok(full > 600 && full < 4 * 700, 'the grass is blades: some hundred a square', full);
+    const w = await spot(4.5, 3.7); const br = await spot(4.5, 5); const fl = await spot(11.5, 2.6); const lv = await spot(8, 4);
+    t.ok(w && w[3] > 200, 'the water is drawn above the picture', w);
+    t.ok(lv && lv[3] > 200, 'the lava too', lv);
+    t.ok(br && br[3] < 10 && fl && fl[3] < 10, 'nothing is drawn over the bridge or the plain floor', [br, fl]);
+    const t0 = (await t.g('Play.view().stats.living')).time; await t.sleep(1200);
+    t.ok((await t.g('Play.view().stats.living')).time > t0, 'it moves', t0);
+    // Draw → Map settings: one switch, three sliders for the grass
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`); await tabsOut(t);
+    if (!(await t.count('#pop .os-fly .os-grass'))) await t.clickSel('#pop .os-mapbtn');
+    await cardOut(t);
+    const card = () => t.g(`(() => { const f = document.querySelector('#pop .os-fly'); const g = f.querySelector('.os-grass'); return { text: [...f.querySelectorAll('.ctl-label, .ctl')].map((e) => e.textContent).join(' | '), grass: !!g && !g.hidden, sliders: g ? g.querySelectorAll('input[type="range"]').length : 0 }; })()`);
+    let c = await card();
+    t.ok(/Living tiles/.test(c.text) && c.grass && c.sliders === 3 && /Grass length/.test(c.text) && /Grass in a breeze/.test(c.text), 'Map settings: Living tiles, and Grass, Grass length, Grass in a breeze', c);
+    await t.shot(t.gm(), 'living-tiles-card');
+    t.handle('live.set', { mapId: own, amount: 0.75 }); await t.settle();
+    gm = await t.until(async () => { const s = await t.g('Play.view().stats.living'); return s && s.on && s.blades < full && s; }, 15000, 'fewer blades');
+    t.ok(Math.abs(gm.blades / full - 0.75) < 0.05, 'Grass at 75 %: three quarters of the blades', [gm.blades, full]);
+    t.handle('live.set', { mapId: own, amount: 9, length: 9, breeze: 0 }); await t.settle();
+    t.ok(M(t).live.amount === 1.5 && M(t).live.length === 2.5 && M(t).live.breeze === 0.3, 'the sliders have their ends', M(t).live);
+    t.handle('live.set', { mapId: own, amount: 1, length: 1, breeze: 1 }); await t.settle();
+    // on the TV
+    await t.g('Trees.allowSoft(false)'); await nudge(21); // (software graphics: one screen at a time)
+    await t.send(own); await t.t('Trees.allowSoft(true)'); await nudge(22);
+    const tv = await t.until(async () => { const s = (await t.tvDebug()).living; return s && s.on && s.blades > 0 && s; }, 40000, 'the living tiles on the TV');
+    t.ok(tv.kinds.water && tv.kinds.lava && tv.kinds.grass && tv.blades === full, 'the TV shows them too, the same grass', tv);
+    await t.shot(t.tv(), 'living-tiles-tv');
+    // off with one switch: the picture as it is, on both screens
+    await t.g('Trees.allowSoft(true)');
+    t.handle('live.set', { mapId: own, on: false }); await t.settle();
+    await t.until(async () => { const s = (await t.tvDebug()).living; const g = await t.g('Play.view().stats.living'); return s && !s.on && g && !g.on; }, 15000, 'the living tiles to stop');
+    c = await card();
+    t.ok(!c.grass, 'Living tiles off: the sliders for the grass leave', c);
+    const off = await spot(4.5, 3.7);
+    t.ok(!off || off[3] < 10, 'and nothing is drawn above the picture', off);
+    t.handle('live.set', { mapId: own, on: true }); await t.settle();
+    t.ok(M(t).live.on === true && (await card()).grass, 'on again: the sliders are back', M(t).live);
+    await t.t('Trees.allowSoft(false)'); await t.g('Trees.allowSoft(false)'); await nudge(23);
+    // a drawing without living tiles has no such map
+    const old = m.bg.live.path;
+    await clear(t);
+    t.handle('os.add', { mapId: own, items: [room(2, 2, 8, 6)] }); await t.settle(); m = await baked(t);
+    t.ok(!m.bg.live, 'a drawing without living tiles: no map of them', m.bg.live);
+    t.handle('history.undo', { mapId: own }); t.handle('history.undo', { mapId: own }); await t.settle();
+    t.ok(M(t).bg && M(t).bg.live && M(t).bg.live.path === old && fs.existsSync(old), 'undo brings the picture back with its map of living tiles', M(t).bg && M(t).bg.live);
+    t.handle('history.redo', { mapId: own }); t.handle('history.redo', { mapId: own }); await t.settle(); await baked(t);
+  }, { ms: 400000 });
 
   area.deep('a picture for the morning: the GM screen and the TV', async (t) => {
     await clear(t);
