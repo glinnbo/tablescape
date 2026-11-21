@@ -4229,3 +4229,48 @@ body.gm[data-tool="oldschool"] #viewport { cursor: crosshair; }
 body.gm .sv-mark.is-hidden { opacity: 0.6; }
 body.gm .sv-mark.is-hidden::after { content: ''; position: absolute; inset: -0.25em; border: 1.5px dashed #f2d14b; border-radius: 0.45em; pointer-events: none; }
 body.gm[data-tool="mark"] .sv-text { pointer-events: auto; cursor: move; }
+
+/* Beta 3.60 (Glinn): Effects in three groups, built like Draw: Scene, Lights, Elements on slide-out tabs; the shape
+   tools of a painted effect beside them; Elements as picture tiles in the colours of their families */
+.fx-groups .tile[data-g="scene"], .os-tabs2.g-scene { --gc: #9ecbff; --gb: #14263a; }
+.fx-groups .tile[data-g="lights"] { --gc: #ffcf70; --gb: #3a2f14; }
+.fx-groups .tile[data-g="elements"], .os-tabs2.g-elements { --gc: #7fcdbb; --gb: #16302b; }
+.fx-panel .ctl-label.fx-sec { text-transform: uppercase; letter-spacing: 0.08em; font-size: 10.5px; color: var(--faint); }
+.fx-sec-row { display: flex; align-items: center; min-height: 22px; }
+.fx-indoors.on { border-color: #9ecbff; color: #9ecbff; background: #14263a; }
+.tiles.fx-moods { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+.tiles.fx-moods .tile { min-height: 56px; padding: 6px 1px 5px; font-size: 10.5px; gap: 4px; }
+.tiles.fx-moods .tile .i { width: 19px; height: 19px; }
+.fx-scene .tiles.wx-presets { gap: 5px; }
+.fx-scene .tiles.wx-presets .tile { min-height: 54px; padding: 6px 1px 5px; font-size: 10px; letter-spacing: -0.01em; gap: 4px; min-width: 0; }
+.fx-scene .tiles.wx-presets .tile .i { width: 19px; height: 19px; }
+.fx-wind { flex-wrap: nowrap; }
+.fx-wind > .i { width: 15px; height: 15px; flex: none; }
+.fx-fold > .stack { margin-top: 3px; padding: 10px; border-radius: 10px; background: var(--soot); border: 1px solid var(--line); }
+.fx-panel .light-card { border: none; padding: 0; background: none; }
+.fx-ban { height: 86px; flex: none; }
+.fx-ban > .fx-pic { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fx-pic.blank { visibility: hidden; }
+.fx-pic.noimg { display: grid; place-items: center; background: #2a2622; color: #cfd8c2; }
+.fx-ban > .fx-pic.noimg .i { width: 30px; height: 30px; margin-bottom: 18px; }
+.fx-ban-acts { position: absolute; right: 5px; top: 5px; display: flex; gap: 2px; background: rgba(10, 11, 14, 0.72); border-radius: 9px; padding: 2px; z-index: 1; }
+.fx-ban-acts .icon-btn { width: 26px; height: 26px; }
+.fx-ban-tag { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 999px; background: var(--torch); color: var(--torch-ink); font-size: 11px; font-weight: 600; z-index: 1; }
+.fx-chips { display: flex; gap: 4px; user-select: none; }
+.fx-chips .cs-chip { padding: 3px 7px; font-size: 11px; white-space: nowrap; }
+.fx-chips .cs-chip.on { border-color: var(--fc); color: var(--fc); background: color-mix(in srgb, var(--fc) 14%, transparent); }
+/* five in a row; four rows show, then the tiles scroll (Glinn) */
+.fx-gal { position: relative; user-select: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; max-height: 271px; overflow-y: auto; scrollbar-width: thin; flex: none; align-content: start; }
+.fx-t { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 3px; min-width: 0; height: 64px; border: 1px solid var(--line); border-radius: 9px; background: var(--soot); color: var(--muted); font-size: 10px; line-height: 1.1; text-align: center; }
+.fx-t:hover { color: var(--text); border-color: var(--muted); }
+.fx-t .fx-pic { width: 100%; height: 34px; object-fit: cover; border-radius: 6px; display: block; flex: none; background: #2a2622; }
+.fx-t .fx-pic.blank { visibility: visible; }
+.fx-t .fx-pic.noimg .i { width: 18px; height: 18px; }
+.fx-t > span:last-child { flex: 1; display: grid; place-items: center; }
+.fx-t .fam { position: absolute; left: 6px; top: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--fc); box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.65); }
+.fx-t.on { border-color: var(--torch); color: var(--torch); background: var(--torch-soft); font-weight: 600; }
+.fx-elements .swatches.color-row { gap: 5px; flex-wrap: nowrap; }
+.fx-elements .swatches.color-row .swatch { width: 22.5px; height: 22.5px; flex: none; }
+.fx-flywrap { top: 0; }
+.fx-fly { width: 262px; }
+.fx-back { margin-right: auto; }

@@ -253,6 +253,23 @@ const FXDATA = (() => {
   const isLight = (f) => !!f && (f.kind === 'light' || (f.kind === 'emitter' && (!!f.holder || FLAMES.some((d) => d.id === f.preset))));
   const givesLight = (f) => !!f && (f.kind === 'light' || (f.kind === 'emitter' && f.bright > 0)) && f.lit !== false;
 
-  return { SKINS, SPELLS, SHAPES, EMITTERS, FLAMES, isLight, givesLight, WINDOW_SHAPES, WINDOW_GRIDS, REGIONS, WEATHER, WEATHER_TYPES, LIGHTS, COLORS, TINTS, MOODS, TBASE, SPEED_MAX, wxTravel };
+  // Beta 3.60 (Glinn): Effects → Elements: what sits on the map, sorted by what it is and never by how it is put down
+  // (the effect knows: an emitter is clicked, a region is dragged or painted). Each stands in one family; the order
+  // here is the order of the tiles. Roof is not among them: it is Scene → Indoors.
+  const FAMILIES = [
+    { id: 'water', label: 'Water', color: '#5aa9e6' },
+    { id: 'fire', label: 'Fire', color: '#ff8a3a' },
+    { id: 'nature', label: 'Nature', color: '#7dc46a' },
+    { id: 'magic', label: 'Magic', color: '#b07cff' },
+    { id: 'battle', label: 'Battle', color: '#e2525a' },
+  ];
+  const ELEMENTS = [
+    ['region', 'water', 'water'], ['region', 'current', 'water'], ['region', 'surf', 'water'], ['region', 'swamp', 'water'], ['region', 'ice', 'water'], ['emitter', 'falls', 'water'],
+    ['region', 'lava', 'fire'], ['region', 'burning', 'fire'], ['emitter', 'vent', 'fire'], ['emitter', 'smoke', 'fire'], ['emitter', 'steam', 'fire'],
+    ['region', 'mist', 'nature'], ['region', 'dust', 'nature'], ['region', 'grass', 'nature'], ['region', 'sway', 'nature'], ['emitter', 'fireflies', 'nature'], ['emitter', 'shaft', 'nature'], ['emitter', 'window', 'nature'],
+    ['region', 'glow', 'magic'], ['region', 'darkness', 'magic'], ['emitter', 'glow', 'magic'], ['emitter', 'sparkles', 'magic'], ['emitter', 'runes', 'magic'], ['emitter', 'portal', 'magic'], ['emitter', 'arcs', 'magic'],
+    ['region', 'blood', 'battle'], ['region', 'acid', 'battle'], ['region', 'oil', 'battle'], ['region', 'web', 'battle'],
+  ].map(([kind, id, family]) => { const d = (kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === id); return { key: `${kind === 'region' ? 'r' : 'e'}:${id}`, kind, id, family, label: d.label, icon: d.icon, tip: d.tip || null }; });
+  return { SKINS, SPELLS, SHAPES, EMITTERS, FLAMES, isLight, givesLight, WINDOW_SHAPES, WINDOW_GRIDS, REGIONS, WEATHER, WEATHER_TYPES, LIGHTS, COLORS, TINTS, MOODS, TBASE, SPEED_MAX, wxTravel, FAMILIES, ELEMENTS };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = FXDATA;

@@ -175,10 +175,12 @@ module.exports = (area) => {
     await clear(t);
     t.gm().webContents.focus();
     const gs = mapNow(t).grid.size;
-    // no Wind under Effects → Weather any more
+    // (Beta 3.60) Effects → Scene shows the wind in one line with Storm; setting it by hand is in its fold. The box
+    // with its heading stays here in Living
     await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'weather'; Play.openPop('fx')`);
-    await t.until(() => t.count('#pop .wx-add'), 4000, 'the weather panel');
-    t.eq(await t.count('#pop .wind-box'), 0, 'no Wind section under Weather');
+    await t.until(() => t.count('#pop .wx-presets'), 4000, 'the Scene group');
+    t.eq(await t.count('#pop .wind-box'), 0, 'no Wind box in Scene');
+    t.ok(await t.count('#pop .fx-wind .wind-now') && await t.findText('#pop .fx-wind button', 'Storm'), 'Scene: the wind now, and Storm');
     // the library: no Living trees folder (the Cartographer still finds them there)
     await t.g(`Play.Drawer.open({ cat: 'assets' })`);
     await t.until(() => t.findText('#drawer span', 'Nature'), 6000, 'the library\'s Assets');
@@ -312,12 +314,12 @@ module.exports = (area) => {
     const [inA, inB, out] = await spots([[7, 6], [9, 7], [15, 6]]);
     t.ok(inA && inA[3] > 60 && inB && inB[3] > 60 && out && out[3] === 0, 'blades where it was painted, nothing beside it', [inA, inB, out]);
     // Effects → Paint → Grass: the map's grass card (with Thickness) instead of Strength, Amount and Speed
-    await t.g(`(() => { Play.setTool('fx'); Play.ui.fxMode = 'paint'; Play.ui.region = 'grass'; Play.openPop('fx'); })()`);
+    await t.g(`(() => { Play.setTool('fx'); Play.ui.fxMode = 'paint'; Play.ui.region = 'grass'; Play.ui.fxFly = true; Play.openPop('fx'); })()`); // (Beta 3.60: Elements → Grass, its settings card)
     await t.sleep(400);
     const labels = await t.g(`[...document.querySelectorAll('#pop .ctl-label')].filter((e) => e.offsetParent).map((e) => e.textContent.trim())`);
     for (const l of ['Amount', 'Length', 'Thickness', 'Between gusts', 'Colour variety', 'Grows on']) t.has(labels, l, 'the grass card');
     t.ok(!labels.includes('Strength') && !labels.includes('Speed'), 'no Strength or Speed for blades', labels);
-    await t.g(`Play.closePop(); Play.setTool('select')`);
+    await t.g(`Play.ui.fxFly = false; Play.closePop(); Play.setTool('select')`);
     await t.cmd('live.set', { mapId: own, fx: 'grass', set: { thick: 3 } });
     t.eq(M().live.grass.thick, 3, 'Thickness 300 %');
     await t.cmd('live.set', { mapId: own, fx: 'grass', set: { thick: 9 } });
@@ -337,5 +339,5 @@ module.exports = (area) => {
     await soft(t, true);
     t.handle('fx.remove', { mapId: own, id: 'grass1' });
     t.handle('edit.open', { id: was }); await t.send(was);
-  });
+  }, { ms: 120000 }); // (Beta 3.60: Elements draws its picture tiles when it opens, slow on software graphics)
 };

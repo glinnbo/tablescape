@@ -15,6 +15,9 @@ module.exports = (area) => {
     await t.settle();
     return M(t);
   };
+  // (Beta 3.60) Effects → Elements: pick an effect by its tile ('r:mist', 'e:smoke'), a shape tool at the side
+  const element = async (t, key) => { await t.g(`(() => { Play.setTool('fx'); if (Play.ui.fxMode !== 'place' && Play.ui.fxMode !== 'paint') Play.ui.fxMode = 'paint'; if (Play.ui.region === 'roof') Play.ui.region = 'mist'; Play.ui.fxFam = 'all'; Play.openPop('fx'); document.querySelector('#pop .fx-gal .fx-t[data-v="${key}"]').click(); })()`); await t.sleep(250); };
+  const shape = async (t, v) => { await t.g(`document.querySelector('#pop .os-tabs2 .tile[data-v="fxt-${v}"]').click()`); await t.sleep(250); };
   // how dark the TV is at a point of the map: 0 (lit) to 255 (black)
   const dark = async (t, x, y) => { const p = await t.t(`window.__table.probeMap('light', ${x}, ${y})`); return p ? p[3] : null; };
 
@@ -250,9 +253,9 @@ module.exports = (area) => {
     for (const w of [...M(t).walls]) t.handle('wall.remove', { mapId: own, id: w.id });
     const fxNow = (id) => M(t).fx.find((f) => f.id === id);
     // Place: no torches, campfires or candles any more (they are lights)
-    await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'place'; Play.openPop('fx')`);
-    const place = await t.g(`[...document.querySelectorAll('#pop .tiles .tile')].map((b) => b.textContent.trim())`);
-    t.ok(!['Torch', 'Campfire', 'Candles'].some((x) => place.includes(x)) && place.includes('Smoke') && place.includes('Magic glow'), 'Place keeps the rest', place);
+    await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'place'; Play.ui.fxFam = 'all'; Play.openPop('fx')`);
+    const place = await t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t')].map((b) => b.textContent.trim())`);
+    t.ok(!['Torch', 'Campfire', 'Candles'].some((x) => place.includes(x)) && place.includes('Smoke') && place.includes('Magic glow'), 'Elements keeps the rest', place);
     // Light sources: Holder, Flame, Just light
     await t.g(`Object.assign(Play.ui.lt, { group: 'holder', holder: 'cooking_fire', color: '', lit: true, reach: null, sat: null, intensity: 1, size: 1 }); Play.ui.fxMode = 'light'; Play.ui.lightTab = 'sources'; Play.openPop('fx')`);
     const tilesNow = () => t.g(`[...document.querySelectorAll('#pop .lt-kinds .tile')].map((b) => b.textContent.trim())`);
@@ -347,8 +350,7 @@ module.exports = (area) => {
     const m = await clean(t); const k = m.grid.size;
     t.gm().webContents.focus();
     await t.key('E');
-    await t.clickText('#pop .seg-btn, #pop .seg button', 'Paint');
-    await t.clickText('#pop .tile', 'Mist');
+    await element(t, 'r:mist'); await shape(t, 'brush');
     await t.drag(await t.scr(15 * k, 9 * k), await t.scr(22 * k, 10 * k), 12);
     const mist = await t.until(() => M(t).fx.find((f) => f.kind === 'region' && f.preset === 'mist'), 3000, 'the mist area');
     t.ok(mist.strokes.length === 1 && mist.strokes[0].pts.length / 2 >= 4, 'one stroke that follows the mouse', mist.strokes.map((s) => s.pts.length / 2));
@@ -361,10 +363,11 @@ module.exports = (area) => {
     const ox = m.grid.ox || 0; const oy = m.grid.oy || 0; const X = (n) => ox + n * k; const Y = (n) => oy + n * k;
     const sq = (pts) => pts.map((v, i) => Math.round(((v - (i % 2 ? oy : ox)) / k) * 100) / 100);
     await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'paint'; Play.ui.paintShape = 'brush'; Play.openPop('fx')`);
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .seg-sub .seg-btn')].map((b) => b.textContent)`), ['Brush', 'Box', 'Round', 'Erase'], 'four ways under Paint');
-    await t.clickText('#pop .tile', 'Acid');
-    await t.clickText('#pop .seg-sub .seg-btn', 'Box');
-    t.eq(await t.g(`(() => { const l = [...document.querySelectorAll('#pop *')].filter((e) => !e.children.length && /^Brush size/.test(e.textContent)); return [l.length > 0, l.every((e) => !!e.closest('[hidden]'))]; })()`), [true, true], 'no brush size for a box');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.textContent)`), ['Box', 'Round', 'Brush', 'Erase'], 'four ways, at the side (Beta 3.60)');
+    t.ok(await t.findText('#pop .ctl-label', 'Brush size'), 'the brush has a size');
+    await element(t, 'r:acid');
+    await shape(t, 'box');
+    t.ok(!(await t.findText('#pop .ctl-label', 'Brush size')), 'no brush size for a box');
     // a drag that begins and ends a little off the grid's lines: the box lies on them
     await t.drag(await t.scr(X(16.2), Y(5.1)), await t.scr(X(20.9), Y(8.8)), 8);
     const acid = () => M(t).fx.find((f) => f.kind === 'region' && f.preset === 'acid');
@@ -377,14 +380,14 @@ module.exports = (area) => {
     await t.until(async () => (await alpha(18.5, 7)) > 40, 8000, 'the acid on the TV');
     t.ok((await alpha(22.5, 7)) < 8 && (await alpha(18.5, 10.5)) < 8 && (await alpha(14.5, 7)) < 8, 'nothing of it outside the box', [await alpha(22.5, 7), await alpha(18.5, 10.5), await alpha(14.5, 7)]);
     // a round with Shift: a circle; it joins the same area
-    await t.clickText('#pop .seg-sub .seg-btn', 'Round');
+    await shape(t, 'round');
     await t.drag(await t.scr(X(23), Y(5)), await t.scr(X(25.9), Y(9.2)), 8, ['shift']);
     await t.until(() => acid().strokes.filter((st) => st.poly).length === 2, 3000, 'the round');
     const ring = acid().strokes.filter((st) => st.poly)[1].pts; const xs = ring.filter((_, i) => i % 2 === 0); const ys = ring.filter((_, i) => i % 2 === 1);
     t.eq(sq([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]), [23, 5, 27, 9], 'a circle four squares across (the longer side of the drag)');
     t.eq(M(t).fx.filter((f) => f.kind === 'region').length, 1, 'box and round are one area');
     // Alt with Box erases a box: the middle of the acid goes, its rim stays
-    await t.clickText('#pop .seg-sub .seg-btn', 'Box');
+    await shape(t, 'box');
     await t.drag(await t.scr(X(17.5), Y(6)), await t.scr(X(19.5), Y(8)), 8, ['alt']);
     await t.until(() => acid().strokes.some((st) => st.cut), 3000, 'the erased box');
     const cut = acid().strokes.find((st) => st.cut);
@@ -392,8 +395,8 @@ module.exports = (area) => {
     await t.until(async () => (await alpha(18.5, 7)) < 8, 8000, 'the middle free of acid on the TV');
     t.ok((await alpha(16.6, 7)) > 40 && (await alpha(20.4, 7)) > 40, 'the rest stays', [await alpha(16.6, 7), await alpha(20.4, 7)]);
     // Erase: the brush takes the round away altogether, in one step that undo brings back
-    await t.clickText('#pop .seg-sub .seg-btn', 'Erase');
-    t.ok(await t.g(`document.querySelector('#pop .tiles').hidden`), 'no effects to pick while erasing');
+    await shape(t, 'erase');
+    t.eq([await t.text('#pop .fx-ban .cap b'), await t.count('#pop .fx-panel .swatches'), await t.count('#pop .fx-gal .fx-t.on')], ['Erase', 0, 0], 'erasing: no effect in hand, no colour');
     await t.g('Play.ui.paintIn = 8'); // (a brush as wide as the round, on a table zoomed as it is)
     const r0 = await t.g(`Play.ui.paintIn / 2 / Play.state().map.view.zoom`);
     for (let y = 5; y <= 9; y += Math.max(0.5, (r0 / k) * 1.2)) await t.drag(await t.scr(X(22.5), Y(y)), await t.scr(X(27.5), Y(y)), 6);
@@ -405,7 +408,90 @@ module.exports = (area) => {
     t.eq(M(t).fx.filter((f) => f.kind === 'region').length, 0, 'an area with nothing left goes');
     t.handle('history.undo', { mapId: own }); await t.settle();
     t.eq(M(t).fx.filter((f) => f.kind === 'region').length, 1, 'undo brings it back');
-    await t.g(`Play.ui.paintIn = 2; Play.ui.paintShape = 'brush'`);
+    await t.g(`Play.ui.paintIn = 2; Play.ui.paintShape = 'box'`);
+  }, { ms: 120000 });
+
+  area.deep('Beta 3.60: Effects in three groups: Scene (time of day, weather, wind, Indoors), Lights, Elements (picture tiles by family); each effect keeps its own look; letting go places nothing; another colour starts a new area', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    t.gm().webContents.focus();
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.fxMode = 'weather'; Play.ui.fxMoreWx = false; Play.ui.fxMoreLight = false; Play.ui.looks = {}; Play.ui.fxFam = 'all'; Play.ui.fxFly = false; Play.ui.paintShape = 'box'`);
+    await t.key('E');
+    const groups = () => t.g(`[...document.querySelectorAll('#pop .fx-groups .tile')].map((b) => b.textContent + (b.classList.contains('open') ? '*' : ''))`);
+    const group = async (g) => { await t.g(`document.querySelector('#pop .fx-groups .tile[data-g="${g}"]').click()`); await t.sleep(300); };
+    t.eq(await groups(), ['Scene*', 'Lights', 'Elements'], 'three groups at the side, Scene open');
+    // Scene: the whole map on one screen
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-moods .tile')].map((b) => b.textContent)`), ['Day', 'Dawn', 'Dusk', 'Night', 'Cave'], 'time of day, five in a row');
+    t.ok((await t.count('#pop .wx-presets .tile')) >= 14 && (await t.count('#pop .wx-add')) === 0, 'the mixes, no single-layer tiles');
+    await t.g(`document.querySelector('#pop .fx-moods .tile[data-v="night"]').click()`);
+    await t.clickText('#pop .wx-presets .tile', 'Rain');
+    await t.until(() => M(t).light.mood === 'night' && M(t).weather.layers.length === 2, 4000, 'night and rain: two clicks on one screen');
+    t.ok(await t.count('#pop .fx-wind .wind-now') && await t.findText('#pop .fx-wind button', 'Storm'), 'the wind now, and Storm');
+    t.ok(await t.g(`[...document.querySelectorAll('#pop .fx-fold')].every((d) => !d.open)`), 'the rest is folded');
+    await t.g(`document.querySelector('#pop .fx-fold[data-v="fxMoreWx"] summary').click()`);
+    await t.until(async () => (await t.count('#pop .fx-fold[data-v="fxMoreWx"] .wx-list .layer-row')) === 2, 3000, 'Fine-tune the weather: this mix\'s layers');
+    await t.clickSel('#pop .fx-addlayer');
+    t.ok(((await t.menu()) || []).includes('Lightning') && (await t.menu()).length === 18, 'Add a layer: the 18 kinds in a menu', await t.menu());
+    await t.menuPick('Lightning');
+    await t.until(() => M(t).weather.layers.some((l) => l.type === 'lightning'), 3000, 'lightning in the mix');
+    await t.until(() => t.g(`(() => { const b = document.querySelector('#pop .wx-strike'); return !!b && !b.closest('[hidden]'); })()`), 3000, 'the Lightning button');
+    await t.g(`document.querySelector('#pop .fx-fold[data-v="fxMoreWx"] summary').click()`);
+    // Indoors: the Roof of before; the shape tools come out, the group stays Scene
+    await t.g(`document.querySelector('#pop .fx-indoors').click()`); await t.sleep(300);
+    t.eq([await t.g('[Play.ui.fxMode, Play.ui.region].join()'), await t.count('#pop .os-tabs2 .tile'), (await groups())[0]], ['paint,roof', 4, 'Scene*'], 'Indoors paints roofs, in Scene');
+    await t.drag(await t.scr(16 * k, 9 * k), await t.scr(19 * k, 11 * k), 6);
+    await t.until(() => M(t).fx.some((f) => f.kind === 'region' && f.preset === 'roof'), 3000, 'a roof');
+    await t.g(`document.querySelector('#pop .fx-indoors').click()`); await t.sleep(300);
+    t.eq([await t.g('Play.ui.fxMode'), await t.count('#pop .os-tabs2 .tile')], ['weather', 0], 'Indoors off again');
+    // Lights: the Light panel
+    await group('lights');
+    t.eq([await groups(), await t.count('#pop .lt-groups'), await t.count('#pop .lt-kinds .tile') > 0], [['Scene', 'Lights*', 'Elements'], 1, true], 'Lights: the Light panel');
+    // Elements: every effect a tile with a picture, sorted by family; a chip narrows them
+    await group('elements');
+    t.eq(await t.count('#pop .fx-gal .fx-t'), 29, 'every element on one screen');
+    await t.until(() => t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t img')].filter((i) => /^data:image/.test(i.src)).length >= 20`), 15000, 'their pictures, drawn by the effects themselves');
+    const gal = await t.g(`(() => { const g = document.querySelector('#pop .fx-gal'); const t0 = g.querySelector('.fx-t'); return { rows: Math.round(g.clientHeight / (t0.offsetHeight + 5)), scrolls: g.scrollHeight > g.clientHeight + 10, cols: getComputedStyle(g).gridTemplateColumns.split(' ').length }; })()`);
+    t.eq(gal, { rows: 4, scrolls: true, cols: 5 }, 'five in a row, four rows show, the rest scrolls');
+    await t.g(`[...document.querySelectorAll('#pop .fx-chips .cs-chip')].find((b) => b.textContent === 'Fire').click()`); await t.sleep(250);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t')].map((b) => b.textContent)`), ['Lava', 'Burning ground', 'Vent', 'Smoke', 'Steam'], 'the chip Fire');
+    // the effect knows how it goes down: Smoke with a click (no shape tools), Mist with a box
+    await element(t, 'e:smoke');
+    t.eq([await t.count('#pop .os-tabs2'), await t.text('#pop .fx-ban .cap b'), await t.findText('#pop .ctl-label', 'Size') !== null], [0, 'Smoke', true], 'Smoke: a click, its size');
+    t.ok(!(await t.findText('#pop .ctl-label', 'Flames flicker')), 'no flame switch on effects without one');
+    // each effect its own look: red smoke does not make the portal red
+    await t.g(`document.querySelector('#pop .fx-panel .swatch[data-v="#ff3344"]').click()`); await t.sleep(150);
+    const at = await t.scr(18 * k, 5 * k); await t.click(at.x, at.y);
+    const smoke = await t.until(() => M(t).fx.find((f) => f.preset === 'smoke'), 3000, 'the smoke');
+    t.eq(smoke.color, '#ff3344', 'red smoke');
+    await element(t, 'e:portal');
+    t.ok(await t.g(`document.querySelector('#pop .fx-panel .swatch.own').classList.contains('on')`), 'the portal still has its own colour');
+    const at2 = await t.scr(23 * k, 5 * k); await t.click(at2.x, at2.y);
+    const portal = await t.until(() => M(t).fx.find((f) => f.preset === 'portal'), 3000, 'the portal');
+    t.ok(portal.color !== '#ff3344', 'in its own colour', portal.color);
+    await element(t, 'e:smoke');
+    t.ok(await t.g(`document.querySelector('#pop .fx-panel .swatch[data-v="#ff3344"]').classList.contains('on')`), 'Smoke remembers its red');
+    // picked: the panel is its card; a click on the empty map lets go and places nothing
+    const mk = await t.rect(`.sv-handle[data-id="${portal.id}"]`); await t.click(mk.cx, mk.cy); await t.sleep(400);
+    t.eq([await t.text('#pop .fx-ban-tag'), await t.text('#pop .fx-ban .cap b'), await t.count('#pop .fx-gal'), await t.count('#pop .fx-ban-acts .icon-btn')], ['picked', 'Portal', 0, 3], 'the portal picked: its card, with eye, copy and bin');
+    const n0 = M(t).fx.length;
+    const free = await t.scr(26 * k, 9 * k); await t.click(free.x, free.y); await t.sleep(400);
+    t.eq([M(t).fx.length, await t.g('Play.ui.selFx'), await t.count('#pop .fx-gal'), await t.text('#pop .fx-gal .fx-t.on')], [n0, null, 1, 'Smoke'], 'a click beside it lets go: nothing placed, the tiles back, Smoke in hand again');
+    // painted: strokes of one look join; another colour starts a new area by itself
+    await element(t, 'r:mist');
+    t.eq([await t.count('#pop .os-tabs2 .tile'), await t.count('#pop .os-tabs2 .tile.on[data-v="fxt-box"]'), await t.findText('#pop .btn', 'Start a new area')], [4, 1, null], 'Mist: the shape tools, a box first; no "Start a new area"');
+    const mists = () => M(t).fx.filter((f) => f.kind === 'region' && f.preset === 'mist');
+    await t.drag(await t.scr(16 * k, 4 * k), await t.scr(18 * k, 6 * k), 6);
+    await t.until(() => mists().length === 1, 3000, 'mist');
+    await t.drag(await t.scr(20 * k, 4 * k), await t.scr(22 * k, 6 * k), 6);
+    await t.until(() => mists().length === 1 && mists()[0].strokes.filter((st) => st.poly).length === 2, 3000, 'the second box joins it');
+    await t.g(`document.querySelector('#pop .fx-panel .swatch[data-v="#5f9dff"]').click()`); await t.sleep(150);
+    await t.drag(await t.scr(24 * k, 4 * k), await t.scr(26 * k, 6 * k), 6);
+    await t.until(() => mists().length === 2, 3000, 'blue mist is an area of its own');
+    t.eq(mists().map((f) => f.color), [null, '#5f9dff'], 'each in its colour');
+    // the settings card, behind its button
+    t.eq(await t.count('#pop .fx-fly'), 0, 'no card until asked');
+    await t.g(`document.querySelector('#pop .os-fxset').click()`); await t.sleep(300);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-fly .ctl-label')].filter((e) => e.offsetParent).map((e) => e.textContent)`), ['Strength', 'Amount', 'Speed'], 'Mist settings');
+    await t.g(`Play.ui.fxFly = false; Play.ui.looks = {}; Play.closePop(); Play.setTool('select')`);
   }, { ms: 120000 });
 
   area.deep('on the TV the effects lie under the fog, the weather above it', async (t) => {

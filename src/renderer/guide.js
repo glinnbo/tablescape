@@ -25,6 +25,13 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.60', [
+      'Effects is sorted anew, in three groups at its side (as in Draw): Scene, Lights, Elements',
+      'Scene: the whole map on one screen: time of day, darkness, the weather mixes, Lightning, the wind. The rare settings are folded under More and Fine-tune the weather, where "Add a layer" replaces the single-layer tiles. Indoors is the Roof of before',
+      'Elements: every effect as a picture tile, sorted by family (Water, Fire, Nature, Magic, Battle); the chips narrow them. The effect knows whether it is clicked or painted: Box, Round, Brush and Erase come out at the side only for painted ones',
+      'Each effect remembers its own colour and size. Painting in another colour starts a new area by itself ("Start a new area" is gone). A click beside a picked effect lets go of it and places nothing',
+      'A picked effect: the panel becomes its card, with hide, copy and remove. Strength, Amount and Speed are behind its settings button',
+    ]],
     ['Beta 3.59', [
       'Conversation: the sliders under the small TV are smooth: the small TV follows at once, the TV once you let go',
       'Conversation: new Height and Size sliders for the picked portrait, beside Blood and Shade; Blood is free from 0 to 100 %, and the notch names and percentages are gone',

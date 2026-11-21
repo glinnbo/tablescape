@@ -19,9 +19,12 @@ const Play = (() => {
     selected: null, selFx: null, selSpell: null, drawer: null, rosterCollapsed: false,
     align: null, expanded: null, viewChapterId: null, lastEditId: null,
     // effects tool
-    fxMode: 'place', emitter: 'glow', region: 'mist', light: 'torch', fxSize: 1, paintIn: 2, regionIds: {},
-    paintShape: 'brush', // (Beta 3.41) how a painted effect is put down: brush, box, round; erase takes it away
-    look: { color: null, intensity: 1, density: 1, speed: 1, flicker: true, angle: null, variant: null, wave: null }, // the next effect you place
+    fxMode: 'weather', emitter: 'glow', region: 'mist', light: 'torch', paintIn: 2, regionIds: {}, // (Beta 3.60: fxMode 'weather' is Scene, 'light' Lights, 'place' and 'paint' Elements)
+    paintShape: 'box', // (Beta 3.41) how a painted effect is put down: brush, box, round; erase takes it away (Beta 3.60: a box first, as in Draw)
+    // Beta 3.60: each effect remembers its own look (before, one look was shared: red for Smoke gave a red Portal).
+    // ui.look (below) is the look of the effect in hand
+    looks: {}, fxEl: { kind: 'region', id: 'mist' }, fxFly: false,
+    fxFam: (() => { try { return localStorage.getItem('fxFam') || 'all'; } catch { return 'all'; } })(),
     // assets tool
     brush: null, assetMode: 'stamp', assetCells: 2, assetRot: 0, scatterIn: 3, scatterGap: 1.2, scatterTurn: true, scatterVary: 0.25, selAsset: null, selAssets: [],
     assetLook: { opacity: 1, dark: 0, shadow: false, flip: false, stretch: 1, hue: 0 }, // the next asset you stamp
@@ -34,6 +37,10 @@ const Play = (() => {
     spell: { name: 'Fireball', shape: 'sphere', size: 20, width: 5, skin: 'fire', mode: 'burst', squares: true, count: false, color: null, duration: null },
     spellAngle: 0, spellQuery: '', recent: [], aimFrom: null,
   };
+  Object.defineProperty(ui, 'look', { enumerable: false, get() { // the look of the next effect of the kind in hand
+    const k = ui.fxMode === 'paint' ? `r:${ui.region}` : ui.fxMode === 'place' ? `e:${ui.emitter}` : 'light';
+    return ui.looks[k] || (ui.looks[k] = { color: null, intensity: 1, density: 1, speed: 1, flicker: true, angle: null, variant: null, wave: null, size: 1 });
+  } });
   try {
     const p = JSON.parse(localStorage.getItem('spellPrefs') || 'null');
     if (p && p.spell) Object.assign(ui.spell, p.spell);
@@ -656,15 +663,15 @@ const Play = (() => {
     map: ['Drag the map to move it; Alt + wheel scales it. Fog, grid, tokens and effects move with it.', 
       'Colours change the picture and its assets only. Each map keeps its own.', 'Hold "original" to compare, here and on the table.',
       'Right-drag or Space-drag moves your view; F fits it to the table, Shift + F shows everything.'],
-    fx: () => [...({
-      place: ['Click the map to place it; click its marker to change it, drag to move it.', 'Torches, campfires and candles are under Light → Light sources → Flame.', 'Right-click a placed effect for more.'],
-      paint: ['Paint over the map; [ and ] change the brush size.', 'Strokes of the same kind join one area until you press Start a new area.', 'Click an area\'s marker to change its look; right-click it to remove it.'],
-      light: ui.lightTab === 'sources'
-        ? ['Holder: a light with what holds it (a wall light sits on the wall near the click). Flame: a flame and its light. Just light: light only; click a token so it carries it.', 'Click a light to pick it: the same rows change it, drag moves it, Delete removes it.', 'The same panel is in Draw → Structure → Light.', 'The party\'s own light is set in Play → Party marker (U).']
-        : ['Darkness covers the whole map; lights, torches and campfires shine through it.', 'Remember lit areas: what the light reached stays dimly visible.', 'Day, Dusk, Night and Cave work on the hotbar and the button deck too.'],
-      weather: ['Weather covers the whole table and stays put when you move the map.', 'With lightning in the mix, the Lightning button flashes it whenever you like.', 'Save a mix to use it on other maps.',
-        'The living trees take their wind from the weather. Their own wind and the Storm are under Assets → Living.'],
-    }[ui.fxMode] || [])],
+    fx: () => [...({ // (Beta 3.60: by group)
+      scene: ['Time of day and Darkness set the light of the whole map; lights, torches and campfires shine through the dark.', 'Weather covers the whole table and stays put when you move the map. With lightning in the mix, the Lightning button flashes it whenever you like.',
+        'Fine-tune the weather: change a layer, add one or take one out, save the mix for other maps. The living trees and the grass take their wind from the weather unless you set it by hand.',
+        'Indoors: paint over houses and caves; the weather stays off there.', 'Day, Dusk, Night, Cave and the mixes work on the hotbar and the button deck too.'],
+      lights: ['Holder: a light with what holds it (a wall light sits on the wall near the click). Flame: a flame and its light. Just light: light only; click a token so it carries it.', 'Click a light to pick it: the same rows change it, drag moves it, Delete removes it.', 'The same panel is in Draw → Structure → Light.', 'The party\'s own light is set in Play → Party marker (U).', 'Lights show once the map is dark: Scene → Time of day or Darkness.'],
+      elements: ['Pick an effect: a click on the map places it, or a drag paints it. The effect knows which.', 'For painted effects Box, Round, Brush and Erase come out at the side. Alt erases with the shape in hand; [ and ] size the brush.',
+        'Click an effect\'s marker to change it, drag it to move it, right-click it for more. A click beside it lets go and places nothing.', 'Each effect remembers its own colour and size. Painting in another colour starts a new area by itself.',
+        'The chips narrow the tiles to one family.'],
+    }[fxGroup()] || [])],
     walls: () => [({
       wall: 'Click from corner to corner; double-click, Enter or right-click ends the line. Alt places freely.',
       room: 'Drag from one corner of a room to the other.',
@@ -720,7 +727,7 @@ const Play = (() => {
         'While player tokens see for themselves, the single party marker on that map rests.',
         'HP and conditions live in the turn order: a player who is not in it gets the max HP here.'];
   const HELP_VARIANTS = {
-    fx: [{ fxMode: 'place' }, { fxMode: 'paint' }, { fxMode: 'light', lightTab: 'sources' }, { fxMode: 'light', lightTab: 'dark' }, { fxMode: 'weather' }],
+    fx: [{ fxMode: 'place' }, { fxMode: 'light', lightTab: 'sources' }, { fxMode: 'weather' }],
     walls: ['wall', 'room', 'door', 'edit', 'erase'].map((m) => ({ 'walls.mode': m })),
     sound: ['chapter', 'map', 'combat'].map((t) => ({ soundTab: t })),
     point: ['ping', 'laser', 'spot', 'measure'].map((m) => ({ 'point.mode': m })),
@@ -760,7 +767,9 @@ const Play = (() => {
   const TOOL_HINTS = {
     oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a wall · drag: a longer one · again: the door goes', window: 'Click a wall · drag: a longer one · again: the window goes', light: 'Click: a light (a wall light on the wall) · click a light: pick it, drag it · Delete: it goes' }[ui.os && ui.os.tool] || ''),
     map: 'Drag moves the map · Alt + wheel scales it · Space-drag moves your view',
-    fx: () => ({ place: 'Click places it · drag its marker to move it · right-click for more', paint: { box: 'Drag a box · Shift: square · Alt: erase', round: 'Drag a round · Shift: circle · Alt: erase', erase: 'Drag over what should go · [ and ] change the size' }[ui.paintShape] || '[ and ] change the brush size · Alt: erase', light: ui.lightTab === 'sources' ? 'Click: a light · click a light: pick it, drag it · Just light on a token: it carries it' : 'Click the map or a token to place a light', weather: '' }[ui.fxMode] || ''),
+    fx: () => (ui.fxMode === 'place' ? 'Click places it · drag its marker to move it · right-click for more'
+      : ui.fxMode === 'paint' ? ({ box: 'Drag a box · Shift: square · Alt: erase', round: 'Drag a round · Shift: circle · Alt: erase', erase: 'Drag over what should go · [ and ] change the size' }[ui.paintShape] || '[ and ] change the brush size · Alt: erase')
+        : ui.fxMode === 'light' && ui.lightTab === 'sources' ? 'Click: a light · click a light: pick it, drag it · Just light on a token: it carries it' : ''),
     asset: 'Click stamps · drag scatters · Ctrl + wheel turns · [ and ] resize · Shift + click selects several',
     walls: () => ({ wall: 'Click corner to corner · double-click ends · Alt places freely', room: 'Drag from corner to corner', door: 'Click a wall for a door', edit: 'Drag a corner or a wall · Delete removes', erase: 'Click a wall, or drag a box' }[ui.walls && ui.walls.mode] || ''),
     token: 'Click drops one · Alt places freely · Ctrl + D duplicates',
@@ -790,7 +799,7 @@ const Play = (() => {
   const POPS = {
     map: { title: 'Map', icon: 'map-2', build: buildMapPop, tips: TIPS.map },
     fog: { title: 'Fog of war', icon: 'cloud-fog', build: buildFogPop, tips: FOG_TIPS },
-    fx: { title: 'Effects', icon: 'flame', build: buildFxPop, tips: TIPS.fx },
+    fx: { title: 'Effects', icon: 'flame', build: buildFxPop, around: () => fxSides, tips: TIPS.fx }, // (Beta 3.60: its groups and shape tools stand beside it, as Draw's)
     walls: { title: 'Walls and doors', icon: 'wall', build: () => Walls.buildPop(), tips: TIPS.walls },
     oldschool: { title: 'Draw', icon: 'pencil', build: (o) => OS.buildPop(o), around: () => OS.around(), tips: TIPS.oldschool }, // (Beta 3.22; 3.37: its tools, sliders and Map settings stand around it)
     party: { title: 'Party marker', icon: 'users-group', build: () => Party.buildPop(), tips: TIPS.party },
@@ -1310,38 +1319,21 @@ const Play = (() => {
       seg({ options: [{ value: 'all', label: 'All' }, { value: 'bright', label: 'Bright' }, { value: 'dark', label: 'Dark' }, { value: 'colour', label: 'Colour' }], get: () => now().grow || 'all', set: (v) => cmd('live.set', { fx: 'grass', set: { grow: v } }) }),
       pick, range);
   }
-  function lookSection() {
-    const light = ui.fxMode === 'light';
-    const head = h('div', { class: 'look-head' });
-    bind(() => {
-      head.innerHTML = '';
-      const f = lookTarget();
-      // filter: append() would write a null out as the text "null"
-      head.append(...[h('span', { class: 'grow' }, f ? h('b', {}, fxLabel(f)) : 'Look of the next one you place'),
-        f ? h('button', { class: 'btn ghost small', onclick: () => selectFx(null) }, iconEl('x'), 'Done') : null].filter(Boolean));
-    });
-    return h('div', { class: 'stack look' }, head,
-      shownIf(() => !(lookDef() && lookDef().noColor), colorSwatches(() => lookGet('color'), (v) => lookSet('color', v))), // (Beta 3.1: Sway has no colour)
-      ui.fxMode !== 'paint' ? shownIf(() => givesLight(), slider({ label: 'Colour of its light', min: 0, max: 1, step: 0.05, get: satNow, set: (v, k) => lookSet('sat', v, k), fmt: (v) => (v < 0.05 ? 'Natural' : v >= 0.95 ? 'Full colour' : pct(v)) })) : null,
-      // Beta 2: a vent is steam, gas or fire (shown while a vent is picked or selected; the panel is not rebuilt for that)
-      shownIf(() => !!(lookDef() && lookDef().kinds), seg({ label: 'What comes out', options: [['steam', 'Steam'], ['gas', 'Gas'], ['fire', 'Fire']].map(([v, label]) => ({ value: v, label })), get: () => lookGet('variant') || 'steam', set: (v) => lookSet('variant', v) })),
-      // Beta 2: which way it faces (light shaft, arcs, bullseye lantern); also Ctrl + wheel
+  // Beta 3.60: an element's own settings, behind its button (as "Grass settings" in Draw): how strong, how much, how
+  // fast, which way it faces; grass that grows blades shows the map's grass card instead
+  function fxSettings() {
+    if (bladesHere()) return [grassCard()];
+    return [
+      slider({ label: 'Strength', min: 0.1, max: 2, step: 0.05, get: () => lookGet('intensity'), set: (v, k) => lookSet('intensity', v, k), fmt: pct }),
+      shownIf(() => !(lookDef() && lookDef().still), slider({ label: 'Amount', min: 0.25, max: 3, step: 0.05, get: () => lookGet('density'), set: (v, k) => lookSet('density', v, k), fmt: (v) => `${round(v, 2)}×` })),
+      shownIf(() => !(lookDef() && lookDef().still), slider({ label: 'Speed', min: 0.25, max: 3, step: 0.05, get: () => lookGet('speed'), set: (v, k) => lookSet('speed', v, k), fmt: (v) => `${round(v, 2)}×` })), // (Beta 3.1: a Roof doesn't move)
+      // Beta 2: which way it faces (light shaft, arcs); also Ctrl + wheel
       shownIf(() => { const d = lookDef(); return !!(d && (d.turn || d.cone)); }, slider({ label: 'Facing (Ctrl + wheel turns it too)', min: 0, max: 355, step: 5, get: () => { const d = lookDef(); const v = lookGet('angle'); return ((v ?? defaultAngle(d)) % 360 + 360) % 360; }, set: (v, k) => lookSet('angle', v, k), fmt: (v) => `${Math.round(v)}°` })),
-      shownIf(() => !bladesHere(), slider({ label: light ? 'Brightness' : 'Strength', min: 0.1, max: light ? 1 : 2, step: 0.05, get: () => lookGet('intensity'), set: (v, k) => lookSet('intensity', v, k), fmt: pct })),
       // 4.9: a window light: which window, its bars, how far the light reaches into the room
       shownIf(() => { const d = lookDef(); return !!(d && d.id === 'window'); }, windowPicks()),
       // 4.3.2: the dust in a light shaft (4.9: and a window light), up to ten times as big
       shownIf(() => { const d = lookDef(); return !!(d && (d.id === 'shaft' || d.id === 'window')); }, slider({ label: 'Dust size', min: 0.1, max: 10, step: 0.05, get: () => lookGet('dust') ?? 1, set: (v, k) => lookSet('dust', v, k), fmt: (v) => `${round(v, 2)}×` })),
-      light ? null : shownIf(() => !(lookDef() && lookDef().still) && !bladesHere(), slider({ label: 'Amount', min: 0.25, max: 3, step: 0.05, get: () => lookGet('density'), set: (v, k) => lookSet('density', v, k), fmt: (v) => `${round(v, 2)}×` })),
-      ui.fxMode === 'paint' ? shownIf(() => bladesHere(), grassCard()) : null,
-      light ? null : shownIf(() => !(lookDef() && lookDef().still) && !bladesHere(), slider({ label: 'Speed', min: 0.25, max: 3, step: 0.05, get: () => lookGet('speed'), set: (v, k) => lookSet('speed', v, k), fmt: (v) => `${round(v, 2)}×` })), // (Beta 3.1: a Roof doesn't move)
-      ui.fxMode !== 'paint' ? toggle({ label: light ? 'Flicker' : 'Flames flicker their light', get: () => lookGet('flicker'), set: (v) => lookSet('flicker', v) }) : null,
-      // Beta 2: how the light lives: steady, a slow pulse, or a dying torch that sputters
-      ui.fxMode !== 'paint' ? shownIf(() => light || givesLight(), seg({ label: 'Its light', options: [{ value: '', label: 'Steady' }, { value: 'pulse', label: 'Pulse', tip: 'Breathes slowly: magic, a heartbeat' }, { value: 'sputter', label: 'Sputter', tip: 'A dying torch: it gutters and almost goes out now and then' }],
-        get: () => lookGet('wave') || '', set: (v) => lookSet('wave', v || null) })) : null,
-      // Beta 2: oil can be set alight
-      ui.fxMode === 'paint' ? shownIf(() => { const f = lookTarget(); return !!(f && f.kind === 'region' && f.preset === 'oil'); },
-        row(btn('Set it alight', 'flame', () => { const f = lookTarget(); if (f) undoable('fx.update', { id: f.id, preset: 'burning' }, `${fxLabel(f)} is burning`); }, { kind: 'primary', tip: 'The oil becomes burning ground (Undo puts it out)' }))) : null);
+    ];
   }
   // 4.9: the window light's window and bars, as little pictures
   function windowPicks() {
@@ -1444,62 +1436,176 @@ const Play = (() => {
     if (d.group === 'flame') return cmd('fx.add', { kind: 'emitter', preset: d.id, x: round(pt.x, 3), y: round(pt.y, 3), r: round(d.r * k * (L.size || 1), 4), color, bright, dim, ...more });
     return cmd('fx.add', { kind: 'light', preset: d.id, x: round(tok ? tok.x : pt.x, 3), y: round(tok ? tok.y : pt.y, 3), attachTo: tok ? tok.id : null, bright, dim, color: color || d.color, ...more, ...(d.cone ? { cone: d.cone, angle: ui.look.angle ?? 0 } : {}) });
   }
-  function buildFxPop() {
-    const mode = seg({
-      cls: 'seg-4',
-      options: [
-        { value: 'place', label: 'Place', icon: 'flame', tip: 'Torches, campfires, smoke, sparkles: click to place' },
-        { value: 'paint', label: 'Paint', icon: 'brush', tip: 'Water, surf, blood, mist, lava: paint over an area' },
-        { value: 'light', label: 'Light', icon: 'bulb', tip: 'Darkness and light sources' },
-        { value: 'weather', label: 'Weather', icon: 'cloud-rain', tip: 'Mix rain, clouds, fog, lightning … over the whole table' }],
-      get: () => ui.fxMode, set: (v) => { ui.fxMode = v; if (ui.selFx) selectFx(null); openPop('fx'); updateBrushCursor(); },
-    });
-    const body = [];
-    if (ui.fxMode === 'place') {
-      body.push(
-        tiles(PLACE, () => ui.emitter, (v) => { ui.emitter = v; refreshPop(); }),
-        slider({ label: 'Size', min: 0.4, max: 3, step: 0.05, get: () => (lookTarget() ? lookTarget().r / (((EMITTERS.find((d) => d.id === lookTarget().preset) || { r: 1 }).r) * cellK()) : ui.fxSize),
-          set: (v, k) => { const f = lookTarget(); if (f) send(k, 'fx.update', { id: f.id, r: round(v * ((EMITTERS.find((d) => d.id === f.preset) || { r: 1 }).r) * cellK(), 4) }); else ui.fxSize = v; }, fmt: (v) => `${round(v, 2)}×` }),
-        lookSection());
-    } else if (ui.fxMode === 'paint') {
-      body.push(
-        // (Beta 3.41) how it is put down: a brush as before, a box or a round dragged on the grid; Erase takes it away
-        seg({ cls: 'seg-4 seg-sub', options: [{ value: 'brush', label: 'Brush', icon: 'brush' }, { value: 'box', label: 'Box', icon: 'square', tip: 'Drag a box on the grid. Shift: a square. Alt: erase a box' },
-          { value: 'round', label: 'Round', icon: 'circle', tip: 'Drag a round on the grid. Shift: a circle. Alt: erase a round' }, { value: 'erase', label: 'Erase', icon: 'eraser', tip: 'Brush away any painted effect. With Box or Round, hold Alt to erase that shape' }],
-        get: () => ui.paintShape, set: (v) => { ui.paintShape = v; refreshPop(); updateBrushCursor(); showToolHint(); } }),
-        shownIf(() => ui.paintShape !== 'erase', tiles(REGIONS, () => ui.region, (v) => { ui.region = v; refreshPop(); })),
-        shownIf(() => ui.paintShape === 'brush' || ui.paintShape === 'erase', slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` })),
-        shownIf(() => ui.paintShape !== 'erase', row(btn('Start a new area', 'plus', () => { delete ui.regionIds[`${S.editMapId}:${ui.region}`]; toast('The next strokes start a new area.'); }, { tip: 'Strokes of the same kind join one area until you start a new one' }))),
-        shownIf(() => ui.paintShape !== 'erase' || !!lookTarget(), lookSection()));
-    } else if (ui.fxMode === 'light') {
-      const tints = h('div', { class: 'swatches' }, ...FXDATA.TINTS.map((t) => h('button', {
-        class: 'swatch', style: `background:${t.hex}`, dataset: { v: t.hex }, 'aria-label': t.label, 'data-tip': t.label, onclick: () => cmd('light.update', { tint: t.hex }),
-      })));
-      bind(() => { for (const b of tints.children) b.classList.toggle('on', b.dataset.v === (map().light.tint || '#03040a')); });
-      // two halves: the light of the whole scene, and the lights you place
-      ui.lightTab = ui.lightTab || 'scene';
-      body.push(seg({ cls: 'light-tabs', options: [
-        { value: 'scene', label: 'Map light', icon: 'sun-moon', tip: 'Day, dusk, night or cave, and how dark the whole map is' },
-        { value: 'sources', label: 'Light sources', icon: 'bulb', tip: 'Candles, torches, lanterns and moonlight you place' }],
-      get: () => ui.lightTab, set: (v) => { ui.lightTab = v; if (ui.selFx) selectFx(null); openPop('fx'); } }));
-      if (ui.lightTab === 'scene') {
-        body.push(h('div', { class: 'light-card' },
-          hotTiles(tiles(FXDATA.MOODS.map((m) => ({ id: m.id, label: m.label, icon: m.icon, tip: m.tip })), () => map().light.mood || null, (v) => setMood(v)), (id) => { const m = FXDATA.MOODS.find((x) => x.id === id); return m && { kind: 'light', ref: m.id, label: m.label, icon: m.icon }; }),
-          seg({ label: 'Change over', options: [{ value: 10, label: '10 seconds' }, { value: 0, label: 'At once' }], get: () => ui.moodFade, set: (v) => { ui.moodFade = v; try { localStorage.setItem('moodFade', String(v)); } catch {} refreshPop(); } }),
-          slider({ label: 'Darkness', min: 0, max: 1, step: 0.01, get: () => map().light.darkness, set: (v, k) => send(k, 'light.update', { darkness: v }), fmt: (v) => (v < 0.01 ? 'Off (daylight)' : v > 0.995 ? 'Pitch black' : pct(v)) }),
-          h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Colour of the dark'), tints),
-          toggle({ label: 'Remember lit areas', get: () => map().light.memory, set: (v) => cmd('light.update', { memory: v }) }),
-          row(btn('Forget explored areas', 'eraser', () => undoable('light.forget', {}), { tip: 'Make everything dark again' }))));
-      } else {
-        // Beta 3.54: the Light panel, the same as Draw → Structure → Light (the party has its own tool: Play → Party)
-        body.push(h('div', { class: 'light-card' }, ...lightPanel({ picked: () => lookTarget(), rebuild: () => openPop('fx'), head: true, remove: true })));
-      }
-    } else {
-      body.push(...weatherPanel());
-    }
+  // ---------- Beta 3.60 (Glinn): Effects in three groups, built like Draw ----------
+  //   Scene     the whole map: time of day, darkness, weather, wind; Indoors paints where the weather stays off
+  //   Lights    the Light panel (Beta 3.54)
+  //   Elements  what sits on the map, sorted by what it is. The effect knows how it goes down: an emitter with a
+  //             click, a region with a box, a round or the brush (those tools come out at the side, as in Draw)
+  // The group follows ui.fxMode ('weather' Scene · 'light' Lights · 'place' and 'paint' Elements), as everything that
+  // opens Effects sets it; a click on a group tab sets it back.
+  const FX_GROUPS = [
+    { id: 'scene', label: 'Scene', icon: 'sun-moon', tip: 'The whole map: time of day, darkness, weather, wind' },
+    { id: 'lights', label: 'Lights', icon: 'bulb', tip: 'Torches, lanterns, candles, fires and plain light' },
+    { id: 'elements', label: 'Elements', icon: 'flame', tip: 'What sits on the map: water, fire, mist, magic, blood …' }];
+  const indoors = () => ui.fxMode === 'paint' && ui.region === 'roof';
+  const fxGroup = () => (ui.fxMode === 'light' ? (ui.lightTab === 'sources' ? 'lights' : 'scene') : ui.fxMode === 'weather' || indoors() ? 'scene' : 'elements');
+  const elOf = (kind, id) => FXDATA.ELEMENTS.find((x) => x.kind === kind && x.id === id) || null;
+  function armElement(el) { // the effect in hand: the next click or drag on the map makes it
+    const e = el && elOf(el.kind, el.id) ? el : { kind: 'region', id: 'mist' };
+    ui.fxEl = { kind: e.kind, id: e.id };
+    if (e.kind === 'region') { ui.fxMode = 'paint'; ui.region = e.id; } else { ui.fxMode = 'place'; ui.emitter = e.id; }
+  }
+  function setFxGroup(g) {
+    if (ui.selFx) { ui.selFx = null; view.selectFx(null); placeCard(); }
+    if (g === 'scene') ui.fxMode = 'weather';
+    else if (g === 'lights') { ui.fxMode = 'light'; ui.lightTab = 'sources'; } else armElement(ui.fxEl);
+    openPop('fx'); updateBrushCursor(); showToolHint();
+  }
+  const fxFold = (key, label, ...kids) => h('details', { class: 'sfx-details fx-fold', dataset: { v: key }, open: !!ui[key], ontoggle: (e) => { ui[key] = e.target.open; placePop(); } }, h('summary', {}, label), h('div', { class: 'stack' }, ...kids.filter(Boolean)));
+  const SHAPE_TOOLS = [
+    ['box', 'Box', 'square', 'Drag a box on the grid (Shift: a square · Alt: erase a box)'], ['round', 'Round', 'circle', 'Drag a round on the grid (Shift: a circle · Alt: erase a round)'],
+    ['brush', 'Brush', 'brush', 'Paint it on freely ([ and ] size the brush)'], ['erase', 'Erase', 'eraser', 'Brush away any painted effect']];
+  let fxSides = null; let fxGalScroll = 0; let fxShown = '';
+  function buildFxPop(o = {}) {
+    if (ui.fxMode === 'light' && ui.lightTab !== 'sources') ui.fxMode = 'weather'; // (the map's light is part of Scene)
+    const group = fxGroup();
+    let body = []; let fly = null;
+    if (group === 'scene') body = sceneRows();
+    else if (group === 'lights') body = [h('div', { class: 'light-card' }, ...lightPanel({ picked: () => lookTarget(), rebuild: () => openPop('fx'), head: true, remove: true }))];
+    else ({ body, fly } = elementRows());
+    const picked = group === 'elements' && !!lookTarget();
+    const tools = (group === 'elements' && ui.fxMode === 'paint' && !picked) || indoors();
+    const slide = o.again && fxShown === `${group}|${tools}` ? '' : ' slide';
+    fxShown = `${group}|${tools}`;
+    const groups = h('div', { class: `os-tools os-tabs os-groups fx-groups${o.again ? '' : ' slide'}` }, ...FX_GROUPS.map((g, i) => h('button', {
+      class: `tile ${g.id === group ? 'open' : ''}`, dataset: { v: `fxg-${g.id}`, g: g.id }, 'data-tip': g.tip, 'aria-label': g.label, style: `--i:${i}`, onclick: () => setFxGroup(g.id),
+    }, iconEl(g.icon), h('span', {}, g.label))));
+    const shapes = tools ? h('div', { class: `os-tools os-tabs os-tabs2 g-${group}${slide}` }, ...SHAPE_TOOLS.map(([v, label, icon, tip], i) => h('button', {
+      class: `tile ${ui.paintShape === v ? 'on' : ''}`, dataset: { v: `fxt-${v}` }, 'data-tip': tip, 'aria-label': label, style: `--i:${i}`,
+      onclick: () => { ui.paintShape = v; openPop('fx'); updateBrushCursor(); showToolHint(); },
+    }, iconEl(icon), h('span', {}, label)))) : null;
+    const wrap = fly ? h('div', { class: `os-flywrap fx-flywrap${shapes ? ' past-parts' : ''}` }, fly) : null;
+    fxSides = { els: [groups, shapes, wrap] };
     const count = h('span', { class: 'grow hint' });
     bind(() => { const n = map().fx.length; count.textContent = n ? `${n} effect${n === 1 ? '' : 's'} on this map` : 'No effects on this map yet'; });
-    return h('div', { class: 'stack' }, mode, ...body.filter(Boolean), sep(), row(count, btn('List', 'stack-2', () => openPop('layers'), { tip: 'All effects in Layers' })));
+    return h('div', { class: `stack fx-panel fx-${group}` }, ...body.filter(Boolean), h('div', { class: 'row os-status' }, count, btn('List', 'stack-2', () => openPop('layers'), { kind: 'small', tip: 'All effects in Layers' })));
+  }
+  // Scene: what covers the whole map. The common on top (time of day, darkness, the weather mixes, the wind), the rest
+  // in two folds that stay as they were left
+  function sceneRows() {
+    const tints = h('div', { class: 'swatches' }, ...FXDATA.TINTS.map((t) => h('button', {
+      class: 'swatch', style: `background:${t.hex}`, dataset: { v: t.hex }, 'aria-label': t.label, 'data-tip': t.label, onclick: () => cmd('light.update', { tint: t.hex }),
+    })));
+    bind(() => { for (const b of tints.children) b.classList.toggle('on', b.dataset.v === (map().light.tint || '#03040a')); });
+    const moods = hotTiles(tiles(FXDATA.MOODS.map((m) => ({ id: m.id, label: m.label, icon: m.icon, tip: m.tip })), () => map().light.mood || null, (v) => setMood(v)), (id) => { const m = FXDATA.MOODS.find((x) => x.id === id); return m && { kind: 'light', ref: m.id, label: m.label, icon: m.icon }; });
+    moods.classList.add('fx-moods');
+    const W = weatherPanel({ parts: true });
+    const wind = windSection(true);
+    const roof = btn('Indoors', 'umbrella', () => {
+      if (indoors()) ui.fxMode = 'weather'; else { ui.fxMode = 'paint'; ui.region = 'roof'; if (ui.paintShape === 'erase') ui.paintShape = 'box'; }
+      openPop('fx'); updateBrushCursor(); showToolHint();
+    }, { kind: `small ghost fx-indoors${indoors() ? ' on' : ''}`, tip: 'Paint over houses and caves: rain, snow and the other weather stay off there. Not seen on the TV' });
+    const addLayer = btn('Add a layer', 'plus', (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      openMenu(r.left, r.bottom + 6, FXDATA.WEATHER_TYPES.map((t) => ({ icon: W.has(t.id) ? 'check' : t.icon, label: t.label, checked: W.has(t.id), action: () => W.toggleLayer(t) })));
+    }, { kind: 'small fx-addlayer', tip: 'Add a single layer to this weather, or take one out' });
+    return [
+      h('div', { class: 'ctl' }, h('span', { class: 'ctl-label fx-sec' }, 'Time of day'), moods),
+      slider({ label: 'Darkness', min: 0, max: 1, step: 0.01, get: () => map().light.darkness, set: (v, k) => send(k, 'light.update', { darkness: v }), fmt: (v) => (v < 0.01 ? 'Off (daylight)' : v > 0.995 ? 'Pitch black' : pct(v)) }),
+      fxFold('fxMoreLight', 'More',
+        h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Colour of the dark'), tints),
+        toggle({ label: 'Remember lit areas', get: () => map().light.memory, set: (v) => cmd('light.update', { memory: v }) }),
+        row(btn('Forget explored areas', 'eraser', () => undoable('light.forget', {}), { kind: 'small', tip: 'Make everything dark again' })),
+        seg({ label: 'Change over', options: [{ value: 10, label: '10 seconds' }, { value: 0, label: 'At once' }], get: () => ui.moodFade, set: (v) => { ui.moodFade = v; try { localStorage.setItem('moodFade', String(v)); } catch {} refreshPop(); } })),
+      h('div', { class: 'ctl' }, h('div', { class: 'row fx-sec-row' }, h('span', { class: 'ctl-label fx-sec grow' }, 'Weather'), roof), W.presets),
+      indoors() ? shownIf(() => ui.paintShape === 'brush' || ui.paintShape === 'erase', slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` })) : null,
+      W.strike,
+      h('div', { class: 'ctl-row fx-wind' }, iconEl('wind'), wind.line, wind.storm),
+      fxFold('fxMoreWx', 'Fine-tune the weather', W.list, row(addLayer, h('span', { class: 'grow' }), W.save), W.fade, wind.follow, wind.own, wind.fine),
+    ];
+  }
+  // Elements. Nothing picked: the banner shows the effect in hand, the tiles pick another, the rows are its look.
+  // An effect picked on the map: the panel is its card (eye, copy, bin; the tiles fold away); a click on the empty map,
+  // Esc or "All elements" lets go.
+  function elementRows() {
+    const f = lookTarget();
+    const def = lookDef();
+    const kind = f ? f.kind : ui.fxMode === 'paint' ? 'region' : 'emitter';
+    const famOf = (e) => FXDATA.FAMILIES.find((x) => x.id === e.family);
+    const erase = !f && kind === 'region' && ui.paintShape === 'erase';
+    // the banner: a picture of it, its name, how it goes down
+    const ban = h('div', { class: 'os-prev fx-ban' }); const cap = h('div', { class: 'cap' }); let banSig = '';
+    const how = () => {
+      if (f) return f.kind === 'region' ? 'on the map' : 'on the map · drag it to move';
+      if (kind === 'emitter') { const v = def && def.kinds ? (def.kinds.find((x) => x[0] === (lookGet('variant') || def.kinds[0][0])) || def.kinds[0])[1].toLowerCase() : null; return ['a click', v].filter(Boolean).join(' · '); }
+      const shape = { box: 'a box', round: 'a round', brush: 'the brush', erase: 'erase' }[ui.paintShape] || 'a box';
+      return erase ? 'rubs out any painted effect' : [shape, def && def.noColor ? null : lookGet('color') ? 'your colour' : 'its own colour'].filter(Boolean).join(' · ');
+    };
+    const picture = (k, d, look) => (k === 'region' && (d.id === 'sway' || d.id === 'roof') ? h('span', { class: 'fx-pic noimg' }, iconEl(d.icon)) : FxThumbs.img(k, d.id, { w: 284, h: 86, zoom: 0.56, ...look }));
+    const acts = f ? h('div', { class: 'fx-ban-acts' }) : null;
+    const showBan = (k, d, look, title, text, tag) => { ban.replaceChildren(...[picture(k, d, look), tag ? h('span', { class: 'fx-ban-tag' }, tag) : null, acts, cap].filter(Boolean)); cap.replaceChildren(h('b', {}, title), text); };
+    const paintBan = (force) => {
+      if (!def) return;
+      const look = { color: lookGet('color') || null, variant: lookGet('variant') || null };
+      const sig = JSON.stringify([kind, def.id, look, how(), f && f.hidden]);
+      if (!force && sig === banSig) return;
+      banSig = sig; showBan(kind, def, look, erase ? 'Erase' : def.label, how(), f ? 'picked' : null);
+    };
+    bind(() => paintBan(false));
+    if (f) {
+      const eye = h('button', { class: 'icon-btn', onclick: () => { const x = lookTarget(); if (x) cmd('fx.update', { id: x.id, hidden: !x.hidden }); } });
+      bind(() => { const x = lookTarget(); const hid = !!(x && x.hidden); if (eye.dataset.h === String(hid)) return; eye.dataset.h = String(hid); eye.classList.toggle('on', hid); eye.replaceChildren(iconEl(hid ? 'eye-off' : 'eye')); eye.dataset.tip = hid ? 'Hidden. Click to show players' : 'Hide from players'; eye.setAttribute('aria-label', eye.dataset.tip); });
+      acts.append(...[eye,
+        f.kind === 'emitter' ? ib('copy', 'Duplicate', () => cmd('fx.duplicate', { id: f.id, dx: grid().size, dy: 0 })) : null,
+        ib('trash', 'Remove', () => { selectFx(null); undoable('fx.remove', { id: f.id }); }, { danger: true, key: 'Del' })].filter(Boolean));
+    }
+    // its rows: only what fits it
+    const rows = [];
+    if (def && def.kinds && !erase) rows.push(seg({ label: 'What comes out', options: def.kinds.map(([v, label]) => ({ value: v, label })), get: () => lookGet('variant') || def.kinds[0][0], set: (v) => lookSet('variant', v) }));
+    if (def && !def.noColor && !erase) rows.push(colorSwatches(() => lookGet('color'), (v) => lookSet('color', v)));
+    if (def && kind === 'emitter') {
+      const base = () => def.r * cellK();
+      rows.push(slider({ label: 'Size', min: 0.4, max: 3, step: 0.05, get: () => { const x = lookTarget(); return x ? x.r / base() : ui.look.size || 1; },
+        set: (v, k) => { const x = lookTarget(); if (x) send(k, 'fx.update', { id: x.id, r: round(v * base(), 4) }); else ui.look.size = v; }, fmt: (v) => (v < 0.7 ? 'small' : v < 1.3 ? 'medium' : v < 2.1 ? 'large' : 'huge') }));
+    }
+    if (!f && kind === 'region' && (ui.paintShape === 'brush' || ui.paintShape === 'erase')) rows.push(slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` }));
+    // Beta 2: oil can be set alight
+    if (f && f.kind === 'region' && f.preset === 'oil') rows.push(row(btn('Set it alight', 'flame', () => { const x = lookTarget(); if (x) undoable('fx.update', { id: x.id, preset: 'burning' }, `${fxLabel(x)} is burning`); }, { kind: 'primary', tip: 'The oil becomes burning ground (Undo puts it out)' })));
+    let fly = null;
+    if (def && !erase) {
+      rows.push(btn(`${def.label} settings`, 'adjustments-horizontal', () => { ui.fxFly = !ui.fxFly; openPop('fx'); }, { kind: `wide os-fxset${ui.fxFly ? ' on' : ''}`, tip: 'How strong, how much, how fast' }));
+      if (ui.fxFly) fly = h('div', { class: 'os-fly os-fly-fx fx-fly stack' }, h('div', { class: 'os-fly-head' }, h('b', {}, def.label), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => { ui.fxFly = false; openPop('fx'); } }, iconEl('x'))), ...fxSettings().filter(Boolean));
+    }
+    // (the effect was removed or another one picked while the panel stood: made again)
+    const was = f ? f.id : null;
+    bind(() => { const x = lookTarget(); if ((x ? x.id : null) !== was && popId === 'fx' && fxGroup() === 'elements') setTimeout(() => { if (popId === 'fx' && fxGroup() === 'elements' && ((lookTarget() || {}).id || null) !== was) openPop('fx'); }, 0); });
+    if (f) return { fly, body: [ban, ...rows, row(btn('All elements', 'arrow-left', () => selectFx(null), { kind: 'small ghost fx-back', tip: 'Let go of it (also Esc, or a click on the empty map)' }))] };
+    // the tiles: all of them in the order of their families, five in a row, four rows before they scroll; a chip
+    // narrows them to one family
+    const fam = FXDATA.FAMILIES.some((x) => x.id === ui.fxFam) ? ui.fxFam : 'all';
+    const chips = h('div', { class: 'fx-chips', role: 'radiogroup', 'aria-label': 'Family' }, ...[{ id: 'all', label: 'All', color: 'var(--torch)' }, ...FXDATA.FAMILIES].map((c) => h('button', {
+      class: `cs-chip ${c.id === fam ? 'on' : ''}`, role: 'radio', dataset: { v: c.id }, style: `--fc:${c.color}`, 'aria-checked': String(c.id === fam),
+      onclick: () => { ui.fxFam = c.id; try { localStorage.setItem('fxFam', c.id); } catch {} fxGalScroll = 0; openPop('fx'); },
+    }, c.label)));
+    const gal = h('div', { class: 'fx-gal', role: 'radiogroup', 'aria-label': 'Elements' });
+    for (const e of FXDATA.ELEMENTS) {
+      if (fam !== 'all' && e.family !== fam) continue;
+      const on = !erase && e.kind === kind && def && e.id === def.id;
+      const d = (e.kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === e.id);
+      gal.append(h('button', {
+        class: `fx-t ${on ? 'on' : ''}`, role: 'radio', 'aria-checked': String(on), dataset: { v: e.key }, 'aria-label': e.label, 'data-tip': e.tip, style: `--fc:${famOf(e).color}`,
+        onclick: () => { armElement(e); if (ui.paintShape === 'erase') ui.paintShape = 'box'; if (ui.selFx) { ui.selFx = null; view.selectFx(null); placeCard(); } openPop('fx'); updateBrushCursor(); showToolHint(); },
+        onmouseenter: () => { banSig = ''; showBan(e.kind, d, {}, e.label, e.kind === 'region' ? 'drag or paint it' : 'a click', null); },
+        onmouseleave: () => paintBan(true),
+      }, picture(e.kind, d, { w: 104, h: 72, zoom: 1 }), h('i', { class: 'fam' }), h('span', {}, e.label)));
+    }
+    gal.addEventListener('scroll', () => { fxGalScroll = gal.scrollTop; });
+    requestAnimationFrame(() => { // (where it was; the tile in hand in sight)
+      gal.scrollTop = fxGalScroll;
+      const t = gal.querySelector('.fx-t.on');
+      if (t && (t.offsetTop < gal.scrollTop || t.offsetTop + t.offsetHeight > gal.scrollTop + gal.clientHeight)) gal.scrollTop = Math.max(0, t.offsetTop - gal.clientHeight / 2 + t.offsetHeight / 2);
+    });
+    return { fly, body: [ban, chips, gal, ...rows] };
   }
 
   // the light of the whole scene: day, dawn, dusk, night, cave (eases over 10 s unless "At once")
@@ -1604,6 +1710,18 @@ const Play = (() => {
       const on = new Set(wxLayers().map((l) => l.type));
       for (const b of add.children) { const o = on.has(b.dataset.v); b.classList.toggle('on', o); b.dataset.tip = o ? 'In the mix. Click to take it out' : 'Click to add it to the mix'; }
     });
+    const fade = seg({ label: 'Changes come in', options: [{ value: 0, label: 'At once' }, { value: 10, label: 'Over 10 s' }, { value: 60, label: 'Over a minute' }], get: () => wmap().weather.fade ?? 0, set: (v) => wcmd('weather.fade', { fade: v }) });
+    const save = btn('Save this mix', 'device-floppy', async () => {
+        const ls = wxLayers();
+        if (!ls.length) { toast('Add some weather first.'); return; }
+        const name = await askText('Name this weather mix', '', { ok: 'Save', placeholder: 'Storm over the sea' });
+        if (!name) return;
+        const layers = ls.map(({ type, amount, opacity, size, speed, color, dir, gust, thunder }) => ({ type, amount, opacity, size, speed, color, dir, gust, thunder }));
+        await ts.settings({ weatherPresets: [...own().filter((o) => o.name !== name), { name, layers }] });
+        toast(`${name} saved with your mixes`);
+      }, { kind: o.parts ? 'small' : '', tip: 'Keep this mix to use on other maps' });
+    // (Beta 3.60) Effects → Scene lays the parts out itself: the mixes on top, the rest under "Fine-tune the weather"
+    if (o.parts) return { presets, list, strike, fade, save, toggleLayer, has: (id) => wxLayers().some((l) => l.type === id) };
     return [
       h('div', { class: 'ctl-label' }, 'Mixes'),
       presets,
@@ -1612,21 +1730,13 @@ const Play = (() => {
       h('div', { class: 'ctl-label' }, 'In this mix (click one to change it)'),
       list,
       strike,
-      seg({ label: 'Changes come in', options: [{ value: 0, label: 'At once' }, { value: 10, label: 'Over 10 s' }, { value: 60, label: 'Over a minute' }], get: () => wmap().weather.fade ?? 0, set: (v) => wcmd('weather.fade', { fade: v }) }),
-      row(btn('Save this mix', 'device-floppy', async () => {
-        const ls = wxLayers();
-        if (!ls.length) { toast('Add some weather first.'); return; }
-        const name = await askText('Name this weather mix', '', { ok: 'Save', placeholder: 'Storm over the sea' });
-        if (!name) return;
-        const layers = ls.map(({ type, amount, opacity, size, speed, color, dir, gust, thunder }) => ({ type, amount, opacity, size, speed, color, dir, gust, thunder }));
-        await ts.settings({ weatherPresets: [...own().filter((o) => o.name !== name), { name, layers }] });
-        toast(`${name} saved with your mixes`);
-      }, { tip: 'Keep this mix to use on other maps' })),
+      fade,
+      row(save),
     ];
   }
   // Beta 3.20: the wind in the living trees (Beta 3.21: at the bottom of Assets → Living). It follows the weather unless
   // you set your own: where it blows and how hard; the rest (how far they lean, branches, leaves) comes from that, or by hand.
-  function windSection() {
+  function windSection(parts = false) {
     const W = () => map().wind || { auto: true };
     const now = () => Trees.windOf(map());
     const set = (patch, key) => (key ? send(key, 'wind.set', patch) : cmd('wind.set', patch));
@@ -1645,12 +1755,9 @@ const Play = (() => {
       slider({ label: 'Branches', min: 0, max: 3, step: 0.05, get: () => W().branches ?? 1, set: (v, k) => set({ branches: v }, k), fmt: pct }),
       slider({ label: 'Leaves', min: 0, max: 3, step: 0.05, get: () => W().rustle ?? 1, set: (v, k) => set({ rustle: v }, k), fmt: pct }));
     bind(() => { own.hidden = W().auto !== false; fine.hidden = W().auto !== false || !ui.windFine; });
-    const box = h('div', { class: 'stack wind-box', dataset: { flash: 'wind' } },
-      h('div', { class: 'ctl-label' }, 'Wind in the trees'),
-      row(line, storm),
-      toggle({ label: 'Follows the weather', get: () => W().auto !== false, set: (v) => { const w = now(); cmd('wind.set', v ? { auto: true } : { auto: false, dir: Math.round(w.dir), ...(W().storm ? {} : { strength: round(w.strength, 2), lean: round(w.lean, 2), branches: round(w.branches, 2), rustle: round(w.rustle, 2) }) }); } }),
-      own, fine);
-    return box;
+    const follow = toggle({ label: 'Follows the weather', get: () => W().auto !== false, set: (v) => { const w = now(); cmd('wind.set', v ? { auto: true } : { auto: false, dir: Math.round(w.dir), ...(W().storm ? {} : { strength: round(w.strength, 2), lean: round(w.lean, 2), branches: round(w.branches, 2), rustle: round(w.rustle, 2) }) }); } });
+    if (parts) return { line, storm, follow, own, fine };
+    return h('div', { class: 'stack wind-box', dataset: { flash: 'wind' } }, h('div', { class: 'ctl-label' }, 'Wind in the trees'), row(line, storm), follow, own, fine);
   }
   function wxDetail(L, def, local, o = {}) {
     const wmap = o.map || map; const cmd = o.cmd || ((type, payload) => ts.cmd(type, payload)); const wsend = o.send || send; // (this map's own commands)
@@ -3095,7 +3202,7 @@ const Play = (() => {
   function fxCard(f) {
     const light = Fixtures.isLight(f);
     const out = [h('span', { class: 'card-title ellipsis' }, iconEl(SceneView.fxIcon(f)), fxLabel(f)),
-      ib('adjustments-horizontal', 'Colour, strength and more', () => { ui.fxMode = lookGroup(f) || 'place'; if (light) ui.lightTab = 'sources'; openPop('fx'); })];
+      ib('adjustments-horizontal', 'Colour, strength and more', () => { ui.fxMode = lookGroup(f) || 'place'; if (light) ui.lightTab = 'sources'; else ui.fxFly = true; openPop('fx'); })];
     if (light) { // (Beta 3.54: every light: lit or put out, and its reach)
       out.push(
         ib(f.lit === false ? 'bulb-off' : 'bulb', f.lit === false ? 'Put out. Click to light it' : 'Lit. Click to put it out', () => cmd('fx.lit', { id: f.id, on: f.lit === false }), { on: f.lit !== false }),
@@ -3151,6 +3258,9 @@ const Play = (() => {
     const f = fxOf(id);
     if (f && Fixtures.isLight(f) && ui.lightTab !== 'sources') { ui.lightTab = 'sources'; if (ui.fxMode === 'light' && popId === 'fx') { openPop('fx'); return; } }
     if (f && ui.tool === 'fx' && lookGroup(f) && lookGroup(f) !== ui.fxMode) { ui.fxMode = lookGroup(f); if (popId === 'fx') openPop('fx'); else refreshPop(); return; }
+    // (Beta 3.60) Elements: the panel is the picked effect's card, or the tiles again; let go, the effect in hand is back
+    if (!f && was && !Fixtures.isLight(was) && (ui.fxMode === 'place' || ui.fxMode === 'paint') && !(ui.fxMode === 'paint' && ui.region === 'roof')) armElement(ui.fxEl);
+    if (popId === 'fx' && (ui.fxMode === 'place' || ui.fxMode === 'paint') && (was ? was.id : null) !== (f ? f.id : null)) { openPop('fx'); return; }
     // (Beta 3.54: the Light panel shows other rows with a light picked: made again when that changes)
     if (ui.fxMode === 'light' && popId === 'fx' && ((was && Fixtures.isLight(was)) || (f && Fixtures.isLight(f))) && (was ? was.id : null) !== (f ? f.id : null)) { openPop('fx'); return; }
     refreshPop();
@@ -3300,7 +3410,7 @@ const Play = (() => {
   function placeEmitter(d, pt) {
     const L = ui.look;
     return cmd('fx.add', {
-      kind: 'emitter', preset: d.id, x: pt.x, y: pt.y, r: round(d.r * ui.fxSize * cellK(), 4), color: L.color || d.color || null,
+      kind: 'emitter', preset: d.id, x: pt.x, y: pt.y, r: round(d.r * (L.size || 1) * cellK(), 4), color: L.color || d.color || null,
       intensity: L.intensity, density: L.density, speed: L.speed, flicker: L.flicker,
       bright: d.light ? d.light.bright : 0, dim: d.light ? d.light.dim : 0,
       sat: L.sat ?? (L.color ? 0.7 : 0.25),
@@ -4428,6 +4538,16 @@ const Play = (() => {
     drag = { kind: 'spellmove', id, dx: sp.x - pt.x, dy: sp.y - pt.y, sx: e.clientX, sy: e.clientY, moved: false, key: `sp-${id}-${Date.now()}` };
   }
 
+  // Beta 3.60: the area new strokes of a painted effect join: one of the same kind and look (the one painted last, if
+  // it still fits). Another colour, strength, amount or speed starts a new area by itself ("Start a new area" is gone).
+  function areaFor(preset, lastId) {
+    const L = ui.look; const near = (a, b) => Math.abs((a ?? 1) - (b ?? 1)) < 0.005;
+    const fits = (f) => !!f && f.kind === 'region' && f.preset === preset && !f.os && !f.hidden && (f.color || null) === (L.color || null) && near(f.intensity, L.intensity) && near(f.density, L.density) && near(f.speed, L.speed);
+    const last = fxOf(lastId);
+    if (fits(last)) return last.id;
+    const other = map().fx.slice().reverse().find(fits);
+    return other ? other.id : uid('r');
+  }
   function fxPointerDown(e, pt) {
     const hEl = e.target.closest('.sv-handle');
     if (hEl) {
@@ -4445,13 +4565,13 @@ const Play = (() => {
       if (hit) { selectFx(hit.id); const p = view.fxPos(hit); drag = { kind: 'fxmove', id: hit.id, dx: p.x - pt.x, dy: p.y - pt.y, attached: false, sx: e.clientX, sy: e.clientY, moved: false, key: `fx-${hit.id}-${Date.now()}` }; return; }
       if (ui.selFx && Fixtures.isLight(fxOf(ui.selFx))) { selectFx(null); return; }
     }
-    if (ui.selFx) selectFx(null);
+    if (ui.selFx) { selectFx(null); return; } // (Beta 3.60: a click beside a picked effect lets go of it and places nothing, as with lights)
     if (ui.fxMode === 'place') {
       placeEmitter(EMITTERS.find((x) => x.id === ui.emitter) || PLACE[0], pt); // (a flame from the hotbar still comes this way)
     } else if (ui.fxMode === 'paint') {
       const k = `${S.editMapId}:${ui.region}`;
       const erase = ui.paintShape === 'erase' || e.altKey; // (Beta 3.41: Alt erases with the shape in hand)
-      if (!erase && (!ui.regionIds[k] || !fxOf(ui.regionIds[k]))) ui.regionIds[k] = uid('r');
+      if (!erase) ui.regionIds[k] = areaFor(ui.region, ui.regionIds[k]);
       if (ui.paintShape === 'box' || ui.paintShape === 'round') {
         const round = ui.paintShape === 'round';
         const pre = h('div', { class: `rect-preview fx ${round ? 'round' : ''} ${erase ? 'erase' : ''}` });
@@ -4465,7 +4585,7 @@ const Play = (() => {
       drag = { kind: 'paint', erase, n: 0, id: ui.regionIds[k], preset: ui.region, sid: uid(erase ? 'e' : 'w'), r: ui.paintIn / 2 / zoom(), buf: [pt.x, pt.y], last: pt };
       updateBrushCursor();
       flushPaint();
-    } else if (ui.fxMode === 'light') { // (Beta 3.54: the next light of the Light panel)
+    } else if (ui.fxMode === 'light' && ui.lightTab === 'sources') { // (Beta 3.54: the next light of the Light panel)
       const d = ltDef();
       const tok = d.group === 'plain' ? tokenUnder(e.clientX, e.clientY) : null;
       if (tok) {
