@@ -82,6 +82,7 @@ uniform float uRustleAmt, uRustleScale, uLight;
 uniform float uBranchAmt, uLobes, uSeed, uTreeSeed;
 uniform float uShadow, uAlpha;
 uniform float uHue, uSat, uBright, uWarm, uPatchHue, uPatchBri;
+uniform mat3 uHueM;                                // (Tablescape: the asset's own Hue, turned as the browser turns it)
 uniform vec3 uTint; uniform float uTintAmt;
 uniform mat4 uLookM; uniform vec4 uLookO; uniform float uLookOn;  // the map's colours (Natural, Vivid, Muted...)
 varying vec2 vTex; varying vec2 vNoise;
@@ -125,6 +126,7 @@ void main(){
   float ch = cos(hue), sh = sin(hue);
   vec2 iq = vec2(I*ch - Q*sh, I*sh + Q*ch)*uSat;
   rgb = vec3(Y + 0.956*iq.x + 0.621*iq.y, Y - 0.272*iq.x - 0.647*iq.y, Y - 1.106*iq.x + 1.703*iq.y);
+  rgb = uHueM*rgb;                                  // (linear, so it works on premultiplied colour as it is)
   rgb *= uBright*(1.0 + pn*2.0*uPatchBri);
   rgb *= vec3(1.0 + uWarm*0.6, 1.0 + uWarm*0.25, 1.0 - uWarm*0.6);
   rgb = clamp(rgb, 0.0, col.a);                     // stay valid premultiplied colour
@@ -136,10 +138,31 @@ void main(){
   gl_FragColor = vec4(rgb, col.a)*uAlpha;           // premultiplied alpha
 }`;
 
+// Tablescape (second-tree-hue-solid): an asset's own Hue turns a living tree's colours exactly as the browser's
+// hue-rotate() turns every other asset, the placing preview and the still trees on a PC without a graphics card (the
+// matrix of the CSS/SVG filter spec). The tree's own small natural variation above stays in YIQ. Column-major for GL.
+const HUE_ID = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+const hueCache = new Map();
+function hueMatrix(rad) {
+  if (!rad) return HUE_ID;
+  const k = Math.round(rad * 1e4);
+  let m = hueCache.get(k);
+  if (m) return m;
+  const c = Math.cos(rad); const s = Math.sin(rad);
+  const r = [ // rows
+    [0.213 + c * 0.787 - s * 0.213, 0.715 - c * 0.715 - s * 0.715, 0.072 - c * 0.072 + s * 0.928],
+    [0.213 - c * 0.213 + s * 0.143, 0.715 + c * 0.285 + s * 0.140, 0.072 - c * 0.072 - s * 0.283],
+    [0.213 - c * 0.213 - s * 0.787, 0.715 - c * 0.715 + s * 0.715, 0.072 + c * 0.928 + s * 0.072]];
+  m = new Float32Array([r[0][0], r[1][0], r[2][0], r[0][1], r[1][1], r[2][1], r[0][2], r[1][2], r[2][2]]);
+  if (hueCache.size > 200) hueCache.clear();
+  hueCache.set(k, m);
+  return m;
+}
+
 const DEBUG_TINTS = [[.95,.3,.3],[.95,.65,.2],[.9,.9,.25],[.3,.85,.4],[.3,.6,.95],[.75,.4,.95],[.95,.4,.7],[.4,.9,.9],[.6,.6,.6]];
 const UNIFORMS = ['uView','uCenter','uSize','uAnchor','uOffset','uScale','uTreeScale','uRot','uFlip','uTex','uRadius','uTime',
   'uRustleT','uBranchT','uWind','uRustleAmt','uRustleScale','uLight','uBranchAmt','uLobes','uSeed','uTreeSeed','uShadow','uAlpha',
-  'uHue','uSat','uBright','uWarm','uPatchHue','uPatchBri','uTint','uTintAmt','uLookM','uLookO','uLookOn'];
+  'uHue','uSat','uBright','uWarm','uPatchHue','uPatchBri','uHueM','uTint','uTintAmt','uLookM','uLookO','uLookOn'];
 const DEG = Math.PI/180;
 
 /* 1-D value noise for gusts */
@@ -402,7 +425,7 @@ class TreeWind {
       gl.uniform2f(U.uOffset, ox + m.x, oy + m.y);
       gl.uniform1f(U.uShadow, 0);
       gl.uniform1f(U.uAlpha, alpha);
-      gl.uniform1f(U.uHue, S.hue + (tree.hue || 0)); gl.uniform1f(U.uSat, S.sat); gl.uniform1f(U.uBright, S.bright*(tree.bright ?? 1)); gl.uniform1f(U.uWarm, S.warm); // (Tablescape: the asset's own colour turn and darkening)
+      gl.uniform1f(U.uHue, S.hue); gl.uniformMatrix3fv(U.uHueM, false, hueMatrix(tree.hue || 0)); gl.uniform1f(U.uSat, S.sat); gl.uniform1f(U.uBright, S.bright*(tree.bright ?? 1)); gl.uniform1f(U.uWarm, S.warm); // (Tablescape: the asset's own colour turn and darkening)
       gl.uniform3fv(U.uTint, DEBUG_TINTS[(i - base) % DEBUG_TINTS.length]);
       gl.uniform1f(U.uTintAmt, this.debugLayers ? 0.38 : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);

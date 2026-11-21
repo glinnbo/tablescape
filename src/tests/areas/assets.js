@@ -102,6 +102,9 @@ module.exports = (area) => {
     const m = await t.until(async () => { const x = await mask(); return x.on && x; }, 4000, 'the window over the token');
     t.eq(m.clip, 'no-clip', 'the mask does not cut the picture to its box');
     t.ok(m.size >= Math.hypot(m.w, m.h), 'the mask reaches round the picture however it lies', m);
+    // Second Builder (second-tree-hue-solid): on your screen it is solid (it used to be half see-through) and opens the same way
+    t.eq(await t.g(`getComputedStyle(document.querySelector('.sv-assets-over')).opacity`), '1', 'solid on your screen');
+    await t.until(() => t.g(`!!document.querySelector('.sv-asset[data-id="${id}"]').style.maskImage`), 4000, 'the window over the token on your screen too');
     // a token beside it (inside the upright box, not under the picture) opens nothing
     t.handle('layer.update', { mapId: own, id: tok, x: b.x + b.w * 0.35, y: b.y });
     await t.until(async () => !(await mask()).on, 4000, 'no window for a token that stands beside it');

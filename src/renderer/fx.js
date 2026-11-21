@@ -2463,6 +2463,10 @@ const FX = (() => {
       ctx.stroke();
     }
 
+    // Second Builder (second-spell-looks): with a graphics card the area is drawn by spell-gl.js; the old drawing
+    // below stays for PCs without one
+    const gpu = !opts.flat && typeof SpellGL === 'object' && SpellGL.draw(ctx, sp, tpl, sk, env, now, { alpha: A, cell: opts.cell, seed: s, quality: Q });
+    if (!gpu) {
     ctx.save();
     Geom.tracePath(ctx, tpl);
     ctx.clip();
@@ -2500,6 +2504,7 @@ const FX = (() => {
       ctx.restore();
       ctx.globalAlpha = 1;
     }
+    } // (the old drawing)
     // outline
     Geom.tracePath(ctx, tpl);
     ctx.strokeStyle = rgba(opts.selected ? '#e3963e' : sk.l, (opts.selected ? 1 : 0.75) * A);

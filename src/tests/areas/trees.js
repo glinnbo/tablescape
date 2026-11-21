@@ -96,7 +96,51 @@ module.exports = (area) => {
     t.handle('layer.update', { id: tok.id, x: was.x + 12, y: was.y + 9 });
     await t.until(async () => (await tv(t)).mask === '', 8000, 'the crown closes when the token walks off');
     t.handle('layer.update', { id: tok.id, ...was });
-    t.eq(await t.g(`getComputedStyle(document.querySelector('.sv-trees-over')).opacity`), '0.7', 'see-through on your screen, so the tokens under it show');
+  }, { ms: 60000 });
+
+  // Second Builder (second-tree-hue-solid): on your screen the crown is solid now (it used to be at 70 %), and opens
+  // round a token as on the TV, right where the token is; also round a token hidden from the table (only you see it)
+  area.quick('on your screen too: a tree above the tokens is solid and opens round a token, hidden ones as well', async (t) => {
+    await clear(t);
+    const tok = mapNow(t).layers.find((l) => l.role === 'token' && !l.hidden);
+    const id = add(t, 'Dark green clumps large', { x: tok.x, y: tok.y });
+    await t.send();
+    t.eq(await t.g(`getComputedStyle(document.querySelector('.sv-trees-over')).opacity`), '1', 'solid on your screen');
+    const where = () => t.g(`(() => { const c = Play.view().tcv.over; if (!c || !c.mask) return null;
+      const m = /at (-?\\d+)px (-?\\d+)px/.exec(c.mask); const cr = c.el.getBoundingClientRect(); const k = cr.width / c.el.offsetWidth;
+      const te = document.querySelector('.sv-token[data-id="${tok.id}"]') || document.querySelector('[data-id="${tok.id}"]'); const tr = te.getBoundingClientRect();
+      return { mx: +m[1], my: +m[2], tx: (tr.left + tr.width / 2 - cr.left) / k, ty: (tr.top + tr.height / 2 - cr.top) / k, r: tr.width / k }; })()`);
+    const w = await t.until(where, 15000, 'a window in the crown on your screen');
+    t.ok(Math.hypot(w.mx - w.tx, w.my - w.ty) < Math.max(4, w.r * 0.15), 'right round the token', w);
+    t.handle('layer.update', { id: tok.id, hidden: true });
+    await t.sleep(400);
+    t.ok(await where(), 'a token hidden from the table opens it on your screen too');
+    t.ok(!(await tv(t)).mask, 'but not on the TV');
+    t.handle('layer.update', { id: tok.id, hidden: false });
+    t.handle('layer.removeMany', { ids: [id] });
+  }, { ms: 60000 });
+
+  // Second Builder (second-tree-hue-solid): a tree's own Hue turns its colours as the browser turns every other asset and
+  // the placing preview (CSS hue-rotate). The tree engine used to turn them its own way, the other way round
+  area.quick('Hue on a living tree: the same colour as the placing preview and any other asset', async (t) => {
+    await clear(t);
+    const at = { x: 6, y: 6 };
+    const id = add(t, 'Oak (dark green) large', at, { over: false });
+    await t.send();
+    await t.until(() => t.t(`window.__table.treeProbe(${JSON.stringify(at)})`), 8000, 'the map on the TV');
+    const px = async (what) => (await t.until(async () => { const x = await tv(t); return x && x.drawn === 1 && x.px && x.px[3] > 200 && x; }, 30000, what)).px;
+    const p0 = await px('the oak drawn');
+    t.handle('layer.update', { id, hue: -90 });
+    await t.sleep(600);
+    const p1 = await px('the oak turned');
+    const css = (c, d) => { const a = (d * Math.PI) / 180; const C = Math.cos(a); const S = Math.sin(a);
+      const M = [[0.213 + C * 0.787 - S * 0.213, 0.715 - C * 0.715 - S * 0.715, 0.072 - C * 0.072 + S * 0.928], [0.213 - C * 0.213 + S * 0.143, 0.715 + C * 0.285 + S * 0.140, 0.072 - C * 0.072 - S * 0.283], [0.213 - C * 0.213 - S * 0.787, 0.715 - C * 0.715 + S * 0.715, 0.072 + C * 0.928 + S * 0.072]];
+      return M.map((r) => Math.max(0, Math.min(255, r[0] * c[0] + r[1] * c[1] + r[2] * c[2]))); };
+    const want = css(p0, -90);
+    const off = Math.max(...want.map((v, i) => Math.abs(v - p1[i])));
+    t.ok(off < 14, 'the turned oak has the colour the browser\'s hue-rotate(-90deg) gives it', { p0, p1, want });
+    t.ok(p1[0] > p1[2], 'leaf green at -90 degrees turns warm (reddish brown), not teal', p1);
+    t.handle('layer.removeMany', { ids: [id] });
   }, { ms: 60000 });
 
   area.quick('the wind follows the weather; a wind of your own and Storm go over it', async (t) => {

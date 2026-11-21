@@ -4534,7 +4534,7 @@ const Play = (() => {
     drag = { kind: 'scatter', key, last: pt, acc: 0 };
     scatterAt(pt, key);
   }
-  // 2.6: what a click (or a drop) will place, half see-through: the picture itself, a video playing
+  // 2.6: what a click (or a drop) will place: the picture itself, a video playing (Second Builder: no longer half see-through)
   let ghost = null; // { el, url, kind, w0: its own width in pixels, bad }
   let dropGhost = null; // a library picture dragged over the map (ui.js DragPic): { asset, x, y } (the mouse)
   function ghostMedia(url, kind) {
@@ -4588,7 +4588,7 @@ const Play = (() => {
     const L = nextLook(); // (a living tree keeps its shape)
     g.el.classList.remove('is-token');
     showGhost(g, {
-      left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${w}px`, height: 'auto', opacity: String(0.5 * L.opacity),
+      left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${w}px`, height: 'auto', opacity: String(L.opacity ?? 1), // (Second Builder: as it will lie, not half see-through)
       transform: `translate(-50%, -50%) rotate(${b.tree ? b.rot : ui.assetRot}deg) scale(${L.flip ? -1 : 1}, ${L.stretch || 1})`, filter: `${L.hue ? `hue-rotate(${L.hue}deg) ` : ''}${L.dark > 0 ? `brightness(${1 - L.dark})` : ''}`,
     });
   }
@@ -4610,7 +4610,7 @@ const Play = (() => {
     const p = view.toTable(x, y);
     const w = (Trees.cells(a.path) || clamp((g.w0 || 512) / 256, 0.25, 8)) * cell;
     g.el.classList.remove('is-token');
-    showGhost(g, { left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${w}px`, height: 'auto', opacity: '0.5', transform: 'translate(-50%, -50%)', filter: '' });
+    showGhost(g, { left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${w}px`, height: 'auto', opacity: '1', transform: 'translate(-50%, -50%)', filter: '' }); // (Second Builder: an asset as it will lie)
   }
   function opacityRange(list) {
     const input = h('input', { type: 'range', min: 0.1, max: 1, step: 0.05, value: list[0].opacity ?? 1, 'aria-label': 'Opacity' });
@@ -4631,7 +4631,7 @@ const Play = (() => {
   const ASSET_LEVELS = [
     { id: 'under', label: 'Under the effects', icon: 'stack-2', tip: 'Mist and smoke drift over it (the ground, rugs, furniture)', patch: { front: false, over: false } },
     { id: 'front', label: 'In front of the effects', icon: 'stack-front', tip: 'Mist and smoke stay under it; tokens stand on top', patch: { front: true, over: false } },
-    { id: 'over', label: 'Above the tokens', icon: 'trees', tip: 'Tree tops, roofs, bridges. On the table it opens where a token stands under it', patch: { over: true, front: false } },
+    { id: 'over', label: 'Above the tokens', icon: 'trees', tip: 'Tree tops, roofs, bridges. It opens where a token stands under it, on the table and on your screen', patch: { over: true, front: false } },
   ];
   const levelOf = (a) => (a.over ? 'over' : a.front ? 'front' : 'under');
   function levelMenu(e, items) {

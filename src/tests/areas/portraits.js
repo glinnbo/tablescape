@@ -45,6 +45,99 @@ module.exports = (area) => {
     }
   });
 
+  // Second Builder: a portrait's looks (Bloodied, Shaded, Hidden), drawn into its picture on the TV; they stack
+  // (blood, then the shade, then the silhouette), and when Hidden goes off the old picture fades slowly over the new one
+  const tvPixels = (t) => t.t(`(() => {
+    const f = [...document.querySelectorAll('.tv-talk .talk-side.near ~ .talk-layer.castl.near .talk-npc:not(.out) img, .tv-talk .talk-layer.castl.near .talk-npc:not(.out) img')][0];
+    if (!f || !f.naturalWidth) return null;
+    const draw = (im) => { const c = document.createElement('canvas'); c.width = 120; c.height = Math.round(120 * im.naturalHeight / im.naturalWidth); const g = c.getContext('2d'); g.drawImage(im, 0, 0, c.width, c.height); return g.getImageData(0, 0, c.width, c.height).data; };
+    return new Promise((res) => { const o = new Image(); o.onload = () => {
+      const a = draw(o); const b = draw(f); const n = Math.min(a.length, b.length);
+      let red0 = 0; let red1 = 0; let on = 0; let lum0 = 0; let lum1 = 0; let topOn = 0; let top0 = 0; let top1 = 0; let most = 0;
+      const rows = n / 4 / 120; let first = -1;
+      for (let i = 0; i < n; i += 4) { if (a[i + 3] > 200) { first = Math.floor(i / 4 / 120); break; } }
+      for (let i = 0; i < n; i += 4) {
+        if (a[i + 3] < 200) continue; on++;
+        const L0 = a[i] + a[i + 1] + a[i + 2]; const L1 = b[i] + b[i + 1] + b[i + 2];
+        lum0 += L0; lum1 += L1; most = Math.max(most, L1);
+        if (a[i] > 1.7 * a[i + 1] && a[i] > 1.7 * a[i + 2] && a[i] > 60) red0++;
+        if (b[i] > 1.7 * b[i + 1] && b[i] > 1.7 * b[i + 2] && b[i] > 60) red1++;
+        const row = Math.floor(i / 4 / 120);
+        if (row >= first && row < first + rows * 0.06) { topOn++; top0 += L0; top1 += L1; }
+      }
+      res({ on, red0: red0 / on, red1: red1 / on, lum: lum1 / Math.max(1, lum0), top: top1 / Math.max(1, top0), most });
+    }; o.src = f.closest('.talk-npc').dataset.src; });
+  })()`);
+  area.quick('looks: Bloodied, Shaded and Hidden stack on the TV; Hidden off fades the figure in', async (t) => {
+    const p = faces(t)[0];
+    const looks = async () => { const x = await talk(t); return x && x.looks && x.looks[0]; };
+    if (t.state.talk) await t.cmd('talk.off', {});
+    try {
+      t.ok((await t.cmd('talk.fx', { path: p.path, bloodOn: true, blood: 0.8 })).ok, 'Bloodied at 80 %');
+      t.eq(t.settings.portraitFx[p.path], { bloodOn: true, blood: 0.8 }, 'kept for this portrait');
+      await t.cmd('talk.toggle', { path: p.path });
+      await t.until(async () => { const l = await looks(); return l && l.composed && l.blood === 0.8; }, 8000, 'the bloodied picture on the TV');
+      await t.sleep(1600); // (its entry animation)
+      const b = await tvPixels(t);
+      t.ok(b && b.red1 > b.red0 + 0.04, 'clearly more blood red on the figure than in the portrait itself', b);
+      await t.shot(t.tv(), 'looks-bloodied');
+      await t.cmd('talk.fx', { path: p.path, shadeOn: true, shade: 0.6 });
+      await t.until(async () => { const l = await looks(); return l && l.shade === 0.6 && !l.veil; }, 6000, 'shaded as well');
+      await t.sleep(300);
+      const s = await tvPixels(t);
+      t.ok(s.top < 0.75 && s.red1 > s.red0, 'the top of the head darker, the blood still there', s);
+      await t.shot(t.tv(), 'looks-bloodied-shaded');
+      await t.cmd('talk.fx', { path: p.path, hidden: true });
+      await t.until(async () => { const l = await looks(); return l && l.hidden && !l.veil; }, 6000, 'hidden');
+      await t.sleep(300);
+      const k = await tvPixels(t);
+      t.ok(k.most < 40, 'only a black silhouette: no light pixel left on the figure', k);
+      await t.shot(t.tv(), 'looks-hidden');
+      await t.cmd('talk.fx', { path: p.path, hidden: false });
+      await t.until(async () => { const l = await looks(); return l && !l.hidden && l.veil; }, 3000, 'the dark picture lying over the new one');
+      await t.sleep(700);
+      t.ok((await looks()).veil, 'still fading after 0.7 s (a slow reveal)');
+      await t.until(async () => { const l = await looks(); return l && !l.veil; }, 3000, 'the reveal to finish');
+      await t.cmd('talk.fx', { path: p.path, reset: true });
+      t.ok(!(t.settings.portraitFx || {})[p.path], 'Clear: nothing kept for it');
+      await t.until(async () => { const l = await looks(); return l && !l.composed; }, 6000, 'the plain portrait again');
+    } finally {
+      await t.cmd('talk.off', {});
+      await t.cmd('talk.fx', { path: p.path, reset: true });
+    }
+  });
+
+  area.deep('looks: right-click a portrait in Conversation: switches, sliders and a preview', async (t) => {
+    const p = faces(t)[0];
+    const ch = t.store.cur.meta.chapters.find((c) => (c.maps || []).some((m) => (m.id || m) === t.state.editMapId)) || t.store.cur.meta.chapters[0];
+    t.ok(t.handle('ready.set', { chapterId: ch.id, kind: 'portraits', items: [{ path: p.path, name: p.name }] }).ok, 'the portrait on the Ready list');
+    try {
+      if (!(await t.popTitle())) { t.gm().webContents.focus(); await t.key('O'); }
+      const sel = `#pop.on .talk-pick[data-flash=${JSON.stringify(p.path)}]`;
+      await t.until(() => t.count(sel), 4000, 'the portrait in the panel');
+      await t.rightClickSel(sel);
+      await t.until(() => t.count('.talk-sizepop .tsp-looks'), 3000, 'the popup with its looks');
+      t.eq(await t.g(`[...document.querySelectorAll('.talk-sizepop .tsp-sw .ctl-label')].map((x) => x.textContent)`), ['Bloodied', 'Shaded', 'Hidden'], 'the three looks');
+      t.eq(await t.g(`[...document.querySelectorAll('.talk-sizepop .tsp-looks input[type=range]')].map((x) => x.disabled)`), [true, true], 'their sliders wait until they are switched on');
+      await t.g(`document.querySelectorAll('.talk-sizepop .tsp-sw input')[0].click()`);
+      await t.until(() => (t.settings.portraitFx[p.path] || {}).bloodOn === true, 2000, 'Bloodied on');
+      await t.g(`(() => { const r = document.querySelectorAll('.talk-sizepop .tsp-looks input[type=range]')[0]; r.value = 65; r.dispatchEvent(new Event('input')); })()`);
+      await t.until(() => (t.settings.portraitFx[p.path] || {}).blood === 0.65, 2000, 'its amount from the slider');
+      await t.g(`document.querySelectorAll('.talk-sizepop .tsp-sw input')[2].click()`);
+      await t.until(() => (t.settings.portraitFx[p.path] || {}).hidden === true, 2000, 'Hidden on');
+      const dark = () => t.g(`(() => { const c = document.querySelector('.talk-sizepop .tsp-preview'); if (!c || c.width < 10) return null; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let most = 0; let on = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200) { on++; most = Math.max(most, d[i] + d[i + 1] + d[i + 2]); } return on > 50 && most < 40; })()`);
+      await t.until(dark, 4000, 'the preview: a black silhouette');
+      await t.shot(t.gm(), 'looks-popup');
+      await t.g(`document.querySelector('.talk-sizepop .tsp-sec .tg-clear').click()`);
+      await t.until(() => !(t.settings.portraitFx || {})[p.path], 2000, 'Clear takes all looks off');
+      await t.key('Escape');
+      t.ok(!(await t.count('.talk-sizepop')), 'Esc closes the popup');
+    } finally {
+      await t.cmd('talk.fx', { path: p.path, reset: true });
+      t.handle('ready.set', { chapterId: ch.id, kind: 'portraits', items: [] });
+    }
+  });
+
   area.deep('two portraits stand together; ending the talk clears the TV', async (t) => {
     const list = faces(t);
     t.ok(list.length >= 2, 'the library has two portraits', list.length);

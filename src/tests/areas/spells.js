@@ -47,6 +47,33 @@ module.exports = (area) => {
     t.eq(t.L().spells.length, n, 'spell areas after Undo');
   });
 
+  // Second Builder (second-spell-looks): with a graphics card the areas are drawn by spell-gl.js, each damage type its
+  // own look; a colour the GM picks still colours it; the outline stays where it was
+  area.quick('spell looks are drawn by the graphics card: fire burns orange, cold is blue, a picked colour is used', async (t) => {
+    const m = t.L(); const k = m.grid.size;
+    t.handle('spell.clear', { mapId: m.id });
+    const gl = await t.t('typeof SpellGL === "object" && SpellGL.supported()');
+    if (!gl) { t.ok(true, 'no WebGL 2 here: the old drawing is used (checked by the other spell checks)'); return; }
+    const cast = async (skin, at, color) => {
+      t.handle('spell.add', { mapId: m.id, name: `Look ${skin}`, shape: 'sphere', size: 15, skin, x: at.x * k, y: at.y * k, mode: 'stay', ...(color ? { color } : {}) });
+      await t.sleep(150);
+    };
+    await cast('fire', { x: 6, y: 6 });
+    await cast('cold', { x: 16, y: 6 });
+    await cast('fire', { x: 11, y: 14 }, '#3cff6e');
+    const n0 = await t.t('SpellGL.stats.drawn');
+    await t.until(async () => (await t.t('SpellGL.stats.drawn')) > n0 + 6, 8000, 'the TV drawing the spells with the graphics card');
+    await t.sleep(1200); // (past the cast)
+    // the average colour over the middle of each area
+    const avg = (x, y) => t.t(`(() => { let r = 0, g = 0, b = 0, n = 0; for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) { const p = window.__table.probeMap('spell', (${x} + i * 0.25) * ${k}, (${y} + j * 0.25) * ${k}); if (p) { r += p[0] * p[3] / 255; g += p[1] * p[3] / 255; b += p[2] * p[3] / 255; n++; } } return [r / n, g / n, b / n]; })()`);
+    const fire = await avg(6, 6); const cold = await avg(16, 6); const green = await avg(11, 14);
+    await t.shot(t.tv(), 'spell-looks-tv');
+    t.ok(fire[0] > 60 && fire[0] > fire[2] * 1.6, 'the fire is orange-red where it burns', fire);
+    t.ok(cold[2] >= cold[0] && cold[2] > 30, 'the cold is blue-white', cold);
+    t.ok(green[1] > green[0] && green[1] > green[2], 'a fire the GM made green burns green', green);
+    t.handle('spell.clear', { mapId: m.id });
+  });
+
   // ---------- deep: exact results on a map of its own ----------
   let own = null;
   const ownMap = async (t) => {

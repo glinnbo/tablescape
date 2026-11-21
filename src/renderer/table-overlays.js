@@ -205,7 +205,7 @@ const TableOverlays = (() => {
     let title = null; let titleOut = 0;
     let geom = { W: innerWidth, H: innerHeight, tin: 50 };
     let seats = 'both';
-    const stats = { talkIn: 0, inkDrawn: 0 };
+    const stats = { talkIn: 0, inkDrawn: 0, fxSet: 0 };
 
     // ---------- talk ----------
     // 4.5: Options → Try: the band of a look, on its own for a moment (not while someone really talks)
@@ -242,9 +242,8 @@ const TableOverlays = (() => {
         t.cast.forEach((c) => {
           let n = s.nodes.get(c.path);
           if (!n) {
-            n = { wrap: el('div', 'talk-npc'), img: el('img'), c };
+            n = { wrap: el('div', 'talk-npc'), img: el('img'), c, fxKey: null };
             n.img.alt = '';
-            n.img.src = c.url;
             n.img.addEventListener('load', () => layout(), { once: true });
             n.wrap.append(n.img);
             s.cast.append(n.wrap);
@@ -252,11 +251,45 @@ const TableOverlays = (() => {
             stats.talkIn++;
           }
           n.c = c;
+          n.wrap.dataset.src = c.url;
           n.wrap.classList.toggle('opaque', !c.alpha);
           n.img.style.transform = c.mirror ? 'scaleX(-1)' : '';
+          if (n.veil) n.veil.style.transform = n.img.style.transform;
+          setLooks(n, c);
         });
       }
       layout();
+    }
+    // Second Builder: Bloodied, Shaded, Hidden (portrait-fx.js) are drawn into the picture the <img> shows. A portrait
+    // with a look waits for its picture before it shows anything (a hidden one must never flash in uncovered). When the
+    // looks change while it stands there, the old picture lies over the new one for a moment and fades: slowly (1.5 s)
+    // when Hidden goes off, so the figure comes out of the dark
+    function setLooks(n, c) {
+      const key = PortraitFx.keyOf(c.url, c.fx, !c.alpha);
+      if (key === n.fxKey) return;
+      const was = n.fxKey; const wasHidden = !!(n.fxOn && n.fxOn.hidden);
+      n.fxKey = key; n.fxOn = PortraitFx.norm(c.fx);
+      const mine = ++fxTurn;
+      n.turn = mine;
+      Promise.resolve(PortraitFx.url(c.url, c.fx, { opaque: !c.alpha, seed: c.path })).catch(() => c.url).then((src) => {
+        if (n.turn !== mine || !n.wrap.isConnected) return;
+        if (was && n.img.complete && n.img.naturalWidth) veil(n, wasHidden && !n.fxOn.hidden ? 1500 : 450);
+        n.img.src = src;
+        stats.fxSet++;
+      });
+    }
+    let fxTurn = 0;
+    function veil(n, ms) {
+      if (n.veil) n.veil.remove();
+      const v = el('canvas', 'talk-veil');
+      v.width = n.img.naturalWidth; v.height = n.img.naturalHeight;
+      v.getContext('2d').drawImage(n.img, 0, 0);
+      v.style.transform = n.img.style.transform;
+      v.style.transition = `opacity ${ms}ms ease`;
+      n.wrap.append(v); n.veil = v;
+      const go = () => requestAnimationFrame(() => requestAnimationFrame(() => { v.style.opacity = '0'; }));
+      if (n.img.complete) go(); n.img.addEventListener('load', go, { once: true });
+      setTimeout(() => { v.remove(); if (n.veil === v) n.veil = null; }, ms + 120);
     }
     function leave(n) {
       n.wrap.classList.add('out');
@@ -705,7 +738,8 @@ void main() {
       return {
         talk: talk ? {
           sides: sides.filter((s) => vis(s.side)).length, npcs: sides[0].cast.querySelectorAll('.talk-npc:not(.out)').length,
-          front: (() => { const f = [...sides[0].cast.querySelectorAll('.talk-npc:not(.out):not(.back)')][0]; return f ? f.querySelector('img').src.split('/').pop() : null; })(),
+          front: (() => { const f = [...sides[0].cast.querySelectorAll('.talk-npc:not(.out):not(.back)')][0]; return f ? (f.dataset.src || f.querySelector('img').src).split('/').pop() : null; })(), // (Second Builder: a portrait with looks shows a composed picture; this is still its own file)
+          looks: [...sides[0].nodes.values()].filter((n) => !n.wrap.classList.contains('out')).map((n) => ({ path: n.c.path, ...(n.fxOn || {}), composed: n.img.src.startsWith('blob:'), shown: !!n.img.getAttribute('src'), veil: !!n.veil })), fxSet: stats.fxSet,
           ink: !!sides[0].ink.querySelector('.ink'), drops: sides[0].ink.querySelectorAll('.drop').length, opaque: sides[0].cast.querySelectorAll('.talk-npc.opaque').length,
           mirrored: sides[0].cast.querySelectorAll('.talk-npc img[style*="scaleX(-1)"]').length,
         } : null,

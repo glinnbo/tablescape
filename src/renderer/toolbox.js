@@ -79,16 +79,80 @@ const Toolbox = (() => {
     // Prototype 12: each portrait's own size in Talk: right-click → a slider; a small badge when it isn't 100 %
     const sizeOf = (path) => ((S().settings && S().settings.portraitSize) || {})[path] || 1;
     const offOf = (path) => ((S().settings && S().settings.portraitOffset) || {})[path] || { x: 0, y: 0 }; // (Prototype 13)
+    const fxOf = (path) => ((S().settings && S().settings.portraitFx) || {})[path] || null; // (Second Builder: Bloodied, Shaded, Hidden)
+    const looksBadge = (it) => {
+      const n = PortraitFx.norm(fxOf(it.path));
+      if (!n.blood && !n.shade && !n.hidden) return null;
+      const tip = [n.blood ? `bloodied ${Math.round(n.blood * 100)} %` : null, n.shade ? `shaded ${Math.round(n.shade * 100)} %` : null, n.hidden ? 'hidden' : null].filter(Boolean).join(', ');
+      return h('b', { class: 'talk-scale talk-looks', 'data-tip': `${it.name}: ${tip} (right-click to change)` }, n.blood ? iconEl('droplet') : null, n.shade ? iconEl('contrast') : null, n.hidden ? iconEl('eye-off') : null);
+    };
     const sizeBadge = (it) => {
       const v = sizeOf(it.path); const o = offOf(it.path); const sized = Math.abs(v - 1) > 0.001; const moved = !!(o.x || o.y);
-      if (!sized && !moved) return null;
+      if (!sized && !moved) return looksBadge(it);
       const tip = [sized ? `${Math.round(v * 100)} % of the portrait size` : null, moved ? `moved ${o.y ? `${o.y > 0 ? 'up' : 'down'} ${Math.abs(Math.round(o.y * 100))} %` : ''}${o.x && o.y ? ', ' : ''}${o.x ? `${o.x > 0 ? 'right' : 'left'} ${Math.abs(Math.round(o.x * 100))} %` : ''}` : null].filter(Boolean).join('; ');
-      return h('b', { class: 'talk-scale', 'data-tip': `${it.name}: ${tip} (right-click to change)` }, sized ? iconEl(v > 1 ? 'arrows-maximize' : 'arrows-minimize') : null, sized ? `${Math.round(v * 100)}%` : null, moved ? iconEl('arrows-move') : null);
+      return h('span', { class: 'talk-badges' }, h('b', { class: 'talk-scale', 'data-tip': `${it.name}: ${tip} (right-click to change)` }, sized ? iconEl(v > 1 ? 'arrows-maximize' : 'arrows-minimize') : null, sized ? `${Math.round(v * 100)}%` : null, moved ? iconEl('arrows-move') : null), looksBadge(it));
     };
     let sizePop = null;
     function closeSizePop() { if (sizePop) { sizePop.remove(); sizePop = null; document.removeEventListener('pointerdown', outSizePop, true); document.removeEventListener('keydown', escSizePop, true); } }
     const outSizePop = (e) => { if (sizePop && !sizePop.contains(e.target)) closeSizePop(); };
     const escSizePop = (e) => { if (e.key === 'Escape' && sizePop) { e.stopPropagation(); closeSizePop(); } };
+    // Second Builder: a portrait's looks, stacked in this order: Bloodied (amount), Shaded (how dark the top of the head), Hidden
+    // (a black silhouette). Kept per portrait, like its size; a small preview shows the result
+    function looksPart(it) {
+      let fx = { ...(fxOf(it.path) || {}) };
+      let sendT = 0; let prevT = 0; let prevTurn = 0;
+      const send = (patch, slow) => {
+        Object.assign(fx, patch); preview();
+        clearTimeout(sendT);
+        if (slow) sendT = setTimeout(() => cmd('talk.fx', { path: it.path, ...patch }), 40); else cmd('talk.fx', { path: it.path, ...patch });
+      };
+      const sw = (label, on, tip, change) => {
+        const i = h('input', { type: 'checkbox', role: 'switch', checked: !!on, 'aria-label': label, onchange: (e) => change(e.target.checked) });
+        return [h('label', { class: 'ctl ctl-toggle tsp-sw', 'data-tip': tip }, h('span', { class: 'ctl-label' }, label), i, h('span', { class: 'switch' })), i];
+      };
+      const slider = (min, max, val, label, key) => {
+        const o = h('output', {}, `${val} %`);
+        const r = h('input', { type: 'range', min, max, step: 1, value: val, 'aria-label': label });
+        r.addEventListener('input', () => { o.textContent = `${r.value} %`; send({ [key]: Number(r.value) / 100 }, true); });
+        return [r, o];
+      };
+      const n0 = PortraitFx.norm({ ...fx, bloodOn: true, shadeOn: true });
+      const [bR, bO] = slider(5, 100, Math.round(n0.blood * 100), `How bloodied ${it.name} is`, 'blood');
+      const [sR, sO] = slider(10, 90, Math.round(n0.shade * 100), `How dark the top of ${it.name} is`, 'shade');
+      const [bS, bI] = sw('Bloodied', fx.bloodOn, 'Blood stains over the figure; more the higher the amount', (v) => { send({ bloodOn: v }); bR.disabled = !v; });
+      const [sS, sI] = sw('Shaded', fx.shadeOn, 'Darker from the top of the head down', (v) => { send({ shadeOn: v }); sR.disabled = !v; });
+      const [hS, hI] = sw('Hidden', fx.hidden, 'Only the black silhouette. Switched off on the table, the figure comes slowly out of the dark', (v) => send({ hidden: v }));
+      bR.disabled = !fx.bloodOn; sR.disabled = !fx.shadeOn;
+      const pv = h('canvas', { class: 'tsp-preview', width: 1, height: 1, 'aria-hidden': 'true' });
+      const pvBox = h('div', { class: 'tsp-pv' }, pv);
+      let src = null;
+      // (a Ready-list entry has only its path: its picture comes from the library)
+      const picUrl = it.url || (lib.find((x) => x.path === it.path) || {}).url;
+      function preview() {
+        if (!picUrl) { pvBox.hidden = true; return; }
+        clearTimeout(prevT);
+        prevT = setTimeout(async () => {
+          const turn = ++prevTurn;
+          try {
+            if (!src) src = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = picUrl; });
+            const c = await PortraitFx.compose(src, fx, { opaque: it.alpha === false, seed: it.path });
+            if (turn !== prevTurn) return;
+            const H = 150; const W = Math.max(1, Math.round((H * c.width) / c.height));
+            pv.width = W; pv.height = H;
+            const g = pv.getContext('2d'); g.clearRect(0, 0, W, H); g.drawImage(c, 0, 0, W, H);
+            pv.style.transform = ((S().settings && S().settings.portraitMirror) || {})[it.path] ? 'scaleX(-1)' : '';
+          } catch { pvBox.hidden = true; }
+        }, 60);
+      }
+      preview();
+      const clear = h('button', { class: 'tg-clear', 'data-tip': 'No looks: no blood, no shade, not hidden', onclick: () => { fx = {}; bI.checked = false; sI.checked = false; hI.checked = false; bR.disabled = true; sR.disabled = true; cmd('talk.fx', { path: it.path, reset: true }); preview(); } }, 'Clear');
+      return h('div', { class: 'tsp-looks' },
+        h('div', { class: 'tsp-sec' }, h('span', { class: 'grow' }, 'Looks'), clear),
+        pvBox,
+        bS, h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Amount'), bO), bR,
+        sS, h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Top of the head'), sO), sR,
+        hS);
+    }
     function openSizePop(e, it) {
       e.preventDefault(); closeSizePop();
       const out = h('output', {}, `${Math.round(sizeOf(it.path) * 100)} %`);
@@ -107,11 +171,12 @@ const Toolbox = (() => {
       inY.addEventListener('input', () => { oy = Number(inY.value) / 100; outY.textContent = fmtY(Number(inY.value)); sendOff(); });
       inX.addEventListener('input', () => { ox = Number(inX.value) / 100; outX.textContent = fmtX(Number(inX.value)); sendOff(); });
       for (const [inp, zero] of [[inY, () => { oy = 0; outY.textContent = '0'; }], [inX, () => { ox = 0; outX.textContent = '0'; }]]) inp.addEventListener('dblclick', () => { inp.value = 0; zero(); sendOff(); }); // (a double-click: back to 0)
-      sizePop = h('div', { class: 'talk-sizepop', role: 'dialog', 'aria-label': `Size and place of ${it.name}` },
+      sizePop = h('div', { class: 'talk-sizepop', role: 'dialog', 'aria-label': `Size, place and looks of ${it.name}` },
         h('div', { class: 'tsp-head' }, h('b', { class: 'grow ellipsis' }, it.name)),
         h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Size'), out), input,
         h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Up / down'), outY), inY,
         h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Left / right'), outX), inX,
+        looksPart(it),
         h('div', { class: 'tsp-row' },
           h('button', { class: 'btn small ghost', 'data-tip': '100 %, in its place', onclick: () => { input.value = 100; out.textContent = '100 %'; inY.value = 0; inX.value = 0; ox = 0; oy = 0; outY.textContent = '0'; outX.textContent = '0'; cmd('talk.size', { path: it.path, scale: 1 }); cmd('talk.offset', { path: it.path, x: 0, y: 0 }); } }, iconEl('refresh'), 'Reset'),
           h('span', { class: 'grow' }),
@@ -141,7 +206,7 @@ const Toolbox = (() => {
           state: (it) => { const i = onStage(it.path); const t = S().talk; return { on: i >= 0, badge: i < 0 ? null : i === t.cast.length - 1 ? 'Speaking' : 'On', tip: tipFor(it, i, t) }; },
           ready: { chapter: () => ctx.ready.chapter(), has: (p) => ctx.ready.list('portraits').some((x) => x.path === p), toggle: (it, on) => (on ? readyAdd(it) : ctx.ready.remove('portraits', it.path)) },
           menu: (e, it) => openSizePop(e, it), // (right-click a portrait: its size)
-          extra: (it) => h('span', { class: 'talk-extras' }, mirrorBtn(it), sizeBadge(it)), extraSig: (it) => [!!((S().settings && S().settings.portraitMirror) || {})[it.path], sizeOf(it.path), offOf(it.path)],
+          extra: (it) => h('span', { class: 'talk-extras' }, mirrorBtn(it), sizeBadge(it)), extraSig: (it) => [!!((S().settings && S().settings.portraitMirror) || {})[it.path], sizeOf(it.path), offOf(it.path), fxOf(it.path)],
           dragCat: 'portraits',
           empty: 'No portraits yet. Put PNG busts into the Portraits folder of your library.',
           foot: [c().btn('From this PC …', 'folder', async () => { const r = await ts.library('import', { cat: 'portraits' }); if (r && r.ok) { loadLib(true); toast(`${r.items.length} portrait${r.items.length === 1 ? '' : 's'} added`, { ms: 2000 }); } else if (r && r.error) toast(r.error, { kind: 'error' }); }, { kind: 'small', tip: 'Copy pictures from anywhere on this PC into Portraits' }),
@@ -165,7 +230,7 @@ const Toolbox = (() => {
         const groups = portraits();
         const t = S().talk;
         const mirror = (S().settings && S().settings.portraitMirror) || {};
-        const sig = JSON.stringify([groups.map(([g, l]) => [g, l.map((x) => x.path)]), t && t.cast.map((x) => x.path), mirror, (S().settings && S().settings.portraitSize) || {}, (S().settings && S().settings.portraitOffset) || {}]);
+        const sig = JSON.stringify([groups.map(([g, l]) => [g, l.map((x) => x.path)]), t && t.cast.map((x) => x.path), mirror, (S().settings && S().settings.portraitSize) || {}, (S().settings && S().settings.portraitOffset) || {}, (S().settings && S().settings.portraitFx) || {}]);
         if (strip.dataset.sig === sig) return;
         strip.dataset.sig = sig;
         strip.innerHTML = '';
@@ -181,7 +246,7 @@ const Toolbox = (() => {
           for (const it of list.slice(0, 48)) {
             const i = onStage(it.path);
             const use = () => (it.missing ? toast(`${it.name} is no longer in the library: ✕ takes it off the Ready list`, { ms: 3500 }) : talkToggle(it));
-            row.append(h('div', { class: `talk-pick ${i >= 0 ? 'on' : ''} ${it.missing ? 'missing' : ''}`, dataset: { flash: it.path }, role: 'button', tabindex: '0', oncontextmenu: (e) => { if (!it.missing) openSizePop(e, it); }, 'data-tip': it.missing ? `${it.name}: no longer in the library (✕ takes it off)` : `${tipFor(it, i, t || { cast: [] })} · right-click: its size and place`, 'aria-label': it.name,
+            row.append(h('div', { class: `talk-pick ${i >= 0 ? 'on' : ''} ${it.missing ? 'missing' : ''}`, dataset: { flash: it.path }, role: 'button', tabindex: '0', oncontextmenu: (e) => { if (!it.missing) openSizePop(e, it); }, 'data-tip': it.missing ? `${it.name}: no longer in the library (✕ takes it off)` : `${tipFor(it, i, t || { cast: [] })} · right-click: its size, place and looks`, 'aria-label': it.name,
               onclick: use, onkeydown: (e) => { if (e.key === 'Enter') use(); } },
             h('span', { class: 'talk-thumb' }, it.missing ? iconEl('alert-triangle') : Thumbs.img(it.path, it.kind || 'image', it.thumb)),
             h('span', { class: 'talk-name' }, it.name),

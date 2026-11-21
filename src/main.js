@@ -58,7 +58,7 @@ let settings = {
   playerDisplayId: null, diagonal: 43, ppi: null, lastCampaignId: null, demoCreated: false, migrated01: false, sfxOn: true, sfxVolume: 0.7, burstSeconds: 8, sfxMap: {},
   seats: 'both', // players on 'both' long sides of the TV, or on 'one'
   handout: { size: 1, pos: 0.5, log: true }, // Prototype 25: a handout's size (0.4 to 1) and where it lies along the TV (0 left end to 1 right end); "shown" lines in the session log
-  talk: { size: 0.34, anchor: 'right', blur: 0.5 }, portraitMirror: {}, portraitSize: {}, portraitOffset: {}, // (Prototype 12: path → its size in Talk, 1 = as the others; 13: its offset { x, y }, share of its width / height) boardVolume: 0.8, weatherPresets: [],
+  talk: { size: 0.34, anchor: 'right', blur: 0.5 }, portraitMirror: {}, portraitSize: {}, portraitOffset: {}, portraitFx: {}, // (Prototype 12: path → its size in Talk, 1 = as the others; 13: its offset { x, y }, share of its width / height; Second Builder: its looks { bloodOn, blood, shadeOn, shade, hidden }) boardVolume: 0.8, weatherPresets: [],
   players: {}, // Prototype 1: moving tokens by phone (players.js DEFAULTS fill the rest)
   hudScale: 1, // size of text and panels on the TV (round, countdowns, turn order, markers) — not of the map
   uiScale: 1, // 4.0.1: size of everything in the GM window (small laptop screens); the TV is not touched
@@ -1571,7 +1571,7 @@ function gmState() {
     partyLoose: partyLoose().length, // 4.7: the party's pictures outside the Party folder
     settings: {
       sfxOn: settings.sfxOn, sfxVolume: settings.sfxVolume, burstSeconds: settings.burstSeconds, sfxMap: sfxNames(),
-      seats: settings.seats, handout: handoutPrefs(), talk: { ...settings.talk, look: lookFor('talk').base }, tableStyle: TABLE_STYLES[settings.tableStyle] ? settings.tableStyle : 'ink', looks: Object.fromEntries(LOOK_PARTS.map((k) => [k, (settings.looks || {})[k] || 'style'])), initAuto: settings.initAutoSort !== false, portraitMirror: settings.portraitMirror, portraitSize: settings.portraitSize || {}, portraitOffset: settings.portraitOffset || {}, boardVolume: settings.boardVolume, weatherPresets: settings.weatherPresets,
+      seats: settings.seats, handout: handoutPrefs(), talk: { ...settings.talk, look: lookFor('talk').base }, tableStyle: TABLE_STYLES[settings.tableStyle] ? settings.tableStyle : 'ink', looks: Object.fromEntries(LOOK_PARTS.map((k) => [k, (settings.looks || {})[k] || 'style'])), initAuto: settings.initAutoSort !== false, portraitMirror: settings.portraitMirror, portraitSize: settings.portraitSize || {}, portraitOffset: settings.portraitOffset || {}, portraitFx: settings.portraitFx || {}, boardVolume: settings.boardVolume, weatherPresets: settings.weatherPresets,
       hudScale: settings.hudScale || 1, uiScale: settings.uiScale || 1, askNotes: settings.askNotes !== false,
       round: roundLook(), mapTransition: transitionOf(), initShow: settings.initShow !== false, initFoes: settings.initFoes === 'enemy' ? 'enemy' : 'names', initCount: Number(settings.initCount) || 0,
       quality: settings.quality || 'high', gmAnim: ['smooth', 'light', 'still'].includes(settings.gmAnim) ? settings.gmAnim : 'light', gmFx: ['smooth', 'light', 'still'].includes(settings.gmFx) ? settings.gmFx : 'light', animDraw: settings.animDraw === 'gpu' ? 'gpu' : 'cpu',
@@ -1751,7 +1751,7 @@ const roundLook = () => ({ x: settings.roundPos?.x ?? 0.07, y: settings.roundPos
 // ---------- talk, initiative ----------
 function talkInfo() {
   if (!state.talk) return null;
-  return { ...state.talk, ...settings.talk, look: lookFor('talk').base, variant: lookFor('talk').variant, cast: state.talk.cast.map((c) => ({ ...c, scale: (settings.portraitSize || {})[c.path] || 1, offset: (settings.portraitOffset || {})[c.path] || null, mirror: !!(settings.portraitMirror || {})[c.path] })) };
+  return { ...state.talk, ...settings.talk, look: lookFor('talk').base, variant: lookFor('talk').variant, cast: state.talk.cast.map((c) => ({ ...c, scale: (settings.portraitSize || {})[c.path] || 1, offset: (settings.portraitOffset || {})[c.path] || null, mirror: !!(settings.portraitMirror || {})[c.path], fx: (settings.portraitFx || {})[c.path] || null })) };
 }
 // ---------- Beta 3.2: a token shown to the table ----------
 // Right-click a token → Show to the table: on the TV its picture flies to the middle in an arc, turns once and flies
@@ -3261,6 +3261,23 @@ function handle(type, p = {}) {
       clearTimeout(sizeSaveT); sizeSaveT = setTimeout(saveSettings, 600);
       broadcast();
       return { ok: true, ...o };
+    }
+    case 'talk.fx': { // Second Builder: a portrait's looks: Bloodied (amount 0 … 1), Shaded (how dark the top, 0 … 0.9), Hidden
+      if (!p.path) return { ok: false };
+      settings.portraitFx = { ...(settings.portraitFx || {}) };
+      const cur = { ...(settings.portraitFx[p.path] || {}) };
+      const n01 = (v, m) => Math.round(Math.min(m, Math.max(0, Number(v) || 0)) * 100) / 100;
+      if ('bloodOn' in p) cur.bloodOn = !!p.bloodOn;
+      if ('blood' in p) cur.blood = n01(p.blood, 1);
+      if ('shadeOn' in p) cur.shadeOn = !!p.shadeOn;
+      if ('shade' in p) cur.shade = n01(p.shade, 0.9);
+      if ('hidden' in p) cur.hidden = !!p.hidden;
+      if (p.reset) for (const k of Object.keys(cur)) delete cur[k];
+      // (only what differs from a plain portrait is kept; the sliders' values stay while a look is switched off)
+      if (!cur.bloodOn && !cur.shadeOn && !cur.hidden && cur.blood == null && cur.shade == null) delete settings.portraitFx[p.path]; else settings.portraitFx[p.path] = cur;
+      clearTimeout(sizeSaveT); sizeSaveT = setTimeout(saveSettings, 600); // (the sliders send many; save once they rest)
+      broadcast();
+      return { ok: true, fx: settings.portraitFx[p.path] || null };
     }
     case 'talk.mirror': {
       settings.portraitMirror = { ...(settings.portraitMirror || {}) };

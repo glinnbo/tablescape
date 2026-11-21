@@ -852,6 +852,7 @@ class SceneView {
     }
   }
   osInkEl(it) {
+    if (it.kind === 'live') return null; // (Beta 3.43: an effect is not inked: it simply starts to move)
     const NS = 'http://www.w3.org/2000/svg';
     const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) if (v != null) e.setAttribute(k, v); return e; };
     const g0 = this.map.grid || {}; const sq = g0.size || 1;
@@ -989,14 +990,15 @@ class SceneView {
     if (trees || Object.keys(this.tcv).length) this.redrawSoon();
   }
   assetParent(l) { return l.over ? this.assetsOverEl : l.front ? this.assetsFrontEl : this.assetsEl; }
-  // Prototype 23: on the TV an asset above the tokens opens where a token stands under it (a soft round window)
-  canopiesSoon() { if (this.canopyRaf || this.gm) return; this.canopyRaf = requestAnimationFrame(() => { this.canopyRaf = 0; this.canopies(); }); }
+  // Prototype 23: an asset above the tokens opens where a token stands under it (a soft round window). Second Builder:
+  // on your screen too (it used to be half see-through there instead); there tokens hidden from the table open it as well
+  canopiesSoon() { if (this.canopyRaf) return; this.canopyRaf = requestAnimationFrame(() => { this.canopyRaf = 0; this.canopies(); }); }
   canopies() {
-    if (!this.map || this.gm) return;
+    if (!this.map) return;
     const over = this.map.layers.filter((l) => l.role === 'asset' && l.over);
     if (!over.length) return;
     const ppi = this.ppi; const g = this.map.grid.size || 1;
-    const toks = this.map.layers.filter((l) => l.role === 'token' && !l.hidden).map((l) => ({ x: l.x * ppi, y: l.y * ppi, r: (l.size || 1) * g * ppi * 0.78 }));
+    const toks = this.map.layers.filter((l) => l.role === 'token' && (!l.hidden || this.gm)).map((l) => ({ x: l.x * ppi, y: l.y * ppi, r: (l.size || 1) * g * ppi * 0.78 }));
     for (const a of over) {
       const n = this.nodes.get(a.id);
       if (!n || !n.el || n.tree) continue; // (a living tree: its canvas opens, see drawTrees)
@@ -2029,8 +2031,8 @@ class SceneView {
     this.treeFrame = ms;
     this.drawTrees();
   }
-  // ---------- living tiles (Beta 3.42) ----------
-  // Water, lava and grass of an Oldschool map that move (living.js): one canvas right above the map picture, under
+  // ---------- living effects (Beta 3.42; 3.43: drawn over the floors) ----------
+  // Water, lava, glow and grass of an Oldschool map that move (living.js): one canvas right above the map picture, under
   // the grid, the assets and the tokens, drawn in the trees' loop and in their wind.
   livingOn() {
     const m = this.map; const b = m && m.bg;
@@ -2055,7 +2057,7 @@ class SceneView {
     const k = this.ppi * v.zoom * c.res; const R = c.rect;
     const ok = c.L.frame({ dt, wind: this.treeWindNow || { dir: 30, strength: 1 }, matrix: [k, (v.x * this.ppi - R.x) * c.res, (v.y * this.ppi - R.y) * c.res], set: m.live || {}, few: (this.qres || 1) < 0.75 });
     st.on = !!ok; st.state = c.L.state || ''; st.blades = c.L.shown || 0; st.kinds = ok ? { ...c.L.kinds } : null; st.time = c.L.time;
-    if (ok && this.livingProbe) { const q = this.livingProbe; st.px = c.L.read(q.x * k + (v.x * this.ppi - R.x) * c.res, q.y * k + (v.y * this.ppi - R.y) * c.res); }
+    if (ok && this.livingProbe) st.px = [].concat(this.livingProbe).map((q) => c.L.read(q.x * k + (v.x * this.ppi - R.x) * c.res, q.y * k + (v.y * this.ppi - R.y) * c.res)); // (the self-test: the layer's colour at some spots)
   }
   treeCanvas(lev) {
     if (this.tcv[lev]) return this.tcv[lev];
@@ -2128,7 +2130,7 @@ class SceneView {
         const q = this.treeProbe; const px = c.L.read(q.x * k + (v.x * this.ppi - R.x) * c.res, q.y * k + (v.y * this.ppi - R.y) * c.res);
         if (px && (px[3] > 0 || !st.px)) st.px = px;
       }
-      if (lev === 'over' && !this.gm) this.treeWindows(c, mine);
+      if (lev === 'over') this.treeWindows(c, mine); // (Second Builder: on your screen too)
     }
   }
   // Prototype 23, for living trees: on the TV the canvas above the tokens opens where a token stands under a tree
@@ -2136,7 +2138,7 @@ class SceneView {
     const ppi = this.ppi; const g = this.map.grid.size || 1; const z = this.v.zoom;
     const holes = [];
     for (const t of this.map.layers) {
-      if (t.role !== 'token' || t.hidden) continue;
+      if (t.role !== 'token' || (t.hidden && !this.gm)) continue;
       const r = (t.size || 1) * g * 0.78;
       if (!trees.some((a) => Math.hypot(t.x - a.x, t.y - a.y) < (a.w || 1) * 0.55 + r)) continue;
       const p = this.mapToPx(t.x, t.y);
@@ -2448,7 +2450,7 @@ class SceneView {
     for (const sp of list) {
       const geo = this.spellGeom(sp);
       FX.spell(ctx, sp, geo.tpl, geo.cells, ms, {
-        squares: sp.squares, px, selected: this.gm && sp.id === this.selectedSpell, alpha: sp.hidden ? 0.4 : 1,
+        squares: sp.squares, px, selected: this.gm && sp.id === this.selectedSpell, alpha: sp.hidden ? 0.4 : 1, cell: this.cellK(), // (Second Builder: the shader's patterns are sized in squares)
       });
     }
     if (this.ghost) FX.ghost(ctx, this.ghost.sp, this.ghost.geo.tpl, this.ghost.geo.cells, px);

@@ -24,6 +24,26 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.45', [
+      'Spell areas look new: every damage type has its own realistic look, drawn by the graphics card. Flames pour out of a Fireball, frost spreads along a Cone of Cold, bolts fork, gas rolls, vines tangle, water whirls, the ground breaks and insects swarm',
+      'Each spell has its own moment when it is cast (the Fireball blooms, frost spreads, vines grow in), and a colour you pick for a spell still colours it',
+      'Without a graphics card the spells look as before; Effects quality Medium and Low draw them a little coarser',
+    ]],
+    ['Beta 3.44', [
+      'Living trees: Hue now gives the colour the preview shows while placing (the trees used to turn the other way round). Trees you already recoloured may look different once: set their Hue again',
+      'Tree tops, roofs and everything else Above the tokens are solid on your screen too, and open round a token under them as on the table (also round tokens hidden from the players). Use Opacity if you want one see-through',
+      'Placing an asset: its preview is no longer half see-through',
+    ]],
+    ['Beta 3.43', [
+      'Living effects are now drawn, not built into tiles. Under Draw → Effects pick Grass, Water, Lava, Glow, Pulse or Ripple and draw it over any floor with Room, Shape, Round, Brush or Tile, like a tile that cannot be seen. What is laid over it later (a bridge) covers it; Alt with the same tool takes effects away there and leaves the floor',
+      'Grass takes the colour of the floor under it, or one you pick: green, dry, wheat, autumn. A field in a colour of its own always shows; blades in the floor\'s own colour show with the wind, as before. Any floor can carry grass',
+      'Water makes any floor its bed: a flooded cellar, a ford. Lava and the glows are light only now, so the floor under them stays as sharp as the tiles around it (lava had gone blurry in 3.42)',
+      'Glow lets the bright colours of a floor shine, each spot in its own rhythm; Pulse lets them breathe together all over the map; Ripple sends rings out from the middle of what you draw. They work on any hue: mushrooms, runes, embers',
+      'No tile moves by itself any more: the river beds, lava and grass tiles of 3.42 are plain floors again. A map drawn in 3.42 stands still until effects are drawn on it',
+      'Draw → Map settings: Living effects (before: Living tiles), with two new sliders, Glow and Glow speed',
+      'Conversation: right-click a portrait for its looks: Bloodied (with an amount), Shaded (darker from the top of the head) and Hidden (only a black silhouette). They stack, and each portrait keeps its own',
+      'A hidden portrait never shows uncovered on the TV; switch Hidden off while it stands there and the figure slowly comes out of the dark',
+    ]],
     ['Beta 3.42', [
       'Living tiles on Oldschool maps: some tiles now move by themselves. Water ripples and glints over its bed, lava glows and pulses, grass waves as fine blades in the map\'s wind (the same wind as the living trees, a storm included). The effect belongs to the tile: it shows exactly where the tile shows, so a bridge laid over a river covers it, and floors at other heights stay as they are',
       'Living so far: River pebbles, River stones, Sandy shallows, Deep water, Bath mosaic and Bog (water); Lava flow, Lava crust, Lava field and Lava veins (lava); Tall grass and Meadow (grass). Maps drawn before come alive when they are opened',

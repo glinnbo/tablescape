@@ -31,12 +31,12 @@ const WIND_RANGE = { dir: [0, 360], strength: [0, 3], lean: [0, 1], branches: [0
 function defaultWind() { return { auto: true, storm: false, dir: 30, strength: 1, lean: 0, branches: 1, rustle: 1 }; }
 // Beta 3.42, living tiles (water, lava and grass that move on an Oldschool map): on or off for this map, and how the
 // grass is: how many blades (amount), how long (length), how soon they show in a light wind (breeze). Each about 1.
-function defaultLive() { return { on: true, amount: 1, length: 1, breeze: 1 }; }
+function defaultLive() { return { on: true, amount: 1, length: 1, breeze: 1, glow: 1, speed: 1 }; } // (Beta 3.43: glow, speed)
 function cleanLive(v) {
   const out = defaultLive();
   if (!v || typeof v !== 'object') return out;
   out.on = v.on !== false;
-  for (const [k, [a, b]] of Object.entries({ amount: [0, 1.5], length: [0.3, 2.5], breeze: [0.3, 2.5] })) { const n = Number(v[k]); if (Number.isFinite(n)) out[k] = Math.round(Math.min(b, Math.max(a, n)) * 100) / 100; }
+  for (const [k, [a, b]] of Object.entries({ amount: [0, 1.5], length: [0.3, 2.5], breeze: [0.3, 2.5], glow: [0, 2], speed: [0.3, 2.5] })) { const n = Number(v[k]); if (Number.isFinite(n)) out[k] = Math.round(Math.min(b, Math.max(a, n)) * 100) / 100; }
   return out;
 }
 function cleanWind(w) {
@@ -61,6 +61,8 @@ function cleanTree(t, ref) {
 // the map's picture (renderer/oldschool.js) and the line-of-sight walls (os.result); the TV only shows that picture.
 const OS_EDGES = ['ledge', 'walls', 'rock', 'cliff', 'fade']; // (Beta 3.28: fade)
 const OS_SHAPES = ['rect', 'poly', 'round', 'path', 'brush'];
+const LIVE_FX = ['grass', 'water', 'lava', 'glow', 'pulse', 'ripple', 'none']; // (Beta 3.43)
+const GRASS_TINTS = ['green', 'dry', 'wheat', 'autumn'];
 // Beta 3.25: ground drawn into an Oldschool map (the Draw tool's Ground): the picture shows the pool, an effect of the
 // same kind (fx, key os) makes it move
 const GROUND_KINDS = ['water', 'lava', 'acid', 'darkness', 'swamp'];
@@ -84,9 +86,14 @@ const refOf = (t) => (t && (t.rel || t.path) ? { ...(t.rel ? { rel: String(t.rel
 function cleanOsItem(it) {
   if (!it || typeof it !== 'object') return null;
   const id = typeof it.id === 'string' && it.id ? it.id : newId('o');
-  const kind = ['area', 'cut', 'line', 'pillar', 'stairs', 'paint'].includes(it.kind) ? it.kind : null; // (Beta 3.29: no more ground)
+  const kind = ['area', 'cut', 'line', 'pillar', 'stairs', 'paint', 'live'].includes(it.kind) ? it.kind : null; // (Beta 3.29: no more ground; 3.43: live, an effect drawn over the floors)
   if (!kind) return null;
   const pts = ptsOf(it.pts);
+  if (kind === 'live') { // (Beta 3.43) grass, water, lava, glow, pulse or ripple over whatever floor lies there; 'none' takes effects away
+    const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'poly';
+    if (pts.length < (shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' ? 1 : 2) || !LIVE_FX.includes(it.fx)) return null;
+    return { id, kind, shape, pts, r: r3(osNum(it.r, 0.5, 0.05, 50)), fx: it.fx, ...(it.fx === 'grass' && GRASS_TINTS.includes(it.tint) ? { tint: it.tint } : {}), mixW: Math.round(osNum(it.mixW, 1.5, 0, 3) * 2) / 2 };
+  }
   if (kind === 'paint') { // (Beta 3.26) a floor painted into the floors under a brush
     if (pts.length < 1) return null;
     const m = mixOf(it);
@@ -1004,7 +1011,7 @@ function apply(map, type, p, media) {
     }
     case 'live.set': { // (Beta 3.42) living tiles: on or off, and how the grass is
       const before = JSON.stringify(map.live);
-      map.live = cleanLive({ ...map.live, ...pick(p, ['on', 'amount', 'length', 'breeze']) });
+      map.live = cleanLive({ ...map.live, ...pick(p, ['on', 'amount', 'length', 'breeze', 'glow', 'speed']) });
       if (JSON.stringify(map.live) === before) return { changed: null };
       return { changed: 'all' };
     }
@@ -1166,7 +1173,7 @@ function apply(map, type, p, media) {
       if (Array.isArray(p.doors) && p.doors.length) map.os.doors.push(...cleanOs({ doors: p.doors.slice(0, 200).map((d) => ({ ...d, id: newId('od') })) }).doors);
       const k = list[list.length - 1].kind;
       syncGround(map);
-      return { changed: 'all', selected: list[list.length - 1].id, label: k === 'cut' ? 'Erased' : k === 'line' ? 'Wall drawn' : k === 'pillar' ? 'Pillar placed' : k === 'stairs' ? 'Stairs placed' : k === 'ground' ? 'Ground drawn' : k === 'paint' ? 'Floor painted' : 'Floor drawn' };
+      return { changed: 'all', selected: list[list.length - 1].id, label: k === 'cut' ? 'Erased' : k === 'line' ? 'Wall drawn' : k === 'pillar' ? 'Pillar placed' : k === 'stairs' ? 'Stairs placed' : k === 'ground' ? 'Ground drawn' : k === 'paint' ? 'Floor painted' : k === 'live' ? (list[list.length - 1].fx === 'none' ? 'Effect erased' : `${list[list.length - 1].fx[0].toUpperCase()}${list[list.length - 1].fx.slice(1)} drawn`) : 'Floor drawn' };
     }
     case 'os.update': { // an area's tile, edge, material or level; any item's points
       if (!map.os) return { changed: null };
