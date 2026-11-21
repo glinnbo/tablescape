@@ -15,6 +15,10 @@
 // tokens sit on its bottom edge (toolbox.js); under them the picked portrait: Take out, Mirror, Hidden, and its looks
 // as two small upright sliders (Blood in four notches, Shade up to 100 %). Ctrl + wheel on the small TV sizes the
 // picked portrait (the TV gets it once the wheel rests).
+// Second Builder (second-conversation-sliders, Glinn 21 Nov 2026): the bar's sliders are smooth and upright side by side,
+// without words beside them: Height (its nudge up, 0 to 80 %), Size (30 to 400 %, finer near 100 %), Blood (0 to 100 %,
+// the stains come in at their own points) and Shade (0 to 100 %). While one moves only this small TV follows (it draws
+// the looks itself, from a smaller copy of the portrait); when let go the TV gets it once.
 'use strict';
 window.TalkStage = (() => {
   const { h, iconEl, clamp, Thumbs } = UI;
@@ -34,6 +38,20 @@ window.TalkStage = (() => {
     im.onerror = () => aspects.set(url, 0.8);
     im.src = url;
     return 0;
+  }
+  // a portrait at most 420 px high, for the small TV's looks (url → Promise<canvas | null>)
+  const smalls = new Map();
+  function small(url) {
+    if (!smalls.has(url)) {
+      smalls.set(url, new Promise((res) => {
+        const im = new Image();
+        im.onload = () => { const k = Math.min(1, 420 / Math.max(1, im.naturalWidth, im.naturalHeight)); const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(im.naturalWidth * k)); c.height = Math.max(1, Math.round(im.naturalHeight * k)); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c); };
+        im.onerror = () => { smalls.delete(url); res(null); };
+        im.src = url;
+      }));
+      while (smalls.size > 24) smalls.delete(smalls.keys().next().value);
+    }
+    return smalls.get(url);
   }
   const live = () => { for (const s of [...stages]) if (!s.stage.isConnected) stages.delete(s); return [...stages]; };
   // (second-conversation-rework: the small TV no longer shows the TV's picture, so it asks for none)
@@ -133,12 +151,38 @@ window.TalkStage = (() => {
       bgKey = key;
       bg.replaceChildren(...(m && m.bgPath ? [Thumbs.img(m.bgPath, m.bgKind || 'image', null, 'cs-bg-img')] : []));
     }
-    // a portrait's picture with its looks (portrait-fx.js composes them, as on the TV)
-    function setPicture(n, c) {
-      const key = PortraitFx.keyOf(c.url, c.fx, !c.alpha);
-      if (key === n.key) return;
-      n.key = key;
-      Promise.resolve(PortraitFx.url(c.url, c.fx, { opaque: !c.alpha, seed: c.path })).catch(() => c.url).then((src) => { if (n.key === key && n.img.getAttribute('src') !== src) n.img.src = src; });
+    // a portrait's picture with its looks, composed here once for both sides (portrait-fx.js, as on the TV) from a copy
+    // at most 420 px high: quick enough to follow a slider. Second Builder (second-conversation-sliders): a look slider
+    // that moves (fxNow) shows here before the TV has it; while a picture is being composed only the newest look waits.
+    let fxNow = null; // { path, fx, t, active }
+    const fxOf = (c) => (fxNow && fxNow.path === c.path && (fxNow.active || Date.now() - fxNow.t < 2500) ? { ...(c.fx || {}), ...fxNow.fx } : c.fx);
+    const pics = new Map(); // path → { key, busy, want, out (a canvas), outKey }
+    function picture(c) {
+      const fx = fxOf(c); const key = PortraitFx.keyOf(c.url, fx, !c.alpha);
+      let p = pics.get(c.path);
+      if (!p) { p = { key: null, busy: false, want: null, out: null, outKey: null }; pics.set(c.path, p); }
+      if (p.key === key) return p;
+      p.key = key;
+      if (p.busy) p.want = { c, fx, key }; else compose(p, c, fx, key);
+      return p;
+    }
+    async function compose(p, c, fx, key) {
+      p.busy = true;
+      let out = null;
+      try { const src = await small(c.url); out = src && PortraitFx.active(fx) ? await PortraitFx.compose(src, fx, { opaque: !c.alpha, seed: c.path }) : src; } catch { out = null; }
+      p.busy = false;
+      if (p.key === key && out) { p.out = out; p.outKey = key; paint(c.path); }
+      const w = p.want; p.want = null;
+      if (w && w.key === p.key && p.outKey !== p.key) compose(p, w.c, w.fx, w.key);
+    }
+    function paint(path) {
+      const p = pics.get(path); if (!p || !p.out) return;
+      for (const sd of sides) {
+        const n = sd.nodes.get(path); if (!n || n.k === p.outKey) continue;
+        n.k = p.outKey; n.cv.width = p.out.width; n.cv.height = p.out.height;
+        const g = n.cv.getContext('2d'); g.clearRect(0, 0, n.cv.width, n.cv.height); g.drawImage(p.out, 0, 0);
+        n.cv.classList.remove('blank');
+      }
     }
     const nodes = new Map(); // path → frame
     function redraw() {
@@ -180,15 +224,17 @@ window.TalkStage = (() => {
         sd.base.style.clipPath = clip.base;
         // the portraits
         for (const [p, n] of sd.nodes) if (!list.some((c) => c.path === p)) { n.wrap.remove(); sd.nodes.delete(p); }
+        for (const p of [...pics.keys()]) if (!list.some((c) => c.path === p)) pics.delete(p);
         list.forEach((c, i) => {
           let n = sd.nodes.get(c.path);
-          if (!n) { n = { wrap: h('div', { class: 'cs-npc' }), img: h('img', { alt: '' }), key: null }; n.wrap.append(n.img); sd.cast.append(n.wrap); sd.nodes.set(c.path, n); }
+          if (!n) { n = { wrap: h('div', { class: 'cs-npc' }), cv: h('canvas', { class: 'blank', 'aria-hidden': 'true' }), k: null }; n.wrap.append(n.cv); sd.cast.append(n.wrap); sd.nodes.set(c.path, n); }
           const b = L.items[i];
           Object.assign(n.wrap.style, { left: `${b.left}px`, width: `${b.width}px`, height: `${b.height}px`, bottom: `${H * 0.01}px`, translate: b.dx || b.dy ? `${b.dx}px ${b.dy}px` : '', zIndex: String(10 + i) });
           n.wrap.classList.toggle('back', !b.front);
           n.wrap.classList.toggle('opaque', !c.alpha);
-          n.img.style.transform = c.mirror ? 'scaleX(-1)' : '';
-          setPicture(n, c);
+          n.cv.style.transform = c.mirror ? 'scaleX(-1)' : '';
+          picture(c);
+          if (n.k !== (pics.get(c.path) || {}).outKey) paint(c.path);
         });
         // the speaker's name: on the band (every look but the parchment, which has its own plate in the band)
         const fb = L.items[list.length - 1];
@@ -314,51 +360,77 @@ window.TalkStage = (() => {
     // ---------- under the picture: the picked one (Beta 3.56: no count any more; the frame is green while it runs) ----------
     const bar = h('div', { class: 'cs-picked' });
     let barSig = '';
-    // a small upright slider with its notches written beside it (the one set lit); ticksOf (k) → [[text, lit], …] top first
-    function upright(label, cls, n, idx, ticksOf, set) {
-      const input = h('input', { type: 'range', min: '0', max: String(n - 1), step: '1', value: String(idx), 'aria-label': label });
-      const ticks = h('span', { class: 'cs-ticks' });
-      const paint = (k) => ticks.replaceChildren(...ticksOf(k).map(([t, lit]) => h('span', { class: lit ? 'on' : '' }, t)));
-      paint(idx);
-      let tm = 0;
-      input.addEventListener('input', () => { const k = Number(input.value); paint(k); clearTimeout(tm); tm = setTimeout(() => set(k), 60); });
-      return h('div', { class: `cs-vs ${cls}` }, h('span', { class: 'cs-vs-l' }, label), h('div', { class: 'cs-vs-b' }, input, ticks));
+    // Second Builder (second-conversation-sliders): a small upright slider, smooth (0 … 1 in a thousand steps), with its
+    // name on top and nothing beside it. live (u): while it moves, only this small TV; done (u): let go, the TV gets it.
+    // It is never drawn anew while held; get () → u sets it again whenever nobody holds it.
+    function upright(label, cls, tip, get, live, done) {
+      const input = h('input', { type: 'range', min: '0', max: '1000', step: '1', 'aria-label': label });
+      let held = false; let calm = 0;
+      const set = () => { if (!held && Date.now() > calm) { const v = String(Math.round(clamp(get(), 0, 1) * 1000)); if (input.value !== v) input.value = v; } };
+      input.addEventListener('pointerdown', () => { held = true; });
+      input.addEventListener('input', () => { held = true; live(Number(input.value) / 1000); });
+      input.addEventListener('change', () => { held = false; calm = Date.now() + 1600; done(Number(input.value) / 1000); }); // (let go; with the keys, each step)
+      input.addEventListener('pointerup', () => { if (held) setTimeout(() => { held = false; }, 0); });
+      set();
+      const el = h('div', { class: `cs-vs ${cls}`, 'data-tip': tip }, h('span', { class: 'cs-vs-l' }, label), input);
+      el.sync = set;
+      return el;
     }
+    // size: 30 to 400 %, finer near 100 % (the slider's middle part); height: its nudge up, 0 to 80 %
+    const SZ = { lo: 0.3, hi: 4 };
+    const sizeToU = (v) => Math.log(clamp(v, SZ.lo, SZ.hi) / SZ.lo) / Math.log(SZ.hi / SZ.lo);
+    const uToSize = (u) => Math.round(SZ.lo * Math.pow(SZ.hi / SZ.lo, clamp(u, 0, 1)) * 100) / 100;
+    const r2 = (v) => Math.round(v * 100) / 100;
+    const lvNow = () => (local && (act || Date.now() - local.t < 1500) ? local : null);
+    const scaleNow = (path) => { const lv = lvNow(); return lv && lv.scale && lv.scale.path === path ? lv.scale.v : sizeOf(path); };
+    const offNow = (path) => { const lv = lvNow(); return (lv && lv.off && lv.off.path === path ? lv.off.v : offOf(path)) || { x: 0, y: 0 }; };
+    const pickedC = () => { const list = cast(); const p = picked && list.some((x) => x.path === picked) ? picked : list.length ? list[list.length - 1].path : null; return p ? list.find((x) => x.path === p) : null; };
+    let sliders = [];
+    const syncSliders = () => { for (const x of sliders) x.sync(); };
     function drawBar() {
       const list = cast();
-      const on = list.length > 0;
       stage.classList.toggle('live', !!talk());
       endBtn.hidden = !talk();
-      const path = picked && list.some((c) => c.path === picked) ? picked : on ? list[list.length - 1].path : null;
-      const c = path ? list.find((x) => x.path === path) : null;
+      const c = pickedC();
       const raw = c ? (o.fx.of(c.path) || {}) : {};
       const mirror = c && !!((S().settings && S().settings.portraitMirror) || {})[c.path];
       const moved = c && (Math.abs(sizeOf(c.path) - 1) > 0.001 || !!offOf(c.path));
-      const sig = JSON.stringify([c && c.path, c && list[list.length - 1].path === c.path, raw, mirror, moved, c && sizeOf(c.path)]);
-      if (sig === barSig) return;
+      // (the bar is built anew only when what it shows changes, not for the sliders' values: they keep moving in your hand)
+      const sig = JSON.stringify([c && c.path, c && c.name, c && list[list.length - 1].path === c.path, !!raw.hidden, mirror, moved]);
+      if (sig === barSig) { syncSliders(); return; }
       barSig = sig;
       bar.hidden = !c;
-      if (!c) { bar.replaceChildren(); return; }
-      const front = list[list.length - 1].path === c.path;
-      const n = PortraitFx.norm(raw);
-      const sz = sizeOf(c.path);
-      // Blood: four notches (Clean, Light, Heavy, Soaked); Shade: 0 to 100 % in steps of 5 (the head black at the top)
-      const blood = upright('Blood', 'cs-blood', 4, PortraitFx.bloodStep(raw), (k) => ['Soaked', 'Heavy', 'Light', 'Clean'].map((t, i) => [t, 3 - i === k]),
-        (k) => { const v = PortraitFx.BLOOD_STEPS[k]; o.fx.send(c.path, { blood: v, bloodOn: v > 0 }); });
-      const shade = upright('Shade', 'cs-shade', 21, Math.round(n.shade * 20), (k) => [['100 %', k === 20], [k > 0 && k < 20 ? `${k * 5} %` : '', true], ['0', k === 0]],
-        (k) => o.fx.send(c.path, { shade: k / 20, shadeOn: k > 0 }));
+      if (!c) { bar.replaceChildren(); sliders = []; return; }
+      const path = c.path;
+      const front = list[list.length - 1].path === path;
+      const fxPatch = (patch, active) => { fxNow = { path, fx: { ...(fxNow && fxNow.path === path ? fxNow.fx : {}), ...patch }, t: Date.now(), active }; redraw(); };
+      const cur = () => cast().find((x) => x.path === path) || c;
+      const height = upright('Height', 'cs-height', 'Height: raise it (it never sinks below its band)', () => offNow(path).y / 0.8,
+        (u) => { local = { off: { path, v: { x: offNow(path).x, y: r2(u * 0.8) } }, t: Date.now() }; redraw(); },
+        (u) => { const v = { x: offNow(path).x, y: r2(u * 0.8) }; local = { off: { path, v }, t: Date.now() }; o.cmd('talk.offset', { path, x: v.x, y: v.y }); redraw(); });
+      const size = upright('Size', 'cs-size-s', 'Size: 30 to 400 % (Ctrl + wheel on the small TV too)', () => sizeToU(scaleNow(path)),
+        (u) => { local = { scale: { path, v: uToSize(u) }, t: Date.now() }; wheelAt = Date.now(); redraw(); },
+        (u) => { const v = uToSize(u); local = { scale: { path, v }, t: Date.now() }; wheelAt = Date.now(); o.cmd('talk.size', { path, scale: v }); redraw(); });
+      const blood = upright('Blood', 'cs-blood', 'Blood: from a few drops to soaked', () => PortraitFx.norm(fxOf(cur())).blood,
+        (u) => fxPatch({ blood: r2(u), bloodOn: u > 0.005 }, true),
+        (u) => { fxPatch({ blood: r2(u), bloodOn: u > 0.005 }, false); o.fx.send(path, { blood: r2(u), bloodOn: u > 0.005 }); });
+      const shade = upright('Shade', 'cs-shade', 'Shade: from the top down; at the top the head is black', () => PortraitFx.norm(fxOf(cur())).shade,
+        (u) => fxPatch({ shade: r2(u), shadeOn: u > 0.005 }, true),
+        (u) => { fxPatch({ shade: r2(u), shadeOn: u > 0.005 }, false); o.fx.send(path, { shade: r2(u), shadeOn: u > 0.005 }); });
+      sliders = [height, size, blood, shade];
       bar.replaceChildren(
         h('div', { class: 'cs-bar-l' },
-          h('b', { class: 'ellipsis' }, c.name, front ? h('small', {}, ' speaking') : null, Math.abs(sz - 1) > 0.001 ? h('small', { class: 'cs-pct' }, ` ${Math.round(sz * 100)} %`) : null),
+          h('b', { class: 'ellipsis' }, c.name, front ? h('small', {}, ' speaking') : null),
           h('div', { class: 'cs-row' },
-            h('button', { class: 'btn small danger', onclick: () => takeOut(c.path) }, iconEl('x'), 'Take out'),
-            h('button', { class: `btn small ${mirror ? 'on' : ''}`, 'data-tip': 'Mirror (face the other way)', onclick: () => o.cmd('talk.mirror', { path: c.path }) }, iconEl('flip-horizontal'), 'Mirror'),
-            moved ? h('button', { class: 'icon-btn', 'aria-label': 'Back to 100 %, in its place', 'data-tip': 'Back to 100 %, in its place', onclick: () => { o.cmd('talk.size', { path: c.path, scale: 1 }); o.cmd('talk.offset', { path: c.path, x: 0, y: 0 }); } }, iconEl('arrow-back-up')) : null),
+            h('button', { class: 'btn small danger', onclick: () => takeOut(path) }, iconEl('x'), 'Take out'),
+            h('button', { class: `btn small ${mirror ? 'on' : ''}`, 'data-tip': 'Mirror (face the other way)', onclick: () => o.cmd('talk.mirror', { path }) }, iconEl('flip-horizontal'), 'Mirror'),
+            moved ? h('button', { class: 'icon-btn', 'aria-label': 'Back to 100 %, in its place', 'data-tip': 'Back to 100 %, in its place', onclick: () => { o.cmd('talk.size', { path, scale: 1 }); o.cmd('talk.offset', { path, x: 0, y: 0 }); } }, iconEl('arrow-back-up')) : null),
           h('div', { class: 'cs-row' },
-            h('button', { class: `cs-look ${raw.hidden ? 'on' : ''}`, 'aria-pressed': String(!!raw.hidden), 'data-tip': 'Hidden: a black figure; off, it fades in', onclick: () => o.fx.send(c.path, { hidden: !raw.hidden }) }, iconEl('eye-off'), 'Hidden'))),
-        h('div', { class: 'cs-bar-r' }, blood, shade));
+            h('button', { class: `cs-look ${raw.hidden ? 'on' : ''}`, 'aria-pressed': String(!!raw.hidden), 'data-tip': 'Hidden: a black figure; off, it fades in', onclick: () => o.fx.send(path, { hidden: !raw.hidden }) }, iconEl('eye-off'), 'Hidden'))),
+        h('div', { class: 'cs-bar-r' }, ...sliders));
     }
     o.bind(() => { redraw(); drawBar(); });
+    stage.addEventListener('pointerup', () => setTimeout(syncSliders, 0)); // (Second Builder (second-conversation-sliders): after a drag on the small TV)
     let rT = 0;
     if (window.ResizeObserver) new ResizeObserver(() => { if (!rT) rT = requestAnimationFrame(() => { rT = 0; redraw(); }); }).observe(stage);
     requestAnimationFrame(() => { const fp = stage.closest('.fp'); applySize(fp); corner(fp); redraw(); });

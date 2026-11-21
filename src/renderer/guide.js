@@ -25,6 +25,11 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.59', [
+      'Conversation: the sliders under the small TV are smooth: the small TV follows at once, the TV once you let go',
+      'Conversation: new Height and Size sliders for the picked portrait, beside Blood and Shade; Blood is free from 0 to 100 %, and the notch names and percentages are gone',
+      'Conversation: Library is as tall as the chips beside it',
+    ]],
     ['Beta 3.58', [
       'Effects → Paint → Grass: living blades on every map, picture maps too. They wave in the map\'s wind, in the colour of the map under them or one you pick (without a graphics card: the waves of light as before)',
       'Grass has one card per map, in Paint and in Draw: Amount, Length, the new Thickness (50 to 300 %), Between gusts, Colour variety, Grows on',

@@ -3248,7 +3248,7 @@ function handle(type, p = {}) {
     case 'talk.size': { // Prototype 12: one portrait bigger or smaller than the others (Second Builder (second-conversation-rework): 30 % to 400 %, it may run off the TV; was 50 to 200 %)
       if (!p.path) return { ok: false };
       settings.portraitSize = { ...(settings.portraitSize || {}) };
-      const v = Math.round(Math.min(4, Math.max(0.3, Number(p.scale) || 1)) * 20) / 20;
+      const v = Math.round(Math.min(4, Math.max(0.3, Number(p.scale) || 1)) * 100) / 100; // (Second Builder (second-conversation-sliders): to the percent, as the Size slider sets it; was steps of 5 %)
       if (Math.abs(v - 1) < 0.001) delete settings.portraitSize[p.path]; else settings.portraitSize[p.path] = v;
       clearTimeout(sizeSaveT); sizeSaveT = setTimeout(saveSettings, 600); // (the slider sends many; save once it rests)
       broadcast();

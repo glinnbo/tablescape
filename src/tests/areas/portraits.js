@@ -329,7 +329,9 @@ module.exports = (area) => {
     }
   });
 
-  area.quick('Beta 3.56: Blood in four notches and Shade up to 100 % (the head black), Hidden, as sliders under the small TV; Ctrl + wheel sizes the picked portrait, the TV once the wheel rests', async (t) => {
+  // Second Builder (second-conversation-sliders): four smooth upright sliders (Height, Size, Blood, Shade), no words
+  // beside them; while one moves only the small TV follows (the bar is not drawn anew under your hand), let go: the TV
+  area.quick('the bar: Height, Size, Blood and Shade as smooth upright sliders without words; the TV gets each when let go; Ctrl + wheel sizes too', async (t) => {
     const p = faces(t)[0];
     const W = '.fp[data-id="talk"]';
     if (t.state.talk) await t.cmd('talk.off', {});
@@ -338,15 +340,23 @@ module.exports = (area) => {
       await t.cmd('talk.toggle', { path: p.path });
       await t.until(() => t.count(`${W} .cs-blood input`).then((n) => n === 1), 4000, 'the bar with its sliders');
       const fx = () => (t.settings.portraitFx || {})[p.path] || {};
-      const slide = (cls, v) => t.g(`(() => { const i = document.querySelector('${W} ${cls} input'); i.value = ${v}; i.dispatchEvent(new Event('input', { bubbles: true })); return [i.min, i.max]; })()`);
-      t.eq(await t.g(`[...document.querySelectorAll('${W} .cs-blood .cs-ticks span')].map((x) => x.textContent)`), ['Soaked', 'Heavy', 'Light', 'Clean'], 'Blood: four notches');
-      t.eq(await slide('.cs-blood', 2), ['0', '3'], 'upright, 0 … 3');
-      await t.until(() => fx().blood === 0.7 && fx().bloodOn === true, 3000, 'Heavy: 70 %');
-      await t.until(() => t.count(`${W} .cs-blood input`).then((n) => n === 1), 3000, 'the bar again');
-      await slide('.cs-blood', 0);
-      await t.until(() => fx().bloodOn === false, 3000, 'Clean: no blood');
-      await t.until(() => t.count(`${W} .cs-shade input`).then((n) => n === 1), 3000, 'the bar again');
-      t.eq(await slide('.cs-shade', 20), ['0', '20'], 'Shade: 0 … 100 % in steps of 5');
+      t.eq(await t.g(`[...document.querySelectorAll('${W} .cs-picked .cs-vs-l')].map((x) => x.textContent)`), ['Height', 'Size', 'Blood', 'Shade'], 'four sliders, in this order');
+      t.eq(await t.g(`[...document.querySelectorAll('${W} .cs-picked input[type=range]')].map((i) => [i.min, i.max, i.step])`), [['0', '1000', '1'], ['0', '1000', '1'], ['0', '1000', '1'], ['0', '1000', '1']], 'smooth: a thousand steps each');
+      const words = await t.g(`document.querySelector('${W} .cs-picked').textContent`);
+      t.ok(!/%|Soaked|Heavy|Light|Clean/.test(words) && !(await t.count(`${W} .cs-ticks`)), 'no notch names, no percent', words);
+      // while it moves: the same slider stays in the hand, the TV waits; let go: the TV has it
+      const move = (cls, v) => t.g(`(() => { const i = document.querySelector('${W} ${cls} input'); window.__in = i; i.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); i.value = ${v}; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      const letGo = (cls) => t.g(`(() => { const i = document.querySelector('${W} ${cls} input'); i.dispatchEvent(new Event('change', { bubbles: true })); i.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); return true; })()`);
+      const same = (cls) => t.g(`document.querySelector('${W} ${cls} input') === window.__in`);
+      await move('.cs-blood', 650);
+      await t.sleep(500);
+      t.ok(!fx().bloodOn, 'Blood moving: the TV not yet');
+      t.ok(await same('.cs-blood'), 'and the slider is still the one in the hand');
+      const red = await t.until(() => t.g(`(() => { const cv = document.querySelector('${W} .cs-layer.cs-cast.near .cs-npc canvas'); if (!cv || cv.classList.contains('blank')) return 0; const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let n = 0; for (let k = 0; k < d.length; k += 16) if (d[k + 3] > 200 && d[k] > 1.7 * d[k + 1] && d[k] > 1.7 * d[k + 2] && d[k] > 60) n++; return n; })()`), 4000, 'the blood on the small TV');
+      t.ok(red > 10, 'the small TV shows the blood already', red);
+      await letGo('.cs-blood');
+      await t.until(() => fx().blood === 0.65 && fx().bloodOn === true, 3000, 'let go: 65 % on the TV');
+      await move('.cs-shade', 1000); await letGo('.cs-shade');
       await t.until(() => fx().shade === 1 && fx().shadeOn === true, 3000, 'Shade 100 %');
       // at 100 % the head is black: the top of the figure has no light left
       const top = await t.g(`(async () => { const im = await new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = ${JSON.stringify(p.url)}; });
@@ -354,19 +364,56 @@ module.exports = (area) => {
         let y0 = -1; for (let y = 0; y < c.height && y0 < 0; y++) for (let x = 0; x < c.width; x += 2) if (d[(y * c.width + x) * 4 + 3] > 200) { y0 = y; break; }
         let max = 0; const y1 = y0 + Math.round(c.height * 0.12); for (let y = y0; y < y1; y++) for (let x = 0; x < c.width; x++) { const k = (y * c.width + x) * 4; if (d[k + 3] > 200) max = Math.max(max, d[k], d[k + 1], d[k + 2]); } return max; })()`);
       t.ok(top <= 6, 'the head black at 100 %', top);
+      // Height: raised half way (40 %); Size: 200 % (finer near 100 %)
+      const frameBottom = () => t.g(`document.querySelector('${W} .cs-frame').getBoundingClientRect().bottom`);
+      const b0 = await frameBottom();
+      await move('.cs-height', 500);
+      await t.sleep(300);
+      t.ok((await frameBottom()) < b0 - 10, 'Height moving: the small TV raises it');
+      t.ok(!((t.settings.portraitOffset || {})[p.path]), 'the TV not yet');
+      await letGo('.cs-height');
+      await t.until(() => ((t.settings.portraitOffset || {})[p.path] || {}).y === 0.4, 3000, 'let go: raised 40 % on the TV');
+      const u2 = Math.round((Math.log(2 / 0.3) / Math.log(4 / 0.3)) * 1000);
+      await move('.cs-size-s', u2);
+      await t.until(async () => /200 %/.test(await t.g(`(document.querySelector('${W} .cs-frame .cs-size:not([hidden])') || {}).textContent || ''`)), 2000, '200 % shown on the small TV');
+      t.eq(((t.settings.portraitSize || {})[p.path]) || 1, 1, 'the TV not yet');
+      await letGo('.cs-size-s');
+      await t.until(() => Math.abs(((t.settings.portraitSize || {})[p.path] || 1) - 2) < 0.011, 3000, 'let go: 200 % on the TV');
+      await t.cmd('talk.size', { path: p.path, scale: 1 });
+      await t.cmd('talk.offset', { path: p.path, x: 0, y: 0 });
       await t.clickText(`${W} .cs-picked .cs-look`, 'Hidden');
       await t.until(() => fx().hidden === true, 3000, 'Hidden');
-      // Ctrl + wheel: the small TV at once, the TV once the wheel rests
+      // Ctrl + wheel: the small TV at once, the TV once the wheel rests; the Size slider follows
+      await t.sleep(1700);
       const sz0 = ((t.settings.portraitSize || {})[p.path]) || 1;
       await t.g(`(() => { const st = document.querySelector('${W} .cs-stage'); const r = st.getBoundingClientRect(); for (let k = 0; k < 3; k++) st.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); })()`);
       await t.until(async () => /115 %/.test(await t.g(`(document.querySelector('${W} .cs-frame .cs-size:not([hidden])') || {}).textContent || ''`)), 2000, 'the size shown on the small TV');
       t.eq(((t.settings.portraitSize || {})[p.path]) || 1, sz0, 'the TV not yet');
       await t.until(() => Math.abs((((t.settings.portraitSize || {})[p.path]) || 1) - (sz0 + 0.15)) < 0.001, 3000, 'once it rests: 115 % on the TV');
+      const uWant = Math.round((Math.log(1.15 / 0.3) / Math.log(4 / 0.3)) * 1000);
+      await t.until(async () => Math.abs(Number(await t.g(`document.querySelector('${W} .cs-size-s input').value`)) - uWant) <= 2, 3000, 'the Size slider follows');
     } finally {
       await t.cmd('talk.off', {});
       await t.cmd('talk.fx', { path: p.path, reset: true });
       await t.cmd('talk.size', { path: p.path, scale: 1 });
+      await t.cmd('talk.offset', { path: p.path, x: 0, y: 0 });
     }
+  });
+
+  area.quick('Library is as tall as the chips beside it, also when they take several lines', async (t) => {
+    const W = '.fp[data-id="talk"]';
+    if (!(await t.g(`!!document.querySelector('${W}')`))) { t.gm().webContents.focus(); await t.key('O'); }
+    await t.until(() => t.count(`${W} .cs-chip`).then((n) => n >= 1), 4000, 'the chips');
+    const m = () => t.g(`(() => { const l = document.querySelector('${W} .cs-chips .cs-lib').getBoundingClientRect(); const c = document.querySelector('${W} .cs-chip-list').getBoundingClientRect(); return { lib: [Math.round(l.top), Math.round(l.bottom)], chips: [Math.round(c.top), Math.round(c.bottom)], right: Math.round(l.right), box: Math.round(document.querySelector('${W} .cs-chips').getBoundingClientRect().right) }; })()`);
+    const one = await m();
+    t.eq(one.lib, one.chips, 'one line of chips: as tall', one);
+    t.ok(Math.abs(one.right - one.box) <= 1, 'on the right', one);
+    // (folders as chips: many of them wrap onto more lines)
+    await t.g(`(() => { const l = document.querySelector('${W} .cs-chip-list'); for (let k = 0; k < 14; k++) { const b = document.createElement('button'); b.className = 'cs-chip probe'; b.textContent = 'Folder ' + k; l.append(b); } return true; })()`);
+    const many = await m();
+    t.ok(many.chips[1] - many.chips[0] > 50, 'the chips take several lines', many);
+    t.eq(many.lib, many.chips, 'Library as tall as all of them', many);
+    await t.g(`document.querySelectorAll('${W} .cs-chip.probe').forEach((b) => b.remove())`);
   });
 
   area.quick('Beta 3.56: chips and Library over one row of portraits that does not wrap', async (t) => {

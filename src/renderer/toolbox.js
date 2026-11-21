@@ -142,7 +142,7 @@ const Toolbox = (() => {
         'The party\'s tokens sit on the small TV\'s edge: a click brings in their cut-out (set it on the character card). A greyed one has none yet.',
         'On the small TV: click a portrait and it speaks. Drag the one speaking sideways to move them all; drag one up or down to raise it; pull a top corner or Ctrl + wheel to size it. The TV follows when you let go.',
         '✕ on the small TV, the big ✕ on its thumbnail, Take out or Delete: it leaves. A click never takes anyone out. Five stand there at most.',
-        'Under the small TV, for the picked portrait: Take out, Mirror, Hidden, and two sliders: Blood in four steps, Shade up to 100 % (the head black).',
+        'Under the small TV, for the picked portrait: Take out, Mirror, Hidden, and four sliders: Height, Size, Blood and Shade (at the top the head is black). The TV follows when you let go.',
         'The chips pick what the row shows: this chapter\'s Ready portraits, all of them, or one of your Portraits folders. The wheel scrolls the row. Library has them all.',
         'The small TV shows the map behind blurred, the bands and the portraits: no effects, no weather.',
         '⚙: how big they stand, the blur behind them, and the speaker\'s name on the band. The band\'s look: Options → Looks.',
@@ -216,7 +216,7 @@ const Toolbox = (() => {
         const sig = JSON.stringify([opts, cur, list.map((x) => [x.path, x.missing]), t && t.cast.map((x) => x.path), (S().settings && S().settings.portraitSize) || {}, (S().settings && S().settings.portraitOffset) || {}, (S().settings && S().settings.portraitFx) || {}]);
         if (strip.dataset.sig === sig) return;
         strip.dataset.sig = sig;
-        chips.replaceChildren(...opts.map(([v, label]) => h('button', { class: `cs-chip ${v === cur ? 'on' : ''}`, dataset: { v }, 'data-tip': v === 'ready' ? `Ready for ${ch.name}` : v === 'all' ? 'All your portraits' : `The folder ${label}`, onclick: () => { setChip(v); strip.dataset.sig = ''; ctx.refreshPop(); } }, label)), libBtn);
+        chips.replaceChildren(h('div', { class: 'cs-chip-list' }, ...opts.map(([v, label]) => h('button', { class: `cs-chip ${v === cur ? 'on' : ''}`, dataset: { v }, 'data-tip': v === 'ready' ? `Ready for ${ch.name}` : v === 'all' ? 'All your portraits' : `The folder ${label}`, onclick: () => { setChip(v); strip.dataset.sig = ''; ctx.refreshPop(); } }, label))), libBtn); // (Second Builder (second-conversation-sliders): the chips in their own block, Library as tall as it)
         row.replaceChildren();
         row.classList.toggle('ready-row', cur === 'ready');
         if (!list.length) { row.append(c().hint(cur === 'ready' ? 'Nothing ready for this chapter: tick portraits in Library.' : 'No portraits yet: Library → From this PC.')); return; }
