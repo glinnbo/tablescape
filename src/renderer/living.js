@@ -16,6 +16,9 @@
  *          the more opaque the more it leans. Its colour is the floor's under its root, or the colour picked for it
  * with the map's wind, the same the living trees are in (trees.js). No graphics card: nothing is drawn, the map shows
  * as it is.
+ * Beta 3.58 (Glinn): grass painted in Effects → Paint grows the same blades on any map, a picture map too. paint()
+ * draws its strokes into a living map of the same kind here, in the window (no bake); on an Oldschool map over the
+ * baked one.
  */
 'use strict';
 const Living = (() => {
@@ -201,6 +204,58 @@ void main() {
   const ATTRS = { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' };
   const supported = () => typeof Trees === 'object' && Trees.supported();
   const image = (url) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(`picture ${url}`)); i.src = url; });
+  const sizeOf = (x) => [x.naturalWidth || x.videoWidth || x.width || 0, x.naturalHeight || x.videoHeight || x.height || 0]; // (a picture, a video or a canvas)
+  // a picture or video on the page, once it can be drawn
+  const ready = (el) => new Promise((res, rej) => {
+    if (!el) { rej(new Error('no map picture')); return; }
+    const ok = () => (el.tagName === 'VIDEO' ? el.readyState >= 2 && el.videoWidth > 0 : el.complete && el.naturalWidth > 0);
+    if (ok()) { res(el); return; }
+    const done = () => { clearTimeout(t); el.removeEventListener('load', done); el.removeEventListener('loadeddata', done); if (ok()) res(el); else rej(new Error('the map picture did not load')); };
+    const t = setTimeout(done, 10000);
+    el.addEventListener('load', done); el.addEventListener('loadeddata', done);
+  });
+  const plane = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return { c, g: c.getContext('2d', { willReadFrequently: true }) }; };
+  // Beta 3.58: the grass areas painted in Effects → Paint as a living map (a b over c d, as oldschool.js bakes it):
+  // a = blue where the grass stands (its edge soft, so the blades thin out and get shorter there), d = the colour picked
+  // for an area (black: the map's own colour under it). Every area is drawn on its own first, so that its Erase strokes
+  // take away only its own grass.
+  //   o: { pic (the map picture: a url, or an img or video on the page), baked (an Oldschool map's living map: a url,
+  //        or null), regions [{ strokes, color }], x, y, w, h (where the picture lies, map units), g (a square), P }
+  // → a promise of { pic, mask, P } (P: the picture's dots a square)
+  async function paint(o) {
+    if (!(typeof FX === 'object' && FX.drawStrokes)) throw new Error('no painted strokes');
+    let pic; let P = o.P; let W; let H; let base = null;
+    if (o.baked) {
+      [pic, base] = await Promise.all([typeof o.pic === 'string' ? image(o.pic) : ready(o.pic), image(o.baked)]);
+      W = base.naturalWidth >> 1; H = base.naturalHeight >> 1;
+    } else {
+      const src = typeof o.pic === 'string' ? await image(o.pic) : await ready(o.pic);
+      const sqx = o.w / o.g; const sqy = o.h / o.g;
+      const Pm = Math.max(4, Math.min(24, 2048 / Math.max(1, sqx), 2048 / Math.max(1, sqy))); // (dots a square: enough for blades, at most 2048 across)
+      W = Math.max(8, Math.round(sqx * Pm)); H = Math.max(8, Math.round(sqy * Pm));
+      const small = plane(W, H); small.g.drawImage(src, 0, 0, W, H); pic = small.c; P = W / sqx;
+    }
+    if (W < 1 || H < 1) throw new Error('the living map is empty');
+    const M = plane(W * 2, H * 2); M.g.fillStyle = '#000'; M.g.fillRect(0, 0, W * 2, H * 2);
+    if (base) M.g.drawImage(base, 0, 0);
+    const k = W / o.w; const soft = 0.35 * o.g; const one = plane(W, H);
+    const draw = (f, col, blur) => {
+      const g = one.g;
+      g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.filter = 'none'; g.clearRect(0, 0, W, H);
+      g.filter = blur ? `blur(${Math.max(0.5, soft * k).toFixed(1)}px)` : 'none';
+      g.setTransform(k, 0, 0, k, -o.x * k, -o.y * k);
+      g.fillStyle = col; g.strokeStyle = col; g.lineCap = 'round'; g.lineJoin = 'round';
+      FX.drawStrokes(g, f.strokes || [], blur ? -soft * 0.5 : 0);
+      g.filter = 'none'; g.setTransform(1, 0, 0, 1, 0, 0);
+    };
+    for (const f of o.regions || []) {
+      draw(f, '#0000ff', true); M.g.globalCompositeOperation = 'lighter'; M.g.drawImage(one.c, 0, 0);
+      draw(f, /^#[0-9a-f]{6}$/i.test(String(f.color || '')) ? f.color : '#000000', false); M.g.globalCompositeOperation = 'source-over'; M.g.drawImage(one.c, W, H);
+    }
+    M.g.globalCompositeOperation = 'source-over';
+    one.c.width = one.c.height = 0;
+    return { pic, mask: M.c, P };
+  }
 
   class Layer {
     constructor(el, onChange) {
@@ -225,16 +280,21 @@ void main() {
       this.tex = [null, null, null, null, null]; this.blades = null; this.ok = true; this.growKey = '';
     }
     // what to show: { key, pic, mask (urls), x, y, w, h (where the picture lies, map units), g (a square, map units), P (the picture's dots a square) }
+    // (Beta 3.58) or { key, make, x, y, w, h, g, P }: make() gives a promise of { pic, mask, P } (paint(): painted grass)
     source(s) {
       this.wantSrc = s;
       if (!s) { this.want = ''; this.src = null; this.state = 'off'; return; }
-      if (s.key === this.want) { if (this.src) Object.assign(this.src, { x: s.x, y: s.y, w: s.w, h: s.h, g: s.g, P: s.P }); return; }
+      if (s.key === this.want) { if (this.src && !s.make) Object.assign(this.src, { x: s.x, y: s.y, w: s.w, h: s.h, g: s.g, P: s.P }); return; }
       this.want = s.key; this.state = 'loading';
-      Promise.all([image(s.pic), image(s.mask)]).then(([pic, mask]) => {
+      const got = s.make ? s.make() : Promise.all([image(s.pic), image(s.mask)]).then(([pic, mask]) => ({ pic, mask, P: s.P }));
+      got.then(({ pic, mask, P }) => {
         if (this.dead || this.want !== s.key || !this.ok) return;
-        try { this.load(s, pic, mask); this.state = 'ready'; } catch (err) { console.error(err); this.src = null; this.state = `failed: ${err && err.message}`; }
+        try { this.load({ ...s, P }, pic, mask); this.state = 'ready'; } catch (err) { console.error(err); this.src = null; this.state = `failed: ${err && err.message}`; }
         this.onChange();
-      }, (err) => { console.error(err); this.state = `failed: ${err && err.message}`; });
+      }, (err) => {
+        console.error(err); this.state = `failed: ${err && err.message}`;
+        if (s.make) setTimeout(() => { if (this.want === s.key) this.want = ''; }, 3000); // (a video not playing yet: try again)
+      });
     }
     load(s, pic, mask) {
       const gl = this.gl;
@@ -249,7 +309,8 @@ void main() {
         return t;
       };
       // the living map's four parts (a b over c d), each a picture of its own (so that none bleeds into its neighbour)
-      const W = mask.naturalWidth >> 1; const H = mask.naturalHeight >> 1;
+      const [mw, mh] = sizeOf(mask); const [pw, ph] = sizeOf(pic);
+      const W = mw >> 1; const H = mh >> 1;
       if (W < 1 || H < 1) throw new Error('the living map is empty');
       const part = (n) => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(mask, (n % 2) * W, Math.floor(n / 2) * H, W, H, 0, 0, W, H); return { c, g }; };
       const A = part(0); const B = part(1); const C = part(2); const D = part(3);
@@ -260,9 +321,9 @@ void main() {
       for (const x of [A, B, C, D]) x.c.width = x.c.height = 0;
       const kinds = { water: false, lava: false, grass: false, glow: false };
       for (let i = 0; i < md.length; i += 4 * 7) { if (md[i] > 40) kinds.water = true; if (md[i + 1] > 40) kinds.lava = true; if (md[i + 2] > 40) kinds.grass = true; if (bd[i] > 40) kinds.glow = true; }
-      const Pm = (s.P * W) / pic.naturalWidth; // the map's dots a square
+      const Pm = (s.P * W) / pw; // the map's dots a square
       this.kinds = kinds;
-      this.src = { ...s, pw: pic.naturalWidth, ph: pic.naturalHeight, Pm };
+      this.src = { ...s, pw, ph, Pm };
       this.data = kinds.grass ? { W, H, md, pd, td, Pm } : null;
       this.growKey = ''; this.grow(this.lastGrass || {});
     }
@@ -391,7 +452,7 @@ void main() {
         shown = Math.round(this.blades.n * (num(G, 'amount', 1, 0, 1.5) / 1.5) * (few ? 0.5 : 1));
         gl.uniform4f(B.u('uMat'), k, 0, e, f); gl.uniform2f(B.u('uView'), this.el.width, this.el.height); gl.uniform2f(B.u('uWind'), Math.cos(a), Math.sin(a));
         gl.uniform1f(B.u('uG'), s.g); gl.uniform1f(B.u('uT'), this.time); gl.uniform1f(B.u('uGustT'), this.gustT); gl.uniform1f(B.u('uWindS'), wind.strength || 0);
-        gl.uniform1f(B.u('uLen'), 0.3 * s.g * num(G, 'length', 1, 0.2, 3)); gl.uniform1f(B.u('uWide'), 0.013 * s.g);
+        gl.uniform1f(B.u('uLen'), 0.3 * s.g * num(G, 'length', 1, 0.2, 3)); gl.uniform1f(B.u('uWide'), 0.013 * s.g * num(G, 'thick', 1, 0.5, 3)); // (Beta 3.58: Thickness)
         gl.uniform1f(B.u('uCalm'), num(G, 'calm', 0.35, 0, 1)); gl.uniform1f(B.u('uVary'), num(G, 'vary', 0.3, 0, 1)); gl.uniform1f(B.u('uMaxA'), 0.8); gl.uniform1f(B.u('uDot'), 1 / k);
         if (shown) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, (SEG + 1) * 2, shown);
       }
@@ -410,5 +471,5 @@ void main() {
   }
   // null where it cannot be drawn (the map then shows as it is)
   function layer(el, onChange) { if (!supported()) return null; try { return new Layer(el, onChange); } catch (err) { console.error(err); return null; } }
-  return { supported, layer };
+  return { supported, layer, paint };
 })();

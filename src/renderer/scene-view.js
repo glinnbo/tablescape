@@ -1983,7 +1983,7 @@ class SceneView {
     if (FX.weatherOn(m.weather)) return true;
     if (this.strikeAt && Date.now() - this.strikeAt < 1200) return true;
     if (m.spells.some((s) => this.shown(s)) || this.ghost) return true;
-    if (m.fx.some((f) => f.kind !== 'light' && f.preset !== 'roof' && this.shown(f))) return true; // (Beta 3.1: a Roof alone doesn't move)
+    if (m.fx.some((f) => f.kind !== 'light' && f.preset !== 'roof' && this.shown(f) && !(f.kind === 'region' && f.preset === 'grass' && this.bladesOn()))) return true; // (Beta 3.1: a Roof alone doesn't move; Beta 3.58: blades move in the trees' loop)
     if (m.light.from && Date.now() - m.light.from.t0 < m.light.from.s * 1000 + 400) return true; // the light is changing
     return m.light.darkness > 0 && m.fx.some((f) => f.kind === 'light' && f.lit !== false && (f.flicker || f.wave));
   }
@@ -2053,7 +2053,29 @@ class SceneView {
   // the grid, the assets and the tokens, drawn in the trees' loop and in their wind.
   livingOn() {
     const m = this.map; const b = m && m.bg;
-    return !!(b && b.os && b.live && b.live.url && !this.peek && !(m.live && m.live.on === false) && typeof Living === 'object' && Living.supported() && !this.bgTurn());
+    if (!b || this.peek || this.livingDead || (m.live && m.live.on === false) || typeof Living !== 'object' || !Living.supported() || this.bgTurn()) return false;
+    if (b.os && b.live && b.live.url) return true;
+    return (b.os || b.kind === 'image' || b.kind === 'video') && this.grassAreas().length > 0; // (Beta 3.58: grass painted in Effects → Paint, on any map)
+  }
+  // Beta 3.58 (Glinn): the grass areas painted in Effects → Paint; with a graphics card they grow living blades (the
+  // ones of Oldschool maps) instead of the waves of light FX draws for them
+  grassAreas() { const m = this.map; return m ? m.fx.filter((f) => f.kind === 'region' && f.preset === 'grass' && f.strokes && f.strokes.length && this.shown(f)) : []; }
+  bladesOn() { return this.livingOn() && this.grassAreas().length > 0; }
+  // what the living layer shows: the baked living map of an Oldschool map, and the painted grass drawn over it (or alone)
+  livingSource(c, m, p, g) {
+    const P = g / (m.bg.scale || 1); const baked = m.bg.os && m.bg.live && m.bg.live.url ? m.bg.live.url : null;
+    const areas = this.grassAreas();
+    if (!areas.length) return { key: `${m.bg.url}|${baked}`, pic: m.bg.url, mask: baked, x: p.x, y: p.y, w: p.w, h: p.h, g, P };
+    const key = `${m.bg.url}|${baked || ''}|${areas.map((f) => `${f.id}:${FX.strokeSig(f)}:${f.color || ''}`).join(';')}|${[p.x, p.y, p.w, p.h, g].map((n) => Math.round(n * 1000)).join(',')}`;
+    if (c.src && c.src.key === key) return c.src;
+    // (while a stroke is being painted: grown again at most every 300 ms)
+    if (c.src && c.src.make && performance.now() - (c.srcAt || 0) < 300) return c.src;
+    const el = this.bgNode && this.bgNode.url === m.bg.url ? this.bgNode.el : null;
+    const pic = m.bg.kind === 'video' ? el : m.bg.url;
+    if (!pic) return null;
+    const regions = areas.map((f) => ({ strokes: f.strokes, color: f.color || null }));
+    c.srcAt = performance.now();
+    return { key, x: p.x, y: p.y, w: p.w, h: p.h, g, P, make: () => Living.paint({ pic, baked, regions, x: p.x, y: p.y, w: p.w, h: p.h, g, P }) };
   }
   drawLiving(dt) {
     const st = { on: false, blades: 0, kinds: null }; this.stats.living = st;
@@ -2062,7 +2084,7 @@ class SceneView {
     if (!this.lcv) {
       const el = document.createElement('canvas'); el.className = 'sv-canvas sv-living';
       const L = Living.layer(el, () => { if (!this.dead) { this.redrawSoon(); this.updateTreeLoop(); } });
-      if (!L) return;
+      if (!L) { this.livingDead = true; this.redrawSoon(); return; } // (Beta 3.58: no living layer after all: painted grass shows its waves)
       this.world.insertBefore(el, this.cv.sway.el.nextSibling);
       el.style.filter = this.cv.sway.el.style.filter;
       this.lcv = { el, L, res: 1 }; this.sizeTrees(this.lcv);
@@ -2070,7 +2092,9 @@ class SceneView {
     const c = this.lcv; const m = this.map; const v = this.v;
     if (c.step !== this.cam.s) { c.step = this.cam.s; this.sizeTrees(c); }
     const g = m.grid && m.grid.size > 0 ? m.grid.size : 1;
-    c.L.source({ key: `${m.bg.url}|${m.bg.live.url}`, pic: m.bg.url, mask: m.bg.live.url, x: p.x, y: p.y, w: p.w, h: p.h, g, P: g / (m.bg.scale || 1) });
+    const src = this.livingSource(c, m, p, g);
+    if (!src) { c.L.clear(); return; }
+    c.src = src; c.L.source(src);
     const k = this.ppi * v.zoom * c.res; const R = c.rect;
     const ok = c.L.frame({ dt, wind: this.treeWindNow || { dir: 30, strength: 1 }, matrix: [k, (v.x * this.ppi - R.x) * c.res, (v.y * this.ppi - R.y) * c.res], set: m.live || {}, few: (this.qres || 1) < 0.75 });
     st.on = !!ok; st.state = c.L.state || ''; st.blades = c.L.shown || 0; st.kinds = ok ? { ...c.L.kinds } : null; st.time = c.L.time;
@@ -2262,7 +2286,8 @@ class SceneView {
   }
   drawAtmo(t) {
     this._lo = this.myMoments(Date.now()).find((m) => m.id === 'lightsout') || null;
-    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f)); // (Sway has a layer of its own; Roof only cuts the weather; Beta 3.54: a light put out has no flame)
+    const blades = this.bladesOn(); // (Beta 3.58: painted grass grows blades on the living layer instead)
+    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f) && !(blades && f.kind === 'region' && f.preset === 'grass')); // (Sway has a layer of its own; Roof only cuts the weather; Beta 3.54: a light put out has no flame)
     this.stats.emitters = all.filter((f) => f.kind === 'emitter').length;
     this.stats.regions = all.filter((f) => f.kind === 'region').length;
     // magical darkness goes on its own layer above the grid, so grid lines don't show through it

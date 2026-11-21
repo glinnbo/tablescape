@@ -143,7 +143,7 @@ const FXDATA = (() => {
     { id: 'burning', label: 'Burning ground', icon: 'flame', tip: 'Flames across the area, embers, charred edges; it lights a dark map' },
     { id: 'web', label: 'Webs', icon: 'spider', tip: 'Strands strung across the area, swaying a little' },
     { id: 'glow', label: 'Glowing ground', icon: 'sparkles-2', tip: 'Soft light from below with slow motes, in any colour: hallowed, cursed, a fairy ring, glowing fungus' },
-    { id: 'grass', label: 'Grass in the wind', icon: 'wheat', tip: 'Waves of wind roll over a meadow, the way you paint the stroke' },
+    { id: 'grass', label: 'Grass', icon: 'wheat', tip: 'Blades that wave in the map\'s wind, in the colour of the map under them or one you pick' }, // (Beta 3.58: living blades, as on Oldschool maps; the waves of light only without a graphics card)
     // Beta 3.1: the map itself moves where it is painted (tree tops, reeds, banners); no colour of its own
     // Beta 3.1: where it is painted the weather stays off (indoors, caves); not seen on the TV
     { id: 'roof', label: 'Roof', icon: 'umbrella', tip: 'Paint over houses and caves: rain, snow and the other weather stay off there. Not seen on the table', noColor: true, still: true },

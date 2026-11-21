@@ -34,7 +34,7 @@ function defaultWind() { return { auto: true, storm: false, dir: 30, strength: 1
 // Beta 3.46: what moves on an Oldschool map (living.js), set for the map and for each kind of effect on its own card.
 // [what a new map has, the least, the most]
 const LIVE_SPEC = {
-  grass: { amount: [1, 0, 1.5], length: [1, 0.3, 2.5], calm: [0.35, 0, 1], range: [0.5, 0.05, 1], vary: [0.3, 0, 1] },
+  grass: { amount: [1, 0, 1.5], length: [1, 0.3, 2.5], thick: [1, 0.5, 3], calm: [0.35, 0, 1], range: [0.5, 0.05, 1], vary: [0.3, 0, 1] }, // (Beta 3.58: thick, the blades' thickness)
   water: { clear: [0.25, 0, 1], speed: [1, 0.3, 2.5] },
   lava: { glow: [1, 0, 2], embers: [1, 0, 2], heat: [0.5, 0, 1], speed: [1, 0.3, 2.5], range: [0.5, 0, 1] },
   shimmer: { power: [1, 0, 2], speed: [1, 0.3, 2.5], range: [0.5, 0, 1] },

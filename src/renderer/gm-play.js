@@ -1293,6 +1293,23 @@ const Play = (() => {
   // does the effect being edited (or the next one) give light? Then its colour can tint the map
   const givesLight = () => { if (ui.fxMode === 'light') return true; if (ui.fxMode !== 'place') return false; const f = lookTarget(); const d = EMITTERS.find((x) => x.id === (f ? f.preset : ui.emitter)); return !!(d && d.light); };
   const satNow = () => { const v = lookGet('sat'); if (v != null) return v; const f = lookTarget(); return f ? lightSat(f) : (lookGet('color') ? 0.7 : 0.25); };
+  // Beta 3.58 (Glinn): painted grass grows the living blades of Oldschool maps (with a graphics card). How they grow is
+  // the map's grass, as on Draw's Grass card: one for all the grass of the map; the colour stays the area's own
+  const bladesHere = () => { const d = lookDef(); return ui.fxMode === 'paint' && !!(d && d.id === 'grass') && typeof Living === 'object' && Living.supported(); };
+  function grassCard() {
+    const now = () => (map() && map().live && map().live.grass) || {};
+    const sl = (label, f, min, max, tip) => { const el = slider({ label, min, max, step: 0.05, get: () => (now()[f] != null ? now()[f] : 1), set: (v, k) => send(k || `live-grass-${f}`, 'live.set', { fx: 'grass', set: { [f]: v } }), fmt: pct }); if (tip) el.dataset.tip = tip; return el; };
+    const col = h('input', { type: 'color', class: 'os-fxcolor', value: now().growColor || '#5c8a34', 'aria-label': 'The colour grass grows on', 'data-tip': 'The colour of the map it grows on (the picker can take it from the screen)' });
+    col.addEventListener('input', () => send('live-grass-growColor', 'live.set', { fx: 'grass', set: { growColor: col.value.toLowerCase() } }));
+    const range = sl('Range', 'range', 0.05, 1, 'How close to that colour the map must be');
+    const pick = h('div', { class: 'row os-fxtint' }, h('span', { class: 'ctl-label grow' }, 'The colour'), col);
+    bind(() => { const on = now().grow === 'colour'; pick.hidden = !on; range.hidden = !on; });
+    return h('div', { class: 'stack grass-card' },
+      sl('Amount', 'amount', 0, 1.5), sl('Length', 'length', 0.3, 2.5), sl('Thickness', 'thick', 0.5, 3), sl('Between gusts', 'calm', 0, 1, 'How much grass still shows where no gust is passing'), sl('Colour variety', 'vary', 0, 1),
+      h('div', { class: 'ctl-label' }, 'Grows on'),
+      seg({ options: [{ value: 'all', label: 'All' }, { value: 'bright', label: 'Bright' }, { value: 'dark', label: 'Dark' }, { value: 'colour', label: 'Colour' }], get: () => now().grow || 'all', set: (v) => cmd('live.set', { fx: 'grass', set: { grow: v } }) }),
+      pick, range);
+  }
   function lookSection() {
     const light = ui.fxMode === 'light';
     const head = h('div', { class: 'look-head' });
@@ -1310,13 +1327,14 @@ const Play = (() => {
       shownIf(() => !!(lookDef() && lookDef().kinds), seg({ label: 'What comes out', options: [['steam', 'Steam'], ['gas', 'Gas'], ['fire', 'Fire']].map(([v, label]) => ({ value: v, label })), get: () => lookGet('variant') || 'steam', set: (v) => lookSet('variant', v) })),
       // Beta 2: which way it faces (light shaft, arcs, bullseye lantern); also Ctrl + wheel
       shownIf(() => { const d = lookDef(); return !!(d && (d.turn || d.cone)); }, slider({ label: 'Facing (Ctrl + wheel turns it too)', min: 0, max: 355, step: 5, get: () => { const d = lookDef(); const v = lookGet('angle'); return ((v ?? defaultAngle(d)) % 360 + 360) % 360; }, set: (v, k) => lookSet('angle', v, k), fmt: (v) => `${Math.round(v)}°` })),
-      slider({ label: light ? 'Brightness' : 'Strength', min: 0.1, max: light ? 1 : 2, step: 0.05, get: () => lookGet('intensity'), set: (v, k) => lookSet('intensity', v, k), fmt: pct }),
+      shownIf(() => !bladesHere(), slider({ label: light ? 'Brightness' : 'Strength', min: 0.1, max: light ? 1 : 2, step: 0.05, get: () => lookGet('intensity'), set: (v, k) => lookSet('intensity', v, k), fmt: pct })),
       // 4.9: a window light: which window, its bars, how far the light reaches into the room
       shownIf(() => { const d = lookDef(); return !!(d && d.id === 'window'); }, windowPicks()),
       // 4.3.2: the dust in a light shaft (4.9: and a window light), up to ten times as big
       shownIf(() => { const d = lookDef(); return !!(d && (d.id === 'shaft' || d.id === 'window')); }, slider({ label: 'Dust size', min: 0.1, max: 10, step: 0.05, get: () => lookGet('dust') ?? 1, set: (v, k) => lookSet('dust', v, k), fmt: (v) => `${round(v, 2)}×` })),
-      light ? null : shownIf(() => !(lookDef() && lookDef().still), slider({ label: 'Amount', min: 0.25, max: 3, step: 0.05, get: () => lookGet('density'), set: (v, k) => lookSet('density', v, k), fmt: (v) => `${round(v, 2)}×` })),
-      light ? null : shownIf(() => !(lookDef() && lookDef().still), slider({ label: 'Speed', min: 0.25, max: 3, step: 0.05, get: () => lookGet('speed'), set: (v, k) => lookSet('speed', v, k), fmt: (v) => `${round(v, 2)}×` })), // (Beta 3.1: a Roof doesn't move)
+      light ? null : shownIf(() => !(lookDef() && lookDef().still) && !bladesHere(), slider({ label: 'Amount', min: 0.25, max: 3, step: 0.05, get: () => lookGet('density'), set: (v, k) => lookSet('density', v, k), fmt: (v) => `${round(v, 2)}×` })),
+      ui.fxMode === 'paint' ? shownIf(() => bladesHere(), grassCard()) : null,
+      light ? null : shownIf(() => !(lookDef() && lookDef().still) && !bladesHere(), slider({ label: 'Speed', min: 0.25, max: 3, step: 0.05, get: () => lookGet('speed'), set: (v, k) => lookSet('speed', v, k), fmt: (v) => `${round(v, 2)}×` })), // (Beta 3.1: a Roof doesn't move)
       ui.fxMode !== 'paint' ? toggle({ label: light ? 'Flicker' : 'Flames flicker their light', get: () => lookGet('flicker'), set: (v) => lookSet('flicker', v) }) : null,
       // Beta 2: how the light lives: steady, a slow pulse, or a dying torch that sputters
       ui.fxMode !== 'paint' ? shownIf(() => light || givesLight(), seg({ label: 'Its light', options: [{ value: '', label: 'Steady' }, { value: 'pulse', label: 'Pulse', tip: 'Breathes slowly: magic, a heartbeat' }, { value: 'sputter', label: 'Sputter', tip: 'A dying torch: it gutters and almost goes out now and then' }],

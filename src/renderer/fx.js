@@ -2968,5 +2968,6 @@ const FX = (() => {
     }
   }
 
-  return { setQuality, emitter, waveOf, ventLevel, region, regionLights, anchor, sway, roof, lightMask, windowIcon, darkness, glow, weather, flashes, strike, weatherOn, spell, ghost, envelope, seedOf, sprite, rgba, mix, skinOf, flowTurn };
+  return { drawStrokes, strokeSig, // (Beta 3.58: painted grass's blades, living.js)
+    setQuality, emitter, waveOf, ventLevel, region, regionLights, anchor, sway, roof, lightMask, windowIcon, darkness, glow, weather, flashes, strike, weatherOn, spell, ghost, envelope, seedOf, sprite, rgba, mix, skinOf, flowTurn };
 })();

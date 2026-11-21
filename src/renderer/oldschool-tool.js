@@ -1193,7 +1193,7 @@ const OldschoolTool = (() => {
           const range = sl('Range', 'range', 0.05, 1, 'How close to that colour the floor must be');
           const pick = h('div', { class: 'row os-fxtint' }, h('span', { class: 'ctl-label grow' }, 'The colour'), col);
           bind(() => { const on = now().grow === 'colour'; pick.hidden = !on; range.hidden = !on; });
-          rows.push(sl('Amount', 'amount', 0, 1.5), sl('Length', 'length', 0.3, 2.5), sl('Between gusts', 'calm', 0, 1, 'How much grass still shows where no gust is passing'), sl('Colour variety', 'vary', 0, 1),
+          rows.push(sl('Amount', 'amount', 0, 1.5), sl('Length', 'length', 0.3, 2.5), sl('Thickness', 'thick', 0.5, 3), sl('Between gusts', 'calm', 0, 1, 'How much grass still shows where no gust is passing'), sl('Colour variety', 'vary', 0, 1),
             h('div', { class: 'ctl-label' }, 'Grows on'),
             seg({ options: [{ value: 'all', label: 'All' }, { value: 'bright', label: 'Bright' }, { value: 'dark', label: 'Dark' }, { value: 'colour', label: 'Colour' }], get: () => now().grow || 'all', set: (v) => cmd('live.set', { fx, set: { grow: v } }) }),
             pick, range);

@@ -25,6 +25,10 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.58', [
+      'Effects → Paint → Grass: living blades on every map, picture maps too. They wave in the map\'s wind, in the colour of the map under them or one you pick (without a graphics card: the waves of light as before)',
+      'Grass has one card per map, in Paint and in Draw: Amount, Length, the new Thickness (50 to 300 %), Between gusts, Colour variety, Grows on',
+    ]],
     ['Beta 3.57', [
       'Marks (X): pins, crosses, numbers, labels and counters in one tool. A pin or number can say something ("Old well", "3 · Trap"), shown under it on the TV too',
       'Marks: On the table or Only me for every mark; J starts a note only you see. One list of everything on the map, with an eye and a bin, and one Clear with Undo',

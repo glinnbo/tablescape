@@ -295,4 +295,47 @@ module.exports = (area) => {
     t.ok(back.layers[0].path === still('Frost (blue) medium') && !back.layers[0].missing && back.layers[0].tree.seed === l.tree.seed, 'found again, the same tree', back.layers[0]);
     t.ok(!back.layers[1].tree, 'an ordinary picture is no living tree');
   });
+
+  // Beta 3.58 (Glinn): grass painted in Effects → Paint grows the living blades of Oldschool maps on a picture map
+  area.deep('Beta 3.58: grass painted on a picture map grows living blades (no waves); its card has Thickness; a colour, hidden, no graphics card', async (t) => {
+    const was = t.state.editMapId;
+    const own = await t.newMap('Grass (test)', { tv: true });
+    t.handle('fog.enabled', { mapId: own, enabled: false });
+    const M = () => t.store.map(own); const k = M().grid.size;
+    t.ok(M().bg && M().bg.kind === 'image' && !M().bg.os, 'a map that is a picture', M().bg);
+    t.handle('wind.set', { mapId: own, auto: false, dir: 20, strength: 1.6, lean: 0.4 });
+    await t.cmd('fx.shape', { mapId: own, id: 'grass1', sid: 'a', preset: 'grass', shape: 'rect', x: 4 * k, y: 4 * k, w: 6 * k, h: 4 * k, dx: 1, dy: 0 });
+    const s = await t.until(async () => { const x = await t.g('Play.view().stats.living'); return x && x.on && x.blades > 0 && x; }, 30000, 'blades on the GM screen');
+    t.ok(s.kinds.grass && !s.kinds.water && s.blades > 24 * 250 && s.blades < 24 * 630, 'grass blades, some hundred a square', s);
+    await t.until(async () => (await t.g('Play.view().stats.regions')) === 0, 4000, 'no waves of light under the blades');
+    const spots = (list) => t.g(`(async () => { const v = Play.view(); v.livingProbe = ${JSON.stringify(list.map(([x, y]) => ({ x: x * k, y: y * k })))}; await new Promise((r) => setTimeout(r, 900)); const s = v.stats.living; v.livingProbe = null; return (s && s.px) || []; })()`);
+    const [inA, inB, out] = await spots([[7, 6], [9, 7], [15, 6]]);
+    t.ok(inA && inA[3] > 60 && inB && inB[3] > 60 && out && out[3] === 0, 'blades where it was painted, nothing beside it', [inA, inB, out]);
+    // Effects → Paint → Grass: the map's grass card (with Thickness) instead of Strength, Amount and Speed
+    await t.g(`(() => { Play.setTool('fx'); Play.ui.fxMode = 'paint'; Play.ui.region = 'grass'; Play.openPop('fx'); })()`);
+    await t.sleep(400);
+    const labels = await t.g(`[...document.querySelectorAll('#pop .ctl-label')].filter((e) => e.offsetParent).map((e) => e.textContent.trim())`);
+    for (const l of ['Amount', 'Length', 'Thickness', 'Between gusts', 'Colour variety', 'Grows on']) t.has(labels, l, 'the grass card');
+    t.ok(!labels.includes('Strength') && !labels.includes('Speed'), 'no Strength or Speed for blades', labels);
+    await t.g(`Play.closePop(); Play.setTool('select')`);
+    await t.cmd('live.set', { mapId: own, fx: 'grass', set: { thick: 3 } });
+    t.eq(M().live.grass.thick, 3, 'Thickness 300 %');
+    await t.cmd('live.set', { mapId: own, fx: 'grass', set: { thick: 9 } });
+    t.eq(M().live.grass.thick, 3, 'not beyond 300 %');
+    // a colour of its own: the blades grow again in it
+    await t.cmd('fx.update', { mapId: own, id: 'grass1', color: '#d9b45a' });
+    const tinted = await t.until(async () => { const [q] = await spots([[7, 6]]); return q && q[3] > 60 && q[0] > q[2] + 30 && q; }, 15000, 'wheat-coloured blades');
+    t.ok(tinted[0] > tinted[2] + 30, 'its own colour', tinted);
+    // the TV shows them; hidden from the players, it doesn't
+    await t.until(async () => { const d = (await t.tvDebug()).living; return d && d.on && d.blades > 0; }, 30000, 'blades on the TV');
+    await t.cmd('fx.update', { mapId: own, id: 'grass1', hidden: true });
+    await t.until(async () => { const d = (await t.tvDebug()).living; return d && !d.on; }, 15000, 'no blades on the TV once hidden');
+    t.ok((await t.g('Play.view().stats.living')).on, 'still on your screen');
+    // without a graphics card: the waves of light as before
+    await soft(t, false); t.handle('wind.set', { mapId: own, auto: false, dir: 25, strength: 1.6, lean: 0.4 }); await t.settle();
+    await t.until(async () => (await t.g('Play.view().stats.regions')) === 1, 6000, 'the waves without a graphics card');
+    await soft(t, true);
+    t.handle('fx.remove', { mapId: own, id: 'grass1' });
+    t.handle('edit.open', { id: was }); await t.send(was);
+  });
 };

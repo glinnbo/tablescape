@@ -754,7 +754,7 @@ module.exports = (area) => {
     await t.clickSel('#pop .os-fxset'); await cardOut(t);
     const card = () => t.g(`(() => { const f = document.querySelector('#pop .os-fly'); if (!f) return null; return { head: f.querySelector('.os-fly-head b').textContent, sliders: [...f.querySelectorAll('input[type="range"]')].filter((e) => !e.closest('[hidden]')).map((e) => e.getAttribute('aria-label')), segs: [...f.querySelectorAll('.seg button, .seg label')].map((e) => e.textContent) }; })()`);
     let c = await card();
-    t.eq([c.head, c.sliders], ['Grass', ['Amount', 'Length', 'Between gusts', 'Colour variety']], 'Grass settings: its card', c);
+    t.eq([c.head, c.sliders], ['Grass', ['Amount', 'Length', 'Thickness', 'Between gusts', 'Colour variety']], 'Grass settings: its card (Beta 3.58: Thickness)', c);
     t.ok(['All', 'Bright', 'Dark', 'Colour'].every((w) => c.segs.includes(w)), 'Grows on: all, bright, dark, a colour', c.segs);
     await t.shot(t.gm(), 'effects-card');
     t.handle('live.set', { mapId: own, fx: 'grass', set: { grow: 'colour' } }); await t.settle();
