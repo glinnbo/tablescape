@@ -379,6 +379,9 @@ function routeLook(m, p) {
   if ('arrow' in p) m.arrow = !!p.arrow;
   if ('round' in p) m.round = !!p.round;
   if ('walked' in p) m.walked = Math.round(Math.min(1, Math.max(0, num(p.walked, 0))) * 1000) / 1000;
+  // Second Builder (second-cartographer-polish): where along it its name plate stands (0 … 1 of its length); null: the
+  // TV finds a spot by itself, near the middle, where the plate covers no place
+  if ('labelAt' in p) m.labelAt = p.labelAt == null || !Number.isFinite(Number(p.labelAt)) ? null : Math.round(Math.min(0.98, Math.max(0.02, Number(p.labelAt))) * 1000) / 1000;
 }
 // the middle of a route, measured along it: where its label stands
 function routeMid(pts) {
@@ -600,6 +603,7 @@ const sceneMatches = (map, D) => { const cur = sceneOf(map); if (!('look' in D))
 // Beta 3.49: a light of the app is a picture (an asset with .fixture) and its flame (an effect with .fixture). After
 // anything done to layers or effects they are put right: the flame lies where the picture lies, a copied picture has a
 // flame of its own, a flame whose picture is gone goes too.
+const fixtureReach = (v) => Math.min(120, Math.max(5, Math.round((Number(v) || 20) / 5) * 5)); // (bright light in feet, in steps of 5)
 function syncFixtures(map) {
   if (!Array.isArray(map.layers) || !Array.isArray(map.fx)) return;
   if (!map.layers.some((l) => l.fixture) && !map.fx.some((f) => f.fixture)) return;
@@ -1002,12 +1006,28 @@ function applyRaw(map, type, p, media) {
       if (!d || !media) return { changed: null };
       const g = map.grid.size || 1;
       const layer = { id: newId('l'), role: 'asset', kind: 'image', ...media(d.path), ...ASSET_DEFAULTS, x: r3(+p.x || 0), y: r3(+p.y || 0), w: r3(d.w * g), rotation: normDeg(Number(p.rotation) || 0), name: d.label, named: true };
-      const color = HEX6.test(String(p.color || '').toLowerCase()) ? String(p.color).toLowerCase() : d.fx.color || null;
-      const fx = { id: newId('x'), kind: 'emitter', preset: d.fx.preset, x: layer.x, y: layer.y, r: d.fx.r, color, intensity: 1, hidden: p.lit === false, attachTo: null, density: 1, speed: 1, bright: d.fx.bright, dim: d.fx.dim, flicker: true, fixture: layer.id };
+      const own = HEX6.test(String(p.color || '').toLowerCase());
+      const color = own ? String(p.color).toLowerCase() : d.fx.color || null;
+      const bright = p.bright != null ? fixtureReach(p.bright) : d.fx.bright; // (Beta 3.51: a reach of its own; dim is twice bright)
+      const fx = { id: newId('x'), kind: 'emitter', preset: d.fx.preset, x: layer.x, y: layer.y, r: d.fx.r, color, intensity: 1, hidden: p.lit === false, attachTo: null, density: 1, speed: 1, bright, dim: p.bright != null ? bright * 2 : d.fx.dim, flicker: true, fixture: layer.id };
+      if (own) fx.sat = 0.7; // (a colour picked: it colours the map strongly, by day too)
       layer.fixture = { kind: d.id, fx: fx.id };
       fixStretch(layer);
       map.layers.push(layer); map.fx.push(fx);
       return { changed: 'all', label: `${d.label} placed`, id: layer.id };
+    }
+    case 'fx.fixtureSet': { // Beta 3.51: a placed light changed (p.id: its picture): color ('' its own), bright (ft), lit
+      const layer = map.layers.find((x) => x.fixture && x.id === p.id);
+      const d = layer && lightOf(layer.fixture.kind);
+      const fx = layer && map.fx.find((x) => x.id === layer.fixture.fx);
+      if (!layer || !d || !fx) return { changed: null };
+      if ('color' in p) {
+        const c = String(p.color || '').toLowerCase();
+        if (HEX6.test(c)) { fx.color = c; fx.sat = 0.7; } else { fx.color = d.fx.color || null; delete fx.sat; }
+      }
+      if (p.bright != null) { fx.bright = fixtureReach(p.bright); fx.dim = fx.bright * 2; }
+      if ('lit' in p) fx.hidden = !p.lit;
+      return { changed: 'all', label: `${layer.name || 'Light'} changed` };
     }
     case 'fx.fixtureLit': { // lit or put out (p.id: the picture's or the effect's id; p.on: which, else the other of now)
       const layer = map.layers.find((x) => x.fixture && (x.id === p.id || x.fixture.fx === p.id));

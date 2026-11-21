@@ -42,7 +42,7 @@ const OldschoolTool = (() => {
     { id: 'swamp', label: 'Swamp', icon: 'plant', color: 'rgba(70,84,40,0.9)' },
   ];
   const AREA_TOOLS = ['room', 'shape', 'round', 'brush'];
-  const OWN = new Set(['osbox', 'ospath', 'osbrush', 'osline', 'osstairs', 'osdoor']);
+  const OWN = new Set(['osbox', 'ospath', 'osbrush', 'osline', 'osstairs', 'osdoor', 'oslight']); // (Beta 3.51: oslight, a picked light dragged)
   const EDGE_LABEL = { walls: 'Walls', rock: 'Rock', ledge: 'Ledge', cliff: 'Cliff', fade: 'Fade' };
 
   function create(ctx) {
@@ -65,7 +65,7 @@ const OldschoolTool = (() => {
     if (!TOOLS.some((x) => x.id === prefs.tool)) prefs.tool = 'room';
     ui.os = { ...prefs, poly: null };
     const O = ui.os;
-    const save = () => { try { const { poly, ...keep } = O; void poly; localStorage.setItem('osPrefs', JSON.stringify(keep)); } catch {} };
+    const save = () => { try { const { poly, lightSel: sel0, ...keep } = O; void poly; void sel0; localStorage.setItem('osPrefs', JSON.stringify(keep)); } catch {} };
     let lib = []; // the library's tiles (with their squares)
     let libAt = 0;
     async function loadLib(force) {
@@ -129,6 +129,12 @@ const OldschoolTool = (() => {
       { id: 'erase', label: 'Erase', icon: 'eraser', tool: 'room', tip: 'Drag a box over painted textures: they go, the floor stays' },
     ];
     const lightKind = () => (Fixtures.BY[O.lightKind] ? O.lightKind : Fixtures.LIST[0].id);
+    // Beta 3.51: a light that is there can be picked with the Light tool (a click on it): then it is dragged, and the
+    // panel shows and changes that light. O.lightSel: its picture's id (not kept between sessions)
+    const lightSel = () => { const m = map(); const l = m && O.lightSel ? (m.layers || []).find((x) => x.id === O.lightSel && x.fixture) : null; if (!l && O.lightSel) O.lightSel = null; return l || null; };
+    const lightFx = (l) => (l && map() ? (map().fx || []).find((f) => f.id === l.fixture.fx) : null) || null;
+    const lightOwn = (l) => { const f = lightFx(l); const d = Fixtures.BY[l.fixture.kind]; const c = f && f.color ? String(f.color).toLowerCase() : ''; return c && c !== String((d && d.fx.color) || '').toLowerCase() ? c : ''; }; // (the colour picked for it, '' its own)
+    function removeLight(l) { O.lightSel = null; cmd('layer.remove', { id: l.id }).then((r) => { if (r && r.ok) toast(`${l.name || 'Light'} removed`, { ms: 1400, undo: () => cmd('history.undo') }); ctx.openPop('oldschool'); drawPreview(); }); }
     const texShape = () => (TEX_SHAPES.some((x) => x.id === O.texShape) ? O.texShape : 'fill');
     const texNow = () => !!O.tex && !O.fx && (AREA_TOOLS.includes(O.tool) || O.tool === 'floor');
     const groupNow = () => (fxNow() ? 'style' : texNow() ? 'texture' : PARTS.includes(O.tool) ? 'structure' : 'terrain');
@@ -177,8 +183,12 @@ const OldschoolTool = (() => {
       if (t === 'floor' && O.floorHow === 'paint') return { kind: 'osbrush', pts: [[round(pt.x, 3), round(pt.y, 3)]], paint: true, r: (O.brush * g()) / 2 }; // (Beta 3.26)
       if (t === 'floor') { repaint(pt); return null; }
       if (t === 'light') { // (Beta 3.49) one of the app's lights: on the wall's face, or where clicked
+        // (Beta 3.51) a click on one that is there picks it and may drag it; a click beside a picked one lets go of it
+        const hit = Fixtures.under(m, pt);
+        if (hit) { const was = O.lightSel; O.lightSel = hit.id; if (was !== hit.id) ctx.openPop('oldschool'); drawPreview(pt); return { kind: 'oslight', id: hit.id, from: pt, pt, moved: false }; }
+        if (lightSel()) { O.lightSel = null; ctx.openPop('oldschool'); drawPreview(pt); return null; }
         const d = Fixtures.BY[lightKind()];
-        Fixtures.place(cmd, m, pt, { kind: d.id, color: O.lightColor || null, lit: O.lightLit !== false }).then((r) => { if (r && r.ok) toast(r.label || `${d.label} placed`, { ms: 1400, undo: () => cmd('history.undo') }); });
+        Fixtures.place(cmd, m, pt, { kind: d.id, color: O.lightColor || null, lit: O.lightLit !== false, ...(O.lightReach ? { bright: O.lightReach } : {}) }).then((r) => { if (r && r.ok) toast(r.label || `${d.label} placed`, { ms: 1400, undo: () => cmd('history.undo') }); });
         return null;
       }
       if (t === 'pillar') { const p = pillarAt(pt, e.altKey); add({ kind: 'pillar', pts: [[p.x, p.y]], r: O.pillar.r * g(), round: O.pillar.round, mat: O.line.mat }); return null; }
@@ -196,6 +206,7 @@ const OldschoolTool = (() => {
       return { kind: 'osbox', a: p, b: p, shape, cut, start: pt };
     }
     function pointerMove(d, e, pt) {
+      if (d.kind === 'oslight') { d.pt = pt; if (Math.hypot(pt.x - d.from.x, pt.y - d.from.y) > g() * 0.12) d.moved = true; lastD = d; drawPreview(pt, d); return; } // (Beta 3.51: a picked light dragged)
       if (d.kind === 'osdoor') { d.b = pt; lastD = d; drawPreview(pt, d); return; }
       if (d.kind === 'osbox' || d.kind === 'osstairs') {
         let b = snapCorner(pt, e.altKey && d.kind !== 'osbox');
@@ -227,6 +238,11 @@ const OldschoolTool = (() => {
     function pointerUp(d) {
       lastD = null;
       const m = map(); if (!m || !m.os) return;
+      if (d.kind === 'oslight') { // (Beta 3.51) dropped: a wall light on the wall there, turned to it; the others where dropped
+        const l = lightSel();
+        if (l && d.moved) { const q = Fixtures.at(m, d.pt, l.fixture.kind); if (q) cmd('layer.update', { id: l.id, x: q.x, y: q.y, rotation: q.rotation }); }
+        drawPreview(); return;
+      }
       if (d.kind === 'osdoor') { // (Beta 3.33) a click: a door of one square, or the one there goes; a drag: any length
         const seg = doorFor(d.a, d.b);
         if (!seg) placeDoor(d.a);
@@ -285,6 +301,11 @@ const OldschoolTool = (() => {
     function cancel() { if (O.poly) { O.poly = null; drawPreview(); return true; } return false; }
     // Enter closes a shape, Esc drops it, Backspace takes its last corner back
     window.addEventListener('keydown', (e) => {
+      if (ui.tool === 'oldschool' && O.tool === 'light' && !O.poly && (e.key === 'Delete' || e.key === 'Backspace')) { // (Beta 3.51: the picked light goes)
+        const t0 = e.target; if (t0 && (t0.tagName === 'INPUT' || t0.tagName === 'TEXTAREA' || t0.isContentEditable)) return;
+        const l = lightSel(); if (l) { e.preventDefault(); e.stopImmediatePropagation(); removeLight(l); }
+        return;
+      }
       if (ui.tool !== 'oldschool' || !O.poly) return;
       const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); closePoly(); }
@@ -509,6 +530,17 @@ const OldschoolTool = (() => {
       svg.append(root);
       const thin = (0.06 * g()).toFixed(4);
       const fillNow = () => (fxNow() ? fxColor(fxNow()) : patternFor(defs, O.floor));
+      if (ui.tool === 'oldschool' && O.tool === 'light') { // (Beta 3.51) the picked light: a ring, its reach, and where a drag would put it
+        const sl = lightSel();
+        if (sl) {
+          const s2 = g(); const f = lightFx(sl); const dd = Fixtures.BY[sl.fixture.kind]; const GOLD = '#f0b44a';
+          const drag = d && d.kind === 'oslight' && d.moved ? Fixtures.at(m, d.pt, sl.fixture.kind) : null;
+          const q = drag || { x: sl.x, y: sl.y, rotation: sl.rotation || 0 };
+          if (drag && dd) root.append(el('rect', { x: q.x - (dd.w * s2) / 2, y: q.y - (dd.h * s2) / 2, width: dd.w * s2, height: dd.h * s2, fill: 'rgba(240,180,74,0.25)', stroke: GOLD, 'stroke-width': thin, transform: `rotate(${q.rotation} ${q.x} ${q.y})` }));
+          root.append(el('circle', { class: 'os-lightsel', cx: q.x, cy: q.y, r: s2 * 0.32, fill: 'rgba(240,180,74,0.16)', stroke: GOLD, 'stroke-width': (thin * 1.5).toFixed(4) }),
+            el('circle', { class: 'os-lightreach', cx: q.x, cy: q.y, r: (((f && f.dim) || 40) / 5) * s2, fill: 'none', stroke: (f && f.color) || GOLD, 'stroke-width': thin, 'stroke-dasharray': `${thin * 4} ${thin * 3}`, opacity: '0.7' }));
+        }
+      }
       const look = (it) => (it.kind === 'live' ? fxColor(it.fx) : it.kind === 'cut' ? 'rgba(10,10,12,0.85)' : it.kind === 'ground' ? groundColor(it.preset) : it.kind === 'line' || it.kind === 'pillar' || (it.kind === 'stairs' && !it.tile) ? 'rgba(140,135,128,0.95)' : patternFor(defs, it.tile));
       for (const it of pending) { const e2 = shapeEl(it, look(it), { opacity: '0.95' }); if (e2) root.append(e2); }
       // the one being drawn
@@ -536,7 +568,7 @@ const OldschoolTool = (() => {
             const r = (O.brush * s) / 2;
             root.append(el('circle', { cx: pt.x, cy: pt.y, r, fill: t === 'erase' ? 'rgba(10,10,12,0.55)' : t === 'ground' ? groundColor(O.ground) : fillNow(), opacity: t === 'brush' ? '0.55' : '0.8' }), el('circle', { cx: pt.x, cy: pt.y, r, fill: 'none', stroke: ORANGE, 'stroke-width': thin }));
           } else if (t === 'light') { // (Beta 3.49: where it would sit: its box on the wall's face, a ring where it shines)
-            const dd = Fixtures.BY[lightKind()]; const q = Fixtures.at(m, pt, dd.id);
+            const dd = Fixtures.BY[lightKind()]; const q = lightSel() || Fixtures.under(m, pt) ? null : Fixtures.at(m, pt, dd.id); // (3.51: none while one is picked or under the pointer)
             if (q) {
               const w = dd.w * s; const hh = dd.h * s;
               root.append(el('rect', { x: q.x - w / 2, y: q.y - hh / 2, width: w, height: hh, fill: 'rgba(240,180,74,0.25)', stroke: ORANGE, 'stroke-width': thin, transform: `rotate(${q.rotation} ${q.x} ${q.y})` }),
@@ -900,7 +932,7 @@ const OldschoolTool = (() => {
       bind(() => {
         const t = O.tool; const tl = tileNow(); const tu = tileUrl(tl);
         const fx = fxNow();
-        const sig = JSON.stringify([t, tileKey(O.floor), tu, O.edge, O.mats, O.level, O.line, O.pillar, O.door, O.doorLeaf, O.windowLeaf, O.floorHow, fx, O.tint, O.waterTint, O.fxSoft, O.fxShape, O.tex, O.texShape, O.lightKind, O.lightLit]);
+        const sig = JSON.stringify([t, tileKey(O.floor), tu, O.edge, O.mats, O.level, O.line, O.pillar, O.door, O.doorLeaf, O.windowLeaf, O.floorHow, fx, O.tint, O.waterTint, O.fxSoft, O.fxShape, O.tex, O.texShape, O.lightKind, O.lightLit, O.lightSel, (() => { const f = lightFx(lightSel()); return f ? !!f.hidden : null; })()]);
         if (card.dataset.sig === sig) return; card.dataset.sig = sig;
         let art; let name; let sub;
         const ground = (cls, ...kids) => { const a = h('span', { class: `os-art a-${cls}` }, ...kids.filter(Boolean)); a.style.background = bgOf(tu, 78); return a; };
@@ -930,9 +962,11 @@ const OldschoolTool = (() => {
           const d = Math.round(Math.min(50, 14 + O.pillar.r * 2 * 12)); const b = h('i', { class: `blk${O.pillar.round ? ' round' : ''}` }); b.style.background = bgOf(matUrl(O.line.mat), 84); b.style.width = b.style.height = `${d}px`;
           art = ground('pillar', b); name = `${matOf(O.line.mat).label} pillar`; sub = `${O.pillar.round ? 'round' : 'square'} · ${round(O.pillar.r * 2, 1)} square${O.pillar.r * 2 === 1 ? '' : 's'}`;
         } else if (t === 'light') { // (Beta 3.49)
-          const dd = Fixtures.BY[lightKind()];
+          const sl = lightSel(); const sf = lightFx(sl);
+          const dd = Fixtures.BY[sl ? sl.fixture.kind : lightKind()] || Fixtures.LIST[0];
           const pic = h('i', { class: 'lt' }); pic.style.background = `${cssUrl(Fixtures.thumb(dd))} center / contain no-repeat`;
-          art = ground('light', pic); name = dd.label; sub = `${O.lightLit === false ? 'unlit' : 'lit'} · ${dd.wall != null ? 'on a wall' : 'where you click'}`;
+          art = ground('light', pic); name = dd.label;
+          sub = sl ? `picked · ${sf && !sf.hidden ? 'lit' : 'unlit'} · drag to move it` : `${O.lightLit === false ? 'unlit' : 'lit'} · ${dd.wall != null ? 'on a wall' : 'where you click'}`; // (Beta 3.51: the one picked)
         } else if (t === 'door' || t === 'window') {
           const secret = t === 'door' && O.door === 'secret'; const leaf = t === 'window' ? O.windowLeaf : O.doorLeaf; const [img, label] = LEAF_ART[leaf] || LEAF_ART.wood;
           const wl = h('i', { class: `wl${secret ? ' whole' : ''}` }); wl.style.background = bgOf(matUrl('stone_wall'), 84);
@@ -1111,12 +1145,24 @@ const OldschoolTool = (() => {
         bind(() => { leafSeg.hidden = O.door === 'secret'; });
         choices.push(leafSeg, snap2());
       } else if (t === 'light') { // (Beta 3.49) which light, lit or not, the colour of its light
-        const kinds = h('div', { class: 'tiles os-lights' }, ...Fixtures.LIST.map((d) => h('button', { class: 'tile', dataset: { v: d.id }, 'aria-label': d.label, 'data-tip': d.wall != null ? `${d.label}: click a wall` : `${d.label}: where you click`, onclick: () => { O.lightKind = d.id; upd(); } },
-          h('img', { src: Fixtures.thumb(d), alt: '', draggable: false }), h('span', {}, d.label))));
-        bind(() => { for (const b2 of kinds.children) b2.classList.toggle('on', b2.dataset.v === lightKind()); });
-        choices.push(h('div', { class: 'ctl-label' }, 'Light'), kinds);
-        choices.push(seg({ options: [{ value: 'unlit', label: 'Unlit' }, { value: 'lit', label: 'Lit' }], get: () => (O.lightLit === false ? 'unlit' : 'lit'), set: (v) => { O.lightLit = v !== 'unlit'; upd(); } }));
-        if (ctx.lightColors) choices.push(ctx.lightColors(() => O.lightColor || '', (v) => { O.lightColor = v || ''; upd(); }));
+        // (Beta 3.51) with a light picked the same rows show and change that light: no kinds then, and Remove
+        const sel = lightSel();
+        const set1 = (patch) => { const l = lightSel(); if (l) cmd('fx.fixtureSet', { id: l.id, ...patch }).then(() => { ctx.refreshPop(); drawPreview(); }); };
+        if (!sel) {
+          const kinds = h('div', { class: 'tiles os-lights' }, ...Fixtures.LIST.map((d) => h('button', { class: 'tile', dataset: { v: d.id }, 'aria-label': d.label, 'data-tip': d.wall != null ? `${d.label}: click a wall` : `${d.label}: where you click`, onclick: () => { O.lightKind = d.id; O.lightReach = null; upd(); } },
+            h('img', { src: Fixtures.thumb(d), alt: '', draggable: false }), h('span', {}, d.label))));
+          bind(() => { for (const b2 of kinds.children) b2.classList.toggle('on', b2.dataset.v === lightKind()); });
+          choices.push(h('div', { class: 'ctl-label' }, 'Light'), kinds);
+        }
+        choices.push(seg({ options: [{ value: 'unlit', label: 'Unlit' }, { value: 'lit', label: 'Lit' }],
+          get: () => { const l = lightSel(); if (l) { const f = lightFx(l); return f && !f.hidden ? 'lit' : 'unlit'; } return O.lightLit === false ? 'unlit' : 'lit'; },
+          set: (v) => { if (lightSel()) set1({ lit: v !== 'unlit' }); else { O.lightLit = v !== 'unlit'; upd(); } } }));
+        if (ctx.lightColors) choices.push(ctx.lightColors(() => { const l = lightSel(); return l ? lightOwn(l) : O.lightColor || ''; }, (v) => { if (lightSel()) set1({ color: v || '' }); else { O.lightColor = v || ''; upd(); } }));
+        choices.push(wordSlider({ name: 'Reach', lo: 'short', hi: 'far', min: 5, max: 60, step: 5,
+          get: () => { const l = lightSel(); if (l) { const f = lightFx(l); return (f && f.bright) || 20; } return O.lightReach || (Fixtures.BY[lightKind()] || Fixtures.LIST[0]).fx.bright; },
+          set: (v) => { const l = lightSel(); if (l) cmd('fx.fixtureSet', { id: l.id, bright: v, coalesce: `fixreach-${l.id}` }).then(() => drawPreview()); else { O.lightReach = v; save(); } },
+          fmt: (v) => `${v} ft bright · ${v * 2} ft dim` }));
+        if (sel) after.push(btn('Remove', 'trash', () => { const l = lightSel(); if (l) removeLight(l); }, { kind: 'wide os-light-remove', tip: 'Take this light away, with its flame (Delete)' }));
       } else if (t === 'window') {
         choices.push(seg({ cls: 'seg-5 os-leaf', options: [{ value: 'clear', label: 'Glass' }, { value: 'leaded', label: 'Leaded' }, { value: 'stained', label: 'Stained' }, { value: 'shutter', label: 'Shutters' }, { value: 'bars', label: 'Bars' }], get: () => O.windowLeaf, set: (v) => { O.windowLeaf = v; upd(); } }));
         choices.push(snap2());

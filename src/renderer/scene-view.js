@@ -2331,7 +2331,8 @@ class SceneView {
       const color = f.color || (f.kind === 'light' ? '#ffcf8a' : '#ffb45a');
       // with line of sight the light stops at walls and closed doors
       const poly = Vision.lightPoly(this.map, p.x, p.y, D * 1.04);
-      const L = { x: p.x, y: p.y, B: Geom.ftToIn(g, f.bright || 0), D, color, sat: f.eye ? 0 : lightSat(f), flicker: f.flicker, strength: (f.intensity ?? 1) * FX.waveOf(f, t) * this.outK(f), s: FX.seedOf(f.id), poly };
+      // (Beta 3.51: own: a colour picked away from the light's own. A light in its own colour throws no colour by day)
+      const L = { x: p.x, y: p.y, B: Geom.ftToIn(g, f.bright || 0), D, color, sat: f.eye ? 0 : lightSat(f), own: ownColour(f, this.map), flicker: f.flicker, strength: (f.intensity ?? 1) * FX.waveOf(f, t) * this.outK(f), s: FX.seedOf(f.id), poly };
       // Beta 2: a bullseye lantern lights a cone, the way it faces (carried: the way the token faces)
       if (f.kind === 'light' && f.cone) { const a = this.facing(f); L.shapes = [[-14, 1], [-6, 0.55], [0, 0.4], [7, 0.25], [15, 0.15]].map(([dw, k]) => ({ poly: conePoly(p.x, p.y, a, Math.max(6, f.cone + dw), D * 1.05), k })); }
       return L;
@@ -3215,6 +3216,21 @@ function conePoly(x, y, deg, cone, r) {
   const out = [x, y];
   for (let i = 0; i <= 16; i++) { const a = a0 + ((a1 - a0) * i) / 16; out.push(x + Math.cos(a) * r, y + Math.sin(a) * r); }
   return out;
+}
+// Beta 3.51 (Glinn: "when the torches are lit during the day they still cast the full radius of their light"): has this
+// light a colour picked away from its own? A preset's own colour, a flame without a colour and a light of the app in
+// the colour it comes with are "its own": those throw no colour on the map in daylight (FX.glow lets it come in with the
+// dark). A picked colour always shows: it is there for the mood.
+function ownColour(f, map) {
+  if (!f.color) return false;
+  const c = String(f.color).toLowerCase();
+  if (f.kind === 'light') { const d = typeof FXDATA !== 'undefined' ? FXDATA.LIGHTS.find((x) => x.id === f.preset) : null; return !(d && String(d.color).toLowerCase() === c); }
+  if (f.fixture && typeof LIGHT_DATA === 'object') {
+    const l = map && (map.layers || []).find((x) => x.id === f.fixture);
+    const d = l && l.fixture ? LIGHT_DATA.lights.find((x) => x.id === l.fixture.kind) : null;
+    return !(d && String(d.fx.color || '').toLowerCase() === c);
+  }
+  return true;
 }
 // how strongly a light colours the map: chosen, or strong for a colour picked away from the light's own
 function lightSat(f) {

@@ -68,6 +68,76 @@ const TableAtlas = (() => {
     }
     return { x: pts[pts.length - 2], y: pts[pts.length - 1] };
   }
+  // Second Builder (second-cartographer-polish): a spot along a route, t of its length (0 … 1) from its start
+  function routeAlong(pts, t) {
+    let len = 0;
+    for (let i = 0; i + 3 < pts.length; i += 2) len += Math.hypot(pts[i + 2] - pts[i], pts[i + 3] - pts[i + 1]);
+    let left = len * clamp(t, 0, 1);
+    for (let i = 0; i + 3 < pts.length; i += 2) {
+      const d = Math.hypot(pts[i + 2] - pts[i], pts[i + 3] - pts[i + 1]);
+      if (d > 0 && left <= d) return { x: pts[i] + ((pts[i + 2] - pts[i]) * left) / d, y: pts[i + 1] + ((pts[i + 3] - pts[i + 1]) * left) / d };
+      left -= d;
+    }
+    return { x: pts[pts.length - 2], y: pts[pts.length - 1] };
+  }
+  // ... and back: how far along a route (0 … 1) the spot of it nearest to (x, y) lies
+  function routeT(pts, x, y) {
+    let len = 0; let best = 0; let bd = Infinity;
+    for (let i = 0; i + 3 < pts.length; i += 2) {
+      const ax = pts[i]; const ay = pts[i + 1]; const dx = pts[i + 2] - ax; const dy = pts[i + 3] - ay; const l2 = dx * dx + dy * dy; const d = Math.sqrt(l2);
+      const f = l2 ? clamp(((x - ax) * dx + (y - ay) * dy) / l2, 0, 1) : 0;
+      const dist = Math.hypot(x - ax - dx * f, y - ay - dy * f);
+      if (dist < bd) { bd = dist; best = len + d * f; }
+      len += d;
+    }
+    return len > 0 ? best / len : 0.5;
+  }
+  // Second Builder (second-cartographer-polish): where each route's name plate stands. Where the GM put it (labelAt),
+  // else the spot along the road nearest its middle where the plate covers no place, no marker and no other route's
+  // plate. Everything stands upright above its spot, so the boxes are worked out in map inches: a letter of a plate is
+  // about 0.042 × S inches tall whatever the zoom (S: half the height of the TV's frame on the map), and the tilt
+  // stretches what stands up over more of the map (1 / cos of the tilt).
+  const spotCache = new WeakMap();
+  function routeSpots(map, S, tilt) {
+    const marks = map.marks || [];
+    const key = `${S.toFixed(3)}|${(tilt || 0).toFixed(2)}`;
+    const was = spotCache.get(marks);
+    if (was && was.key === key) return was.out;
+    const em = 0.042 * S; const vy = 1 / Math.max(0.4, Math.cos((tilt || 0) * TILT_MAX * D2R));
+    const len = (s) => String(s || '').length;
+    const boxes = [];
+    for (const m of marks) {
+      if (m.kind === 'route' || m.kind === 'note') continue;
+      let w; let up;
+      if (m.kind === 'place') { w = Math.max(len(m.title) * 0.75, len(m.sub) * 0.45, 2) + 1.7; up = m.style === 'medallion' || !m.style ? 7.4 : 6.2; }
+      else { w = m.kind === 'counter' ? Math.max(len(m.label) * 0.6, 3) + 1.5 : 1.8; up = 2.2; }
+      boxes.push({ x0: m.x - (w / 2) * em, x1: m.x + (w / 2) * em, y0: m.y - up * em * vy, y1: m.y + 0.4 * em * vy });
+    }
+    const out = new Map();
+    for (const r of marks) {
+      if (r.kind !== 'route' || !r.pts || r.pts.length < 4) continue;
+      const sub = Geom && Geom.routeLabel ? Geom.routeLabel(map.grid, r) : '';
+      const hw = ((Math.max(len(r.title) * 0.53, len(sub) * 0.37, 2) + 1.3) / 2) * em;
+      const box = (p) => ({ x0: p.x - hw, x1: p.x + hw, y0: p.y - (r.title && sub ? 2.65 : 1.9) * em * vy, y1: p.y - 0.5 * em * vy });
+      const cover = (b) => { let a = 0; for (const o of boxes) { const ox = Math.min(b.x1, o.x1) - Math.max(b.x0, o.x0); const oy = Math.min(b.y1, o.y1) - Math.max(b.y0, o.y0); if (ox > 0 && oy > 0) a += ox * oy; } return a; };
+      let spot = null;
+      if (typeof r.labelAt === 'number') spot = routeAlong(r.pts, r.labelAt);
+      else {
+        let best = null; let least = Infinity;
+        for (let k = 0; k <= 36; k++) { // (0.5, 0.52, 0.48, 0.54 … out to 0.14 and 0.86)
+          const t = 0.5 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.02;
+          const p = routeAlong(r.pts, t); const a = cover(box(p));
+          if (a < least - 1e-9) { least = a; best = p; }
+          if (a <= 0) break;
+        }
+        spot = best || routeAlong(r.pts, 0.5);
+      }
+      out.set(r.id, spot);
+      if (!r.hidden) boxes.push(box(spot)); // (the next route's plate keeps off this one)
+    }
+    spotCache.set(marks, { key, out });
+    return out;
+  }
   // how light a colour is (0 black … 1 white): an icon on it is drawn dark or white
   const lightOf = (hex) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(hex)); if (!m) return 0.5; const n = parseInt(m[1], 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; };
 
@@ -645,14 +715,16 @@ void main() {
     // ---------- what stands on the map ----------
     function standing(map) {
       const out = [];
+      // (Second Builder (second-cartographer-polish): a route's plate keeps off places; its spot is worked out for the TV's frame)
+      const spots = viewInfo && map.view ? routeSpots(map, camOf(map.view).S, ((cur && cur.look) || {}).tilt || 0) : null;
       for (const m of map.marks || []) {
         if (m.kind === 'note' || (m.hidden && !opts.edit)) continue;
-        if (m.kind === 'route') { if (m.pts && m.pts.length >= 2) out.push({ id: m.id, kind: 'route', ...routeMid(m.pts), color: m.color, title: m.title || '', sub: m.pts.length >= 4 ? Geom.routeLabel(map.grid, m) : '', hidden: !!m.hidden }); continue; }
+        if (m.kind === 'route') { if (m.pts && m.pts.length >= 2) out.push({ id: m.id, kind: 'route', ...((spots && spots.get(m.id)) || routeMid(m.pts)), color: m.color, title: m.title || '', sub: m.pts.length >= 4 ? Geom.routeLabel(map.grid, m) : '', hidden: !!m.hidden }); continue; }
         out.push({ id: m.id, kind: m.kind, x: m.x, y: m.y, color: m.color || '#e3963e', title: m.title || m.label || '', sub: m.kind === 'counter' ? String(m.value) : m.sub || '', n: m.n, style: STYLES[m.style] ? m.style : 'medallion', icon: m.icon || 'flag',
-          note: cur.note && cur.note.id === m.id ? m.note : '', hidden: !!m.hidden, leads: !!m.to });
+          note: cur.note && cur.note.id === m.id ? m.note : '', hidden: !!m.hidden, leads: !!(m.to && opts.edit) }); // (Second Builder (second-cartographer-polish): the door mark is the GM's only)
       }
       for (const l of map.layers || []) if (l.role === 'token' && !l.hidden) out.push({ id: l.id, kind: 'token', x: l.x, y: l.y, url: l.url, size: (l.size || 1) * ((map.grid && map.grid.size) || 1) });
-      if (opts.edit) for (const d of map.draw || []) if (d.kind === 'text') out.push({ id: d.id, kind: 'text', x: d.x, y: d.y }); // (the GM grabs a written label by a small handle)
+      if (opts.edit) for (const d of map.draw || []) if (d.kind === 'text') out.push({ id: d.id, kind: 'text', x: d.x, y: d.y + (d.size || 0) * 0.62 }); // (the GM grabs a written label by a small handle; Second Builder (second-cartographer-polish): just under its letters, not on them)
       return out;
     }
     function buildNode(it) {
@@ -665,6 +737,7 @@ void main() {
         if (it.style === 'diamond') { const p = words('atl-words'); if (it.sub && it.title) p.insertBefore(el('i', 'atl-rule'), p.lastChild); inner.append(p); }
         else inner.append(words(`atl-plate ${it.style === 'medallion' ? 'parch' : 'dark'}`));
         const body = el('div', 'atl-body'); body.innerHTML = SHAPE[it.style] + `<span class="atl-ico">${typeof icon === 'function' ? icon(iconOf(it.icon)) : ''}</span>`;
+        if (it.leads) { const d = el('span', 'atl-door'); d.innerHTML = typeof icon === 'function' ? icon('door-enter') : ''; body.append(d); } // (Second Builder (second-cartographer-polish): it leads to another map)
         inner.append(body);
         if (it.note) { const n = el('div', 'atl-note'); n.textContent = it.note; e.append(n); }
       } else if (it.kind === 'route') inner.append(words('atl-plate dark'));
@@ -679,7 +752,7 @@ void main() {
     let items = [];
     function syncNodes() {
       items = cur ? standing(cur.map) : [];
-      const sig = JSON.stringify(items.map((it) => [it.id, it.kind, it.color, it.title, it.sub, it.n, it.note, it.url, it.style, it.icon, it.hidden]));
+      const sig = JSON.stringify(items.map((it) => [it.id, it.kind, it.color, it.title, it.sub, it.n, it.note, it.url, it.style, it.icon, it.hidden, it.leads]));
       if (sig !== labelSig) {
         labelSig = sig;
         labels.innerHTML = ''; nodes.clear();
@@ -890,6 +963,6 @@ void main() {
       assetSize: (l) => { const m = pic(l.url, l.kind); return m && m.ok ? { w: l.w || 1, h: (((l.w || 1) * m.h) / m.w) * (l.stretch || 1) } : null; },
     };
   }
-  return { mount, geo, ICONS, STYLES, LIVE_MAX, routeLine, routeMid, routeWidth };
+  return { mount, geo, ICONS, STYLES, LIVE_MAX, routeLine, routeMid, routeWidth, routeAlong, routeT, routeSpots };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = TableAtlas;

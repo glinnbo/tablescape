@@ -1889,7 +1889,9 @@ const FX = (() => {
     xform();
     ctx.globalCompositeOperation = 'source-over';
     let n = 0;
-    const alphaOf = (L) => Math.min(1, (L.sat ?? 0.25) * (0.5 + 0.5 * level) * Math.min(1, L.strength ?? 1));
+    // (Beta 3.51: a light in its own colour throws none by day: its colour comes in with the dark, all of it from 40 %)
+    const dayK = (L) => { if (L.own !== false) return 1; const k = Math.min(1, Math.max(0, level / 0.4)); return k * k * (3 - 2 * k); };
+    const alphaOf = (L) => Math.min(1, (L.sat ?? 0.25) * (0.5 + 0.5 * level) * Math.min(1, L.strength ?? 1) * dayK(L));
     const plain = lights.filter((L) => !L.mask && L.color && alphaOf(L) >= 0.02);
     if (plain.length > 1 && overlapping(plain)) { // (Prototype 15: overlapping lights don't stack their colour)
       const img = maxLights('glow', ctx, w, hgt, plain, (g, L) => {

@@ -13,7 +13,7 @@
 'use strict';
 
 const AtlasPanel = (() => {
-  const { h, iconEl, openMenu, askText, Thumbs, clamp } = UI;
+  const { h, iconEl, openMenu, askText, Thumbs, clamp, toast } = UI;
   const D2R = Math.PI / 180;
   const FLAT = { tilt: 0, bulge: 0, blur: 0, turn: 0 };
   const INK = [{ hex: '#ffffff', label: 'White' }, { hex: '#e3963e', label: 'Torch' }, { hex: '#e4675e', label: 'Red' }, { hex: '#f2d14b', label: 'Yellow' }, { hex: '#5cc382', label: 'Green' },
@@ -21,12 +21,12 @@ const AtlasPanel = (() => {
   const FACES = [{ value: 0, icon: 'arrow-down', tip: 'It faces the bottom side of the TV' }, { value: 90, icon: 'arrow-left', tip: 'It faces the left side' }, { value: 180, icon: 'arrow-up', tip: 'It faces the top side' }, { value: 270, icon: 'arrow-right', tip: 'It faces the right side' }];
   // the strip: at the top what is used all the time, at the bottom (low) what is set once for a map
   const TOOLS = [
-    { id: 'move', icon: 'hand-grab', label: 'Move', tip: 'Move the view; pick a place, a route or a label to change it. Double click a place to open its map' },
-    { id: 'place', icon: 'map-pin', label: 'Place', tip: 'Click the map to set a named place' },
-    { id: 'route', icon: 'route', label: 'Route', tip: 'A line from click to click, counted in grid cells. With a grid shown it snaps to the cells (Alt: free)' },
-    { id: 'draw', icon: 'pencil', label: 'Draw', tip: 'Draw on the map' },
-    { id: 'write', icon: 'typography', label: 'Write', tip: 'Click the map to write on it' },
-    { id: 'erase', icon: 'eraser', label: 'Erase', tip: 'Rub out what was drawn or written' },
+    { id: 'move', icon: 'hand-grab', label: 'Move', key: 'V', tip: 'Move the view; pick a place, a route or a label to change it. Double click a place to open its map' },
+    { id: 'place', icon: 'map-pin', label: 'Place', key: 'P', tip: 'Click the map to set a named place' },
+    { id: 'route', icon: 'route', label: 'Route', key: 'R', tip: 'A line from click to click, counted in grid cells. With a grid shown it snaps to the cells (Alt: free)' },
+    { id: 'draw', icon: 'pencil', label: 'Draw', key: 'D', tip: 'Draw on the map' },
+    { id: 'write', icon: 'typography', label: 'Write', key: 'T', tip: 'Click the map to write on it' },
+    { id: 'erase', icon: 'eraser', label: 'Erase', key: 'E', tip: 'Rub out what was drawn or written' },
     { id: 'maps', icon: 'map-2', label: 'Maps', tip: 'The maps of the atlas', low: true },
     { id: 'assets', icon: 'trees', label: 'Assets', tip: 'Pictures and animations that lie on the map', low: true },
     { id: 'grid', icon: 'grid-4x4', label: 'Grid', tip: 'A grid, and what one cell stands for', low: true },
@@ -42,16 +42,19 @@ const AtlasPanel = (() => {
     'Drag the map to move the view, mouse wheel to zoom. The middle mouse button (or Alt + drag) moves the view with any tool.',
     'Right-click the map for a round menu (right-click again, Esc or a click beside it closes it): a place, a route, a label or an asset right there, or the TV looking there. Right-click a place, a route or an asset for what can be done with it.',
     'Place: click the map. A place has a name, a marker (medallion, diamond or pin), an icon and a colour; it can lead to another map and bring a note or a handout.',
-    'Double click a place that leads to another map (Move tool) to open that map. On the TV the camera dives into the place, the mist closes, and the other map opens. Zoom out (top right) goes back the same way.',
+    'Double click a place that leads to another map (Move tool; it wears a small door) to open that map. On the TV the camera dives into the place, the mist closes, and the other map opens (asked first). Zoom out (top right) goes back the same way.',
     'After a place is set, a route ended or a label written, the Move tool is back. Draw and Erase stay until you pick another tool or press Esc.',
     'Route: click from point to point; a right-click, a double click or Enter ends it, Backspace takes the last point back. With a grid shown the points snap to the middle of its cells; hold Alt for a free point. Its length is counted in grid cells, in what one cell stands for.',
-    'A picked route glows. With Lock routes open, its points show as handles: drag one to move it, click the line to add one, right-click one to take it out. Travelled draws the part the party has walked solid, with a marker where they are.',
+    'A route\'s name stands where it covers no place. Drag its name along the road to put it somewhere else; "Name plate back by itself" returns it.',
+    'How far is it? Right-click the map or a place: How far from here, or M at the pointer. Every click adds a bend; a double click, a right-click, Enter or Esc ends it. Nothing is kept.',
+    'Keys: V Move, P Place, R Route, D Draw, T Write, E Erase, M measure. The Move tool lists the places and routes of the map: click one to show it here, the TV button to make the TV look there.',
+    'A picked route glows. With Lock routes open, its points show as handles: drag one to move it, click the line to add one, right-click one to take it out. Travelled draws the part the party has walked solid, with a marker where they are; − and + move them one cell (one day, in what a cell stands for).',
     'The two locks at the top right keep markers and routes where they are: they can still be picked and changed, but not dragged. Open a lock to move them.',
-    'Assets lie on the map. Animated ones move there too, up to 20 at once; more than that stand still.',
+    'Assets lie on the map: Add from the library, or drag one from the library onto the map. Animated ones move there too, up to 20 at once; more than that stand still.',
     'The mist hides where the map ends: white cloud or dark mist, kept with each map. Reach is how far it comes in from the map\'s edge, Screen edge how far from the rim of the TV.',
     'Weather is the battlemap\'s: the same mixes and layers, falling over the world map. Every map has its own.',
     'A world map comes onto the TV and leaves it with the table style\'s map change. While a world map is on the TV the battlemap under it rests; while this window is open, the battlemap on your screen rests too.',
-    'Ctrl + Z takes back the last change to this map. Delete removes what is picked.',
+    'Ctrl + Z takes back the last change to this map. Delete removes what is picked (the note that says so has an Undo too).',
     'Drag the corner of this window to make it bigger.'];
   const KEY = 'mapTable';
   const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -67,7 +70,7 @@ const AtlasPanel = (() => {
     const msend = (key, type, p = {}) => ctx.send(key, type, { mapId: mid(), ...p });
     // what the window remembers
     const ui = { tool: 'move', mode: 'flat', w: 780, h: 480, lockMarks: true, lockRoutes: true, moved: false, // (Beta 3.13: markers and routes are locked until their lock is opened; moved: the TV's handle was used once)
-      place: { style: 'medallion', icon: 'city', color: '#e3963e' }, draw: { color: '#17181c', w: 3 }, write: { color: '#17181c', size: 3 }, route: { color: '#e4675e', look: 'dash', width: 2, arrow: true, round: true } }; // (Beta 3.14: how the next route is drawn)
+      place: { style: 'medallion', icon: 'city', color: '#e3963e' }, draw: { color: '#17181c', w: 3 }, write: { color: '#17181c', size: 3 }, route: { color: '#e4675e', look: 'dash', width: 2, arrow: true, round: true }, lookOpen: false }; // (Beta 3.14: how the next route is drawn; Second Builder (second-cartographer-polish): lookOpen: a picked place's Look is unfolded)
     try { const s = JSON.parse(localStorage.getItem(KEY) || '{}'); for (const k of Object.keys(ui)) if (s && k in s && typeof s[k] === typeof ui[k]) ui[k] = typeof ui[k] === 'object' ? { ...ui[k], ...s[k] } : s[k]; } catch {}
     if (!TOOLS.some((t) => t.id === ui.tool)) ui.tool = 'move';
     const save = () => { try { localStorage.setItem(KEY, JSON.stringify(ui)); } catch {} };
@@ -75,7 +78,7 @@ const AtlasPanel = (() => {
     let win = null; // the open window: { ed, addAsset, debug, … } (null: closed)
 
     const def = () => ({
-      id: 'atlas', title: 'Map table', icon: 'world', tips: TIPS, // (the Toolbox's Cartographer tile)
+      id: 'atlas', title: 'Cartographer', icon: 'world', tips: TIPS, // (the Toolbox's Cartographer tile; Third Builder (third-small-labels): E1, one name, was Map table)
       place: (r, el) => ({ x: Math.max(12, Math.round((r.width - el.offsetWidth) / 2)), y: 14 }),
       build,
     });
@@ -108,6 +111,7 @@ const AtlasPanel = (() => {
       const mk = (tag, cls) => { const e = document.createElementNS(NS, tag); e.setAttribute('class', cls); svg.append(e); return e; };
       const rglow = mk('polyline', 'mt-rglow'); const rline = mk('polyline', 'mt-rline'); // a picked route: its glow, and the line to click for one more point
       const penEl = mk('polyline', 'mt-pen'); const rubber = mk('polyline', 'mt-rubber'); const giz = mk('polygon', 'mt-giz');
+      const measEl = mk('polyline', 'mt-measure'); let meas = null; // (Second Builder (second-cartographer-polish): a line that only measures: { pts })
       const countEl = h('span', { class: 'mt-count', hidden: true }); const rhs = []; // what the next leg adds, next to the pointer; the handles of a picked route's points
       // the TV's frame: a round handle at its corner to move it (it stays in the picture when the corner does not), a dot
       // at the opposite corner to size it
@@ -200,11 +204,15 @@ const AtlasPanel = (() => {
       let selAt = 0;
       const selLost = () => !!sel && !selItem() && Date.now() - selAt > 1500;
       function select(s) { sel = s; selAt = Date.now(); ed.setSelected(s ? s.id : null); renderOpts(); }
-      function removeSel() {
+      async function removeSel() {
         const it = selItem(); if (!it) return;
-        if (it.sel.kind === 'mark') mcmd('mark.remove', { id: it.o.id }); else if (it.sel.kind === 'text') mcmd('draw.remove', { id: it.o.id }); else mcmd('layer.remove', { id: it.o.id });
+        const mapId = mid(); const type = it.sel.kind === 'mark' ? 'mark.remove' : it.sel.kind === 'text' ? 'draw.remove' : 'layer.remove';
+        const name = nameOfItem(it); const title = it.o.title || it.o.name || '';
         if (routeId === it.o.id) routeId = null;
         select(null);
+        const r = await mcmd(type, { id: it.o.id });
+        // Second Builder (second-cartographer-polish): an Undo right there (H5)
+        if (r && r.ok) toast(title ? `${title} removed` : `${name} removed`, { undo: () => cmd('history.undo', { mapId }) });
       }
       function setTool(t) {
         ui.tool = t; save();
@@ -226,6 +234,7 @@ const AtlasPanel = (() => {
       function askOpen(m) {
         const dest = m && m.to ? A().maps.find((x) => x.id === m.to) : null;
         if (!dest) return;
+        if (A().on !== mid()) { openRegion(m); return; } // (Second Builder (second-cartographer-polish): only a trip on the TV asks first)
         let dlg = null;
         const yes = c().btn('Open', 'door-enter', () => { dlg.close(); openRegion(m); }, { kind: 'primary' });
         dlg = UI.dialog(`Open ${dest.name}?`, h('div', { class: 'stack' }, h('p', { class: 'hint' }, A().on === mid() ? 'The TV dives into this place and opens the map behind it.' : 'This window changes to the map behind this place.'),
@@ -294,6 +303,19 @@ const AtlasPanel = (() => {
         }
         return null;
       }
+      // Second Builder (second-cartographer-polish): a route's name plate is pulled along its road (also when routes
+      // are locked: the road itself stays where it is). Where the plate's foot stands is kept, not where it was grabbed.
+      function dragPlate(e, p0, it, node) {
+        const id = it.o.id; const key = `atl-plate-${Date.now()}`; let moved = false; let t = null;
+        const r0 = wrap.getBoundingClientRect(); const a = node.getBoundingClientRect(); const off = { x: a.left - r0.left - p0.x, y: a.top - r0.top - p0.y };
+        track(e, (p) => {
+          if (!moved && Math.hypot(p.x - p0.x, p.y - p0.y) < 3) return;
+          moved = true;
+          const q = toMap({ x: p.x + off.x, y: p.y + off.y }); const r = itemOf(id); if (!q || !r) return;
+          t = r3(TableAtlas.routeT(r.o.pts, q.x, q.y));
+          msend(key, 'mark.update', { id, labelAt: t });
+        }, () => { if (moved && t != null) mcmd('mark.update', { id, labelAt: t, coalesce: key }); });
+      }
       function dragGizmo(e, p0, kind) {
         e.preventDefault();
         const it = selItem(); if (!it || it.sel.kind !== 'asset') return;
@@ -348,6 +370,14 @@ const AtlasPanel = (() => {
           routeId = r && r.selected ? r.selected : null; renderOpts();
         }).catch(() => {});
       }
+      // Second Builder (second-cartographer-polish): how far is it? A line from a spot, counted like a route, that is not
+      // kept: every click adds a bend; a double click, a right-click, Enter or Esc ends it
+      function startMeasure(q, free) {
+        const s0 = snapPt(q, free); if (!s0) return;
+        meas = { pts: [r3(s0.x), r3(s0.y)] }; routeId = null;
+        wrap.classList.add('measuring'); syncEd();
+      }
+      function endMeasure() { meas = null; wrap.classList.remove('measuring'); countEl.hidden = true; measEl.style.display = 'none'; syncEd(); }
       const penW = () => (ui.draw.w / 1000) * span();
       function startPen(e, p0) {
         const q0 = toMap(p0); if (!q0) return;
@@ -405,23 +435,25 @@ const AtlasPanel = (() => {
         const p = pt(e);
         const twice = e.button === 0 && e.timeStamp - lastDown.t < 400 && Math.hypot(p.x - lastDown.x, p.y - lastDown.y) < 6;
         if (e.button === 0) lastDown = twice ? { t: 0, x: 0, y: 0 } : { t: e.timeStamp, x: p.x, y: p.y };
-        if (e.button === 1 || (e.button === 0 && e.altKey)) { e.preventDefault(); startPan(e, p); return; }
+        if (e.button === 1 || (e.button === 0 && e.altKey && !meas)) { e.preventDefault(); startPan(e, p); return; }
         if (e.button !== 0) return;
+        if (meas) { e.preventDefault(); if (twice) endMeasure(); else { const q = snapPt(toMap(p), e.altKey); if (q) { meas.pts.push(r3(q.x), r3(q.y)); syncEd(); } } return; } // (Second Builder (second-cartographer-polish))
         if (e.target.closest('.mt-tv-grab')) { if (!ui.moved) { ui.moved = true; save(); tvGrab.classList.remove('fresh'); } dragFrame(e, p, 'move'); return; }
         if (e.target.closest('.mt-tv-grip')) { dragFrame(e, p, 'size'); return; }
         const hd = e.target.closest('.mt-h'); if (hd) { dragGizmo(e, p, hd.dataset.k); return; }
         const rh = e.target.closest('.mt-rh'); if (rh) { dragRoutePoint(e, Number(rh.dataset.i)); return; }
         if (e.target === rline) { addRoutePoint(p, e); return; }
         const t = ui.tool; const node = e.target.closest('.atl-s');
-        const pick = (it) => {
+        const pick = (it, plate) => {
           if (t !== 'move') setTool('move');
           select(it.sel);
           if (twice && t === 'move' && it.o.kind === 'place' && it.o.to) { askOpen(it.o); return; } // (a double click on a place that leads somewhere)
+          if (plate && it.o.kind === 'route') { dragPlate(e, p, it, plate); return; } // (Second Builder (second-cartographer-polish): its name plate slides along it)
           if (locked(it)) lockedPress(e, p, it); else dragItem(e, p, it); // (locked: picked, but it stays where it is)
         };
         // (with the Assets tool an asset under the pointer comes first, also under a marker that stands on it)
         if (t === 'assets') { const l = assetAt(p); if (l) { select({ kind: 'asset', id: l.id }); dragItem(e, p, itemOf(l.id)); return; } }
-        if (node && PICK.includes(t)) { const it = itemOf(node.dataset.id); if (it) { pick(it); return; } }
+        if (node && PICK.includes(t)) { const it = itemOf(node.dataset.id); if (it) { pick(it, node); return; } }
         // a route is picked by its line too (not while a place is being set or a label written: those may go onto a road)
         if (PICK.includes(t) && t !== 'place' && t !== 'write') { const r = routeAt(p); if (r) { pick(itemOf(r.id)); return; } }
         if (t === 'place') { placeAt(p); return; }
@@ -437,6 +469,7 @@ const AtlasPanel = (() => {
         e.preventDefault();
         if (!M() || !ctx.Radial) return;
         if (routeId && ui.tool === 'route') { endRoute(); return; } // (Beta 3.15: a right-click ends the route being drawn)
+        if (meas) { endMeasure(); return; } // (Second Builder (second-cartographer-polish): and the measuring line)
         const rh = e.target.closest('.mt-rh'); // (a point of the picked route: it is taken out)
         if (rh) { const it0 = selItem(); if (it0 && it0.o.kind === 'route') mcmd('mark.route', { id: it0.o.id, remove: Number(rh.dataset.i) }); return; }
         const p = pt(e); const q = toMap(p);
@@ -452,6 +485,7 @@ const AtlasPanel = (() => {
             const dest = o.kind === 'place' && o.to ? A().maps.find((x) => x.id === o.to) : null;
             if (dest) items.push({ icon: 'door-enter', label: `Open ${dest.name}`, run: () => openRegion(o) });
             if (o.kind === 'place' && o.note && A().on === mid()) items.push({ icon: 'message', label: A().note === o.id ? 'Put its note away' : 'Show its note', run: () => cmd('atlas.note', { id: o.id }) });
+            if (o.kind === 'place') items.push({ icon: 'ruler-measure', label: 'How far from here', run: () => startMeasure({ x: o.x, y: o.y }, true) }); // (Second Builder (second-cartographer-polish))
             if (o.kind === 'route') items.push({ icon: 'route', label: 'Draw on', run: () => { routeId = o.id; sel = null; setTool('route'); } }, { icon: 'arrow-back-up', label: 'One point back', run: () => mcmd('mark.route', { id: o.id, back: true }) });
             items.push({ icon: o.hidden ? 'eye' : 'eye-off', label: o.hidden ? 'Show' : 'Hide', run: () => upd({ hidden: !o.hidden }) });
           }
@@ -463,9 +497,23 @@ const AtlasPanel = (() => {
         items.push({ icon: 'map-pin', label: 'Place here', run: () => { if (ui.tool !== 'place') setTool('place'); placeAt(p); } },
           { icon: 'route', label: 'Route from here', run: () => { setTool('route'); routeClick(p, false); } },
           { icon: 'typography', label: 'Write here', run: () => { if (ui.tool !== 'write') setTool('write'); writeAt(p); } },
+          { icon: 'ruler-measure', label: 'How far from here', run: () => startMeasure(q, false) }, // (Second Builder (second-cartographer-polish))
           { icon: 'trees', label: 'Asset here', run: () => ctx.Drawer.open({ cat: 'assets', purpose: 'atlasAsset', at: { x: r3(q.x), y: r3(q.y) } }) },
           { icon: 'device-tv', label: 'TV looks here', run: () => { const cm = { ...camOfView(viewNow()), cx: q.x, cy: q.y }; mcmd('view.update', viewOfCam(cm)); } });
         ctx.Radial.open(e.clientX, e.clientY, items, 'Here', { modal: true });
+      });
+      // Second Builder (second-cartographer-polish): an asset dragged from the library lies where it is dropped
+      const draggedAsset = (e) => [...e.dataTransfer.types].includes('application/x-ts-asset');
+      wrap.addEventListener('dragover', (e) => { if (!M() || !draggedAsset(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; wrap.classList.add('drop-ok'); });
+      wrap.addEventListener('dragleave', () => wrap.classList.remove('drop-ok'));
+      wrap.addEventListener('drop', (e) => {
+        wrap.classList.remove('drop-ok');
+        if (!M() || !draggedAsset(e)) return;
+        let a = null; try { a = JSON.parse(e.dataTransfer.getData('application/x-ts-asset') || 'null'); } catch {}
+        e.preventDefault(); e.stopPropagation();
+        if (!a || !a.path) return;
+        if (a.cat && a.cat !== 'assets') { toast('Only assets lie on a world map: maps come in under Maps', { kind: 'error' }); return; }
+        const q = toMap(pt(e)); if (q) win.addAsset(a, { x: r3(q.x), y: r3(q.y) });
       });
       wrap.addEventListener('pointermove', (e) => { hover = pt(e); hover.free = e.altKey; });
       wrap.addEventListener('pointerleave', () => { hover = null; });
@@ -501,6 +549,17 @@ const AtlasPanel = (() => {
         const rt = routeId && m && ui.tool === 'route' && hover ? m.marks.find((x) => x.id === routeId) : null;
         const hq = rt ? snapPt(g.toMap(hover.x, hover.y), hover.free) : null;
         rubber.style.display = rt && hq ? '' : 'none'; countEl.hidden = !(rt && hq);
+        // (Second Builder (second-cartographer-polish)) the measuring line: its bends, on to the pointer, and how far that is
+        const mq = meas && m && hover ? snapPt(g.toMap(hover.x, hover.y), hover.free) : null;
+        const mpts = meas ? (mq ? [...meas.pts, mq.x, mq.y] : meas.pts) : null;
+        measEl.style.display = mpts && mpts.length >= 4 ? '' : 'none';
+        if (meas && m) {
+          if (mpts.length >= 4) measEl.setAttribute('points', line(mpts));
+          const say = mpts.length >= 4 ? Geom.unitLabel(m.grid, Geom.routeCells(m.grid, mpts)) : 'Click where to';
+          if (countEl.textContent !== say) countEl.textContent = say;
+          countEl.hidden = !hover;
+          if (hover) { countEl.style.left = `${(hover.x + 16).toFixed(0)}px`; countEl.style.top = `${(hover.y + 14).toFixed(0)}px`; }
+        }
         if (rt && hq) {
           const last = [rt.pts[rt.pts.length - 2], rt.pts[rt.pts.length - 1]];
           rubber.setAttribute('points', line([...last, hq.x, hq.y])); rubber.style.stroke = rt.color;
@@ -549,17 +608,24 @@ const AtlasPanel = (() => {
         if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) { e.preventDefault(); undo(k === 'y' || e.shiftKey); return; }
         if (e.ctrlKey || e.metaKey) return;
         if (k === 'escape') { // the round menu closes; else a route ends; else what is picked is let go; else the Move tool is back
-          if (ctx.Radial && ctx.Radial.isOpen) ctx.Radial.close(); else if (routeId) endRoute(); else if (sel) select(null); else if (ui.tool !== 'move') setTool('move');
+          if (ctx.Radial && ctx.Radial.isOpen) ctx.Radial.close(); else if (meas) endMeasure(); else if (routeId) endRoute(); else if (sel) select(null); else if (ui.tool !== 'move') setTool('move');
           return;
         }
+        if (k === 'enter' && meas) { endMeasure(); return; }
         if (k === 'enter' && routeId) { endRoute(); return; }
+        // Second Builder (second-cartographer-polish): a letter picks a tool, M measures from the pointer
+        if (!e.altKey && !e.shiftKey && M()) {
+          const tk = TOOLS.find((x) => x.key && x.key.toLowerCase() === k);
+          if (tk) { e.preventDefault(); if (meas) endMeasure(); if (routeId && tk.id !== 'route') endRoute(); setTool(tk.id); return; }
+          if (k === 'm') { e.preventDefault(); if (meas) endMeasure(); else if (hover) startMeasure(toMap(hover), false); return; }
+        }
         if (k === 'backspace' && routeId && ui.tool === 'route') { e.preventDefault(); mcmd('mark.route', { id: routeId, back: true }); return; }
         if ((k === 'delete' || k === 'backspace') && sel) { e.preventDefault(); removeSel(); }
       };
 
       // ---------- the strip of tools ----------
       const strip = h('div', { class: 'mt-strip', role: 'toolbar', 'aria-label': 'Map tools' });
-      for (const t of TOOLS) strip.append(h('button', { class: `mt-tool${ui.tool === t.id ? ' on' : ''}${t.low && !TOOLS[TOOLS.indexOf(t) - 1].low ? ' first-low' : ''}`, dataset: { id: t.id }, 'aria-label': t.label, 'data-tip': `${t.label}: ${t.tip}`, onclick: () => setTool(t.id) }, iconEl(t.icon)));
+      for (const t of TOOLS) strip.append(h('button', { class: `mt-tool${ui.tool === t.id ? ' on' : ''}${t.low && !TOOLS[TOOLS.indexOf(t) - 1].low ? ' first-low' : ''}`, dataset: { id: t.id }, 'aria-label': t.label, 'data-tip': `${t.label}${t.key ? ` (${t.key})` : ''}: ${t.tip}`, onclick: () => setTool(t.id) }, iconEl(t.icon))); // (Second Builder (second-cartographer-polish): its key in the tip)
 
       // ---------- the choices next to it ----------
       const opts = h('div', { class: 'mt-opts stack' });
@@ -572,7 +638,7 @@ const AtlasPanel = (() => {
         optSig = sig; optBinds = [];
         const t = TOOLS.find((x) => x.id === ui.tool) || TOOLS[0];
         ctx.withBinds(optBinds, () => {
-          const body = !M() && ui.tool !== 'maps' ? [h('p', { class: 'hint' }, 'No world map yet.')] : it ? editorOf(it) : toolOpts(ui.tool);
+          const body = !M() && ui.tool !== 'maps' ? [] : it ? editorOf(it) : toolOpts(ui.tool); // (Second Builder (second-cartographer-polish): the window says it once, E2)
           opts.replaceChildren(h('div', { class: 'mt-opts-head' }, iconEl(it ? iconOfItem(it) : t.icon), h('b', { class: 'ellipsis' }, it ? nameOfItem(it) : t.label)), ...body.filter(Boolean));
         });
         if (focusTitle && it) { focusTitle = false; const f = opts.querySelector('input.mt-title'); if (f) requestAnimationFrame(() => { f.focus(); f.select(); }); }
@@ -584,7 +650,7 @@ const AtlasPanel = (() => {
       function toolOpts(t) {
         if (t === 'maps') return mapsOpts();
         if (t === 'move') return [c().btn('Show the whole map', 'maximize', () => { cams[mid()] = fitCam(); if (ui.mode !== 'flat') { ui.mode = 'flat'; save(); } syncEd(); }, { kind: 'wide', tip: 'The whole map in this window, flat' }),
-          c().btn('Fit the TV to the map', 'device-tv', fitTv, { kind: 'wide', tip: 'The TV shows as much of the map as fits without showing past its edge' })];
+          c().btn('Fit the TV to the map', 'device-tv', fitTv, { kind: 'wide', tip: 'The TV shows as much of the map as fits without showing past its edge' }), placesList()];
         if (t === 'place') return placeChoices(() => ui.place, (patch) => { Object.assign(ui.place, patch); save(); });
         if (t === 'route') {
           const now = h('div', { class: 'stack' });
@@ -600,13 +666,45 @@ const AtlasPanel = (() => {
           c().slider({ label: 'Width', min: 1, max: 14, step: 0.5, get: () => ui.draw.w, set: (v) => { ui.draw.w = v; save(); }, fmt: (v) => String(v) })];
         if (t === 'write') return [swatches('Colour', () => ui.write.color, (v) => { ui.write.color = v; save(); }),
           c().slider({ label: 'Size', min: 1, max: 12, step: 0.5, get: () => ui.write.size, set: (v) => { ui.write.size = v; save(); }, fmt: (v) => String(v) })];
-        if (t === 'erase') return [c().btn('Rub out everything', 'trash', () => mcmd('draw.clear', {}), { kind: 'wide', tip: 'All drawings and labels of this map (Ctrl + Z brings them back)' })];
+        if (t === 'erase') return [c().btn('Rub out everything', 'trash', async () => { const mapId = mid(); const r = await mcmd('draw.clear', {}); if (r && r.ok) toast('Drawings and labels rubbed out', { undo: () => cmd('history.undo', { mapId }) }); }, { kind: 'wide', tip: 'All drawings and labels of this map' })]; // (Second Builder (second-cartographer-polish): with an Undo)
         if (t === 'assets') return [c().btn('Add from the library', 'plus', () => ctx.Drawer.open({ cat: 'assets', purpose: 'atlasAsset' }), { kind: 'wide primary', tip: 'A picture or an animation that lies on the map' })];
         if (t === 'grid') return gridOpts();
         if (t === 'view') return viewOpts();
         // the battlemap's weather, for this map (gm-play.js builds it), and sunshine, which only world maps have
         return [...ctx.weatherPanel({ map: M, cmd: mcmd, send: msend, refresh: () => renderOpts(true), key: 'wxOpenAtlas', plain: true }), c().sep(),
           c().slider({ label: 'Sunshine', min: 0, max: 1, step: 0.05, get: () => ((M() && M().atlas && M().atlas.weather) || {}).sun || 0, set: (v, key) => msend(key, 'atlasmap.set', { weather: { sun: v } }), fmt: pc })];
+      }
+      // Second Builder (second-cartographer-polish): the places and routes of this map, to find one on a big map. A click
+      // shows it in the middle of this window and picks it; the TV button moves the TV's frame there.
+      let findText = '';
+      function placesList() {
+        const list = h('div', { class: 'mt-places' });
+        const find = h('input', { type: 'search', class: 'mt-find', placeholder: 'Find a place', 'aria-label': 'Find a place', spellcheck: 'false', value: findText });
+        find.addEventListener('input', () => { findText = find.value; list.dataset.sig = ''; paint(); });
+        const box = h('div', { class: 'ctl mt-places-box' }, h('span', { class: 'ctl-label' }, 'On this map'), find, list);
+        const centre = (o) => { const at = o.kind === 'route' ? TableAtlas.routeAlong(o.pts, 0.5) : o; const cm = { ...winCam(), cx: at.x, cy: at.y }; cams[mid()] = cm; if (ui.mode !== 'flat') { ui.mode = 'flat'; save(); } syncEd(); };
+        function paint() {
+          const m = M(); const all = m ? m.marks.filter((x) => x.kind === 'place' || (x.kind === 'route' && x.pts && x.pts.length >= 4)) : [];
+          const q = findText.trim().toLowerCase();
+          const rows = all.filter((x) => !q || `${x.title || ''} ${x.sub || ''}`.toLowerCase().includes(q))
+            .sort((a, b) => (a.kind === b.kind ? String(a.title || '').localeCompare(String(b.title || '')) : a.kind === 'place' ? -1 : 1));
+          const sig = JSON.stringify([rows.map((x) => [x.id, x.title, x.icon, x.hidden, x.to]), all.length]);
+          if (list.dataset.sig === sig) return;
+          list.dataset.sig = sig; list.replaceChildren();
+          find.hidden = all.length < 7 && !q;
+          box.hidden = !all.length;
+          for (const o of rows) {
+            const ic = o.kind === 'route' ? 'route' : (TableAtlas.ICONS[o.icon] || TableAtlas.ICONS.flag)[1];
+            const name = o.title || (o.kind === 'route' ? 'Route' : 'Place');
+            list.append(h('div', { class: `mt-prow${o.hidden ? ' is-hidden' : ''}`, dataset: { id: o.id } },
+              h('button', { class: 'mt-pgo', 'data-tip': `Show ${name} here and pick it`, onclick: () => { centre(o); if (ui.tool !== 'move') setTool('move'); select({ kind: 'mark', id: o.id }); } },
+                iconEl(ic), h('span', { class: 'ellipsis' }, name), o.hidden ? iconEl('eye-off') : null, o.to ? iconEl('door-enter') : null),
+              c().ib('device-tv', `The TV looks at ${name}`, () => { const at = o.kind === 'route' ? TableAtlas.routeAlong(o.pts, 0.5) : o; mcmd('view.update', viewOfCam({ ...camOfView(viewNow()), cx: at.x, cy: at.y })); })));
+          }
+          if (!rows.length && q) list.append(h('p', { class: 'hint' }, 'Nothing by that name.'));
+        }
+        c().bind(paint);
+        return box;
       }
       function fitTv() { const R = mapRect(); const t = tIn(); const cm = { cx: R.x + R.w / 2, cy: R.y + R.h / 2, S: Math.min(R.h / 2, R.w / 2 / (t.w / t.h)) }; mcmd('view.update', viewOfCam(cm)); }
 
@@ -634,7 +732,6 @@ const AtlasPanel = (() => {
               h('button', { class: 'atl-open', 'data-tip': `Work on ${m.name}`, onclick: () => { sel = null; routeId = null; cmd('atlas.open', { id: m.id }); } },
                 h('span', { class: 'atl-thumb' }, m.missing || !m.bgPath ? iconEl(m.missing ? 'alert-triangle' : world ? 'world' : 'map-2') : Thumbs.img(m.bgPath, m.bgKind || 'image')),
                 h('span', { class: 'atl-name' }, h('b', { class: 'ellipsis' }, m.name), h('small', {}, sub))),
-              c().ib('backpack', m.found ? 'The party has found it. Click: not found yet' : 'Not found yet. Click: the party has it now', () => cmd('atlas.found', { id: m.id }), { on: m.found }),
               c().ib('cast', onTv ? 'On the table. Click to take it off' : 'Show it on the table', () => cmd(onTv ? 'atlas.hide' : 'atlas.show', { id: m.id }), { on: onTv }),
               h('button', { class: 'icon-btn', 'aria-label': `More for ${m.name}`, onclick: (e) => rowMenu(e, m) }, iconEl('dots'))));
           }
@@ -702,9 +799,12 @@ const AtlasPanel = (() => {
             if (k.note) acts.append(c().ib('message', onTv ? (a().note === id ? 'Its note is on the TV. Click to put it away' : 'Show its note on the TV') : 'Its note shows once this map is on the TV', () => cmd('atlas.note', { id }), { on: a().note === id }));
             if (k.ho) acts.append(c().ib('cast', 'Show its handout on the table', () => cmd('handout.show', { path: k.ho.path, add: true })));
           });
+          // (Second Builder (second-cartographer-polish): what matters at the table first; how it looks folded under Look)
+          const look = h('details', { class: 'opt-adv mt-look', open: ui.lookOpen || undefined }, h('summary', {}, 'Look'),
+            h('div', { class: 'stack' }, ...placeChoices(cur, (patch, live) => { Object.assign(ui.place, patch); save(); upd(patch, live ? `atl-col-${id}` : null); })));
+          look.addEventListener('toggle', () => { ui.lookOpen = look.open; save(); });
           return [text('mt-title', 'title', 'Name', 60), text('', 'sub', 'A line under the name', 80),
-            ...placeChoices(cur, (patch, live) => { Object.assign(ui.place, patch); save(); upd(patch, live ? `atl-col-${id}` : null); }),
-            field('Leads to', lead), note, field('Handout', ho), acts, foot];
+            field('Leads to', lead), note, field('Handout', ho), acts, look, foot];
         }
         if (m.kind === 'route') {
           const say = h('output', { class: 'mt-say' });
@@ -712,9 +812,38 @@ const AtlasPanel = (() => {
           return [text('mt-title', 'title', 'Name', 60), say,
             ...routeChoices(cur, (patch, live) => { Object.assign(ui.route, patch); save(); upd(patch, live ? `atl-col-${id}` : null); }),
             c().slider({ label: 'Travelled', min: 0, max: 1, step: 0.01, get: () => cur().walked || 0, set: (v, key) => upd({ walked: v }, key), fmt: (v) => (v < 0.005 ? 'Off' : `${Math.round(v * 100)}%`) }),
+            dayRow(cur, upd),
+            plateRow(cur, upd),
             c().row(c().btn('Draw on', 'route', () => { routeId = id; sel = null; setTool('route'); }, { tip: 'Every click adds a point' }), c().btn('Back', 'arrow-back-up', () => mcmd('mark.route', { id, back: true }), { tip: 'Take the last point back' })), foot];
         }
         return [swatches('Colour', () => cur().color, (v, live) => upd({ color: v }, live ? `atl-col-${id}` : null)), foot];
+      }
+      // Second Builder (second-cartographer-polish): the party walks on one cell (one day of travel, in what one cell
+      // stands for) at a time: Travelled moves by one cell of the route's length
+      function dayRow(cur, upd) {
+        const g = () => (M() && M().grid) || {};
+        const total = () => Math.max(1, Geom.routeCells(g(), cur().pts || []));
+        const now = () => Math.round((cur().walked || 0) * total());
+        const say = h('output', { class: 'mt-say mt-days' });
+        const step = (d) => upd({ walked: r3(clamp((now() + d) / total(), 0, 1)) });
+        const back = c().ib('minus', 'One back', () => step(-1)); const on = c().ib('plus', 'One on', () => step(1));
+        c().bind(() => {
+          const n = now(); const all = total(); const one = Geom.unitLabel(g(), 1);
+          say.textContent = `${n} of ${Geom.unitLabel(g(), all)}`;
+          back.dataset.tip = `Back by ${one}`; on.dataset.tip = `On by ${one}`; back.disabled = n <= 0; on.disabled = n >= all;
+        });
+        return h('div', { class: 'ctl-row mt-dayrow' }, back, say, on);
+      }
+      // where its name plate stands: dragged along the road, or by itself
+      function plateRow(cur, upd) {
+        const row = h('div', { class: 'mt-plate-row' });
+        c().bind(() => {
+          const set = typeof cur().labelAt === 'number';
+          if (row.dataset.on === String(set)) return;
+          row.dataset.on = String(set); row.replaceChildren();
+          if (set) row.append(c().btn('Name plate back by itself', 'refresh', () => upd({ labelAt: null }), { kind: 'small wide', tip: 'It finds a spot along the road where it covers no place' }));
+        });
+        return row;
       }
       function assetEditor(cur, upd, foot) {
         const id = cur().id;

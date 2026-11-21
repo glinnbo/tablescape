@@ -20,10 +20,30 @@ const Guide = (() => {
     ['Panels', [['L', 'Library'], ['Shift L', 'Library full screen'], ['Tab', 'Map thumbnails on or off'], ['Shift I', 'Character cards: the party at a glance (only for you)'], ['?', 'This guide'], ['Ctrl ,', 'Tablescape settings: the TV, picture, sound, performance'], ['Ctrl + / Ctrl − / Ctrl 0', 'Size of everything on your screen (not the TV)']]],
     ['Editing', [['Ctrl Z', 'Undo (also the arrows on top of the tools)'], ['Ctrl Y', 'Redo'], ['H', 'Hide or show what is selected'], ['Ctrl D', 'Duplicate the selected token'], ['Delete / Backspace', 'Remove what is selected'], ['[  ]', 'Brush size']]],
     ['Mouse', [['Right-click', 'Radial menu'], ['Right-drag or Space-drag', 'Pan the view'], ['Wheel', 'Zoom the view'], ['Alt + wheel', 'Scale the map (with everything on it)'], ['Double-click', 'Ping'], ['Alt while dragging a token', 'Place it without snapping']]],
+    ['Cartographer', [['V P R D T E', 'Move, Place, Route, Draw, Write, Erase'], ['M', 'How far: measure from the pointer (a click adds a bend)'], ['Enter / Esc', 'End a route or a measuring line'], ['Delete', 'Remove what is picked']]], // Second Builder (second-cartographer-polish)
   ];
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.53', [
+      'Cartographer: a route\'s name moves to where it covers no place on its road; drag it along the road to put it elsewhere',
+      'Cartographer: How far from here (right-click, or M) measures in days of travel and keeps nothing; − and + under Travelled walk the party on a day at a time',
+      'Cartographer: the Move tool lists the places and routes of the map; a click shows one in the middle, the TV button makes the TV look there',
+      'Cartographer: a picked place shows Leads to and its note first, its look folded; a place that leads to another map wears a small door on your screen; off the TV it opens without asking',
+      'Cartographer: keys V P R D T E for the tools, drag assets from the library onto the map, Undo after removing something; without a map the window only offers Add a map',
+    ]],
+    ['Beta 3.52', [
+      'Clearer labels: Layers has + Token, + Effect and Ambience …; Walls has a labelled Remove all walls; the Tokens row is called Name tags; Spells names the picked look',
+      'One name each: the Cartographer is called Cartographer everywhere (no more Map table or Atlas), and the Map and Grid panels both say Make grid squares 1 inch',
+      'Grid: Match the map\'s printed grid and Make grid squares 1 inch now sit at the top of the panel',
+      'Options → TV: Video on the TV is under Advanced, as Best picture, Smoothest or Safest; the Blackout switch is gone from there (B and the preview still have it)',
+      'The rail calls the Party marker Marker',
+    ]],
+    ['Beta 3.51', [
+      'By day a light in its own colour no longer lays its colour over the floor: only the flame burns. Its colour comes in as the map gets dark (all of it from 40 % darkness). A light you gave a colour keeps colouring the map by day, for the mood. This goes for every light: torches, campfires, candles, Light sources and the lights with a holder',
+      'Draw → Structure → Light: click a light that is there and it is picked. Drag it (a wall light keeps to the wall and turns to it), change Lit, its colour and its reach in the panel; Remove or Delete takes it away; a click beside it lets go',
+      'New for these lights: Reach, for the next one or the picked one (bright and dim light together)',
+    ]],
     ['Beta 3.50', [
       'Conversation is a window of its own with a small TV: click a portrait and it speaks, drag the speaker sideways, pull a corner to size one, ✕ takes it out (a click never does)',
       'The picked portrait\'s Bloodied, Shaded and Hidden sit right under the small TV; ⚙ holds the size, the blur and a new switch: the speaker\'s name on the band',

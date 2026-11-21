@@ -204,7 +204,7 @@ module.exports = (area) => {
     t.handle('edit.open', { id: battle }); await t.settle();
     t.eq(await t.g(`Play.view().playing`), true, 'the battlemap plays');
     const d = await openTable(t, world);
-    t.eq((await t.panels()).find((p) => p.id === 'atlas').title, 'Map table', 'its title');
+    t.eq((await t.panels()).find((p) => p.id === 'atlas').title, 'Cartographer', 'its title (one name: E1)');
     t.eq([d.mode, d.ed.plain], ['flat', true], 'it opens on the flat map');
     t.eq(t.state.editMapId, battle, 'the battlemap editor still has its map');
     t.eq(await t.g(`Play.state().map.id`), battle, 'and shows it');
@@ -259,6 +259,7 @@ module.exports = (area) => {
     await t.until(() => t.g(`document.activeElement && document.activeElement.classList.contains('mt-title')`), 3000, 'its name to be ready for typing');
     await t.type('Emberfall');
     await t.until(() => M(t, world).marks.find((m) => m.id === pl.id).title === 'Emberfall', 3000, 'the name typed');
+    if (!(await t.g(`document.querySelector('.mt-opts details.mt-look').open`))) { const fold = await t.rect('.mt-opts details.mt-look > summary'); await t.click(fold.cx, fold.cy); } // (Second Builder (second-cartographer-polish): how it looks is folded under Look)
     await t.clickText('.mt-opts .seg-btn', 'Diamond');
     const ic = await t.rect('.mt-opts .mt-icon[data-v="tower"]'); await t.click(ic.cx, ic.cy);
     await t.until(() => { const m = M(t, world).marks.find((x) => x.id === pl.id); return m.style === 'diamond' && m.icon === 'tower'; }, 3000, 'a diamond with a tower');
@@ -396,7 +397,7 @@ module.exports = (area) => {
     const e = await scr(t, at(0.3, 0.7));
     await t.click(e.x, e.y, 'right');
     await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the round menu');
-    t.eq(await t.g(`[...document.querySelectorAll('.radial-item span')].map((x) => x.textContent)`), ['Place here', 'Route from here', 'Write here', 'Asset here', 'TV looks here'], 'what can be made here');
+    t.eq(await t.g(`[...document.querySelectorAll('.radial-item span')].map((x) => x.textContent)`), ['Place here', 'Route from here', 'Write here', 'How far from here', 'Asset here', 'TV looks here'], 'what can be made here'); // (Second Builder (second-cartographer-polish): How far from here)
     await t.clickText('.radial-item', 'Place here');
     const made = await t.until(() => M(t, world).marks.find((m) => m.kind === 'place' && m.id !== gate), 4000, 'the place');
     t.near(made.x, at(0.3, 0.7).x, R.w * 0.005, 'where the right-click was');
@@ -404,7 +405,7 @@ module.exports = (area) => {
     await t.sleep(300);
     await t.click(s.x, s.y - 14, 'right');
     await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the round menu of the place');
-    t.eq(await t.g(`[...document.querySelectorAll('.radial-item span')].map((x) => x.textContent)`), ['Open The north', 'Hide', 'Remove'], 'open its map, hide it, remove it');
+    t.eq(await t.g(`[...document.querySelectorAll('.radial-item span')].map((x) => x.textContent)`), ['Open The north', 'How far from here', 'Hide', 'Remove'], 'open its map, hide it, remove it');
     await t.clickText('.radial-item', 'Hide');
     await t.until(() => M(t, world).marks.find((m) => m.id === gate).hidden === true, 3000, 'the place to be hidden');
     t.handle('atlas.hide', {});
@@ -476,7 +477,7 @@ module.exports = (area) => {
     t.handle('mark.update', { mapId: world, id: r.id, title: 'The pilgrim road' });
     t.handle('atlas.show', { id: world });
     await shownOn(t, world);
-    const st = await t.until(async () => { const x = (await tvA(t)).standing.find((s) => s.kind === 'route'); return x && x.shown && x; }, 5000, 'the route\'s label on the TV');
+    const st = await t.until(async () => { const x = (await tvA(t)).standing.find((s) => s.kind === 'route'); return x && x.shown && x.title && x; }, 5000, 'the route\'s label on the TV'); // (Second Builder (second-cartographer-polish): with its name, not the moment before)
     t.ok(/days of travel$/.test(st.sub) && st.title === 'The pilgrim road', 'its name and its length', st);
     t.eq(await t.t(`!!document.querySelector('#table-atlas .atl-s.kind-route .atl-plate.dark b')`), true, 'on a plate');
     t.handle('atlas.hide', {});
@@ -552,6 +553,172 @@ module.exports = (area) => {
     t.eq(await W(t, 'w.debug().tool'), 'move', 'one place set: the Move tool is back');
     await t.g(`Play.Floats.hide('atlas')`);
   }, { ms: 80000 });
+
+  // ---------- Second Builder (second-cartographer-polish) ----------
+  area.quick('a route\'s name keeps off the places on its road; dragged, it slides along the road and stays; back by itself again', async (t) => {
+    for (const m of [...M(t, world).marks]) t.handle('mark.remove', { mapId: world, id: m.id });
+    t.handle('grid.update', { mapId: world, show: false, unit: { n: 1, name: 'day of travel' } });
+    t.handle('atlas.look', { look: { tilt: 0.5, bulge: 0.3, turn: 0 } });
+    t.handle('atlas.show', { id: world });
+    const a = await shownOn(t, world);
+    const R = a.surface.rect; const at = (fx, fy) => ({ x: R.x + R.w * fx, y: R.y + R.h * fy });
+    const mid = at(0.5, 0.5);
+    t.handle('mark.add', { mapId: world, kind: 'place', title: 'Kintsugi', sub: 'Seat of the shogun', ...mid });
+    const r = t.handle('mark.add', { mapId: world, kind: 'route', title: 'The pilgrim road', ...at(0.3, 0.5) }).selected;
+    t.handle('mark.route', { mapId: world, id: r, ...at(0.7, 0.5) });
+    const plate = async () => t.until(async () => { const x = (await tvA(t)).standing.find((s) => s.kind === 'route'); return x && x.shown && x.title && x; }, 6000, 'the route\'s plate on the TV');
+    const onMap = async (x) => t.t(`window.__table.atlasUnproject(${x.x}, ${x.y})`); // (the TV says where on its screen; back onto the map)
+    const p1 = await onMap(await plate());
+    const S = a.cam.S; // (half the TV's height, in inches of the map)
+    t.ok(Math.abs(p1.x - mid.x) > 0.1 * S, 'it does not stand on the place in the middle of its road', { plate: p1, place: mid, S });
+    t.near(p1.y, mid.y, 0.01, 'it stands on its road');
+    // pulled along its road (the GM's Map table): it slides along it and stays there; the road itself stays put
+    const d = await openTable(t, world);
+    await t.g(`Play.Atlas.win.setMode('flat')`);
+    const pts0 = [...M(t, world).marks.find((m) => m.id === r).pts];
+    const pr = await t.until(() => t.rect('.mt-view .atl-s.kind-route .atl-plate'), 4000, 'the plate in the Map table');
+    const to = await scr(t, at(0.36, 0.42)); // (above the road, nearer its start)
+    await t.drag({ x: pr.cx, y: pr.cy }, { x: to.x, y: pr.cy + (to.y - pr.cy) });
+    const got = await t.until(() => { const m = M(t, world).marks.find((x) => x.id === r); return typeof m.labelAt === 'number' && m; }, 4000, 'where the plate was put');
+    t.ok(got.labelAt < 0.4, 'nearer the start of the road, where it was pulled', got.labelAt);
+    t.eq(got.pts, pts0, 'the road itself stays where it is (routes are locked)');
+    const p2 = await t.until(async () => { const x = await onMap(await plate()); return Math.abs(x.x - (R.x + R.w * (0.3 + 0.4 * got.labelAt))) < 0.05 && x; }, 6000, 'the TV to follow');
+    t.near(p2.y, mid.y, 0.01, 'still on its road');
+    // the side has a button to give it back
+    t.ok(await t.findText('.mt-opts .btn', 'Name plate back by itself'), 'the picked route offers to put its name back');
+    await t.clickText('.mt-opts .btn', 'Name plate back by itself');
+    await t.until(() => M(t, world).marks.find((x) => x.id === r).labelAt === null, 3000, 'by itself again');
+    const p3 = await t.until(async () => { const x = await onMap(await plate()); return Math.abs(x.x - p1.x) < 0.05 && x; }, 6000, 'the plate back where it found room');
+    t.ok(p3, 'where it was before');
+    t.handle('atlas.hide', {});
+    await t.until(async () => { const x = await tvA(t); return !x.on && !x.busy; }, 8000, 'off the TV');
+    await t.g(`Play.Floats.hide('atlas')`);
+  }, { ms: 80000 });
+
+  area.quick('the Map table: How far from here keeps nothing; − and + walk a route on by a cell; keys pick the tools; Remove has an Undo', async (t) => {
+    for (const m of [...M(t, world).marks]) t.handle('mark.remove', { mapId: world, id: m.id });
+    for (const x of [...M(t, world).draw]) t.handle('draw.remove', { mapId: world, id: x.id });
+    t.handle('grid.update', { mapId: world, show: true, type: 'square', size: 1, ox: 0, oy: 0, unit: { n: 1, name: 'day of travel' } });
+    const d = await openTable(t, world);
+    await t.g(`Play.Atlas.win.setMode('flat')`);
+    const R = d.ed.surface.rect; const at = (fx, fy) => ({ x: R.x + R.w * fx, y: R.y + R.h * fy });
+    const before = JSON.stringify([M(t, world).marks, M(t, world).draw]);
+    // How far from here: right-click, then the pointer shows the distance; a click adds a bend; Esc ends it, nothing kept
+    const a0 = await scr(t, at(0.3, 0.6));
+    await t.click(a0.x, a0.y, 'right');
+    await t.until(() => t.findText('.radial-item', 'How far from here'), 3000, 'the round menu');
+    await t.clickText('.radial-item', 'How far from here');
+    const a1 = await scr(t, { x: at(0.3, 0.6).x + 5, y: at(0.3, 0.6).y });
+    await t.mouse('mouseMove', a1.x, a1.y);
+    const say = await t.until(async () => { const x = await t.text('.mt-count'); return x && /days? of travel/.test(x) && x; }, 3000, 'how far it is, next to the pointer');
+    t.eq(say, '5 days of travel', 'five cells to the right');
+    await t.click(a1.x, a1.y);
+    const a2 = await scr(t, { x: at(0.3, 0.6).x + 5, y: at(0.3, 0.6).y - 3 });
+    await t.mouse('mouseMove', a2.x, a2.y);
+    await t.until(async () => (await t.text('.mt-count')) === '8 days of travel', 3000, 'a bend and three more cells');
+    await t.key('Escape');
+    t.eq(await t.g(`getComputedStyle(document.querySelector('.mt-measure')).display`), 'none', 'Esc ends it');
+    t.eq(JSON.stringify([M(t, world).marks, M(t, world).draw]), before, 'and nothing was kept on the map');
+    // the keys pick the tools
+    for (const [k, id] of [['P', 'place'], ['R', 'route'], ['D', 'draw'], ['T', 'write'], ['E', 'erase'], ['V', 'move']]) {
+      await t.key(k);
+      t.eq(await W(t, 'w.debug().tool'), id, `${k} picks ${id}`);
+    }
+    // a route walked on by one cell at a time
+    const r = t.handle('mark.add', { mapId: world, kind: 'route', title: 'The road', ...at(0.2, 0.3) }).selected;
+    t.handle('mark.route', { mapId: world, id: r, x: at(0.2, 0.3).x + 4, y: at(0.2, 0.3).y });
+    await t.g(`Play.Atlas.win.select({ kind: 'mark', id: ${JSON.stringify(r)} })`);
+    await t.until(() => t.text('.mt-days'), 3000, 'how far the party has come');
+    t.eq(await t.text('.mt-days'), '0 of 4 days of travel', 'nobody has walked it yet');
+    const plus = await t.rect('.mt-dayrow .icon-btn:last-child'); await t.click(plus.cx, plus.cy); await t.click(plus.cx, plus.cy);
+    await t.until(() => M(t, world).marks.find((x) => x.id === r).walked === 0.5, 3000, 'two cells of four walked');
+    t.eq(await t.text('.mt-days'), '2 of 4 days of travel', 'said in days');
+    const minus = await t.rect('.mt-dayrow .icon-btn:first-child'); await t.click(minus.cx, minus.cy);
+    await t.until(() => M(t, world).marks.find((x) => x.id === r).walked === 0.25, 3000, 'one cell back');
+    // Delete removes it, and the note that says so has an Undo
+    const pr = await t.rect('.mt-stage'); await t.click(pr.x + 6, pr.y + pr.h - 6, 'left'); // (focus in the window, on empty map: lets go of the route)
+    await t.g(`Play.Atlas.win.select({ kind: 'mark', id: ${JSON.stringify(r)} })`);
+    await t.key('Delete');
+    await t.until(() => !M(t, world).marks.some((x) => x.id === r), 3000, 'the route to go');
+    await t.until(() => t.rect('.toast .toast-undo'), 3000, 'a note with Undo');
+    t.ok(/The road removed/.test(await t.g(`document.getElementById('toasts').textContent`)), 'it names what went');
+    await t.clickSel('.toast .toast-undo');
+    await t.until(() => M(t, world).marks.some((x) => x.id === r), 3000, 'Undo brings it back');
+    t.handle('grid.update', { mapId: world, show: false });
+    await t.g(`Play.Floats.hide('atlas')`);
+  }, { ms: 80000 });
+
+  area.quick('the Map table: the places of a map in a list; a place that leads to a map wears a door (yours only); off the TV it opens without asking; no backpack; an asset dropped lies there', async (t) => {
+    for (const m of [...M(t, world).marks]) t.handle('mark.remove', { mapId: world, id: m.id });
+    t.handle('atlas.hide', {});
+    const d = await openTable(t, world);
+    await t.g(`Play.Atlas.win.setMode('flat')`);
+    const R = d.ed.surface.rect; const at = (fx, fy) => ({ x: R.x + R.w * fx, y: R.y + R.h * fy });
+    const gate = t.handle('mark.add', { mapId: world, kind: 'place', title: 'North gate', to: region, ...at(0.8, 0.2) }).selected;
+    t.handle('mark.add', { mapId: world, kind: 'place', title: 'Ashford', ...at(0.2, 0.7) });
+    t.handle('mark.add', { mapId: world, kind: 'place', title: 'Secret cove', hidden: true, ...at(0.5, 0.9) });
+    await W(t, `w.setTool('move')`);
+    const names = await t.until(async () => { const x = await t.g(`[...document.querySelectorAll('.mt-places .mt-pgo')].map((b) => b.textContent)`); return x && x.length === 3 && x; }, 3000, 'the list of places');
+    t.eq(names, ['Ashford', 'North gate', 'Secret cove'], 'by name');
+    t.eq(await t.count('.mt-places .mt-prow.is-hidden'), 1, 'the hidden one is marked');
+    // a click shows it in the middle of the window and picks it
+    await t.clickText('.mt-places .mt-pgo', 'Ashford');
+    const w = await W(t, 'w.debug()');
+    const c = await W(t, `w.screen(${at(0.2, 0.7).x}, ${at(0.2, 0.7).y})`); const st = await t.rect('.mt-wrap');
+    t.near(c.x, st.x + st.w / 2, 3, 'Ashford in the middle of the window (across)'); t.near(c.y, st.y + st.h / 2, 3, 'and down');
+    t.eq(w.sel && w.sel.kind, 'mark', 'and picked');
+    // the door: on the GM's place that leads somewhere, never on the TV
+    t.eq(await t.count(`.mt-view .atl-s[data-id="${gate}"] .atl-door`), 1, 'North gate wears a door in the Map table');
+    t.eq(await t.count('.mt-view .atl-door'), 1, 'only that one');
+    t.handle('atlas.show', { id: world }); await shownOn(t, world);
+    t.eq(await t.t(`document.querySelectorAll('#table-atlas .atl-door').length`), 0, 'the TV shows no door');
+    t.handle('atlas.hide', {});
+    await t.until(async () => { const x = await tvA(t); return !x.on && !x.busy; }, 8000, 'off the TV');
+    // no backpack in the list of maps
+    await W(t, `w.setTool('maps')`);
+    await t.until(() => t.count('.atl-row'), 3000, 'the maps');
+    t.eq(await t.g(`[...document.querySelectorAll('.atl-row .icon-btn')].filter((b) => /found/i.test(b.dataset.tip || '')).length`), 0, 'no "found" button');
+    // an asset dragged from the library onto the map lies where it is dropped
+    const pic = t.lib('assets').find((x) => x.kind === 'image');
+    const n0 = M(t, world).layers.filter((l) => l.role === 'asset').length;
+    const spot = at(0.6, 0.6); const sp = await scr(t, spot);
+    await t.g(`(() => { const dt = new DataTransfer(); dt.setData('application/x-ts-asset', JSON.stringify({ path: ${JSON.stringify(pic.path)}, kind: 'image', name: 'Dropped', cat: 'assets' }));
+      const el = document.querySelector('.mt-wrap'); const o = { bubbles: true, cancelable: true, clientX: ${sp.x}, clientY: ${sp.y}, dataTransfer: dt };
+      el.dispatchEvent(new DragEvent('dragover', o)); el.dispatchEvent(new DragEvent('drop', o)); return true; })()`);
+    const l = await t.until(() => { const x = M(t, world).layers.filter((y) => y.role === 'asset'); return x.length === n0 + 1 && x[x.length - 1]; }, 4000, 'the asset on the map');
+    t.near(l.x, spot.x, R.w * 0.01, 'where it was dropped (across)'); t.near(l.y, spot.y, R.w * 0.01, 'and down');
+    t.handle('layer.remove', { mapId: world, id: l.id });
+    // off the TV a double click on North gate opens the north at once
+    await W(t, `w.setTool('move')`);
+    await t.clickText('.mt-places .mt-pgo', 'North gate'); // (shown in the middle of the window)
+    await t.g(`Play.Atlas.win.select(null)`);
+    const g = await t.until(() => t.rect(`.mt-view .atl-s[data-id="${gate}"] .atl-plate`), 3000, 'North gate');
+    await t.mouse('mouseMove', g.cx, g.cy); await t.mouse('mouseDown', g.cx, g.cy); await t.mouse('mouseUp', g.cx, g.cy);
+    await t.mouse('mouseDown', g.cx, g.cy); await t.mouse('mouseUp', g.cx, g.cy);
+    await t.until(async () => (await W(t, 'w.debug().map')) === region, 4000, 'the north opened');
+    t.eq(await t.count('.modal'), 0, 'without asking');
+    t.eq(t.state.atlas, null, 'and the TV was not touched');
+    t.handle('atlas.open', { id: world });
+    await t.g(`Play.Floats.hide('atlas')`);
+  }, { ms: 80000 });
+
+  area.quick('without a map in the atlas the Map table shows one thing: Add a map', async (t) => {
+    t.handle('atlas.hide', {});
+    const r1 = t.handle('atlas.remove', { id: region }); const r2 = t.handle('atlas.remove', { id: world });
+    t.ok(r1.ok && r2.ok, 'the atlas emptied for this check');
+    t.gm().webContents.focus();
+    await t.g(`Play.TB.openPanel('atlas')`);
+    await t.until(() => t.rect('.mt-none .btn'), 4000, 'the empty window');
+    t.eq(await t.g(`getComputedStyle(document.querySelector('.mt-strip')).visibility`), 'hidden', 'no tools');
+    t.eq(await t.g(`getComputedStyle(document.querySelector('.mt-opts')).visibility`), 'hidden', 'no side');
+    const box = await t.rect('.mt-none'); const win = await t.rect('.fp[data-id="atlas"] .mt');
+    t.ok(box.w >= win.w - 2 && box.h >= win.h - 2, 'the empty state fills the window', [box, win]);
+    t.eq(await t.g(`[...document.querySelectorAll('.fp[data-id="atlas"] *')].filter((e) => e.children.length === 0 && /No world map yet/.test(e.textContent) && e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden').length`), 1, '"No world map yet" once');
+    t.ok(/Add a map/.test(await t.text('.mt-none .btn')), 'and Add a map');
+    await t.g(`Play.Floats.hide('atlas')`);
+    t.handle(r2.undo.type, r2.undo.payload); t.handle(r1.undo.type, r1.undo.payload);
+    t.eq(A(t).maps.map((x) => x.id), [world, region], 'the atlas as it was');
+  });
 
   area.deep('an asset lies on the world map: added from the Map table, picked, moved, sized by its handle', async (t) => {
     const d = await openTable(t, world);

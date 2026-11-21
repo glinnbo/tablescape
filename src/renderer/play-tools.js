@@ -221,7 +221,7 @@ const PlayTools = (() => {
         cmd('layer.many', { patches: list.map((l) => ({ id: l.id, tag: t })), stepLabel: 'Name tags' });
         toast(t === 'off' ? 'Name tags off on this map' : t === 'gm' ? 'Name tags on your screen' : 'Name tags on the table too', { ms: 1800 });
       };
-      return h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'All tokens on this map'),
+      return h('div', { class: 'ctl', 'data-tip': 'For all tokens on this map at once' }, h('span', { class: 'ctl-label' }, 'Name tags'), // Third Builder (third-small-labels): D2, say what Off turns off
         h('div', { class: 'ctl-row tag-all' }, c().btn('Off', null, () => set('off'), { kind: 'small' }), c().btn('Only me', null, () => set('gm'), { kind: 'small' }), c().btn('Players too', null, () => set('all'), { kind: 'small' })));
     }
     async function placeToken(pt) {

@@ -440,8 +440,9 @@ const WallsTool = (() => {
       out.push(slider({ label: 'Explored, out of sight', min: 0, max: 0.9, step: 0.05, get: () => map().vision.dim, set: (v, k) => ctx.send(k, 'vision.update', { dim: v }), fmt: (v) => (v < 0.03 ? 'Clear' : `${Math.round(v * 100)}% darker`) }));
       out.push(sep());
       out.push(row(
-        btn('Load walls from a file', 'file-import', () => loadFile(), { kind: 'wl-load grow', tip: 'Dungeon Alchemist, Dungeondraft, Dungeon Fog, Arkenforge (Universal VTT: .dd2vtt, .uvtt) or Foundry VTT (.json, .db)' }),
-        ctx.ctl.ib('trash', 'Remove all walls', () => undoable('wall.clear', {}), { tip: 'Remove all walls and doors' })));
+        btn('Load walls from a file', 'file-import', () => loadFile(), { kind: 'wl-load grow', tip: 'Dungeon Alchemist, Dungeondraft, Dungeon Fog, Arkenforge (Universal VTT: .dd2vtt, .uvtt) or Foundry VTT (.json, .db)' })));
+      // Third Builder (third-small-labels): C7, a labelled button of its own, so it doesn't read as part of Load
+      out.push(btn('Remove all walls', 'trash', () => undoable('wall.clear', {}), { kind: 'wide danger wl-clear', tip: 'Remove all walls and doors (Ctrl+Z brings them back)' }));
       return h('div', { class: 'stack' }, ...out);
     }
     return {

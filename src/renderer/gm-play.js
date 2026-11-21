@@ -205,7 +205,7 @@ const Play = (() => {
       { id: 'select', icon: 'pointer', label: 'Select', key: 'V', tool: true, tip: 'Select and move tokens, spell areas and lights' },
       { id: 'token', icon: 'user-plus', label: 'Tokens', key: 'N', tool: true, pop: true, tip: 'Drop NPCs with a click' },
       { id: 'fog', icon: 'cloud-fog', label: 'Fog', key: 'R / C', tool: true, pop: true, tip: 'Reveal (R) or cover (C) with fog' },
-      { id: 'party', icon: 'users-group', label: 'Party marker', short: 'Party', key: 'U', tool: true, pop: true, tip: 'The party marker: where it is, its light and darkvision' },
+      { id: 'party', icon: 'users-group', label: 'Party marker', short: 'Marker', key: 'U', tool: true, pop: true, tip: 'The party marker: where it is, its light and darkvision' }, // Third Builder (third-small-labels): H3, the rail's short name says what it is
       { id: 'spell', icon: 'wand', label: 'Spells', key: 'A', tool: true, pop: true, tip: 'Spells: spheres, cones, lines, cubes and auras' },
       { id: 'talk', icon: 'messages', label: 'Conversation', short: 'Converse', key: 'O', pop: true, tip: 'NPC portraits rise out of a band on the table' }] },
     'spacer',
@@ -648,6 +648,7 @@ const Play = (() => {
       'Edges: Walls are built around the floor; Rock carves rooms out of stone; Ledge and Cliff drop into darkness; Fade lets the floor fade into the dark. One can see across Ledge, Cliff and Fade.',
       'Four groups: Terrain makes floors and rooms; Structure puts walls, pillars, stairs, doors, windows and lights on them; Texture lays another tile on a floor that is there; Style draws living effects over any floor. The tabs beside the groups are how you draw.',
       'Structure → Light: a torch or a lantern sits on the wall you click and lights the room; walls stop its light. In the Play tools a click on one asks before it is lit or put out.',
+      'With Light picked, a click on a light that is there picks it: drag it, change it in the panel, Delete removes it. By day a light in its own colour only burns; give it a colour and it colours the map by day too.',
       'Higher and Lower step a floor up or down, a level a click (three each way): platforms and pits. The button between them puts it back to floor level. Stairs climb toward where you drag, in the floor you picked. Doors sit on grid lines: click one again to take it away.',
       'Blending is how a floor runs into the floors around it: Sharp, Soft, Natural or Tiled; the small button beside it fine-tunes. A floor blends with the floors at its own height; where a higher or lower one begins there is a step.',
       'Doors open and shut on the table: the leaf swings when you open a door.',
@@ -1019,7 +1020,7 @@ const Play = (() => {
       size,
       row(
         btn('Fit to table', 'maximize', () => { const f = fitView(); if (f) cmd('view.update', f); }, { tip: 'Show the whole map on the table' }),
-        btn('Grid squares = 1 inch', 'ruler-measure', oneInch, { tip: 'Scale the map so one grid cell is one inch on the table' })),
+        btn('Make grid squares 1 inch', 'ruler-measure', oneInch, { tip: 'Scale the map so one grid cell is one inch on the table' })), // Third Builder (third-small-labels): C2, the Grid panel's name
       sep(),
       buildLookBox(),
       sep(),
@@ -1669,6 +1670,9 @@ const Play = (() => {
       class: 'skin', style: `--c:${sk.c}`, dataset: { v: id }, 'data-tip': sk.label, 'aria-label': sk.label, onclick: () => setSpell({ skin: id }),
     }, iconEl(sk.icon))));
     bind(() => { for (const b of skins.children) b.classList.toggle('on', b.dataset.v === ui.spell.skin); });
+    // Third Builder (third-small-labels): D6, the picked look by name (Cold, Force and Psychic are hard to tell apart by icon)
+    const skinName = h('span', { class: 'ctl-label skin-name' });
+    bind(() => { skinName.textContent = `Look: ${(SKINS[ui.spell.skin] || SKINS.arcane).label}`; });
 
     const widthBox = h('div', {}, stepper({ name: 'Width', label: 'Width', get: () => ui.spell.width, prev: (v) => stepIn(WIDTHS, v, -1), next: (v) => stepIn(WIDTHS, v, 1), set: (v) => setSpell({ width: v }), fmt: (v) => `${v} ft` }));
     bind(() => { widthBox.hidden = ui.spell.shape !== 'line'; });
@@ -1678,7 +1682,7 @@ const Play = (() => {
       seg({ cls: 'seg-icons', options: SHAPES.map((s) => ({ value: s.id, icon: s.icon, tip: s.label })), get: () => ui.spell.shape, set: (v) => setSpell({ shape: v }) }),
       stepper({ name: 'Size', label: () => shapeInfo(ui.spell.shape).sizeLabel, get: () => ui.spell.size, prev: (v) => stepIn(SIZES, v, -1), next: (v) => stepIn(SIZES, v, 1), set: (v) => setSpell({ size: v }), fmt: (v) => `${v} ft`, minusKey: '−', plusKey: '+' }),
       widthBox,
-      skins,
+      h('div', { class: 'ctl' }, skinName, skins),
       colorSwatches(() => ui.spell.color, (v) => setSpell({ color: v })),
       seg({ options: [{ value: 'burst', label: 'Burst', icon: 'bolt', tip: 'Plays, then fades after a few seconds' }, { value: 'stay', label: 'Stays', icon: 'hourglass', tip: 'Stays until you remove it' }], get: () => ui.spell.mode, set: (v) => setSpell({ mode: v }) }),
       impactCtl(),
@@ -1911,9 +1915,10 @@ const Play = (() => {
       return box;
     }
     return h('div', { class: 'stack' }, list,
-      row(btn('Token', 'user', () => Drawer.open({ filter: 'tokens', purpose: 'addToken', back: { pop: 'layers' } }), { tip: 'Add a token' }),
-        btn('Effect', 'flame', () => { setTool('fx'); openPop('fx'); }, { tip: 'Place torches, mist, lights or weather', key: 'E' }),
-        btn('Ambience', 'volume', () => { ui.soundTab = 'map'; openPop('sound'); }, { tip: 'Ambience, the map\'s sounds, fight music: all in the Ambience panel' })));
+      // Third Builder (third-small-labels): C9, they add or jump, they don't filter the list
+      row(btn('+ Token', 'user', () => Drawer.open({ filter: 'tokens', purpose: 'addToken', back: { pop: 'layers' } }), { tip: 'Add a token' }),
+        btn('+ Effect', 'flame', () => { setTool('fx'); openPop('fx'); }, { tip: 'Place torches, mist, lights or weather', key: 'E' }),
+        btn('Ambience …', 'volume', () => { ui.soundTab = 'map'; openPop('sound'); }, { tip: 'Ambience, the map\'s sounds, fight music: all in the Ambience panel' })));
   }
 
   // ---------- grid popover ----------
@@ -1954,6 +1959,10 @@ const Play = (() => {
       h('input', { type: 'color', 'aria-label': 'Custom grid colour', oninput: (e) => send('grid-color', 'grid.update', { color: e.target.value }) }));
     bind(() => { for (const b of sw.querySelectorAll('.swatch')) b.classList.toggle('on', b.style.background && rgbToHex(b.style.background) === grid().color); const ci = sw.querySelector('input'); if (document.activeElement !== ci) ci.value = grid().color; });
     return h('div', { class: 'stack' },
+      // Third Builder (third-small-labels): C3, the buttons that set up a map's grid come first, not last under six sliders
+      btn('Match the map\'s printed grid', 'ruler-2', () => startAlign(), { kind: 'wide', tip: 'Drag across the grid printed on the map; only the grid changes' }),
+      btn('Make grid squares 1 inch', 'ruler-measure', oneInch, { kind: 'wide', tip: 'Scale the map with everything on it so one cell is one inch on the table' }),
+      sep(),
       toggle({ label: 'Show grid', get: () => grid().show, set: (v) => cmd('grid.update', { show: v }) }),
       seg({ options: [
         { value: 'square', label: 'Squares', icon: 'square' },
@@ -1969,10 +1978,7 @@ const Play = (() => {
       seg({ label: 'Grid lies', options: [
         { value: 'over', label: 'Over everything', icon: 'grid-4x4', tip: 'The grid is drawn over assets and effects' },
         { value: 'under', label: 'Under assets', icon: 'trees', tip: 'Trees, furniture and painted effects cover the grid lines' }],
-      get: () => (grid().under ? 'under' : 'over'), set: (v) => cmd('grid.update', { under: v === 'under' }) }),
-      sep(),
-      btn('Match the map\'s printed grid', 'ruler-2', () => startAlign(), { kind: 'wide', tip: 'Drag across the grid printed on the map; only the grid changes' }),
-      btn('Make grid squares 1 inch', 'ruler-measure', oneInch, { kind: 'wide', tip: 'Scale the map with everything on it so one cell is one inch on the table' }));
+      get: () => (grid().under ? 'under' : 'over'), set: (v) => cmd('grid.update', { under: v === 'under' }) }));
   }
 
   // ---------- sound popover: everything the table hears ----------

@@ -142,4 +142,33 @@ module.exports = (area) => {
     await t.until(() => t.E().layers.length === n0 + 1, 3000, 'Ctrl + Y to bring it back');
     await t.key('Z', ['control']);
   });
+
+  // Third Builder (third-small-labels): open points C2, C3, C7, C9, D2, D6, E1, H3 (Party marker)
+  area.quick('labels say what they do and one thing has one name: Layers, Map, Grid, Walls, Tokens, Spells, the rail', async (t) => {
+    const pop = async (tool, id, ms = 400) => { await t.g(`${tool ? `Play.setTool(${JSON.stringify(tool)}); ` : ''}Play.openPop(${JSON.stringify(id)})`); await t.sleep(ms); };
+    const btns = () => t.g(`[...document.querySelectorAll('#pop .btn')].map((b) => b.textContent.trim())`);
+    await pop(null, 'layers');
+    const lay = await btns();
+    for (const l of ['+ Token', '+ Effect', 'Ambience …']) t.ok(lay.includes(l), `Layers has "${l}"`, lay);
+    await pop('map', 'map');
+    const mp = await btns();
+    t.ok(mp.includes('Make grid squares 1 inch') && !mp.includes('Grid squares = 1 inch'), 'the Map panel names 1 inch as the Grid panel does', mp);
+    await pop(null, 'grid');
+    t.eq((await btns()).slice(0, 2), ['Match the map\'s printed grid', 'Make grid squares 1 inch'], 'the Grid panel starts with its two set-up buttons');
+    await pop('walls', 'walls');
+    t.ok((await btns()).includes('Remove all walls'), 'Walls: "Remove all walls" is a labelled button', await btns());
+    await pop('token', 'token');
+    const tagRow = await t.g(`(() => { const r = document.querySelector('#pop .tag-all'); return r && r.parentElement.querySelector('.ctl-label').textContent; })()`);
+    t.eq(tagRow, 'Name tags', 'Tokens: the row for all tokens is called Name tags');
+    await pop('spell', 'spell');
+    const look = () => t.g(`(document.querySelector('#pop .skin-name') || {}).textContent`);
+    await t.g(`document.querySelector('#pop .skin-grid .skin[data-v="psychic"]').click()`);
+    await t.until(async () => (await look()) === 'Look: Psychic', 2000, 'Spells: the picked look by name');
+    await t.g(`document.querySelector('#pop .skin-grid .skin[data-v="fire"]').click()`);
+    await t.until(async () => (await look()) === 'Look: Fire', 2000, 'and again after another pick');
+    await t.g(`Play.closePop()`);
+    t.eq(await t.g(`(document.querySelector('.rail-btn[data-id="party"] .rail-label') || {}).textContent`), 'Marker', 'the rail: Party marker is short for Marker, not Party');
+    const tb = await t.g(`(() => { Play.openPop('toolbox'); const b = document.querySelector('#pop [data-id="atlas"]'); const r = b && [b.textContent.trim(), b.dataset.tip || '']; Play.closePop(); return r; })()`);
+    t.ok(tb && tb[0].includes('Cartographer') && !/Atlas|Map table/.test(tb.join(' ')), 'the Toolbox tile says Cartographer and nothing else', tb);
+  });
 };

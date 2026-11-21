@@ -158,6 +158,35 @@ module.exports = (area) => {
     await t.g(`Play.ui.light = 'torch'`);
   }, { ms: 90000 });
 
+  // Beta 3.51 (Glinn): by day a light in its own colour throws no colour on the map (only its flame burns); it comes in
+  // with the dark. A light given a colour colours the map by day too. For every light: flames, presets, the app's lights
+  area.deep('Beta 3.51: by day a light in its own colour throws no colour on the map; it comes in with the dark; a picked colour shows by day too', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    const glow = async (x, y) => { const p = await t.t(`window.__table.probeMap('glow', ${x}, ${y})`); return p ? p[3] : 0; };
+    await t.cmd('fx.fixture', { mapId: own, kind: 'lamp_post', x: 8 * k, y: 8 * k });
+    await t.cmd('fx.add', { mapId: own, kind: 'light', preset: 'lantern', x: 8 * k, y: 16 * k, bright: 30, dim: 60, color: '#ffd28a' });
+    await t.cmd('fx.fixture', { mapId: own, kind: 'lamp_post', x: 24 * k, y: 8 * k, color: '#55ff55' });
+    await t.sleep(1200);
+    const day = [await glow(9 * k, 9 * k), await glow(9 * k, 17 * k), await glow(25 * k, 9 * k)];
+    t.ok(day[0] < 6 && day[1] < 6, 'daylight: no colour from the lamp of the app nor from the Lantern preset, each in its own colour', day);
+    t.ok(day[2] > 12, 'daylight: the green one colours the map', day);
+    await t.cmd('light.update', { mapId: own, darkness: 0.2 });
+    const dusk = await t.until(async () => { const v = await glow(9 * k, 9 * k); return v > 3 && v; }, 15000, 'a little colour at dusk');
+    await t.cmd('light.update', { mapId: own, darkness: 0.6 });
+    const dark = await t.until(async () => { const v = await glow(9 * k, 9 * k); return v > dusk + 6 && v; }, 15000, 'its colour in the dark');
+    t.ok((await glow(9 * k, 17 * k)) > 12, 'the Lantern preset as well', [dusk, dark]);
+    // a reach of its own, and changed afterwards
+    const lamp = M(t).layers.find((l) => l.fixture);
+    await t.cmd('fx.fixtureSet', { mapId: own, id: lamp.id, bright: 10 });
+    const f = M(t).fx.find((x) => x.id === lamp.fixture.fx);
+    t.eq([f.bright, f.dim], [10, 20], 'Reach: bright and dim together');
+    await t.cmd('fx.fixtureSet', { mapId: own, id: lamp.id, color: '#3366ff' });
+    t.eq([f.color, f.sat], ['#3366ff', 0.7], 'a colour picked afterwards: strong');
+    await t.cmd('fx.fixtureSet', { mapId: own, id: lamp.id, color: '' });
+    t.eq([f.color, f.sat], ['#ffd28a', undefined], 'back to its own colour');
+    for (const l of [...M(t).layers.filter((x) => x.fixture)]) t.handle('layer.remove', { mapId: own, id: l.id });
+  }, { ms: 90000 });
+
   area.deep('without darkness the light layer leaves the map alone', async (t) => {
     const m = await clean(t); const k = m.grid.size;
     await t.sleep(600);

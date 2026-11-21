@@ -173,4 +173,16 @@ module.exports = (area) => {
     await t.key('Escape');
     await t.until(async () => !(await t.g('App.optionsOpen()')), 3000, 'Options to close');
   });
+
+  // Third Builder (third-small-labels): open points G2, G3
+  area.quick('Options → TV: no Blackout switch; Video on the TV is under Advanced, named by what it does', async (t) => {
+    await t.g(`App.openOptions('tv')`);
+    await t.until(() => t.g(`!!document.querySelector('.opt-body .opt-adv')`), 3000, 'the TV page');
+    const labels = await t.g(`[...document.querySelectorAll('.opt-body .ctl-label')].map((x) => x.textContent.trim())`);
+    t.ok(!labels.includes('Blackout'), 'no Blackout switch on the TV page', labels);
+    const adv = await t.g(`(() => { const d = [...document.querySelectorAll('.opt-body details.opt-adv')].find((x) => x.textContent.includes('Animated maps and overlays')); return d && { open: d.open, opts: [...d.querySelectorAll('.seg-btn')].map((b) => b.textContent.trim()) }; })()`);
+    t.ok(adv && !adv.open, 'the video choices are folded under Advanced', adv);
+    t.eq(adv && adv.opts, ['Best picture', 'Smoothest', 'Safest'], 'named by what they do');
+    await t.g('App.closeOptions()');
+  });
 };

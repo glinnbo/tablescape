@@ -277,7 +277,7 @@ const App = (() => {
 
     const screen = [h('label', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'TV or projector'), select), oneScreen, openBtn, h('div', { class: 'pop-sep' }),
       h('label', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Screen diagonal in inches'), diag), calBox, sizeInfo];
-    if (part === 'screen') return h('div', { class: 'stack' }, ...screen, h('div', { class: 'pop-sep' }), ...blackBox);
+    if (part === 'screen') return h('div', { class: 'stack' }, ...screen); // Third Builder (third-small-labels): G3, no live Blackout switch in Options (B, the preview and the home menu have it)
     if (part === 'hud') return hudBox;
     return h('div', { class: 'stack' }, ...screen, h('div', { class: 'pop-sep' }), ...blackBox);
   }
@@ -364,7 +364,7 @@ const App = (() => {
     { id: 'check', label: 'Table check', icon: 'checklist', // (Beta 3.19: was the status line on the home screen)
       tips: ['Is the table ready: the TV, one inch is one inch, the speakers, Spotify, missing files, the players here today.', 'While something needs a look, Tablescape settings on the home screen has an orange dot.', 'Check again looks for the speakers once more (a TV switched on later).'] },
     { id: 'tv', label: 'TV', icon: 'device-tv',
-      tips: ['Black bars flickering on the TV over an animated map: Video on the TV → Drawn with the picture (or Safest), then restart.', 'Calibrate: match the frame on the TV to a bank card; then one inch on the TV is one inch.', 'Without calibrating, the size comes from the screen diagonal.',
+      tips: ['Black bars flickering on the TV over an animated map: Video on the TV → Advanced → Best picture (or Safest), then restart.', 'Calibrate: match the frame on the TV to a bank card; then one inch on the TV is one inch.', 'Without calibrating, the size comes from the screen diagonal.',
         'TV text scales the round, countdowns, turn order, markers and spell badges; the map keeps its size.', 'Press Esc on the TV to close the table window.', 'B switches the blackout on or off anywhere.'] },
     { id: 'picture', label: 'Picture', icon: 'brightness',
       tips: ['Each TV keeps its own picture.', 'Set the TV itself to its most natural mode (Movie or Cinema) first.', 'Gamma above 1 lifts the dark middle tones without washing out black.',
@@ -568,11 +568,13 @@ const App = (() => {
         h('div', { class: 'try-row' }, h('button', { class: 'btn small ghost', 'data-tip': 'Drag the badge over a picture of the TV, its size',
           onclick: () => { closeOptions(); if (typeof Play !== 'undefined' && document.body.dataset.screen === 'play') Play.openPop('round'); else UI.toast('Open the maps first: the badge is placed over a picture of the TV'); } }, iconEl('drag-drop-2'), 'Where the round badge sits …')),
         optHead('Video on the TV'),
-        segCtl(bind, { label: 'Animated maps and overlays', options: [
-          { value: 'noOverlay', label: 'Drawn with the picture', tip: 'Against flickering black bars over video maps' },
-          { value: 'normal', label: 'Graphics card overlay', tip: 'A little lighter for the PC, but some TVs flicker with it' },
-          { value: 'noDcomp', label: 'Safest', tip: 'If it still flickers (a little heavier)' }],
-          get: () => set().videoPath || 'noOverlay', set: (v) => ts.settings({ videoPath: v }) }),
+        // Third Builder (third-small-labels): G2, the choices named by what they do, folded under Advanced
+        h('details', { class: 'opt-adv' }, h('summary', {}, 'Advanced'),
+          segCtl(bind, { label: 'Animated maps and overlays', options: [
+            { value: 'noOverlay', label: 'Best picture', tip: 'Video drawn with the map: no flickering black bars over video maps' },
+            { value: 'normal', label: 'Smoothest', tip: 'The graphics card lays video over the map: a little lighter for the PC, but some TVs flicker with it' },
+            { value: 'noDcomp', label: 'Safest', tip: 'If it still flickers (a little heavier)' }],
+          get: () => set().videoPath || 'noOverlay', set: (v) => ts.settings({ videoPath: v }) })),
         restart);
     }
     return tablePanel(st, bind, 'screen');

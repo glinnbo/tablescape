@@ -317,7 +317,7 @@ const Toolbox = (() => {
       { id: 'spotify', label: 'Spotify', icon: 'brand-spotify', tip: 'Your Spotify: moods, playlists and the volume' },
       { id: 'dice', label: 'Dice', icon: 'dice', tip: 'A dramatic roll, the wheel of luck and death saves on the table' },
       { id: 'handouts', label: 'Handouts', icon: 'script', tip: 'Letters, maps and pictures shown big on the table' }, // Prototype 25
-      { id: 'atlas', label: 'Cartographer', short: 'Atlas', icon: 'world', tip: 'The Map table: the world map and regional maps the party carries, big on the TV' }, // Beta 3.11; 3.12: its own window
+      { id: 'atlas', label: 'Cartographer', icon: 'world', tip: 'The world map and regional maps the party carries, big on the TV' }, // Beta 3.11; 3.12: its own window; Third Builder (third-small-labels): E1, no other name (was Atlas, Map table)
       { id: 'break', label: 'Break', icon: 'coffee', tip: 'A break screen with a countdown' },
       { id: 'notes', label: 'Session log', short: 'Log', icon: 'notes', tip: 'Notes during the session, saved with the campaign' },
       { id: 'lights', label: 'Room lights', short: 'Lights', icon: 'bulb', tip: 'Govee and IKEA lamps around the table follow the game' },
