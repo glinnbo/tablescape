@@ -126,6 +126,38 @@ module.exports = (area) => {
     t.ok(await dark(t, 10 * k, 8 * k) < 150, 'the torch still cuts through', await dark(t, 10 * k, 8 * k));
   }, { ms: 60000 });
 
+  // Beta 3.49: the lights that come with the app (a picture with the app's own flame or glow on it), from Light sources
+  // on any map: a lamp post where clicked, a wall torch on the wall near the click; a wall stops its light
+  area.deep('Beta 3.49: Light sources → With its holder: a lamp post where clicked gives light; a wall torch sits on the wall near the click and the wall stops its light', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    for (const w of [...M(t).walls]) t.handle('wall.remove', { mapId: own, id: w.id });
+    await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'light'; Play.ui.lightTab = 'sources'; Play.ui.look.color = null; Play.openPop('fx')`);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .light-card .tile')].map((b) => b.textContent.trim()).slice(-6)`), ['Wall torch', 'Wall lantern', 'Lamp post', 'Street lamp', 'Candles', 'Cooking fire'], 'the six lights with their holder, after the plain ones');
+    await t.clickText('#pop .light-card .tile', 'Lamp post');
+    let at = await t.scr(10 * k, 8 * k); await t.click(at.x, at.y);
+    const lamp = await t.until(() => M(t).layers.find((l) => l.fixture), 4000, 'a lamp post');
+    const glow = M(t).fx.find((f) => f.id === lamp.fixture.fx);
+    t.eq([lamp.fixture.kind, lamp.role, glow.kind, glow.preset, glow.bright, glow.dim, glow.hidden], ['lamp_post', 'asset', 'emitter', 'glow', 30, 60, false], 'its picture and a glow with a lantern\'s light', glow);
+    t.ok(Math.abs(lamp.x - 10 * k) < 0.1 * k && Math.abs(lamp.y - 8 * k) < 0.1 * k && glow.x === lamp.x && glow.y === lamp.y, 'where clicked, the glow on it', [lamp.x, lamp.y]);
+    await t.cmd('light.update', { mapId: own, darkness: 1 });
+    await t.until(async () => (await dark(t, 24 * k, 14 * k)) >= 250, 15000, 'pitch black far from the lamp');
+    t.ok(await dark(t, 10.5 * k, 8.5 * k) < 150, 'the lamp cuts through the dark', await dark(t, 10.5 * k, 8.5 * k));
+    // a wall, and a wall torch clicked beside it: on the wall, turned to it; no light behind the wall
+    t.handle('layer.remove', { mapId: own, id: lamp.id });
+    t.eq(M(t).fx.length, 0, 'the lamp gone with its glow');
+    t.handle('wall.add', { mapId: own, segs: [[16 * k, 4 * k, 16 * k, 12 * k]] });
+    await t.settle();
+    await t.clickText('#pop .light-card .tile', 'Wall torch');
+    at = await t.scr(16.4 * k, 8 * k); await t.click(at.x, at.y);
+    const torch = await t.until(() => M(t).layers.find((l) => l.fixture), 4000, 'a wall torch');
+    t.ok(torch.x > 16.1 * k && torch.x < 16.5 * k && Math.abs(Math.abs(torch.rotation) - 90) < 1, 'on the wall\'s side that was clicked, turned to the wall', [torch.x / k, torch.rotation]);
+    await t.until(async () => (await dark(t, 17.5 * k, 8 * k)) < 150, 15000, 'light in front of the wall');
+    t.ok(await dark(t, 14 * k, 8 * k) >= 250, 'none behind it', await dark(t, 14 * k, 8 * k));
+    t.handle('layer.remove', { mapId: own, id: torch.id });
+    for (const w of [...M(t).walls]) t.handle('wall.remove', { mapId: own, id: w.id });
+    await t.g(`Play.ui.light = 'torch'`);
+  }, { ms: 90000 });
+
   area.deep('without darkness the light layer leaves the map alone', async (t) => {
     const m = await clean(t); const k = m.grid.size;
     await t.sleep(600);

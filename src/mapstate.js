@@ -8,7 +8,7 @@
 // effects travel with it. Weather and table-anchored overlays ignore the view.
 'use strict';
 
-const { kindOf, treeOf } = require('./library');
+const { kindOf, treeOf, lightOf } = require('./library');
 const Vision = require('./renderer/vision');
 const FXDATA = require('./renderer/fx-data');
 
@@ -124,10 +124,12 @@ function cleanOsItem(it) {
     return { id, kind, shape, pts: shape === 'fill' ? pts.slice(0, 1) : pts, r: r3(osNum(it.r, 0.5, 0.05, 50)), fx, ...((fx === 'grass' || fx === 'water') && HEX6.test(tint) ? { tint } : {}), mixW: shape === 'fill' ? 0 : Math.round(osNum(it.mixW, 1.5, 0, 3) * 2) / 2 };
   }
   if (kind === 'paint') { // (Beta 3.26) a floor painted into the floors under a brush
-    if (pts.length < 1) return null;
+    // (Beta 3.49: Texture with every painting tool: a box, a round or a shape as well as the brush)
+    const shape = ['rect', 'round', 'poly'].includes(it.shape) ? it.shape : 'brush';
+    if (pts.length < (shape === 'poly' ? 3 : shape === 'brush' ? 1 : 2)) return null;
     const m = mixOf(it);
     // (Beta 3.38: its soft edge as wide as the panel says; a tile painted before has none and keeps the brush's own)
-    return { id, kind, shape: 'brush', pts, r: r3(osNum(it.r, 0.75, 0.05, 50)), tile: refOf(it.tile), ...(it.mixW !== undefined && it.mixW !== null ? { mixW: m.mixW } : {}), mixU: m.mixU, mixT: m.mixT };
+    return { id, kind, shape, pts, r: r3(osNum(it.r, 0.75, 0.05, 50)), tile: refOf(it.tile), ...(it.mixW !== undefined && it.mixW !== null || shape !== 'brush' ? { mixW: m.mixW } : {}), mixU: m.mixU, mixT: m.mixT };
   }
   if (kind === 'area' || kind === 'cut') {
     const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'poly';
@@ -595,7 +597,28 @@ function sceneSig(D) {
 const sceneMatches = (map, D) => { const cur = sceneOf(map); if (!('look' in D)) delete cur.look; return sceneSig(cur) === sceneSig(placeScene(D, map)); }; // (a snapshot from before 4.5 has no colours)
 
 // media(path) is injected by the caller: turns a file path into {path, rel, name, url}
+// Beta 3.49: a light of the app is a picture (an asset with .fixture) and its flame (an effect with .fixture). After
+// anything done to layers or effects they are put right: the flame lies where the picture lies, a copied picture has a
+// flame of its own, a flame whose picture is gone goes too.
+function syncFixtures(map) {
+  if (!Array.isArray(map.layers) || !Array.isArray(map.fx)) return;
+  if (!map.layers.some((l) => l.fixture) && !map.fx.some((f) => f.fixture)) return;
+  const used = new Set();
+  for (const l of map.layers) {
+    if (!l.fixture) continue;
+    let f = map.fx.find((x) => x.id === l.fixture.fx);
+    if (f && used.has(f.id)) { f = { ...structuredClone(f), id: newId('x') }; map.fx.push(f); l.fixture = { ...l.fixture, fx: f.id }; }
+    if (f) { used.add(f.id); f.fixture = l.id; f.x = l.x; f.y = l.y; }
+  }
+  const have = new Set(map.layers.filter((l) => l.fixture).map((l) => l.id));
+  map.fx = map.fx.filter((f) => !f.fixture || have.has(f.fixture));
+}
 function apply(map, type, p, media) {
+  const r = applyRaw(map, type, p, media);
+  if (r && r.changed && map && /^(layer|fx|scene)\./.test(type)) syncFixtures(map);
+  return r;
+}
+function applyRaw(map, type, p, media) {
   switch (type) {
     // ---------- background ----------
     case 'bg.set': {
@@ -728,6 +751,7 @@ function apply(map, type, p, media) {
       const l = map.layers.find((x) => x.id === p.id);
       if (!l) return { changed: null };
       updateLayer(l, p);
+      if (l.fixture) { const f = map.fx.find((x) => x.id === l.fixture.fx); if (f) { f.x = l.x; f.y = l.y; } } // (Beta 3.49: a light's flame goes along)
       return { changed: 'all' };
     }
     case 'layer.reroll': { // (Beta 3.20) living trees: another look and movement (a new seed), one or several
@@ -780,6 +804,7 @@ function apply(map, type, p, media) {
       const l = map.layers.find((x) => x.id === p.id);
       if (!l) return { changed: null };
       map.layers = map.layers.filter((x) => x.id !== p.id);
+      if (l.fixture) map.fx = map.fx.filter((x) => x.id !== l.fixture.fx); // (Beta 3.49: a light's flame goes with it)
       detach(map, l);
       return { changed: 'all', label: `${l.name} removed` };
     }
@@ -968,6 +993,35 @@ function apply(map, type, p, media) {
       if (!n) return { changed: null };
       if (gone.length) map.fx = map.fx.filter((f) => !gone.includes(f.id));
       return { changed: 'all', label: 'Effect erased' };
+    }
+    // Beta 3.49: a light that comes with the app: its unlit picture (an asset) and what burns on it (the app's own
+    // flame or glow, with a light that walls stop), made together and kept together: moved, the light goes along;
+    // removed, both go. p: { kind, x, y, rotation, color, lit }
+    case 'fx.fixture': {
+      const d = lightOf(String(p.kind || ''));
+      if (!d || !media) return { changed: null };
+      const g = map.grid.size || 1;
+      const layer = { id: newId('l'), role: 'asset', kind: 'image', ...media(d.path), ...ASSET_DEFAULTS, x: r3(+p.x || 0), y: r3(+p.y || 0), w: r3(d.w * g), rotation: normDeg(Number(p.rotation) || 0), name: d.label, named: true };
+      const color = HEX6.test(String(p.color || '').toLowerCase()) ? String(p.color).toLowerCase() : d.fx.color || null;
+      const fx = { id: newId('x'), kind: 'emitter', preset: d.fx.preset, x: layer.x, y: layer.y, r: d.fx.r, color, intensity: 1, hidden: p.lit === false, attachTo: null, density: 1, speed: 1, bright: d.fx.bright, dim: d.fx.dim, flicker: true, fixture: layer.id };
+      layer.fixture = { kind: d.id, fx: fx.id };
+      fixStretch(layer);
+      map.layers.push(layer); map.fx.push(fx);
+      return { changed: 'all', label: `${d.label} placed`, id: layer.id };
+    }
+    case 'fx.fixtureLit': { // lit or put out (p.id: the picture's or the effect's id; p.on: which, else the other of now)
+      const layer = map.layers.find((x) => x.fixture && (x.id === p.id || x.fixture.fx === p.id));
+      if (!layer) return { changed: null };
+      const d = lightOf(layer.fixture.kind);
+      let fx = map.fx.find((x) => x.id === layer.fixture.fx);
+      const on = p.on === undefined ? !(fx && !fx.hidden) : !!p.on;
+      if (!fx && d) { // (its flame was removed by hand: a new one)
+        fx = { id: newId('x'), kind: 'emitter', preset: d.fx.preset, x: layer.x, y: layer.y, r: d.fx.r, color: d.fx.color || null, intensity: 1, hidden: true, attachTo: null, density: 1, speed: 1, bright: d.fx.bright, dim: d.fx.dim, flicker: true, fixture: layer.id };
+        layer.fixture.fx = fx.id; map.fx.push(fx);
+      }
+      if (!fx || !fx.hidden === on) return { changed: null };
+      fx.hidden = !on;
+      return { changed: 'all', label: `${layer.name || 'Light'} ${on ? 'lit' : 'put out'}` };
     }
     case 'fx.remove': {
       const fx = map.fx.find((x) => x.id === p.id);

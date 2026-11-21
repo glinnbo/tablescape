@@ -24,6 +24,14 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.49', [
+      'Draw has four groups now, each with its colour: Terrain (floors and rooms), Structure (walls, pillars, stairs, doors, windows, lights), Texture (it was called Tile) and Style (the living effects). The tabs beside the groups are the painting tools: Box, Round, Shape, Brush, Erase, and Fill where it fits',
+      'Texture paints with every tool: a box, a round, a shape or the brush lay the tile onto the floors under them; Fill gives the whole floor you click the tile (it was Whole floor); Erase takes painted textures away',
+      'Style: what you paint (Grass, Water, Lava, Shimmer, Pulse, Ripple) is picked in the panel, how you paint it are the tabs',
+      'New, Structure → Light: a wall torch, a wall lantern, a lamp post, a street lamp, candles and a cooking fire. A torch or a lantern sits on the wall you click and shines into the room; walls stop its light. Pick the colour of its light, and whether it is lit',
+      'The same six lights for any map: Effects → Light → Light sources → With its holder',
+      'In the Play tools a click on one of these lights asks before it is lit or put out, as doors do; the TV follows',
+    ]],
     ['Beta 3.48', [
       'Conversation → Bloodied looks soaked in now, not stuck on: new splats and a spray, blended like paint (Darken)',
       'The Bloodied slider builds up: a wound at the neck first, then blood running down the body, then more',

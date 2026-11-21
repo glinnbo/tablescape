@@ -14,13 +14,17 @@ module.exports = (area) => {
   const PARTS = ['wall', 'pillar', 'stairs', 'door', 'window'];
   // (the tabs slide out from behind the panel: a click waits until they have arrived)
   const tabsOut = (t) => t.until(() => t.g(`document.getAnimations().every((a) => { const e = a.effect && a.effect.target; return !(e && e.closest && e.closest('#pop .os-tabs')) || a.playState === 'finished'; })`), 4000, 'the tabs to come out');
-  const tab = async (t, id) => { await tabsOut(t); await t.clickSel(`.os-tools .tile[data-v="${id}"]`); };
+  // (Beta 3.49) four groups in the first column; the picked group's tools in the second
+  const GROUP = { room: 'terrain', round: 'terrain', shape: 'terrain', brush: 'terrain', erase: 'terrain', wall: 'structure', pillar: 'structure', stairs: 'structure', door: 'structure', window: 'structure', light: 'structure' };
+  const group = async (t, g) => { await tabsOut(t); if (!(await t.count(`.os-groups .tile.open[data-g="${g}"]`))) { await t.clickSel(`.os-groups .tile[data-g="${g}"]`); await tabsOut(t); } };
+  const tab = async (t, id) => { await tabsOut(t); await t.clickSel(`.os-tabs2 .tile[data-v="${id}"]`); };
+  const fxPick = async (t, id) => { await group(t, 'style'); await t.clickSel(`#pop .os-fxkinds .os-pick[data-v="fx-${id}"]`); await tabsOut(t); };
   // (Beta 3.41) the card beside the tabs slides out from behind the panel, and back when closed: wait for either
   const cardOut = (t) => t.until(() => t.g(`(() => { const e = document.querySelector('#pop .os-fly'); return !!e && !e.classList.contains('out') && e.getAnimations().every((a) => a.playState === 'finished'); })()`), 4000, 'the card to come out');
   const cardGone = (t) => t.until(async () => (await t.count('#pop .os-fly')) === 0, 4000, 'the card to go');
-  const tool = async (t, id) => {
-    if (PARTS.includes(id) && !(await t.count(`.os-tabs2 .tile[data-v="${id}"]`))) await tab(t, 'room');
-    await tab(t, id);
+  const tool = async (t, id) => { // ('floor': Texture → Fill, the whole floor clicked)
+    if (id === 'floor') { await group(t, 'texture'); await tab(t, 'tx-fill'); return; }
+    await group(t, GROUP[id]); await tab(t, id);
   };
   const wallsOf = (t) => M(t).walls.filter((w) => w.os);
   const clear = async (t) => { t.handle('os.clear', { mapId: own }); await t.settle(); await baked(t); };
@@ -66,7 +70,7 @@ module.exports = (area) => {
     t.eq(await t.popTitle(), 'Draw', 'its panel');
     t.ok(await t.g(`!document.querySelector('#empty.on')`), 'no "no background" card in the way');
     t.ok(await t.g(`(() => { const b = document.querySelector('#rail [data-id="oldschool"]'); return !!b && !b.hidden && b.offsetParent !== null; })()`), 'Draw is on the rail');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((c) => [...c.querySelectorAll('.tile')].map((b) => b.dataset.v))`), [['room', 'shape', 'round', 'brush', 'floor', 'erase'], ['wall', 'pillar', 'stairs', 'door', 'window']], 'its tools: six, and with Room picked its five parts beside it (Beta 3.38)');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((c) => [...c.querySelectorAll('.tile')].map((b) => b.dataset.v))`), [['g-terrain', 'g-structure', 'g-texture', 'g-style'], ['room', 'round', 'shape', 'brush', 'erase']], 'its tools: six, and with Room picked its five parts beside it (Beta 3.38)');
     t.eq(await t.count('.os-floors .tile[data-v]'), 8, 'the last 8 tiles used (Beta 3.35)');
     await t.clickSel('.os-tile-list');
     await t.until(async () => (await t.count('.fp[data-id="ostiles"] .pl-it')) >= 11, 4000, 'List …: all the tiles of the app');
@@ -172,30 +176,33 @@ module.exports = (area) => {
     t.eq(await t.count('#pop .os-level'), 0, 'the Tile tool has no level to pick');
     t.eq(await t.count('#pop .os-looks .os-pick'), 4, 'but Blending, also for the whole floor (Beta 3.38)');
     t.eq(await t.count('#pop .os-floors .tile[data-v]'), 8, 'but the tiles');
-    await t.clickText('#pop .seg-btn', 'Brush');
-    t.eq(await t.g('Play.ui.os.floorHow'), 'paint', 'painted on with the brush');
+    // (Beta 3.49) Texture is a group of its own with every painting tool; Fill is the whole floor clicked
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.dataset.v)`), ['tx-box', 'tx-round', 'tx-shape', 'tx-brush', 'tx-fill', 'tx-erase'], 'Texture: six painting tools');
+    await tab(t, 'tx-brush'); await tabsOut(t);
+    t.eq([await t.g('Play.ui.os.texShape'), await t.g('Play.ui.os.tool')], ['brush', 'brush'], 'painted on with the brush');
     t.eq(await t.count('#pop .os-looks .os-pick'), 4, 'with Blending as well');
-    await t.clickText('#pop .seg-btn', 'Whole floor');
-    t.eq([await t.g('Play.ui.os.floorHow'), await t.g('Play.ui.os.floorMode')], ['click', 'tile'], 'or the whole floor clicked: its tile alone');
+    await tab(t, 'tx-fill'); await tabsOut(t);
+    t.eq([await t.g('Play.ui.os.tool'), await t.g('Play.ui.os.floorMode')], ['floor', 'tile'], 'or the whole floor clicked: its tile alone');
     await tool(t, 'pillar');
     t.eq(await t.g(`Number(document.querySelector('#pop input[aria-label="Size"]').max)`), 8, 'pillars up to 8 squares');
     // (Beta 3.37) the menu made new: the tools as tabs on the panel's edge, a picture of what comes
     t.eq(await t.g(`document.querySelector('#pop .os-prev b').textContent`), 'Stone pillar', 'a picture of the pillar to come, with its name');
-    // (Beta 3.38) Room's parts: a second column while Room or one of them is picked, Room stays marked
-    t.ok(await t.g(`(() => { const two = document.querySelector('#pop .os-tabs2'); const one = document.querySelector('#pop .os-tabs:not(.os-tabs2)'); const room = one.querySelector('[data-v="room"]'); const a = one.getBoundingClientRect(); const b = two.getBoundingClientRect(); return room.classList.contains('open') && !room.classList.contains('on') && two.querySelector('[data-v="pillar"]').classList.contains('on') && b.left < a.right && b.right > a.right + 40 && Math.abs(b.top - a.top) < 3; })()`), 'the pillar among Room\'s parts, beside the tools, Room marked as open');
-    // (Beta 3.41) Room's parts stand close together and begin under the tools, so nothing of the map shows between; no scroll bar beside the tabs
-    t.ok(await t.g(`(() => { const r = [...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.getBoundingClientRect()); const one = document.querySelector('#pop .os-tabs:not(.os-tabs2) [data-v="shape"]').getBoundingClientRect(); return r.length === 5 && r.every((b, i) => !i || Math.abs(b.top - r[i - 1].bottom) <= 1.5) && r.every((b) => b.left <= one.right - 8); })()`), 'the parts in one block, filled up to the tools');
+    // (Beta 3.49) two columns: the four groups, and the picked group's tools beside them; Structure stays marked
+    t.ok(await t.g(`(() => { const two = document.querySelector('#pop .os-tabs2'); const one = document.querySelector('#pop .os-groups'); const g = one.querySelector('[data-g="structure"]'); const a = one.getBoundingClientRect(); const b = two.getBoundingClientRect(); return g.classList.contains('open') && one.querySelectorAll('.open').length === 1 && two.querySelector('[data-v="pillar"]').classList.contains('on') && b.left < a.right && b.right > a.right + 40 && Math.abs(b.top - a.top) < 3; })()`), 'the pillar among Structure\'s things, beside the groups, Structure marked');
+    // the tools stand close together and begin under the groups; no tool hangs below the last group (Glinn: "connect to the main menu")
+    t.ok(await t.g(`(() => { const r = [...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.getBoundingClientRect()); const gs = [...document.querySelectorAll('#pop .os-groups .tile')].map((b) => b.getBoundingClientRect()); return r.length === 6 && r.every((b, i) => !i || Math.abs(b.top - r[i - 1].bottom) <= 1.5) && r.every((b) => b.left <= gs[0].right - 8) && r[r.length - 1].bottom <= gs[gs.length - 1].bottom + 2; })()`), 'six things in one block, none below the groups');
     t.eq(await t.g(`getComputedStyle(document.querySelector('#pop .pop-body')).scrollbarWidth`), 'none', 'no scroll bar in the panel');
-    t.eq(await t.g(`getComputedStyle(document.querySelector('#pop .os-tabs2 .tile:not(.on)')).color === getComputedStyle(document.querySelector('.g-build .rail-head')).color`), true, 'the parts in the blue of Build');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-groups .tile')].map((b) => getComputedStyle(b).getPropertyValue('--gc').trim()).filter((v, i, a2) => v && a2.indexOf(v) === i).length`), 4, 'each group a colour of its own');
     await tool(t, 'shape');
-    t.eq(await t.count('#pop .os-tabs2'), 0, 'another tool: the parts go');
-    // (Beta 3.38) the tabs come out from behind the panel when it opens; Room's parts from behind the tools when Room is picked
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => e.classList.contains('slide'))`), [false], 'a tool picked: the tabs stay where they are');
-    t.ok(await t.g(`document.querySelector('#pop .os-tabs .tile[data-v="shape"]').classList.contains('pick')`), 'the picked one comes out a little further');
-    await tab(t, 'room');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => [e.classList.contains('slide'), getComputedStyle(e.querySelector('.tile:last-child')).animationName])`), [[false, 'none'], [true, 'os-part-out']], 'Room picked: its parts slide out, the tools stay');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.textContent)`), ['Box', 'Round', 'Shape', 'Brush', 'Erase'], 'Terrain: its painting tools');
+    // the tabs come out from behind the panel when it opens; a group's tools from behind the groups when it is picked
+    await tab(t, 'round'); await tabsOut(t);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => e.classList.contains('slide'))`), [false, false], 'a tool picked: the tabs stay where they are');
+    t.ok(await t.g(`document.querySelector('#pop .os-tabs2 .tile[data-v="round"]').classList.contains('pick')`), 'the picked one comes out a little further');
+    await t.clickSel('.os-groups .tile[data-g="structure"]');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => [e.classList.contains('slide'), getComputedStyle(e.querySelector('.tile:last-child')).animationName])`), [[false, 'none'], [true, 'os-part-out']], 'a group picked: its tools slide out, the groups stay');
     await tab(t, 'door');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => e.classList.contains('slide'))`), [false, false], 'a part picked: nothing slides again');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => e.classList.contains('slide'))`), [false, false], 'a thing picked: nothing slides again');
     await t.g(`Play.closePop(), Play.openPop('oldschool')`);
     t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs')].map((e) => [e.classList.contains('slide'), getComputedStyle(e.querySelector('.tile')).animationName])`), [[true, 'os-tab-out'], [true, 'os-part-out']], 'the panel opened anew: all of them come out from behind it');
     t.ok(await t.g(`(() => { const p = document.querySelector('#pop').getBoundingClientRect(); return [...document.querySelectorAll('#pop .os-tabs')].every((e) => /inset/.test(getComputedStyle(e).clipPath)) && document.querySelector('#pop .os-tabs').getBoundingClientRect().left >= p.right - 2; })()`), 'cut at the panel\'s edge, so they come from behind it');
@@ -592,14 +599,13 @@ module.exports = (area) => {
     await baked(t);
     // (Beta 3.38) the Tile tool blends too: a whole floor takes the tile and the look; a painted tile its own soft width
     await tool(t, 'floor');
-    await t.clickText('#pop .seg-btn', 'Whole floor');
     await t.clickText('#pop .os-looks .os-pick', 'Soft');
     await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Slate.webp"]');
     const at = await t.scr(17 * k, 5 * k); await t.click(at.x, at.y);
     await t.until(() => M(t).os.items[1].tile.rel === 'Tiles/Tablescape/Slate.webp', 5000, 'the floor clicked takes the tile');
     const f1 = M(t).os.items[1];
     t.eq([f1.mixW, f1.mixU, f1.mixT, f1.level, f1.edge], [1.5, 0, 0, 0, 'walls'], 'and the look Soft with it; its height and edge stay', f1);
-    await t.clickText('#pop .seg-btn', 'Brush');
+    await tab(t, 'tx-brush'); await tabsOut(t);
     await t.clickText('#pop .os-looks .os-pick', 'Sharp');
     const p0 = await t.scr(22 * k, 4 * k); const p1 = await t.scr(24 * k, 6 * k);
     await t.drag(p0, p1, 8);
@@ -705,12 +711,13 @@ module.exports = (area) => {
     t.ok((await t.g('Play.view().stats.living')).time > t0, 'it moves', t0);
     // Draw → Tile: the effects are its blue block; each has its own few choices and a card with its sliders
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`); await tool(t, 'floor'); await tabsOut(t);
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fxtabs .tile')].map((b) => b.textContent)`), ['Grass', 'Water', 'Lava', 'Shimmer', 'Pulse', 'Ripple'], 'Tile: a blue block with the six effects');
-    t.ok(!(await t.count('#pop .os-fxshapes')) && (await t.count('#pop .os-floors')) === 1, 'Tile itself is as before');
-    await tab(t, 'fx-grass'); await tabsOut(t);
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fxshapes .os-pick')].map((b) => b.textContent)`), ['Box', 'Round', 'Shape', 'Brush', 'Fill', 'Erase'], 'Grass: six ways to draw it');
+    t.ok(!(await t.count('#pop .os-fxkinds')) && (await t.count('#pop .os-floors')) === 1, 'Texture has its tiles and no effects');
+    await group(t, 'style');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fxkinds .os-pick')].map((b) => b.textContent)`), ['Grass', 'Water', 'Lava', 'Shimmer', 'Pulse', 'Ripple'], 'Style (Beta 3.49): the six effects, picked in the panel');
+    await fxPick(t, 'grass');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.textContent)`), ['Box', 'Round', 'Shape', 'Brush', 'Fill', 'Erase'], 'Grass: six ways to draw it, as the tabs');
     t.ok(!(await t.count('#pop .os-level')) && !(await t.count('#pop .os-edges')) && !(await t.count('#pop .os-blend')) && !(await t.count('#pop .os-floors')), 'no height, no edge, no blending, no tiles');
-    t.eq(await t.g(`[document.querySelector('#pop .os-fxtabs .tile.on').dataset.v, document.querySelector('#pop .os-tabs .tile[data-v="floor"]').classList.contains('open'), !!document.querySelector('#pop .os-tabs:not(.os-tabs2) .tile.on')]`), ['fx-grass', true, false], 'Grass is marked, Tile stays open, no other tool is marked');
+    t.eq(await t.g(`[document.querySelector('#pop .os-fxkinds .os-pick.on').dataset.v, document.querySelector('#pop .os-groups [data-g="style"]').classList.contains('open'), document.querySelectorAll('#pop .os-groups .open').length]`), ['fx-grass', true, 1], 'Grass is marked, Style is the open group, no other');
     t.eq(await t.text('#pop .os-prev .cap b'), 'Grass', 'the picture at the top names it');
     await t.shot(t.gm(), 'effects-panel');
     const n0 = M(t).os.items.length;
@@ -725,25 +732,25 @@ module.exports = (area) => {
     await t.drag(await t.scr(17 * k, 4 * k), await t.scr(18 * k, 5 * k), 8, ['alt']);
     await t.until(() => M(t).os.items.length === n0 + 3, 5000, 'the effect erased');
     t.eq([M(t).os.items[n0 + 2].kind, M(t).os.items[n0 + 2].fx], ['live', 'none'], 'Alt takes effects away there, and nothing else');
-    await t.clickSel('#pop .os-fxshapes .os-pick[data-v="erase"]'); await tabsOut(t);
+    await tab(t, 'fxs-erase'); await tabsOut(t);
     await t.drag(await t.scr(16.5 * k, 7.5 * k), await t.scr(17.5 * k, 8.5 * k), 8);
     await t.until(() => M(t).os.items.length === n0 + 4, 5000, 'effects brushed away');
     it = M(t).os.items[n0 + 3];
     t.eq([it.kind, it.fx, it.shape], ['live', 'none', 'brush'], 'Erase: a brush that takes effects away (the floor stays)', it);
-    await t.clickSel('#pop .os-fxshapes .os-pick[data-v="brush"]'); await tabsOut(t);
+    await tab(t, 'fxs-brush'); await tabsOut(t);
     await t.drag(await t.scr(20 * k, 3 * k), await t.scr(22 * k, 4 * k), 8);
     await t.until(() => M(t).os.items.length === n0 + 5, 5000, 'grass brushed on');
     it = M(t).os.items[n0 + 4];
     t.eq([it.kind, it.fx, it.shape], ['live', 'grass', 'brush'], 'Brush paints the effect on', it);
-    await tab(t, 'fx-water'); await tabsOut(t);
-    await t.clickSel('#pop .os-fxshapes .os-pick[data-v="fill"]'); await tabsOut(t);
+    await fxPick(t, 'water'); await tabsOut(t);
+    await tab(t, 'fxs-fill'); await tabsOut(t);
     { const q = await t.scr(8 * k, 9 * k); await t.click(q.x, q.y); }
     await t.until(() => M(t).os.items.length === n0 + 6, 5000, 'water poured');
     it = M(t).os.items[n0 + 5];
     t.eq([it.kind, it.fx, it.shape, it.pts.length], ['live', 'water', 'fill', 1], 'Fill: a click pours the effect', it);
     t.ok(!M(t).os.items.slice(n0).some((x) => x.kind === 'cut' || x.kind === 'area' || x.kind === 'paint'), 'no floor was drawn, painted or erased');
     // its card: the sliders of this kind of effect, for the whole map
-    await tab(t, 'fx-grass'); await tabsOut(t);
+    await fxPick(t, 'grass'); await tabsOut(t);
     await t.clickSel('#pop .os-fxset'); await cardOut(t);
     const card = () => t.g(`(() => { const f = document.querySelector('#pop .os-fly'); if (!f) return null; return { head: f.querySelector('.os-fly-head b').textContent, sliders: [...f.querySelectorAll('input[type="range"]')].filter((e) => !e.closest('[hidden]')).map((e) => e.getAttribute('aria-label')), segs: [...f.querySelectorAll('.seg button, .seg label')].map((e) => e.textContent) }; })()`);
     let c = await card();
@@ -754,12 +761,12 @@ module.exports = (area) => {
     t.ok((await card()).sliders.includes('Range'), 'Grows on a colour: its range');
     t.handle('live.set', { mapId: own, fx: 'grass', set: { grow: 'all' } }); await t.settle();
     for (const [fx, want] of [['water', ['Transparency', 'Speed']], ['lava', ['Glow', 'Embers', 'Heat shimmer', 'Speed', 'Pick-up range']], ['shimmer', ['Intensity', 'Speed', 'Pick-up range']], ['pulse', ['Intensity', 'Speed', 'Pick-up range']], ['ripple', ['Intensity', 'Speed', 'Pick-up range']]]) {
-      await tab(t, `fx-${fx}`); await tabsOut(t);
+      await fxPick(t, fx); await tabsOut(t);
       c = await card();
       t.eq(c && c.sliders, want, `${fx}: its own sliders`, c);
     }
-    await tab(t, 'room'); await tabsOut(t);
-    t.ok((await t.count('#pop .os-level')) === 1 && !(await t.count('#pop .os-fxshapes')) && !(await t.count('#pop .os-fly-fx')), 'a tool picked: the effect is put down, its card goes');
+    await tool(t, 'room'); await tabsOut(t);
+    t.ok((await t.count('#pop .os-level')) === 1 && !(await t.count('#pop .os-fxkinds')) && !(await t.count('#pop .os-fly-fx')), 'a tool picked: the effect is put down, its card goes');
     for (let i = 0; i < 6; i++) t.handle('history.undo', { mapId: own });
     await t.settle(); await baked(t);
     t.eq(M(t).os.items.length, n0, 'undo takes what was drawn away again (a slider moved in between is no step of its own)');
@@ -806,6 +813,98 @@ module.exports = (area) => {
     t.ok(M(t).bg && M(t).bg.live && M(t).bg.live.path === old && fs.existsSync(old), 'undo brings the picture back with its living map', M(t).bg && M(t).bg.live);
     t.handle('history.redo', { mapId: own }); t.handle('history.redo', { mapId: own }); await t.settle(); await baked(t);
   }, { ms: 500000 });
+
+  // Beta 3.49: Texture with every painting tool (a box, a round, a shape as well as the brush; Fill the whole floor;
+  // Erase takes painted textures away), and the lights that come with the app under Structure
+  area.deep('Beta 3.49: Texture paints with a box and Erase takes it away; Structure → Light: a torch on the wall with a flame whose light walls stop, a colour, lit or not, asked before it is put out', async (t) => {
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
+    await tabsOut(t);
+    if (await t.count('#pop .os-fly:not(.out)')) { await cardOut(t); await t.clickSel('#pop .os-fly .os-fly-head .icon-btn'); await cardGone(t); } // (a card left open would lie over the map)
+    await clear(t);
+    t.handle('os.add', { mapId: own, item: room(14, 3, 24, 9) });
+    await baked(t);
+    // Texture → Box: the picked tile on the floor under the box
+    await group(t, 'texture'); await tab(t, 'tx-box'); await tabsOut(t);
+    await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Old cobblestone.webp"]');
+    await t.clickSel('.os-floors .tile[data-v="Tiles/Tablescape/Slate.webp"]');
+    t.eq(await t.text('#pop .os-prev .cap b'), 'Slate', 'the card shows the tile to come');
+    let a = await t.scr(16 * k, 5 * k); let b = await t.scr(19 * k, 7 * k);
+    await t.drag(a, b, 6);
+    const paint = await t.until(() => M(t).os.items.find((x) => x.kind === 'paint'), 5000, 'a box of texture');
+    t.eq([paint.shape, paint.tile.rel, paint.pts.map((q) => q.map((v) => Math.round(v / k)))], ['rect', 'Tiles/Tablescape/Slate.webp', [[16, 5], [19, 7]]], 'a box, on the grid, in the picked tile', paint);
+    const pic = await baked(t);
+    t.ok(pic && pic.bg, 'the picture is made with it');
+    await tab(t, 'tx-round'); await tabsOut(t);
+    a = await t.scr(20 * k, 5 * k); b = await t.scr(22 * k, 7 * k); await t.drag(a, b, 6);
+    await t.until(() => M(t).os.items.filter((x) => x.kind === 'paint').length === 2, 5000, 'a round one');
+    t.eq(M(t).os.items.filter((x) => x.kind === 'paint')[1].shape, 'round', 'round');
+    // Erase: a box over the first takes it away, the floor stays
+    await tab(t, 'tx-erase'); await tabsOut(t);
+    t.eq(await t.count('#pop .os-floors'), 0, 'Erase needs no tile');
+    a = await t.scr(15 * k, 4 * k); b = await t.scr(19.5 * k, 8 * k); await t.drag(a, b, 6);
+    await t.until(() => M(t).os.items.filter((x) => x.kind === 'paint').length === 1, 5000, 'the box of texture to go');
+    t.eq(M(t).os.items.filter((x) => x.kind === 'area').length, 1, 'the floor stays');
+    await baked(t);
+    // Structure → Light
+    await tool(t, 'light'); await tabsOut(t);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-lights .tile')].map((x) => x.textContent)`), ['Wall torch', 'Wall lantern', 'Lamp post', 'Street lamp', 'Candles', 'Cooking fire'], 'the six lights of the app');
+    t.eq(await t.text('#pop .os-prev .cap b'), 'Wall torch', 'the card names the one picked');
+    t.ok((await t.count('#pop .swatches .swatch')) > 3, 'the colours of Light sources');
+    // near the top wall, inside the room: it sits on the wall's face, its bracket to the wall
+    a = await t.scr(18 * k, 3.5 * k); await t.click(a.x, a.y);
+    const torch = await t.until(() => M(t).layers.find((l) => l.fixture), 5000, 'a torch');
+    const flame = M(t).fx.find((f) => f.id === torch.fixture.fx);
+    t.ok(Math.abs(torch.x / k - 18) < 0.05 && Math.abs(torch.y / k - 3.278) < 0.02 && torch.rotation === 0, 'on the face of the wall above, turned to it', [torch.x / k, torch.y / k, torch.rotation]);
+    t.eq([torch.role, torch.rel, torch.name], ['asset', 'Assets/Lights/Wall torch.png', 'Wall torch'], 'an asset that comes with the app');
+    t.eq([flame.kind, flame.preset, flame.bright, flame.dim, flame.hidden, flame.x, flame.y], ['emitter', 'torch', 20, 40, false, torch.x, torch.y], 'the app\'s own flame on it, lit, with a torch\'s light', flame);
+    // on the left wall: turned a quarter
+    a = await t.scr(14.4 * k, 6 * k); await t.click(a.x, a.y);
+    const left = await t.until(() => M(t).layers.filter((l) => l.fixture)[1], 5000, 'a second torch');
+    t.ok(Math.abs(Math.abs(left.rotation) - 90) < 1 && left.x / k > 14.2 && left.x / k < 14.8, 'on the left wall, turned to it', [left.x / k, left.rotation]);
+    // a colour, unlit, standing free
+    await t.clickSel('.os-lights .tile[data-v="candles"]');
+    await t.clickSel('#pop .swatches .swatch[data-v]:not([data-v=""])');
+    const col = await t.g('Play.ui.os.lightColor');
+    await t.clickText('#pop .seg-btn', 'Unlit');
+    a = await t.scr(20 * k, 6.5 * k); await t.click(a.x, a.y);
+    const can = await t.until(() => M(t).layers.find((l) => l.fixture && l.fixture.kind === 'candles'), 5000, 'candles');
+    const cf = M(t).fx.find((f) => f.id === can.fixture.fx);
+    t.ok(/^#[0-9a-f]{6}$/.test(col) && cf.color === col && cf.hidden === true && cf.preset === 'candle' && Math.abs(can.x / k - 20) < 0.05, 'candles where clicked, in the picked colour, unlit', [col, cf]);
+    await t.clickText('#pop .seg-btn', 'Lit');
+    await t.shot(t.gm(), 'lights-draw');
+    // moved, the flame goes along; copied, the copy burns by itself; removed, the flame goes too
+    const cx0 = can.x;
+    t.handle('layer.update', { mapId: own, id: can.id, x: cx0 + k });
+    t.eq(M(t).fx.find((f) => f.id === cf.id).x, Math.round((cx0 + k) * 1000) / 1000, 'moved: the flame goes along');
+    t.handle('layer.duplicate', { mapId: own, id: can.id, dx: k, dy: 0 });
+    const two = M(t).layers.filter((l) => l.fixture && l.fixture.kind === 'candles');
+    t.ok(two.length === 2 && two[0].fixture.fx !== two[1].fixture.fx && M(t).fx.filter((f) => f.fixture).length === 4, 'a copy has a flame of its own', two.map((x) => x.fixture));
+    t.handle('layer.remove', { mapId: own, id: two[1].id });
+    t.eq(M(t).fx.filter((f) => f.fixture).length, 3, 'removed: its flame goes too');
+    // in the Play tools a click asks first, as a door does; the TV follows
+    await t.send(own);
+    await t.g(`Play.setTool('select')`);
+    a = await t.scr(torch.x, torch.y); await t.click(a.x, a.y);
+    await t.until(async () => (await t.count('.light-ask')) === 1, 3000, 'the question');
+    t.eq(await t.text('.light-ask b'), 'Put out the wall torch?', 'it asks');
+    t.eq(M(t).fx.find((f) => f.id === flame.id).hidden, false, 'nothing happens before the answer');
+    await t.clickText('.light-ask .btn', 'No');
+    t.ok((await t.count('.light-ask')) === 0 && !M(t).fx.find((f) => f.id === flame.id).hidden, 'No: it burns on');
+    await t.click(a.x, a.y);
+    await t.until(async () => (await t.count('.light-ask')) === 1, 3000, 'the question again');
+    await t.clickText('.light-ask .btn', 'Yes');
+    await t.until(() => M(t).fx.find((f) => f.id === flame.id).hidden === true, 3000, 'the torch put out');
+    await t.click(a.x, a.y);
+    await t.until(async () => (await t.count('.light-ask')) === 1, 3000, 'the question for the dark torch');
+    t.eq(await t.text('.light-ask b'), 'Light the wall torch?', 'now it offers to light it');
+    await t.clickText('.light-ask .btn', 'Yes');
+    await t.until(() => M(t).fx.find((f) => f.id === flame.id).hidden === false, 3000, 'the torch lit again');
+    await t.shot(t.tv(), 'lights-tv');
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
+    for (const l of M(t).layers.filter((x) => x.fixture)) t.handle('layer.remove', { mapId: own, id: l.id });
+    t.eq(M(t).fx.filter((f) => f.fixture).length, 0, 'all gone with their pictures');
+    await tool(t, 'room');
+  }, { ms: 300000 });
 
   area.deep('a picture for the morning: the GM screen and the TV', async (t) => {
     await clear(t);

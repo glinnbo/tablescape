@@ -645,7 +645,8 @@ const Play = (() => {
       'Room and Round: drag (Shift: square, circle). Shape: click the corners; click the first again, double-click, Enter or right-click closes it.',
       'Alt with a floor tool erases instead. Erase also takes wall lines, pillars and doors away. Ctrl + Z brings anything back.',
       'Edges: Walls are built around the floor; Rock carves rooms out of stone; Ledge and Cliff drop into darkness; Fade lets the floor fade into the dark. One can see across Ledge, Cliff and Fade.',
-      'Wall, Pillar, Stairs, Door and Window come out beside Room when you pick it.',
+      'Four groups: Terrain makes floors and rooms; Structure puts walls, pillars, stairs, doors, windows and lights on them; Texture lays another tile on a floor that is there; Style draws living effects over any floor. The tabs beside the groups are how you draw.',
+      'Structure → Light: a torch or a lantern sits on the wall you click and lights the room; walls stop its light. In the Play tools a click on one asks before it is lit or put out.',
       'Higher and Lower step a floor up or down, a level a click (three each way): platforms and pits. The button between them puts it back to floor level. Stairs climb toward where you drag, in the floor you picked. Doors sit on grid lines: click one again to take it away.',
       'Blending is how a floor runs into the floors around it: Sharp, Soft, Natural or Tiled; the small button beside it fine-tunes. A floor blends with the floors at its own height; where a higher or lower one begins there is a step.',
       'Doors open and shut on the table: the leaf swings when you open a door.',
@@ -757,7 +758,7 @@ const Play = (() => {
   }
   // Prototype 25: one line with what you cannot guess, shown for a few seconds when a tool is picked (Options → This screen)
   const TOOL_HINTS = {
-    oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a wall · drag: a longer one · again: the door goes', window: 'Click a wall · drag: a longer one · again: the window goes' }[ui.os && ui.os.tool] || ''),
+    oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a wall · drag: a longer one · again: the door goes', window: 'Click a wall · drag: a longer one · again: the window goes', light: 'Click a wall: a light on it · elsewhere: where you click' }[ui.os && ui.os.tool] || ''),
     map: 'Drag moves the map · Alt + wheel scales it · Space-drag moves your view',
     fx: () => ({ place: 'Click places it · drag its marker to move it · right-click for more', paint: { box: 'Drag a box · Shift: square · Alt: erase', round: 'Drag a round · Shift: circle · Alt: erase', erase: 'Drag over what should go · [ and ] change the size' }[ui.paintShape] || '[ and ] change the brush size · Alt: erase', light: 'Click the map or a token to place a light', weather: '' }[ui.fxMode] || ''),
     asset: 'Click stamps · drag scatters · Ctrl + wheel turns · [ and ] resize · Shift + click selects several',
@@ -1393,6 +1394,9 @@ const Play = (() => {
         body.push(h('div', { class: 'light-card' },
           // the party is not a light you place here: it has its own tool (Play → Party)
           tiles(LIGHTS.filter((l) => l.id !== 'party').map((l) => ({ ...l, icon: l.id === 'moon' ? 'moon' : l.id === 'candle' ? 'candle' : l.id === 'bullseye' ? 'cone' : 'bulb', tip: `${l.bright} ft bright, ${l.dim} ft dim` })), () => ui.light, (v) => { ui.light = v; refreshPop(); }),
+          // Beta 3.49: the lights that come with the app, with their holder: on a wall near the click, or where clicked
+          h('span', { class: 'ctl-label' }, 'With its holder'),
+          tiles(Fixtures.LIST.map((d) => ({ id: `fx:${d.id}`, label: d.label, icon: d.fx.preset === 'candle' ? 'candle' : d.fx.preset === 'campfire' ? 'campfire' : d.fx.preset === 'torch' ? 'flame' : 'bulb', tip: `${d.fx.bright} ft bright, ${d.fx.dim} ft dim${d.wall != null ? ' · sits on a wall near the click' : ''}` })), () => ui.light, (v) => { ui.light = v; refreshPop(); }),
           lookSection()));
       }
     } else {
@@ -3871,6 +3875,8 @@ const Play = (() => {
     ui, cmd, send, state: () => S, view: () => view,
     ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
     refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), setTool: (t) => setTool(t),
+    lightColors: (get, set) => colorSwatches(get, set, 'Colour of its light'), // (Beta 3.49: Structure → Light, the swatches of Light sources)
+
     openLibrary: () => Drawer.open({ cat: 'tiles', purpose: 'tile', back: { pop: 'oldschool', tool: 'oldschool' } }),
     togglePanel: (def) => { Floats.toggle(def); renderRail(); }, panelOpen: (id) => !!(Floats && Floats.isOpen(id)), // (Beta 3.35: Draw → Tiles → List)
   });
@@ -3976,6 +3982,9 @@ const Play = (() => {
       if (WallsTool.PLAY_TOOLS.includes(ui.tool)) {
         const doorEl = e.target.closest('.sv-door');
         if (doorEl) { Walls.askDoor(doorEl.dataset.id); return; }
+        // Beta 3.49: a light of the app (a wall torch, a lamp …) asks the same way before it is lit or put out
+        const lamp = !e.target.closest('.sv-token') && typeof Fixtures === 'object' ? Fixtures.under(map(), pt) : null;
+        if (lamp) { Fixtures.askLit(map(), lamp, cmd, e.clientX, e.clientY); return; }
         const pEl = ui.tool !== 'select' && ui.tool !== 'party' ? e.target.closest('.sv-handle.party') : null;
         const pf = pEl && fxOf(pEl.dataset.id);
         if (pf) {
@@ -4336,6 +4345,10 @@ const Play = (() => {
       drag = { kind: 'paint', erase, n: 0, id: ui.regionIds[k], preset: ui.region, sid: uid(erase ? 'e' : 'w'), r: ui.paintIn / 2 / zoom(), buf: [pt.x, pt.y], last: pt };
       updateBrushCursor();
       flushPaint();
+    } else if (ui.fxMode === 'light' && String(ui.light || '').startsWith('fx:')) { // (Beta 3.49: a light with its holder)
+      const fd = Fixtures.BY[String(ui.light).slice(3)];
+      if (fd) Fixtures.place(cmd, map(), pt, { kind: fd.id, color: ui.look.color || null, lit: true }).then((r) => { if (r && r.ok) toast(r.label || `${fd.label} placed`, { ms: 1400, undo: () => cmd('history.undo') }); });
+      if (!map().light.darkness) toast('Lights show once the map is dark: raise Darkness above.');
     } else if (ui.fxMode === 'light') {
       const d = LIGHTS.find((x) => x.id === ui.light) || LIGHTS[1];
       const tok = tokenUnder(e.clientX, e.clientY);

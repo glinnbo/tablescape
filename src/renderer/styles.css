@@ -3903,6 +3903,28 @@ body.gm .sv-asset.is-selected > .sv-treebox { outline: 2px solid var(--torch); o
 .os-tabs2 .tile:first-child { margin-top: 0; }
 .os-tabs2 .tile.on { width: 90px; border-color: var(--prep); color: var(--prep); background: linear-gradient(90deg, var(--panel) 24px, #1c2440); z-index: 1; }
 .os-tabs2 .tile.pick { animation-name: os-part-pick; }
+/* Beta 3.49: the four groups (Terrain orange, Structure stone, Texture teal, Style blue) as the first column; their
+   tools as the second, in the group's colour. Four group tabs are as tall as six tools, so each tool comes out from
+   behind one of them */
+.os-groups .tile { height: 58px; gap: 3px; font-size: 10.5px; color: color-mix(in srgb, var(--gc) 62%, #555); }
+.os-groups .tile .i { width: 19px; height: 19px; }
+.os-groups .tile[data-g="terrain"], .os-tabs2.g-terrain { --gc: var(--torch); --gb: #3a2a17; }
+.os-groups .tile[data-g="structure"], .os-tabs2.g-structure { --gc: #d9cfba; --gb: #34312b; }
+.os-groups .tile[data-g="texture"], .os-tabs2.g-texture { --gc: #7fcdbb; --gb: #16302b; }
+.os-groups .tile[data-g="style"], .os-tabs2.g-style { --gc: var(--prep); --gb: #1c2440; }
+.os-groups .tile.open { width: 66px; border-color: var(--gc); color: var(--gc); background: linear-gradient(90deg, var(--panel), var(--gb)); }
+.os-tabs2[class*="g-"] .tile { color: var(--gc); height: 41px; }
+.os-tabs2[class*="g-"] .tile.on { border-color: var(--gc); color: var(--gc); background: linear-gradient(90deg, var(--panel) 24px, var(--gb)); }
+/* Style: the six effects as a row of tiles in the panel */
+.os-fxkinds { grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.os-picks.os-fxkinds .os-pick { padding: 4px 1px 5px; font-size: 9.5px; line-height: 1.05; }
+.os-picks.os-fxkinds .os-pick .os-fxart { width: 36px; height: 36px; display: grid; place-items: center; color: #fff; }
+.os-picks.os-fxkinds .os-pick .os-fxart .i { width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)); }
+.os-edgemat { gap: 6px; }
+/* Beta 3.49: Structure → Light: the six lights of the app as tiles; its picture on the panel's card */
+.tiles.os-lights { grid-template-columns: repeat(3, 1fr); }
+.tiles.os-lights .tile img { width: 44px; height: 44px; border-radius: 7px; object-fit: cover; background: #2a2622; }
+.os-art.a-light .lt { inset: 6px 0 22px; }
 @keyframes os-part-pick { from { width: 82px; } }
 .os-level .os-pick:disabled { opacity: 0.35; }
 .os-level-now span { font-variant-numeric: tabular-nums; }

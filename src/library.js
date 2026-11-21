@@ -326,6 +326,22 @@ function treeOf(ref) {
   return e && e.tree ? { ...e.tree, turn: e.turn } : null; // (Beta 3.22: the tiles are built in too, and no trees)
 }
 const isBuiltin = (rel) => BUILTIN.has(rel);
+// ---------- Beta 3.49: the lights that come with the app (Draw → Structure → Light; Effects → Light sources) ----------
+// An unlit picture each (renderer/lights), kept by name like the trees and the tiles; what burns on it is an effect.
+const LIGHT_FOLDER = 'Assets/Lights';
+const LIGHTS = new Map(); // id → { id, label, rel, path, w, h, wall?, fx }
+function loadLights() {
+  let data = null;
+  try { data = require('./renderer/light-data'); } catch { return; }
+  const dir = path.join(__dirname, 'renderer', 'lights');
+  for (const d of data.lights) {
+    const e = { rel: `${LIGHT_FOLDER}/${d.label}.png`, path: path.join(dir, d.file), name: d.label, light: { ...d } };
+    BUILTIN.set(e.rel, e); BUILTIN_AT.set(e.path, e);
+    LIGHTS.set(d.id, { ...d, rel: e.rel, path: e.path });
+  }
+}
+loadLights();
+const lightOf = (id) => LIGHTS.get(id) || null;
 // ---------- Beta 3.22: the tiles that come with the app (Oldschool maps) ----------
 // Floors are listed under Tiles/Tablescape; materials (what walls, rock and cliffs are made of) are known by the same
 // kind of name but not listed. Like the living trees they lie with the app and are kept by name.
@@ -469,6 +485,6 @@ function importFiles(files, { cat, folder } = {}) {
 
 module.exports = {
   FOLDERS, kindOf, categoryOf, resolveLibraryRoot, defaultLibraryRoot, isPortable, ensureLibrary, listLibrary, setFavourite, touchRecent, importFiles,
-  toRef, resolveRef, hydrate, media, thumbUrl, putThumb, vttImagePath, forgetRecent, treeOf, isBuiltin, tileOf, setTileSquares,
+  toRef, resolveRef, hydrate, media, thumbUrl, putThumb, vttImagePath, forgetRecent, treeOf, isBuiltin, tileOf, setTileSquares, lightOf,
   get root() { return ROOT; },
 };
