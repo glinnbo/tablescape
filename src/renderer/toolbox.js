@@ -63,17 +63,18 @@ const Toolbox = (() => {
     }
     const onStage = (path) => { const t = S().talk; return t ? t.cast.findIndex((x) => x.path === path) : -1; };
     // Second Builder (second-conversation-stage): a portrait clicked (or dropped on the small TV) comes in and speaks; one
-    // that already stands there speaks; one speaking stays (only ✕ or Delete take anyone out). A 4th pushes the oldest
-    // out: a notice says who, with Undo
-    async function bringIn(it) {
+    // that already stands there speaks; one speaking stays (only ✕ or Delete take anyone out). A 6th pushes the oldest
+    // out: a notice says who, with Undo (second-conversation-rework: five at most, was three). o.hidden: it comes in Hidden
+    async function bringIn(it, o = {}) {
       if (!it || !it.path) return null;
       const t = S().talk; const i = onStage(it.path);
       TalkStage.pick(it.path);
       if (i >= 0) { if (i < t.cast.length - 1) return cmd('talk.toggle', { path: it.path }); TalkStage.refresh(); return { ok: true }; }
-      const out = t && t.cast.length >= 3 ? t.cast[0] : null;
+      const out = t && t.cast.length >= 5 ? t.cast[0] : null;
+      if (o.hidden) await cmd('talk.fx', { path: it.path, hidden: true }); // (first: the TV never shows it uncovered)
       const r = await talkToggle(it);
       if (r && r.ok && out) {
-        toast(`${out.name} stepped out: three stand there at most`, { ms: 6000, action: { label: 'Undo', run: async () => {
+        toast(`${out.name} stepped out: five stand there at most`, { ms: 6000, action: { label: 'Undo', run: async () => {
           await cmd('talk.toggle', { path: it.path, out: true });
           await cmd('talk.toggle', { path: out.path, alpha: out.alpha !== false });
         } } });
@@ -102,111 +103,17 @@ const Toolbox = (() => {
       const n = PortraitFx.norm(fxOf(it.path));
       if (!n.blood && !n.shade && !n.hidden) return null;
       const tip = [n.blood ? `bloodied ${Math.round(n.blood * 100)} %` : null, n.shade ? `shaded ${Math.round(n.shade * 100)} %` : null, n.hidden ? 'hidden' : null].filter(Boolean).join(', ');
-      return h('b', { class: 'talk-scale talk-looks', 'data-tip': `${it.name}: ${tip} (right-click to change)` }, n.blood ? iconEl('droplet') : null, n.shade ? iconEl('contrast') : null, n.hidden ? iconEl('eye-off') : null);
+      return h('b', { class: 'talk-scale talk-looks', 'data-tip': `${it.name}: ${tip} (change it on the small TV)` }, n.blood ? iconEl('droplet') : null, n.shade ? iconEl('contrast') : null, n.hidden ? iconEl('eye-off') : null);
     };
     const sizeBadge = (it) => {
       const v = sizeOf(it.path); const o = offOf(it.path); const sized = Math.abs(v - 1) > 0.001; const moved = !!(o.x || o.y);
       if (!sized && !moved) return looksBadge(it);
       const tip = [sized ? `${Math.round(v * 100)} % of the portrait size` : null, moved ? `moved ${o.y ? `${o.y > 0 ? 'up' : 'down'} ${Math.abs(Math.round(o.y * 100))} %` : ''}${o.x && o.y ? ', ' : ''}${o.x ? `${o.x > 0 ? 'right' : 'left'} ${Math.abs(Math.round(o.x * 100))} %` : ''}` : null].filter(Boolean).join('; ');
-      return h('span', { class: 'talk-badges' }, h('b', { class: 'talk-scale', 'data-tip': `${it.name}: ${tip} (right-click to change)` }, sized ? iconEl(v > 1 ? 'arrows-maximize' : 'arrows-minimize') : null, sized ? `${Math.round(v * 100)}%` : null, moved ? iconEl('arrows-move') : null), looksBadge(it));
+      return h('span', { class: 'talk-badges' }, h('b', { class: 'talk-scale', 'data-tip': `${it.name}: ${tip} (change it on the small TV)` }, sized ? iconEl(v > 1 ? 'arrows-maximize' : 'arrows-minimize') : null, sized ? `${Math.round(v * 100)}%` : null, moved ? iconEl('arrows-move') : null), looksBadge(it));
     };
-    let sizePop = null;
-    function closeSizePop() { if (sizePop) { sizePop.remove(); sizePop = null; document.removeEventListener('pointerdown', outSizePop, true); document.removeEventListener('keydown', escSizePop, true); } }
-    const outSizePop = (e) => { if (sizePop && !sizePop.contains(e.target)) closeSizePop(); };
-    const escSizePop = (e) => { if (e.key === 'Escape' && sizePop) { e.stopPropagation(); closeSizePop(); } };
-    // Second Builder: a portrait's looks, stacked in this order: Bloodied (amount), Shaded (how dark the top of the head), Hidden
-    // (a black silhouette). Kept per portrait, like its size; a small preview shows the result
-    function looksPart(it) {
-      let fx = { ...(fxOf(it.path) || {}) };
-      let sendT = 0; let prevT = 0; let prevTurn = 0;
-      const send = (patch, slow) => {
-        Object.assign(fx, patch); preview();
-        clearTimeout(sendT);
-        if (slow) sendT = setTimeout(() => cmd('talk.fx', { path: it.path, ...patch }), 40); else cmd('talk.fx', { path: it.path, ...patch });
-      };
-      const sw = (label, on, tip, change) => {
-        const i = h('input', { type: 'checkbox', role: 'switch', checked: !!on, 'aria-label': label, onchange: (e) => change(e.target.checked) });
-        return [h('label', { class: 'ctl ctl-toggle tsp-sw', 'data-tip': tip }, h('span', { class: 'ctl-label' }, label), i, h('span', { class: 'switch' })), i];
-      };
-      const slider = (min, max, val, label, key) => {
-        const o = h('output', {}, `${val} %`);
-        const r = h('input', { type: 'range', min, max, step: 1, value: val, 'aria-label': label });
-        r.addEventListener('input', () => { o.textContent = `${r.value} %`; send({ [key]: Number(r.value) / 100 }, true); });
-        return [r, o];
-      };
-      const n0 = PortraitFx.norm({ ...fx, bloodOn: true, shadeOn: true });
-      const [bR, bO] = slider(5, 100, Math.round(n0.blood * 100), `How bloodied ${it.name} is`, 'blood');
-      const [sR, sO] = slider(10, 90, Math.round(n0.shade * 100), `How dark the top of ${it.name} is`, 'shade');
-      const [bS, bI] = sw('Bloodied', fx.bloodOn, 'Blood stains over the figure; more the higher the amount', (v) => { send({ bloodOn: v }); bR.disabled = !v; });
-      const [sS, sI] = sw('Shaded', fx.shadeOn, 'Darker from the top of the head down', (v) => { send({ shadeOn: v }); sR.disabled = !v; });
-      const [hS, hI] = sw('Hidden', fx.hidden, 'Only the black silhouette. Switched off on the table, the figure comes slowly out of the dark', (v) => send({ hidden: v }));
-      bR.disabled = !fx.bloodOn; sR.disabled = !fx.shadeOn;
-      const pv = h('canvas', { class: 'tsp-preview', width: 1, height: 1, 'aria-hidden': 'true' });
-      const pvBox = h('div', { class: 'tsp-pv' }, pv);
-      let src = null;
-      // (a Ready-list entry has only its path: its picture comes from the library)
-      const picUrl = it.url || (lib.find((x) => x.path === it.path) || {}).url;
-      function preview() {
-        if (!picUrl) { pvBox.hidden = true; return; }
-        clearTimeout(prevT);
-        prevT = setTimeout(async () => {
-          const turn = ++prevTurn;
-          try {
-            if (!src) src = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = picUrl; });
-            const c = await PortraitFx.compose(src, fx, { opaque: it.alpha === false, seed: it.path });
-            if (turn !== prevTurn) return;
-            const H = 150; const W = Math.max(1, Math.round((H * c.width) / c.height));
-            pv.width = W; pv.height = H;
-            const g = pv.getContext('2d'); g.clearRect(0, 0, W, H); g.drawImage(c, 0, 0, W, H);
-            pv.style.transform = ((S().settings && S().settings.portraitMirror) || {})[it.path] ? 'scaleX(-1)' : '';
-          } catch { pvBox.hidden = true; }
-        }, 60);
-      }
-      preview();
-      const clear = h('button', { class: 'tg-clear', 'data-tip': 'No looks: no blood, no shade, not hidden', onclick: () => { fx = {}; bI.checked = false; sI.checked = false; hI.checked = false; bR.disabled = true; sR.disabled = true; cmd('talk.fx', { path: it.path, reset: true }); preview(); } }, 'Clear');
-      return h('div', { class: 'tsp-looks' },
-        h('div', { class: 'tsp-sec' }, h('span', { class: 'grow' }, 'Looks'), clear),
-        pvBox,
-        bS, h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Amount'), bO), bR,
-        sS, h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Top of the head'), sO), sR,
-        hS);
-    }
-    function openSizePop(e, it) {
-      e.preventDefault(); closeSizePop();
-      const out = h('output', {}, `${Math.round(sizeOf(it.path) * 100)} %`);
-      const input = h('input', { type: 'range', min: 50, max: 200, step: 5, value: Math.round(sizeOf(it.path) * 100), 'aria-label': `Size of ${it.name}` });
-      let sendT = 0;
-      input.addEventListener('input', () => { out.textContent = `${input.value} %`; clearTimeout(sendT); sendT = setTimeout(() => cmd('talk.size', { path: it.path, scale: Number(input.value) / 100 }), 40); });
-      const i = onStage(it.path);
-      // (Prototype 13) up / down and left / right, a share of its own height and width
-      const o0 = offOf(it.path); let ox = o0.x || 0; let oy = o0.y || 0; let offT = 0;
-      const sendOff = () => { clearTimeout(offT); offT = setTimeout(() => cmd('talk.offset', { path: it.path, x: ox, y: oy }), 40); };
-      const fmtY = (v) => (v ? `${v > 0 ? 'up' : 'down'} ${Math.abs(v)} %` : '0');
-      const fmtX = (v) => (v ? `${v > 0 ? 'right' : 'left'} ${Math.abs(v)} %` : '0');
-      const outY = h('output', {}, fmtY(Math.round(oy * 100))); const outX = h('output', {}, fmtX(Math.round(ox * 100)));
-      const inY = h('input', { type: 'range', min: -40, max: 40, step: 1, value: Math.round(oy * 100), 'aria-label': `${it.name} up or down` });
-      const inX = h('input', { type: 'range', min: -50, max: 50, step: 1, value: Math.round(ox * 100), 'aria-label': `${it.name} left or right` });
-      inY.addEventListener('input', () => { oy = Number(inY.value) / 100; outY.textContent = fmtY(Number(inY.value)); sendOff(); });
-      inX.addEventListener('input', () => { ox = Number(inX.value) / 100; outX.textContent = fmtX(Number(inX.value)); sendOff(); });
-      for (const [inp, zero] of [[inY, () => { oy = 0; outY.textContent = '0'; }], [inX, () => { ox = 0; outX.textContent = '0'; }]]) inp.addEventListener('dblclick', () => { inp.value = 0; zero(); sendOff(); }); // (a double-click: back to 0)
-      sizePop = h('div', { class: 'talk-sizepop', role: 'dialog', 'aria-label': `Size, place and looks of ${it.name}` },
-        h('div', { class: 'tsp-head' }, h('b', { class: 'grow ellipsis' }, it.name)),
-        h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Size'), out), input,
-        h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Up / down'), outY), inY,
-        h('div', { class: 'tsp-lab' }, h('span', { class: 'grow' }, 'Left / right'), outX), inX,
-        looksPart(it),
-        h('div', { class: 'tsp-row' },
-          h('button', { class: 'btn small ghost', 'data-tip': '100 %, in its place', onclick: () => { input.value = 100; out.textContent = '100 %'; inY.value = 0; inX.value = 0; ox = 0; oy = 0; outY.textContent = '0'; outX.textContent = '0'; cmd('talk.size', { path: it.path, scale: 1 }); cmd('talk.offset', { path: it.path, x: 0, y: 0 }); } }, iconEl('refresh'), 'Reset'),
-          h('span', { class: 'grow' }),
-          i >= 0 ? h('button', { class: 'btn small ghost', onclick: () => { closeSizePop(); cmd('talk.toggle', { path: it.path, out: true }); } }, iconEl('x'), 'Take out') : null));
-      document.body.append(sizePop);
-      const r = sizePop.getBoundingClientRect();
-      sizePop.style.left = `${Math.max(6, Math.min(innerWidth - r.width - 6, e.clientX))}px`;
-      sizePop.style.top = `${Math.max(6, Math.min(innerHeight - r.height - 6, e.clientY))}px`;
-      setTimeout(() => { document.addEventListener('pointerdown', outSizePop, true); document.addEventListener('keydown', escSizePop, true); }, 0);
-      input.focus();
-    }
-    const tipFor = (it, i, t) => (i < 0 ? `${it.name}: click to bring in` : i === t.cast.length - 1 ? `${it.name}: speaking (✕ on the small TV takes them out)` : `${it.name}: on the table. Click: they speak`); // (Second Builder, second-conversation-stage)
+    // (Second Builder (second-conversation-rework): no right-click popup any more: size, place and looks are set on the
+    // small TV and in the bar under it; a portrait comes in hidden from the eye on its thumbnail)
+    const tipFor = (it, i, t) => (i < 0 ? `${it.name}: click to bring in (the eye: in Hidden)` : i === t.cast.length - 1 ? `${it.name}: speaking (the big ✕ takes them off)` : `${it.name}: on the table. Click: they speak`); // (Second Builder, second-conversation-stage; second-conversation-rework: the thumbnail's own buttons)
     const readyAdd = (it) => ctx.ready.add('portraits', [{ path: it.path, name: it.name }]);
     // Talk → List: every portrait in the library; click: in or out of the conversation, tick: ready for this chapter
     const talkListDef = () => ({
@@ -223,7 +130,6 @@ const Toolbox = (() => {
           pick: (it) => bringIn(it),
           state: (it) => { const i = onStage(it.path); const t = S().talk; return { on: i >= 0, badge: i < 0 ? null : i === t.cast.length - 1 ? 'Speaking' : 'On', tip: tipFor(it, i, t) }; },
           ready: { chapter: () => ctx.ready.chapter(), has: (p) => ctx.ready.list('portraits').some((x) => x.path === p), toggle: (it, on) => (on ? readyAdd(it) : ctx.ready.remove('portraits', it.path)) },
-          menu: (e, it) => openSizePop(e, it), // (right-click a portrait: its size)
           extra: (it) => h('span', { class: 'talk-extras' }, mirrorBtn(it), sizeBadge(it)), extraSig: (it) => [!!((S().settings && S().settings.portraitMirror) || {})[it.path], sizeOf(it.path), offOf(it.path), fxOf(it.path)],
           dragCat: 'portraits',
           empty: 'No portraits yet. Put PNG busts into the Portraits folder of your library.',
@@ -239,14 +145,16 @@ const Toolbox = (() => {
     const talkDef = () => ({
       id: 'talk', title: 'Conversation', icon: 'messages', build: buildTalkPop,
       // (main Builder at integration: the first time it opens beside the table preview, not over it: it is wider than the other windows)
-      place: (r) => { let w = 420; try { w = Number(localStorage.getItem('talkStageW')) || 420; } catch {} return { x: Math.max(8, r.width - 212 - 24 - (w + 28) - 12), y: 12 }; }, // (talkStageW: the small TV's width, talk-stage.js)
-      tips: ['Click a portrait below, or drag it onto the small TV: it comes in and speaks. The first one starts the conversation.',
-        'On the small TV: click a portrait and it speaks. Drag the one speaking sideways to move them all; drag one up or down to raise or lower it; pull a top corner to size it.',
-        '✕ on the small TV, Take out or Delete: it leaves. A click never takes anyone out. Three stand there at most.',
-        'The bar under the small TV: Mirror, Bloodied, Shaded and Hidden for the picked portrait. Right-click a portrait below to set its looks before it comes in.',
+      place: (r) => { let w = 600; try { w = Number(localStorage.getItem(TalkStage.KEY_W)) || 600; } catch {} return { x: Math.max(8, r.width - 212 - 24 - w - 12), y: 12 }; }, // (the window's width, talk-stage.js)
+      // (Second Builder (second-conversation-rework): the tips for the drawn small TV, five portraits, no right-click)
+      tips: ['Click a portrait below, or drag it onto the small TV: it comes in and speaks. The first one starts the conversation. The eye on a thumbnail brings it in Hidden.',
+        'On the small TV: click a portrait and it speaks. Drag the one speaking sideways to move them all; drag one up or down to raise it; pull a top corner to size it. The TV follows when you let go.',
+        '✕ on the small TV, the big ✕ on its thumbnail, Take out or Delete: it leaves. A click never takes anyone out. Five stand there at most.',
+        'The bar under the small TV: Mirror, Bloodied, Shaded and Hidden for the picked portrait.',
+        'The small TV shows the map behind blurred, the bands and the portraits: no effects, no weather.',
         '⚙: how big they stand, the blur behind them, and the speaker\'s name on the band. The band\'s look: Options → Looks.',
-        'With players on both sides, the far side gets a turned copy. A tall portrait may reach over the far band, away from the players looking at it.',
-        'Drag the corner of the small TV to make this window bigger.'],
+        'Portraits may run off the top and the sides of the TV, and over the far side\'s band; never below their own band.',
+        'Drag the window\'s bottom right corner: the small TV grows with it, the list gets taller.'],
       headExtra: () => h('button', { class: `icon-btn cs-gear ${gearOpen ? 'on' : ''}`, 'aria-label': 'Look settings', 'data-tip': 'How big, the blur behind, names',
         onclick: (e) => { gearOpen = !gearOpen; e.currentTarget.classList.toggle('on', gearOpen); if (gearEl) gearEl.hidden = !gearOpen; } }, iconEl('settings')),
     });
@@ -254,13 +162,14 @@ const Toolbox = (() => {
       loadLib();
       const stage = TalkStage.build({
         S, cmd, toast, bind: c().bind, bringIn, refresh: () => ctx.refreshPop(),
-        preview: () => (ctx.preview ? ctx.preview() : ''), previewSize: () => { if (ctx.previewSize) ctx.previewSize(); },
         fx: { of: (path) => fxOf(path), send: (path, patch) => cmd('talk.fx', { path, ...patch }) },
       });
+      let sizeT = 0;
       const set = (patch) => ts.settings({ talk: patch });
       const prefs = () => (S().settings && S().settings.talk) || { size: 0.34, pos: 1, blur: 0.5, look: 'ink' };
       gearEl = h('div', { class: 'cs-gear-box stack', hidden: !gearOpen },
-        c().slider({ label: 'Size', min: 0.1, max: 0.7, step: 0.01, get: () => prefs().size, set: (v) => set({ size: v }), fmt: (v) => `${Math.round(v * 100)}% of the TV height` }),
+        // (Second Builder (second-conversation-rework): the small TV follows the slider at once, the TV once it rests)
+        c().slider({ label: 'Size', min: 0.1, max: 0.7, step: 0.01, get: () => TalkStage.shownSize() ?? prefs().size, set: (v) => { TalkStage.size(v); clearTimeout(sizeT); sizeT = setTimeout(() => set({ size: v }), 300); }, fmt: (v) => `${Math.round(v * 100)}% of the TV height` }),
         c().slider({ label: 'Blur the map behind', min: 0, max: 1, step: 0.05, get: () => prefs().blur, set: (v) => set({ blur: v }), fmt: (v) => (v < 0.05 ? 'Off' : `${Math.round(v * 100)}%`) }),
         c().toggle({ label: 'The speaker\'s name on the band', get: () => !!prefs().names, set: (v) => set({ names: v }) }),
         c().btn('The band\'s look …', 'sparkles', () => { if (window.App && App.openOptions) App.openOptions('looks'); }, { kind: 'small ghost' }));
@@ -289,13 +198,19 @@ const Toolbox = (() => {
             const i = onStage(it.path);
             const use = () => (it.missing ? toast(`${it.name} is no longer in the library: ✕ takes it off the Ready list`, { ms: 3500 }) : bringIn(it));
             const drag = !it.missing ? { draggable: 'true', ondragstart: (e) => { e.dataTransfer.setData('application/x-ts-asset', JSON.stringify({ path: it.path, name: it.name, cat: 'portraits', kind: it.kind || 'image' })); e.dataTransfer.effectAllowed = 'copy'; } } : {};
-            row.append(h('div', { class: `talk-pick ${i >= 0 ? 'on' : ''} ${it.missing ? 'missing' : ''}`, dataset: { flash: it.path }, role: 'button', tabindex: '0', ...drag, oncontextmenu: (e) => { if (!it.missing) openSizePop(e, it); }, 'data-tip': it.missing ? `${it.name}: no longer in the library (✕ takes it off)` : tipFor(it, i, t || { cast: [] }),
+            row.append(h('div', { class: `talk-pick ${i >= 0 ? 'on' : ''} ${it.missing ? 'missing' : ''}`, dataset: { flash: it.path }, role: 'button', tabindex: '0', ...drag, 'data-tip': it.missing ? `${it.name}: no longer in the library (✕ takes it off)` : tipFor(it, i, t || { cast: [] }),
               onclick: use, onkeydown: (e) => { if (e.key === 'Enter') use(); } },
             h('span', { class: 'talk-thumb' }, it.missing ? iconEl('alert-triangle') : Thumbs.img(it.path, it.kind || 'image', it.thumb)),
             h('span', { class: 'talk-name' }, it.name),
             i >= 0 ? h('b', { class: 'talk-badge' }, i === t.cast.length - 1 ? 'Speaking' : 'On') : null,
             sizeBadge(it),
-            o.ready ? h('button', { class: 'icon-btn ready-x', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('portraits', it.path); } }, iconEl('x')) : null));
+            o.ready ? h('button', { class: 'icon-btn ready-x', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('portraits', it.path); } }, iconEl('x')) : null,
+            // Second Builder (second-conversation-rework), on hover: one on the TV shows a big ✕ that takes it off; one not
+            // on the TV the eye that brings it in Hidden (its looks are set first, so the TV never shows it uncovered)
+            !it.missing && i >= 0 ? h('button', { class: 'talk-off', 'aria-label': `Take ${it.name} off the TV`, 'data-tip': 'Take off the TV', onkeydown: (e) => e.stopPropagation(),
+              onclick: (e) => { e.stopPropagation(); if (TalkStage.picked() === it.path) TalkStage.pick(null); cmd('talk.toggle', { path: it.path, out: true }); } }, iconEl('x')) : null,
+            !it.missing && i < 0 ? h('button', { class: 'talk-hidden-in', 'aria-label': `Bring ${it.name} in hidden`, 'data-tip': 'Bring in hidden', onkeydown: (e) => e.stopPropagation(),
+              onclick: (e) => { e.stopPropagation(); bringIn(it, { hidden: true }); } }, iconEl('eye-off')) : null));
           }
           strip.append(row);
         }

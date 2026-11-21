@@ -19,7 +19,7 @@ const Play = (() => {
     selected: null, selFx: null, selSpell: null, drawer: null, rosterCollapsed: false,
     align: null, expanded: null, viewChapterId: null, lastEditId: null,
     // effects tool
-    fxMode: 'place', emitter: 'torch', region: 'mist', light: 'torch', fxSize: 1, paintIn: 2, regionIds: {},
+    fxMode: 'place', emitter: 'glow', region: 'mist', light: 'torch', fxSize: 1, paintIn: 2, regionIds: {},
     paintShape: 'brush', // (Beta 3.41) how a painted effect is put down: brush, box, round; erase takes it away
     look: { color: null, intensity: 1, density: 1, speed: 1, flicker: true, angle: null, variant: null, wave: null }, // the next effect you place
     // assets tool
@@ -432,7 +432,7 @@ const Play = (() => {
       if (m) view.setGhost(null);
     }
     if (ui.selected && !layer(ui.selected)) ui.selected = null;
-    if (ui.selFx && !fxOf(ui.selFx)) { ui.selFx = null; view.selectFx(null); }
+    if (ui.selFx && !fxOf(ui.selFx)) { ui.selFx = null; view.selectFx(null); if (popId === 'fx' && ui.fxMode === 'light') setTimeout(() => { if (popId === 'fx' && !ui.selFx) openPop('fx'); }, 0); } // (Beta 3.54: a picked light gone: the Light panel sets the next one again)
     if (ui.selAssets.some((id) => !layer(id))) setAssetSelection(ui.selAssets.filter((id) => layer(id) && !layer(id).locked));
     Tools.update();
     OS.update(); // (Beta 3.22) an Oldschool map: its picture made again when the drawing changed
@@ -647,7 +647,7 @@ const Play = (() => {
       'Alt with a floor tool erases instead. Erase also takes wall lines, pillars and doors away. Ctrl + Z brings anything back.',
       'Edges: Walls are built around the floor; Rock carves rooms out of stone; Ledge and Cliff drop into darkness; Fade lets the floor fade into the dark. One can see across Ledge, Cliff and Fade.',
       'Four groups: Terrain makes floors and rooms; Structure puts walls, pillars, stairs, doors, windows and lights on them; Texture lays another tile on a floor that is there; Style draws living effects over any floor. The tabs beside the groups are how you draw.',
-      'Structure → Light: a torch or a lantern sits on the wall you click and lights the room; walls stop its light. In the Play tools a click on one asks before it is lit or put out.',
+      'Structure → Light: Holder (a torch or a lantern sits on the wall you click and lights the room; walls stop its light), Flame, or Just light. With the Select tool a click on a light asks before it is lit or put out. A wall light goes when its wall goes.',
       'With Light picked, a click on a light that is there picks it: drag it, change it in the panel, Delete removes it. By day a light in its own colour only burns; give it a colour and it colours the map by day too.',
       'Higher and Lower step a floor up or down, a level a click (three each way): platforms and pits. The button between them puts it back to floor level. Stairs climb toward where you drag, in the floor you picked. Doors sit on grid lines: click one again to take it away.',
       'Blending is how a floor runs into the floors around it: Sharp, Soft, Natural or Tiled; the small button beside it fine-tunes. A floor blends with the floors at its own height; where a higher or lower one begins there is a step.',
@@ -657,10 +657,10 @@ const Play = (() => {
       'Colours change the picture and its assets only. Each map keeps its own.', 'Hold "original" to compare, here and on the table.',
       'Right-drag or Space-drag moves your view; F fits it to the table, Shift + F shows everything.'],
     fx: () => [...({
-      place: ['Click the map to place it; click its marker to change it, drag to move it.', 'Torches, campfires and candles also light up a dark map.', 'Right-click a placed effect for more.'],
+      place: ['Click the map to place it; click its marker to change it, drag to move it.', 'Torches, campfires and candles are under Light → Light sources → Flame.', 'Right-click a placed effect for more.'],
       paint: ['Paint over the map; [ and ] change the brush size.', 'Strokes of the same kind join one area until you press Start a new area.', 'Click an area\'s marker to change its look; right-click it to remove it.'],
       light: ui.lightTab === 'sources'
-        ? ['Click the map to place a light, or click a token so it carries the light.', 'The party\'s own light is set in Play → Party marker (U).']
+        ? ['Holder: a light with what holds it (a wall light sits on the wall near the click). Flame: a flame and its light. Just light: light only; click a token so it carries it.', 'Click a light to pick it: the same rows change it, drag moves it, Delete removes it.', 'The same panel is in Draw → Structure → Light.', 'The party\'s own light is set in Play → Party marker (U).']
         : ['Darkness covers the whole map; lights, torches and campfires shine through it.', 'Remember lit areas: what the light reached stays dimly visible.', 'Day, Dusk, Night and Cave work on the hotbar and the button deck too.'],
       weather: ['Weather covers the whole table and stays put when you move the map.', 'With lightning in the mix, the Lightning button flashes it whenever you like.', 'Save a mix to use it on other maps.',
         'The living trees take their wind from the weather. Their own wind and the Storm are under Assets → Living.'],
@@ -760,9 +760,9 @@ const Play = (() => {
   }
   // Prototype 25: one line with what you cannot guess, shown for a few seconds when a tool is picked (Options → This screen)
   const TOOL_HINTS = {
-    oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a wall · drag: a longer one · again: the door goes', window: 'Click a wall · drag: a longer one · again: the window goes', light: 'Click a wall: a light on it · elsewhere: where you click' }[ui.os && ui.os.tool] || ''),
+    oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a wall · drag: a longer one · again: the door goes', window: 'Click a wall · drag: a longer one · again: the window goes', light: 'Click: a light (a wall light on the wall) · click a light: pick it, drag it · Delete: it goes' }[ui.os && ui.os.tool] || ''),
     map: 'Drag moves the map · Alt + wheel scales it · Space-drag moves your view',
-    fx: () => ({ place: 'Click places it · drag its marker to move it · right-click for more', paint: { box: 'Drag a box · Shift: square · Alt: erase', round: 'Drag a round · Shift: circle · Alt: erase', erase: 'Drag over what should go · [ and ] change the size' }[ui.paintShape] || '[ and ] change the brush size · Alt: erase', light: 'Click the map or a token to place a light', weather: '' }[ui.fxMode] || ''),
+    fx: () => ({ place: 'Click places it · drag its marker to move it · right-click for more', paint: { box: 'Drag a box · Shift: square · Alt: erase', round: 'Drag a round · Shift: circle · Alt: erase', erase: 'Drag over what should go · [ and ] change the size' }[ui.paintShape] || '[ and ] change the brush size · Alt: erase', light: ui.lightTab === 'sources' ? 'Click: a light · click a light: pick it, drag it · Just light on a token: it carries it' : 'Click the map or a token to place a light', weather: '' }[ui.fxMode] || ''),
     asset: 'Click stamps · drag scatters · Ctrl + wheel turns · [ and ] resize · Shift + click selects several',
     walls: () => ({ wall: 'Click corner to corner · double-click ends · Alt places freely', room: 'Drag from corner to corner', door: 'Click a wall for a door', edit: 'Drag a corner or a wall · Delete removes', erase: 'Click a wall, or drag a box' }[ui.walls && ui.walls.mode] || ''),
     token: 'Click drops one · Alt places freely · Ctrl + D duplicates',
@@ -1234,8 +1234,11 @@ const Play = (() => {
 
   // ---------- effects popover ----------
   const { EMITTERS, REGIONS, LIGHTS, WEATHER, SKINS, SPELLS, SHAPES } = FXDATA;
+  // Beta 3.54: Torch, Campfire and Candles are lights now (Effects → Light → Light sources → Flame); Place keeps the rest
+  const PLACE = EMITTERS.filter((d) => !d.light);
+  if (!PLACE.some((d) => d.id === ui.emitter)) ui.emitter = PLACE[0].id;
   const fxLabel = (f) => {
-    if (f.kind === 'light') { const d = LIGHTS.find((x) => x.id === f.preset); return `${d ? d.label : 'Light'}${f.attachTo ? ' (carried)' : ''}`; }
+    if (Fixtures.isLight(f)) return Fixtures.labelOf(f, map());
     const d = (f.kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === f.preset);
     return d ? d.label : f.preset;
   };
@@ -1267,7 +1270,8 @@ const Play = (() => {
   // ---------- effects popover ----------
   const LOOK_GROUP = { emitter: 'place', region: 'paint', light: 'light' };
   // the options edit the selected effect, or the next one you place
-  const lookTarget = () => { const f = fxOf(ui.selFx); return f && LOOK_GROUP[f.kind] === ui.fxMode ? f : null; };
+  const lookGroup = (f) => (Fixtures.isLight(f) ? 'light' : LOOK_GROUP[f.kind]); // (Beta 3.54: a flame that gives light is a light)
+  const lookTarget = () => { const f = fxOf(ui.selFx); return f && lookGroup(f) === ui.fxMode ? f : null; };
   const LOOK_DEFAULT = { color: null, intensity: 1, density: 1, speed: 1, flicker: true, sat: null, angle: null, variant: null, wave: null, dust: 1, shape: 'arched', grid: 'cross', stretch: 1.5 };
   // Beta 2: what the effect being edited (or the next one) is: its definition in EMITTERS / LIGHTS
   const lookDef = () => {
@@ -1347,6 +1351,85 @@ const Play = (() => {
       pick('Bars', FXDATA.WINDOW_GRIDS, 'grid', (it) => FX.windowIcon(lookGet('shape'), it.id)),
       slider({ label: 'Length (a low sun throws it further)', min: 1, max: 3, step: 0.05, get: () => lookGet('stretch'), set: (v, k) => lookSet('stretch', v, k), fmt: (v) => `${round(v, 2)}×` }));
   }
+  // ---------- Beta 3.54: the Light panel (Effects → Light → Light sources, and Draw → Structure → Light) ----------
+  // A light is one thing (fixtures.js). Nothing picked: the panel sets the next light (ui.lt, kept): Holder, Flame or
+  // Just light, which one, lit or not, its colour ('' its own), its reach (null: the kind's own) and, under More, how it
+  // lives. A light picked (a click on it): the same rows change that light; the kinds hide; Remove.
+  ui.lt = (() => { let v = {}; try { v = JSON.parse(localStorage.getItem('lightNext') || '{}') || {}; } catch {} return { group: 'holder', holder: 'wall_torch', flame: 'torch', plain: 'torch', lit: true, color: '', reach: null, intensity: 1, flicker: null, wave: '', sat: null, size: 1, ...v }; })();
+  if (!Fixtures.GROUPS.includes(ui.lt.group)) ui.lt.group = 'holder';
+  const saveLt = () => { try { localStorage.setItem('lightNext', JSON.stringify(ui.lt)); } catch {} };
+  const ltDef = () => Fixtures.defOf(ui.lt.group, ui.lt[ui.lt.group]);
+  const ltSat = (f) => { if (f.sat != null) return f.sat; if (f.kind === 'light') return Fixtures.isOwnColor(f) ? 0.25 : 0.7; return f.color ? 0.7 : 0.25; }; // (as the light layer reads it)
+  function wordSlider(o) { // (a slider with words at its ends, as in Draw)
+    const input = h('input', { type: 'range', min: o.min, max: o.max, step: o.step, 'aria-label': o.name });
+    const out = h('output');
+    const key = `ws-${o.name}-${Math.random().toString(36).slice(2, 6)}`;
+    const show = () => { out.textContent = o.fmt(Number(input.value)); };
+    input.addEventListener('input', () => { show(); o.set(Number(input.value), key); });
+    bind(() => { const v = o.get(); if (v == null) return; if (document.activeElement !== input) input.value = v; show(); });
+    return h('label', { class: 'ctl os-ws' }, h('span', { class: 'ctl-label' }, o.name), out, h('span', { class: 'os-ws-row' }, h('span', {}, o.lo), input, h('span', {}, o.hi)));
+  }
+  function lightPanel(o = {}) {
+    const P = () => { const f = o.picked ? o.picked() : null; return f && Fixtures.isLight(f) ? fxOf(f.id) : null; };
+    const f0 = P();
+    const out = [];
+    const next = (patch, rebuild) => { Object.assign(ui.lt, patch); saveLt(); if (rebuild && o.rebuild) o.rebuild(); else refreshPop(); if (o.changed) o.changed(); };
+    const upd = (patch, key) => { const f = P(); if (!f) return; if (key) send(key, 'fx.update', { id: f.id, ...patch }); else cmd('fx.update', { id: f.id, ...patch }); };
+    if (f0 && o.head) {
+      out.push(h('div', { class: 'look-head' }, h('span', { class: 'grow' }, h('b', {}, Fixtures.labelOf(f0, map()))), h('button', { class: 'btn ghost small', onclick: () => { selectFx(null); } }, iconEl('x'), 'Done')));
+    }
+    if (!f0) {
+      out.push(seg({ cls: 'lt-groups', options: [
+        { value: 'holder', label: 'Holder', tip: 'A torch, a lantern, a lamp, candles or a fire with what holds it' },
+        { value: 'flame', label: 'Flame', tip: 'A flame and its light, for a torch or a fire painted on the map' },
+        { value: 'plain', label: 'Just light', tip: 'Light only, nothing to see. Click a token: it carries it' }],
+      get: () => ui.lt.group, set: (v) => next({ group: v, reach: null }, true) }));
+      const kinds = h('div', { class: 'tiles os-lights lt-kinds' }, ...Fixtures.kinds(ui.lt.group).map((d) => h('button', {
+        class: 'tile', dataset: { v: d.id }, 'aria-label': d.label, 'data-tip': `${d.label}: ${d.wall != null ? 'click a wall' : d.group === 'plain' ? 'where you click, or on a token' : 'where you click'}`,
+        onclick: () => next({ [ui.lt.group]: d.id, reach: null }),
+      }, d.thumb ? h('img', { src: d.thumb, alt: '', draggable: false }) : iconEl(d.icon), h('span', {}, d.label))));
+      bind(() => { for (const b of kinds.children) b.classList.toggle('on', b.dataset.v === ltDef().id); });
+      out.push(kinds);
+    }
+    out.push(seg({ cls: 'lt-lit', options: [{ value: 'unlit', label: 'Unlit' }, { value: 'lit', label: 'Lit' }],
+      get: () => { const f = P(); return (f ? f.lit !== false : ui.lt.lit !== false) ? 'lit' : 'unlit'; },
+      set: (v) => { const f = P(); if (f) cmd('fx.lit', { id: f.id, on: v === 'lit' }); else next({ lit: v === 'lit' }); } }));
+    out.push(colorSwatches(() => { const f = P(); return f ? (Fixtures.isOwnColor(f) ? '' : f.color) : ui.lt.color || ''; },
+      (v) => { const f = P(); if (f) cmd('fx.lightSet', { id: f.id, color: v || '' }); else next({ color: v || '' }); }, 'Colour of its light'));
+    out.push(wordSlider({ name: 'Reach', lo: 'short', hi: 'far', min: 5, max: 60, step: 5,
+      get: () => { const f = P(); return f ? f.bright || 5 : ui.lt.reach || ltDef().bright; },
+      set: (v, k) => { const f = P(); if (f) send(k, 'fx.lightSet', { id: f.id, bright: v }); else { ui.lt.reach = v; saveLt(); } },
+      fmt: (v) => `${v} ft bright · ${v * 2} ft dim` }));
+    // More: how it lives (closed unless opened; it stays as it was left)
+    const grp = () => { const f = P(); return f ? Fixtures.groupOf(f) : ui.lt.group; };
+    const cone = () => { const f = P(); return f ? !!f.cone : !!ltDef().cone; };
+    const flameBase = () => { const f = P(); const d = f ? Fixtures.defOfLight(f) : ltDef(); return ((d && d.r) || 1) * cellK(); };
+    const more = h('details', { class: 'sfx-details lt-more', open: !!ui.ltMore, ontoggle: (e) => { ui.ltMore = e.target.open; } }, h('summary', {}, 'More'),
+      h('div', { class: 'stack' },
+        slider({ label: 'Brightness', min: 0.1, max: 1, step: 0.05, get: () => { const f = P(); return f ? f.intensity ?? 1 : ui.lt.intensity ?? 1; }, set: (v, k) => { if (P()) upd({ intensity: v }, k); else { ui.lt.intensity = v; saveLt(); } }, fmt: pct }),
+        toggle({ label: 'Flicker', get: () => { const f = P(); return f ? !!f.flicker : ui.lt.flicker ?? ltDef().flicker ?? true; }, set: (v) => { if (P()) upd({ flicker: v }); else next({ flicker: v }); } }),
+        seg({ label: 'Its light', options: [{ value: '', label: 'Steady' }, { value: 'pulse', label: 'Pulse', tip: 'Breathes slowly: magic, a heartbeat' }, { value: 'sputter', label: 'Sputter', tip: 'A dying torch: it gutters and almost goes out now and then' }],
+          get: () => { const f = P(); return (f ? f.wave : ui.lt.wave) || ''; }, set: (v) => { if (P()) upd({ wave: v || null }); else next({ wave: v || '' }); } }),
+        slider({ label: 'Colour strength', min: 0, max: 1, step: 0.05, get: () => { const f = P(); return f ? ltSat(f) : ui.lt.sat ?? (ui.lt.color ? 0.7 : 0.25); }, set: (v, k) => { if (P()) upd({ sat: v }, k); else { ui.lt.sat = v; saveLt(); } }, fmt: (v) => (v < 0.05 ? 'Natural' : v >= 0.95 ? 'Full colour' : pct(v)) }),
+        shownIf(cone, slider({ label: 'Facing (Ctrl + wheel turns it too)', min: 0, max: 355, step: 5, get: () => { const f = P(); const v = f ? f.angle : ui.look.angle; return (((v ?? 0) % 360) + 360) % 360; }, set: (v, k) => { if (P()) upd({ angle: v }, k); else ui.look.angle = v; }, fmt: (v) => `${Math.round(v)}°` })),
+        shownIf(() => grp() !== 'plain', slider({ label: 'Flame size', min: 0.4, max: 3, step: 0.05, get: () => { const f = P(); return f ? (f.r || flameBase()) / flameBase() : ui.lt.size || 1; }, set: (v, k) => { if (P()) upd({ r: round(v * flameBase(), 4) }, k); else { ui.lt.size = v; saveLt(); } }, fmt: (v) => `${round(v, 2)}×` }))));
+    out.push(more);
+    if (f0 && o.remove) out.push(row(btn('Remove', 'trash', () => { const f = P(); if (f) { selectFx(null); undoable('fx.remove', { id: f.id }); } }, { kind: 'lt-remove', tip: 'Take this light away (Delete)' })));
+    return out;
+  }
+  // place the next light (ui.lt) at pt: a wall light on the wall near it; just light on a token: the token carries it
+  function placeLightAt(pt, tok) {
+    const L = ui.lt; const d = ltDef(); const k = cellK();
+    const color = /^#[0-9a-f]{6}$/i.test(L.color || '') ? L.color.toLowerCase() : null;
+    const more = { intensity: L.intensity ?? 1, flicker: L.flicker ?? d.flicker ?? true, lit: L.lit !== false, ...(L.wave ? { wave: L.wave } : {}), ...(L.sat != null ? { sat: L.sat } : color ? { sat: 0.7 } : {}) };
+    const bright = L.reach || d.bright; const dim = L.reach ? L.reach * 2 : d.dim;
+    if (d.group === 'holder') {
+      const q = Fixtures.at(map(), pt, d.id);
+      return cmd('fx.fixture', { kind: d.id, x: q.x, y: q.y, rotation: q.rotation, wall: q.wall || null, color, ...(L.reach ? { bright: L.reach } : {}), r: round(d.r * k * (L.size || 1), 4), ...more });
+    }
+    if (d.group === 'flame') return cmd('fx.add', { kind: 'emitter', preset: d.id, x: round(pt.x, 3), y: round(pt.y, 3), r: round(d.r * k * (L.size || 1), 4), color, bright, dim, ...more });
+    return cmd('fx.add', { kind: 'light', preset: d.id, x: round(tok ? tok.x : pt.x, 3), y: round(tok ? tok.y : pt.y, 3), attachTo: tok ? tok.id : null, bright, dim, color: color || d.color, ...more, ...(d.cone ? { cone: d.cone, angle: ui.look.angle ?? 0 } : {}) });
+  }
   function buildFxPop() {
     const mode = seg({
       cls: 'seg-4',
@@ -1360,7 +1443,7 @@ const Play = (() => {
     const body = [];
     if (ui.fxMode === 'place') {
       body.push(
-        tiles(EMITTERS, () => ui.emitter, (v) => { ui.emitter = v; refreshPop(); }),
+        tiles(PLACE, () => ui.emitter, (v) => { ui.emitter = v; refreshPop(); }),
         slider({ label: 'Size', min: 0.4, max: 3, step: 0.05, get: () => (lookTarget() ? lookTarget().r / (((EMITTERS.find((d) => d.id === lookTarget().preset) || { r: 1 }).r) * cellK()) : ui.fxSize),
           set: (v, k) => { const f = lookTarget(); if (f) send(k, 'fx.update', { id: f.id, r: round(v * ((EMITTERS.find((d) => d.id === f.preset) || { r: 1 }).r) * cellK(), 4) }); else ui.fxSize = v; }, fmt: (v) => `${round(v, 2)}×` }),
         lookSection());
@@ -1394,13 +1477,8 @@ const Play = (() => {
           toggle({ label: 'Remember lit areas', get: () => map().light.memory, set: (v) => cmd('light.update', { memory: v }) }),
           row(btn('Forget explored areas', 'eraser', () => undoable('light.forget', {}), { tip: 'Make everything dark again' }))));
       } else {
-        body.push(h('div', { class: 'light-card' },
-          // the party is not a light you place here: it has its own tool (Play → Party)
-          tiles(LIGHTS.filter((l) => l.id !== 'party').map((l) => ({ ...l, icon: l.id === 'moon' ? 'moon' : l.id === 'candle' ? 'candle' : l.id === 'bullseye' ? 'cone' : 'bulb', tip: `${l.bright} ft bright, ${l.dim} ft dim` })), () => ui.light, (v) => { ui.light = v; refreshPop(); }),
-          // Beta 3.49: the lights that come with the app, with their holder: on a wall near the click, or where clicked
-          h('span', { class: 'ctl-label' }, 'With its holder'),
-          tiles(Fixtures.LIST.map((d) => ({ id: `fx:${d.id}`, label: d.label, icon: d.fx.preset === 'candle' ? 'candle' : d.fx.preset === 'campfire' ? 'campfire' : d.fx.preset === 'torch' ? 'flame' : 'bulb', tip: `${d.fx.bright} ft bright, ${d.fx.dim} ft dim${d.wall != null ? ' · sits on a wall near the click' : ''}` })), () => ui.light, (v) => { ui.light = v; refreshPop(); }),
-          lookSection()));
+        // Beta 3.54: the Light panel, the same as Draw → Structure → Light (the party has its own tool: Play → Party)
+        body.push(h('div', { class: 'light-card' }, ...lightPanel({ picked: () => lookTarget(), rebuild: () => openPop('fx'), head: true, remove: true })));
       }
     } else {
       body.push(...weatherPanel());
@@ -1773,7 +1851,7 @@ const Play = (() => {
     bind(() => {
       const m = map();
       const offs = offTable();
-      const nsig = JSON.stringify([[...offs.keys()], m.layers.map((l) => [l.id, l.name, l.hidden, l.role, l.anchor, l.n, l.locked]), m.fx.map((f) => [f.id, f.preset, f.hidden, f.attachTo]),
+      const nsig = JSON.stringify([[...offs.keys()], m.layers.map((l) => [l.id, l.name, l.hidden, l.role, l.anchor, l.n, l.locked]), m.fx.map((f) => [f.id, f.preset, f.hidden, f.attachTo, f.lit, f.holder]),
         m.marks.map((k) => [k.id, k.hidden, k.label, k.value, k.text, k.n]), m.draw.map((d) => [d.id, d.hidden, d.text]),
         m.spells.map((s) => [s.id, s.name, s.hidden]), m.weather.name, m.weather.layers.filter((l) => !l.dying).length, ui.selected, ui.selFx, ui.selSpell, ui.expanded, [...view.broken],
         m.walls.length, m.walls.filter((w) => w.door).length, m.vision.on]);
@@ -1803,8 +1881,15 @@ const Play = (() => {
           remove: () => undoable('wall.clear', {}),
         }] : []],
         ['Assets', m.layers.filter((l) => l.role === 'asset').reverse().map(layerItem)],
+        // Beta 3.54: a light is one row: the bulb lights it or puts it out, the eye hides it from the players
+        ['Lights', m.fx.filter((f) => Fixtures.isLight(f)).reverse().map((f) => ({
+          id: f.id, icon: SceneView.fxIcon(f), name: fxLabel(f), hidden: f.hidden, sel: ui.selFx === f.id,
+          lit: () => cmd('fx.lit', { id: f.id, on: f.lit === false }), isLit: f.lit !== false,
+          eye: () => cmd('fx.update', { id: f.id, hidden: !f.hidden }), remove: () => undoable('fx.remove', { id: f.id }),
+          detail: () => fxDetail(f),
+        }))],
         ['Atmosphere', [
-          ...m.fx.slice().reverse().map((f) => ({
+          ...m.fx.filter((f) => !Fixtures.isLight(f)).reverse().map((f) => ({
             id: f.id, icon: SceneView.fxIcon(f), name: fxLabel(f), hidden: f.hidden, sel: ui.selFx === f.id,
             eye: () => cmd('fx.update', { id: f.id, hidden: !f.hidden }), remove: () => undoable('fx.remove', { id: f.id }),
             detail: () => fxDetail(f),
@@ -1841,6 +1926,7 @@ const Play = (() => {
               iconEl(it.icon), UI.wrapName(it.name, 'grow'), off ? h('span', { class: 'off-badge', 'data-tip': 'Off the table: the players don\'t see it' }, 'off table') : null),
             off && !off.fixed ? h('button', { class: 'icon-btn off-bring', 'aria-label': `Bring ${it.name} onto the table`, 'data-tip': 'Bring it onto the table', onclick: () => bringHere(it.id, off) }, iconEl('focus-centered')) : null,
             it.lock ? h('button', { class: `icon-btn ${it.locked ? 'on' : ''}`, 'aria-label': it.locked ? 'Unlock' : 'Lock', 'data-tip': it.locked ? 'Locked: clicks go through it. Click to unlock' : 'Lock it in place', onclick: it.lock }, iconEl(it.locked ? 'lock' : 'lock-open')) : null,
+            it.lit ? h('button', { class: `icon-btn lt-bulb ${it.isLit ? 'on' : ''}`, 'aria-label': it.isLit ? 'Put it out' : 'Light it', 'data-tip': it.isLit ? 'Lit. Click to put it out' : 'Put out. Click to light it', onclick: it.lit }, iconEl(it.isLit ? 'bulb' : 'bulb-off')) : null,
             it.noEye ? null : h('button', { class: 'icon-btn', 'aria-label': it.hidden ? 'Show to players' : 'Hide from players', 'data-tip': it.hidden ? 'Hidden from players. Click to show' : 'Visible to players. Click to hide', onclick: it.eye }, iconEl(it.hidden ? 'eye-off' : 'eye')),
             h('button', { class: 'icon-btn', 'aria-label': 'Remove', 'data-tip': 'Remove', onclick: it.remove }, iconEl('trash'))));
           if (open && it.detail) list.append(it.detail());
@@ -1901,10 +1987,8 @@ const Play = (() => {
       const fr = (k) => { const x = fxOf(f.id); return x ? x[k] : null; };
       const fsl = (o) => sl({ ...o, key: `${f.id}-${o.k}`, get: () => fr(o.k), set: (v, key) => send(key, 'fx.update', { id: f.id, [o.k]: v }) });
       const box = h('div', { class: 'layer-detail' });
-      if (f.kind === 'light') {
-        box.append(
-          fsl({ label: 'Bright light', k: 'bright', min: 0, max: 120, step: 5, fmt: (v) => `${v} ft` }),
-          fsl({ label: 'Dim light', k: 'dim', min: 0, max: 240, step: 5, fmt: (v) => `${v} ft` }));
+      if (Fixtures.isLight(f)) { // (Beta 3.54: every light: its reach, dim twice the bright)
+        box.append(sl({ label: 'Reach', key: `${f.id}-reach`, min: 5, max: 60, step: 5, get: () => fr('bright'), set: (v, key) => send(key, 'fx.lightSet', { id: f.id, bright: v }), fmt: (v) => `${v} ft bright · ${v * 2} ft dim` }));
         const fl = h('input', { type: 'checkbox', role: 'switch', onchange: (e) => cmd('fx.update', { id: f.id, flicker: e.target.checked }) });
         local(() => { fl.checked = !!fr('flicker'); });
         box.append(h('label', { class: 'ctl ctl-toggle' }, h('span', { class: 'ctl-label' }, 'Flicker'), fl, h('span', { class: 'switch' })));
@@ -2995,14 +3079,15 @@ const Play = (() => {
   }
   const normAngle = (a) => { let x = ((a % 360) + 360) % 360; if (x > 180) x -= 360; return Math.round(x * 100) / 100; };
   function fxCard(f) {
-    const light = f.kind === 'light';
+    const light = Fixtures.isLight(f);
     const out = [h('span', { class: 'card-title ellipsis' }, iconEl(SceneView.fxIcon(f)), fxLabel(f)),
-      ib('adjustments-horizontal', 'Colour, strength and more', () => { ui.fxMode = LOOK_GROUP[f.kind] || 'place'; openPop('fx'); })];
-    if (light) {
+      ib('adjustments-horizontal', 'Colour, strength and more', () => { ui.fxMode = lookGroup(f) || 'place'; if (light) ui.lightTab = 'sources'; openPop('fx'); })];
+    if (light) { // (Beta 3.54: every light: lit or put out, and its reach)
       out.push(
-        ib('minus', 'Less light', () => cmd('fx.update', { id: f.id, bright: Math.max(0, f.bright - 5), dim: Math.max(5, f.dim - 10) })),
-        h('span', { class: 'card-size wide', 'data-tip': 'Bright / dim light' }, `${f.bright}/${f.dim} ft`),
-        ib('plus', 'More light', () => cmd('fx.update', { id: f.id, bright: f.bright + 5, dim: f.dim + 10 })));
+        ib(f.lit === false ? 'bulb-off' : 'bulb', f.lit === false ? 'Put out. Click to light it' : 'Lit. Click to put it out', () => cmd('fx.lit', { id: f.id, on: f.lit === false }), { on: f.lit !== false }),
+        ib('minus', 'Less light', () => cmd('fx.lightSet', { id: f.id, bright: Math.max(5, (f.bright || 5) - 5) })),
+        h('span', { class: 'card-size wide', 'data-tip': 'Bright / dim light' }, `${f.bright || 0}/${f.dim || 0} ft`),
+        ib('plus', 'More light', () => cmd('fx.lightSet', { id: f.id, bright: (f.bright || 0) + 5 })));
     } else if (f.kind === 'emitter') {
       out.push(
         ib('minus', 'Smaller', () => cmd('fx.update', { id: f.id, r: round(Math.max(0.1, f.r / 1.25), 3) })),
@@ -3025,7 +3110,7 @@ const Play = (() => {
   function toggleTokenLight(l) {
     const lit = tokenLight(l.id);
     if (lit) { cmd('fx.remove', { id: lit.id }); return; }
-    const d = LIGHTS.find((x) => x.id === ui.light) || LIGHTS[1];
+    const d = LIGHTS.find((x) => x.id === ui.lt.plain) || LIGHTS[1]; // (Beta 3.54: the Light panel's Just light)
     cmd('fx.add', { kind: 'light', preset: d.id, attachTo: l.id, x: l.x, y: l.y, bright: d.bright, dim: d.dim, color: d.color, ...(d.cone ? { cone: d.cone, angle: 0 } : {}) });
     if (!map().light.darkness) toast(`${l.name} carries a ${d.label.toLowerCase()}. It shows once the map is dark (Effects → Light).`);
   }
@@ -3044,13 +3129,17 @@ const Play = (() => {
     return { x: round(q.x, 3), y: round(q.y, 3) };
   }
   function selectFx(id) {
+    const was = fxOf(ui.selFx);
     ui.selFx = id;
     view.selectFx(id);
     placeCard();
     // the Effects popover shows the options of the selected effect
     const f = fxOf(id);
-    if (f && f.kind === 'light' && ui.lightTab !== 'sources') { ui.lightTab = 'sources'; if (ui.fxMode === 'light' && popId === 'fx') { openPop('fx'); return; } }
-    if (f && ui.tool === 'fx' && LOOK_GROUP[f.kind] && LOOK_GROUP[f.kind] !== ui.fxMode) { ui.fxMode = LOOK_GROUP[f.kind]; if (popId === 'fx') openPop('fx'); else refreshPop(); } else refreshPop();
+    if (f && Fixtures.isLight(f) && ui.lightTab !== 'sources') { ui.lightTab = 'sources'; if (ui.fxMode === 'light' && popId === 'fx') { openPop('fx'); return; } }
+    if (f && ui.tool === 'fx' && lookGroup(f) && lookGroup(f) !== ui.fxMode) { ui.fxMode = lookGroup(f); if (popId === 'fx') openPop('fx'); else refreshPop(); return; }
+    // (Beta 3.54: the Light panel shows other rows with a light picked: made again when that changes)
+    if (ui.fxMode === 'light' && popId === 'fx' && ((was && Fixtures.isLight(was)) || (f && Fixtures.isLight(f))) && (was ? was.id : null) !== (f ? f.id : null)) { openPop('fx'); return; }
+    refreshPop();
   }
 
   // =====================================================================
@@ -3156,16 +3245,17 @@ const Play = (() => {
   function fxRadial(f, x, y) {
     if (!f) return;
     selectFx(f.id);
-    const light = f.kind === 'light';
+    const light = Fixtures.isLight(f); // (Beta 3.54: every light, its reach and lit or put out)
     Radial.open(x, y, [
-      { icon: 'plus', label: light ? 'More light' : 'Bigger', run: () => cmd('fx.update', light ? { id: f.id, bright: f.bright + 5, dim: f.dim + 10 } : f.kind === 'region' ? { id: f.id, intensity: Math.min(2, (f.intensity ?? 1) + 0.2) } : { id: f.id, r: f.r * 1.25 }) },
+      { icon: 'plus', label: light ? 'More light' : 'Bigger', run: () => (light ? cmd('fx.lightSet', { id: f.id, bright: (f.bright || 0) + 5 }) : cmd('fx.update', f.kind === 'region' ? { id: f.id, intensity: Math.min(2, (f.intensity ?? 1) + 0.2) } : { id: f.id, r: f.r * 1.25 })) },
       { icon: f.hidden ? 'eye' : 'eye-off', label: f.hidden ? 'Show' : 'Hide', run: () => cmd('fx.update', { id: f.id, hidden: !f.hidden }) },
+      light ? { icon: f.lit === false ? 'bulb' : 'bulb-off', label: f.lit === false ? 'Light it' : 'Put it out', run: () => cmd('fx.lit', { id: f.id, on: f.lit === false }) } : null,
       f.attachTo
         ? { icon: 'user-circle', label: 'Leave here', run: () => { const p = view.fxPos(f); cmd('fx.update', { id: f.id, attachTo: null, x: p.x, y: p.y }); } }
-        : { icon: 'copy', label: 'Duplicate', disabled: f.kind === 'region', run: () => cmd('fx.add', { ...f, x: f.x + grid().size, y: f.y }) },
+        : { icon: 'copy', label: 'Duplicate', disabled: f.kind === 'region', run: () => cmd('fx.duplicate', { id: f.id, dx: grid().size, dy: 0 }) },
       { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('fx.remove', { id: f.id }) },
-      { icon: 'minus', label: light ? 'Less light' : 'Smaller', run: () => cmd('fx.update', light ? { id: f.id, bright: Math.max(0, f.bright - 5), dim: Math.max(5, f.dim - 10) } : f.kind === 'region' ? { id: f.id, intensity: Math.max(0.1, (f.intensity ?? 1) - 0.2) } : { id: f.id, r: f.r / 1.25 }) },
-    ], fxLabel(f));
+      { icon: 'minus', label: light ? 'Less light' : 'Smaller', run: () => (light ? cmd('fx.lightSet', { id: f.id, bright: Math.max(5, (f.bright || 5) - 5) }) : cmd('fx.update', f.kind === 'region' ? { id: f.id, intensity: Math.max(0.1, (f.intensity ?? 1) - 0.2) } : { id: f.id, r: f.r / 1.25 })) },
+    ].filter(Boolean), fxLabel(f));
   }
   const DEFAULT_RECENT = ['Fireball', 'Burning Hands', 'Thunderwave', 'Lightning Bolt', 'Fog Cloud', 'Spirit Guardians', 'Darkness'];
   function castRadial(pt, x, y) {
@@ -3189,7 +3279,7 @@ const Play = (() => {
     Radial.open(x, y, items, 'Ready');
   }
   function effectRadial(pt, x, y) {
-    Radial.open(x, y, EMITTERS.map((d) => ({
+    Radial.open(x, y, PLACE.map((d) => ({
       icon: d.icon, label: d.label, run: () => placeEmitter(d, pt),
     })), 'Effect');
   }
@@ -3205,12 +3295,6 @@ const Play = (() => {
       ...(d.id === 'window' ? { shape: L.shape || LOOK_DEFAULT.shape, grid: L.grid || LOOK_DEFAULT.grid, stretch: L.stretch ?? LOOK_DEFAULT.stretch } : {}),
     });
   }
-  function placeLight(d, pt, tok) {
-    const L = ui.look;
-    return cmd('fx.add', { kind: 'light', preset: d.id, x: pt.x, y: pt.y, attachTo: tok ? tok.id : null, bright: d.bright, dim: d.dim, color: L.color || d.color, intensity: Math.min(1, L.intensity), flicker: d.id === 'party' || d.id === 'moon' || d.id === 'light' ? false : L.flicker, sat: L.sat ?? (L.color ? 0.7 : 0.25),
-      ...(d.cone ? { cone: d.cone, angle: L.angle ?? 0 } : {}), ...(L.wave ? { wave: L.wave } : {}) });
-  }
-
   // Beta 3.15: a right-click while it is open only closes it (it used to open a new one at once); a click on its middle
   // closes it; opened with { modal: true } (the Map table), the click that closes it does nothing else.
   const Radial = (() => {
@@ -3886,7 +3970,8 @@ const Play = (() => {
     ui, cmd, send, state: () => S, view: () => view,
     ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
     refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), setTool: (t) => setTool(t),
-    lightColors: (get, set) => colorSwatches(get, set, 'Colour of its light'), // (Beta 3.49: Structure → Light, the swatches of Light sources)
+    // (Beta 3.54) Structure → Light: the Light panel of Effects → Light → Light sources, and the next light it sets
+    lightPanel: (o) => lightPanel(o), placeLight: (pt) => placeLightAt(pt, null), lightDef: () => ltDef(), lightNext: () => ui.lt,
 
     openLibrary: () => Drawer.open({ cat: 'tiles', purpose: 'tile', back: { pop: 'oldschool', tool: 'oldschool' } }),
     togglePanel: (def) => { Floats.toggle(def); renderRail(); }, panelOpen: (id) => !!(Floats && Floats.isOpen(id)), // (Beta 3.35: Draw → Tiles → List)
@@ -3993,8 +4078,9 @@ const Play = (() => {
       if (WallsTool.PLAY_TOOLS.includes(ui.tool)) {
         const doorEl = e.target.closest('.sv-door');
         if (doorEl) { Walls.askDoor(doorEl.dataset.id); return; }
-        // Beta 3.49: a light of the app (a wall torch, a lamp …) asks the same way before it is lit or put out
-        const lamp = !e.target.closest('.sv-token') && typeof Fixtures === 'object' ? Fixtures.under(map(), pt) : null;
+        // Beta 3.49: a light asks the same way before it is lit or put out. Beta 3.54: every placed light, and only with
+        // the Select tool (a fog stroke, a token or a spell that starts on a torch does its own job)
+        const lamp = ui.tool === 'select' && !e.target.closest('.sv-token') ? Fixtures.under(map(), pt) : null;
         if (lamp) { Fixtures.askLit(map(), lamp, cmd, e.clientX, e.clientY); return; }
         const pEl = ui.tool !== 'select' && ui.tool !== 'party' ? e.target.closest('.sv-handle.party') : null;
         const pf = pEl && fxOf(pEl.dataset.id);
@@ -4221,7 +4307,9 @@ const Play = (() => {
       } else if (d.kind === 'fxmove' && d.moved) {
         pending.delete(d.key);
         const q = fxDropAt(d, pt);
-        cmd('fx.update', { id: d.id, x: q.x, y: q.y, coalesce: d.key, final: true, ...(d.attached ? { attachTo: null } : {}) });
+        const f = fxOf(d.id);
+        const w = f && f.holder && Fixtures.BY[f.holder] && Fixtures.BY[f.holder].wall != null ? Fixtures.at(map(), q, f.holder) : null; // (Beta 3.54: a wall light dropped near a wall hangs on it, turned to it)
+        cmd('fx.update', { id: d.id, x: w ? w.x : q.x, y: w ? w.y : q.y, ...(w ? { rotation: w.rotation, wall: w.wall || null } : {}), coalesce: d.key, final: true, ...(d.attached ? { attachTo: null } : {}) });
       } else if (d.kind === 'spellmove' && d.moved) {
         pending.delete(d.key);
         cmd('spell.update', { id: d.id, x: pt.x + d.dx, y: pt.y + d.dy, coalesce: d.key });
@@ -4336,9 +4424,16 @@ const Play = (() => {
       drag = { kind: 'fxmove', id: f.id, dx: p.x - pt.x, dy: p.y - pt.y, attached: !!f.attachTo, sx: e.clientX, sy: e.clientY, moved: false, key: `fx-${f.id}-${Date.now()}` };
       return;
     }
+    // Beta 3.54: Light sources: a click on a light (its holder, its flame) picks it, as in Draw; a click beside a
+    // picked light lets go of it and places nothing
+    if (ui.fxMode === 'light' && ui.lightTab === 'sources') {
+      const hit = Fixtures.under(map(), pt);
+      if (hit) { selectFx(hit.id); const p = view.fxPos(hit); drag = { kind: 'fxmove', id: hit.id, dx: p.x - pt.x, dy: p.y - pt.y, attached: false, sx: e.clientX, sy: e.clientY, moved: false, key: `fx-${hit.id}-${Date.now()}` }; return; }
+      if (ui.selFx && Fixtures.isLight(fxOf(ui.selFx))) { selectFx(null); return; }
+    }
     if (ui.selFx) selectFx(null);
     if (ui.fxMode === 'place') {
-      placeEmitter(EMITTERS.find((x) => x.id === ui.emitter) || EMITTERS[0], pt);
+      placeEmitter(EMITTERS.find((x) => x.id === ui.emitter) || PLACE[0], pt); // (a flame from the hotbar still comes this way)
     } else if (ui.fxMode === 'paint') {
       const k = `${S.editMapId}:${ui.region}`;
       const erase = ui.paintShape === 'erase' || e.altKey; // (Beta 3.41: Alt erases with the shape in hand)
@@ -4356,22 +4451,18 @@ const Play = (() => {
       drag = { kind: 'paint', erase, n: 0, id: ui.regionIds[k], preset: ui.region, sid: uid(erase ? 'e' : 'w'), r: ui.paintIn / 2 / zoom(), buf: [pt.x, pt.y], last: pt };
       updateBrushCursor();
       flushPaint();
-    } else if (ui.fxMode === 'light' && String(ui.light || '').startsWith('fx:')) { // (Beta 3.49: a light with its holder)
-      const fd = Fixtures.BY[String(ui.light).slice(3)];
-      if (fd) Fixtures.place(cmd, map(), pt, { kind: fd.id, color: ui.look.color || null, lit: true }).then((r) => { if (r && r.ok) toast(r.label || `${fd.label} placed`, { ms: 1400, undo: () => cmd('history.undo') }); });
-      if (!map().light.darkness) toast('Lights show once the map is dark: raise Darkness above.');
-    } else if (ui.fxMode === 'light') {
-      const d = LIGHTS.find((x) => x.id === ui.light) || LIGHTS[1];
-      const tok = tokenUnder(e.clientX, e.clientY);
+    } else if (ui.fxMode === 'light') { // (Beta 3.54: the next light of the Light panel)
+      const d = ltDef();
+      const tok = d.group === 'plain' ? tokenUnder(e.clientX, e.clientY) : null;
       if (tok) {
         const old = tokenLight(tok.id);
         if (old) cmd('fx.remove', { id: old.id });
-        placeLight(d, { x: tok.x, y: tok.y }, tok);
+        placeLightAt(pt, tok);
         toast(`${tok.name} carries a ${d.label.toLowerCase()}`);
       } else {
-        placeLight(d, pt, null);
+        placeLightAt(pt, null).then((r) => { if (r && r.ok) toast(r.label || `${d.label} placed`, { ms: 1400, undo: () => cmd('history.undo') }); });
       }
-      if (!map().light.darkness) toast('Lights show once the map is dark: raise Darkness above.');
+      if (!map().light.darkness && d.group === 'plain') toast('Lights show once the map is dark: raise Darkness above.');
     }
   }
 

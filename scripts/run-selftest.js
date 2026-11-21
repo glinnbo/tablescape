@@ -96,7 +96,7 @@ const checks = [
   ['the dark can be tinted', Array.isArray(c.tint) && c.tint[2] > c.tint[0], JSON.stringify(c.tint)],
   ['light colour: a green torch tints the map around it, in daylight too; Colour of its light slider', c.greenTorch?.sat === 0.7 && c.greenGlow?.glows >= 1 && c.greenGlow.darkness === 0 && c.greenGlow.px?.[3] > 10 && c.greenGlow.px[1] > c.greenGlow.px[0] + 20 && c.greenGlow.slider && c.greenGlow.satAfter === 1, JSON.stringify([c.greenTorch, c.greenGlow])],
   ['effects take a colour (green torch on the table)', c.greenTorch?.color === '#5cff74' && c.greenPixel && c.greenPixel[1] > c.greenPixel[0], JSON.stringify([c.greenTorch, c.greenPixel])],
-  ['selected effect: options edit it', c.lookSelected === 'Torch' && c.lookEdit === 2.5, JSON.stringify([c.lookSelected, c.lookEdit])],
+  ['selected effect: options edit it (Beta 3.54: a torch in the Light panel)', c.lookSelected === 'Torch' && c.lookEdit === 0.5, JSON.stringify([c.lookSelected, c.lookEdit])],
   // 0.4: library and assets
   ['library: big categories and shelves', ['All', 'Maps', 'Tokens', 'Assets', 'Overlays', 'Sounds', 'Favourites', 'Recent', 'This campaign', 'Fits this map'].every((x) => (c.libNav || []).includes(x)), JSON.stringify(c.libNav)],
   ['library: "Fits this map" finds related files', c.libFits >= 2],
@@ -241,7 +241,7 @@ const checks = [
   ['B blacks out the table', c.blackout?.table && /black/.test(c.blackout.frame)],
   ['Tab collapses the map roster', c.rosterCollapsed === true],
   ['chapter menu', Array.isArray(c.chapterMenu) && c.chapterMenu.includes('New chapter')],
-  ['layers popover groups atmosphere and tokens', c.layersPop?.rows >= 1 && c.layersPop.groups.includes('Atmosphere')],
+  ['layers popover groups atmosphere and tokens', c.layersPop?.rows >= 1 && (c.layersPop.groups.includes('Atmosphere') || c.layersPop.groups.includes('Lights')), JSON.stringify(c.layersPop)], // (Beta 3.54: lights have a group of their own)
   // 0.3: grid
   ['grid match: only the grid changes, tilt is found', c.alignBar && near(c.alignTilt?.size, 0.9, 0.02) && near(c.alignTilt.angle, 12, 1) && c.alignTilt.bgSame && c.alignTilt.viewSame, JSON.stringify(c.alignTilt)],
   ['hex grid: type, size and angle from a drag', c.hexType === 'hex-pointy' && near(c.alignHex?.size, 1.1, 0.02) && near(c.alignHex.angle, 20, 1) && c.alignHex.bgSame, JSON.stringify(c.alignHex)],

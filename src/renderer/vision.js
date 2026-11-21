@@ -230,7 +230,7 @@
   // everything that gives light: lights and flames that carry their own light
   function lights(map, gm) {
     const idle = markersIdle(map);
-    return (map.fx || []).filter((f) => (f.kind === 'light' || (f.kind === 'emitter' && f.bright > 0)) && (gm || !offTable(map, f)) && !idleMarker(f, idle)).map((f) => {
+    return (map.fx || []).filter((f) => (f.kind === 'light' || (f.kind === 'emitter' && f.bright > 0)) && f.lit !== false && (gm || !offTable(map, f)) && !idleMarker(f, idle)).map((f) => { // (Beta 3.54: not one that is put out)
       const p = posOf(map, f);
       return { id: f.id, x: p.x, y: p.y, D: Math.max(0.05, ftToIn(map, Math.max(f.dim || 0, f.bright || 0))) };
     });

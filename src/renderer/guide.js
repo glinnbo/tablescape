@@ -25,6 +25,21 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.55', [
+      'Conversation: the small TV now draws only the map (blurred), the bands and the portraits with their looks: no effects, and it no longer costs the TV pictures',
+      'Conversation: sizing and moving portraits happen on the small TV first; when you let go the TV glides there',
+      'Conversation: the window\'s corner sizes it; the small TV grows with it, the portraits below keep their size',
+      'Conversation: portraits may be as big as you like (up to 400 %), run off the top and the sides, and overlap the far side; never below their band. Five can stand there now',
+      'Conversation: no right-click any more: the eye on a portrait brings it in Hidden, and on the TV a big ✕ on its picture takes it off',
+    ]],
+    ['Beta 3.54', [
+      'A light is one thing now: a wall torch, a lamp post or a cooking fire moves, hides and goes away together with its holder. Removing its flame in Effects no longer leaves the empty holder behind; maps from before are put right when they open',
+      'One Light panel, the same in Effects → Light → Light sources and in Draw → Structure → Light: Holder (the six lights with what holds them), Flame (Torch, Campfire, Candles, for a torch painted on the map) or Just light (which a token can carry). Then Lit or Unlit, the colour, the reach, and under More how it lives',
+      'Click a light to pick it, in Draw and in Effects: the same rows change it, drag moves it, Delete removes it. Torch, Campfire and Candles moved from Effects → Place to Light sources → Flame',
+      'Lit and hidden are two things: a light put out still shows its holder, a hidden light is gone from the TV. Layers lists every light once under Lights, with a bulb to light it or put it out',
+      'Only the Select tool asks before a light is lit or put out, now for every light; a fog stroke or a spell that starts on a torch does its own job',
+      'On a drawn map a wall light goes with its wall: cut a room back and the torches on the wall that went go too (Undo brings both back)',
+    ]],
     ['Beta 3.53', [
       'Cartographer: a route\'s name moves to where it covers no place on its road; drag it along the road to put it elsewhere',
       'Cartographer: How far from here (right-click, or M) measures in days of travel and keeps nothing; − and + under Travelled walk the party on a day at a time',

@@ -816,7 +816,7 @@ module.exports = (area) => {
 
   // Beta 3.49: Texture with every painting tool (a box, a round, a shape as well as the brush; Fill the whole floor;
   // Erase takes painted textures away), and the lights that come with the app under Structure
-  area.deep('Beta 3.49: Texture paints with a box and Erase takes it away; Structure → Light: a torch on the wall with a flame whose light walls stop, a colour, lit or not, asked before it is put out', async (t) => {
+  area.deep('Beta 3.49: Texture paints with a box and Erase takes it away; Structure → Light: a torch on the wall with a flame whose light walls stop, a colour, lit or not, asked before it is put out (Beta 3.54: one thing, picked in Draw and in Effects)', async (t) => {
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
     await tabsOut(t);
     if (await t.count('#pop .os-fly:not(.out)')) { await cardOut(t); await t.clickSel('#pop .os-fly .os-fly-head .icon-btn'); await cardGone(t); } // (a card left open would lie over the map)
@@ -845,31 +845,34 @@ module.exports = (area) => {
     await t.until(() => M(t).os.items.filter((x) => x.kind === 'paint').length === 1, 5000, 'the box of texture to go');
     t.eq(M(t).os.items.filter((x) => x.kind === 'area').length, 1, 'the floor stays');
     await baked(t);
-    // Structure → Light
+    // Structure → Light (Beta 3.54: the Light panel of Light sources; a light is one thing, its holder drawn from it)
+    await t.g(`Object.assign(Play.ui.lt, { group: 'holder', holder: 'wall_torch', color: '', lit: true, reach: null, sat: null, intensity: 1, size: 1 })`);
     await tool(t, 'light'); await tabsOut(t);
+    const lights = () => M(t).fx.filter((f) => f.holder);
+    const fx1 = (id) => M(t).fx.find((f) => f.id === id);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .lt-groups .seg-btn')].map((x) => x.textContent)`), ['Holder', 'Flame', 'Just light'], 'Holder, Flame, Just light');
     t.eq(await t.g(`[...document.querySelectorAll('#pop .os-lights .tile')].map((x) => x.textContent)`), ['Wall torch', 'Wall lantern', 'Lamp post', 'Street lamp', 'Candles', 'Cooking fire'], 'the six lights of the app');
     t.eq(await t.text('#pop .os-prev .cap b'), 'Wall torch', 'the card names the one picked');
     t.ok((await t.count('#pop .swatches .swatch')) > 3, 'the colours of Light sources');
     // near the top wall, inside the room: it sits on the wall's face, its bracket to the wall
     a = await t.scr(18 * k, 3.5 * k); await t.click(a.x, a.y);
-    const torch = await t.until(() => M(t).layers.find((l) => l.fixture), 5000, 'a torch');
-    const flame = M(t).fx.find((f) => f.id === torch.fixture.fx);
+    const torch = await t.until(() => lights()[0], 5000, 'a torch');
     t.ok(Math.abs(torch.x / k - 18) < 0.05 && Math.abs(torch.y / k - 3.278) < 0.02 && torch.rotation === 0, 'on the face of the wall above, turned to it', [torch.x / k, torch.y / k, torch.rotation]);
-    t.eq([torch.role, torch.rel, torch.name], ['asset', 'Assets/Lights/Wall torch.png', 'Wall torch'], 'an asset that comes with the app');
-    t.eq([flame.kind, flame.preset, flame.bright, flame.dim, flame.hidden, flame.x, flame.y], ['emitter', 'torch', 20, 40, false, torch.x, torch.y], 'the app\'s own flame on it, lit, with a torch\'s light', flame);
+    t.eq([torch.kind, torch.holder, torch.preset, torch.bright, torch.dim, torch.hidden, torch.lit], ['emitter', 'wall_torch', 'torch', 20, 40, false, undefined], 'one light: the holder of the app with its own flame, lit, with a torch\'s light', torch);
+    t.ok(!!torch.wall && M(t).walls.some((w) => w.id === torch.wall) && !M(t).layers.some((l) => l.fixture), 'hung on that wall; no picture of its own', torch.wall);
+    await t.until(async () => (await t.count(`.sv-holder[data-id="h-${torch.id}"]`)) === 1, 3000, 'its holder drawn');
     // on the left wall: turned a quarter
     a = await t.scr(14.4 * k, 6 * k); await t.click(a.x, a.y);
-    const left = await t.until(() => M(t).layers.filter((l) => l.fixture)[1], 5000, 'a second torch');
+    const left = await t.until(() => lights()[1], 5000, 'a second torch');
     t.ok(Math.abs(Math.abs(left.rotation) - 90) < 1 && left.x / k > 14.2 && left.x / k < 14.8, 'on the left wall, turned to it', [left.x / k, left.rotation]);
     // a colour, unlit, standing free
     await t.clickSel('.os-lights .tile[data-v="candles"]');
     await t.clickSel('#pop .swatches .swatch[data-v]:not([data-v=""])');
-    const col = await t.g('Play.ui.os.lightColor');
+    const col = await t.g('Play.ui.lt.color');
     await t.clickText('#pop .seg-btn', 'Unlit');
     a = await t.scr(20 * k, 6.5 * k); await t.click(a.x, a.y);
-    const can = await t.until(() => M(t).layers.find((l) => l.fixture && l.fixture.kind === 'candles'), 5000, 'candles');
-    const cf = M(t).fx.find((f) => f.id === can.fixture.fx);
-    t.ok(/^#[0-9a-f]{6}$/.test(col) && cf.color === col && cf.hidden === true && cf.preset === 'candle' && Math.abs(can.x / k - 20) < 0.05, 'candles where clicked, in the picked colour, unlit', [col, cf]);
+    const can = await t.until(() => lights().find((f) => f.holder === 'candles'), 5000, 'candles');
+    t.ok(/^#[0-9a-f]{6}$/.test(col) && can.color === col && can.lit === false && can.preset === 'candle' && Math.abs(can.x / k - 20) < 0.05, 'candles where clicked, in the picked colour, unlit', [col, can]);
     await t.clickText('#pop .seg-btn', 'Lit');
     await t.shot(t.gm(), 'lights-draw');
     // Beta 3.51: a click on a light that is there picks it: the panel shows and changes that light; dragged, a wall
@@ -878,61 +881,77 @@ module.exports = (area) => {
     await t.until(() => t.g('Play.ui.os.lightSel').then((v) => v === torch.id), 3000, 'the torch picked');
     await tabsOut(t);
     t.eq([await t.count('#pop .os-lights'), await t.count('#pop .os-light-remove'), await t.text('#pop .os-prev .cap b')], [0, 1, 'Wall torch'], 'the panel shows the picked torch: no kinds, Remove');
-    t.eq(M(t).layers.filter((l) => l.fixture).length, 3, 'picking places nothing');
+    t.eq(lights().length, 3, 'picking places nothing');
     t.ok((await t.count('.os-preview .os-lightsel')) === 1 && (await t.count('.os-preview .os-lightreach')) === 1, 'a ring on it and its reach on the map');
     await t.clickText('#pop .seg-btn', 'Unlit');
-    await t.until(() => M(t).fx.find((f) => f.id === flame.id).hidden === true, 3000, 'the picked torch put out from the panel');
+    await t.until(() => fx1(torch.id).lit === false, 3000, 'the picked torch put out from the panel');
+    t.eq(fx1(torch.id).hidden, false, 'put out is not hidden');
     await t.clickText('#pop .seg-btn', 'Lit');
-    await t.until(() => M(t).fx.find((f) => f.id === flame.id).hidden === false, 3000, 'and lit again');
+    await t.until(() => fx1(torch.id).lit !== false, 3000, 'and lit again');
     await t.clickSel('#pop .swatches .swatch[data-v]:not([data-v=""])');
-    await t.until(() => /^#[0-9a-f]{6}$/.test(M(t).fx.find((f) => f.id === flame.id).color || ''), 3000, 'a colour for the picked torch');
+    await t.until(() => /^#[0-9a-f]{6}$/.test(fx1(torch.id).color || ''), 3000, 'a colour for the picked torch');
     await t.g(`(() => { const i = document.querySelector('#pop input[aria-label="Reach"]'); i.value = 10; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-    await t.until(() => M(t).fx.find((f) => f.id === flame.id).bright === 10, 3000, 'its reach');
-    t.eq(M(t).fx.find((f) => f.id === flame.id).dim, 20, 'dim follows');
+    await t.until(() => fx1(torch.id).bright === 10, 3000, 'its reach');
+    t.eq(fx1(torch.id).dim, 20, 'dim follows');
     b = await t.scr(21 * k, 3.4 * k); await t.drag(a, b, 6);
-    await t.until(() => Math.abs(M(t).layers.find((l) => l.id === torch.id).x / k - 21) < 0.1, 3000, 'the torch dragged along the wall');
-    const moved = M(t).layers.find((l) => l.id === torch.id);
-    t.ok(Math.abs(moved.y / k - 3.278) < 0.02 && moved.rotation === 0 && M(t).fx.find((f) => f.id === flame.id).x === moved.x, 'still on the wall\'s face, its flame with it', [moved.x / k, moved.y / k]);
+    await t.until(() => Math.abs(fx1(torch.id).x / k - 21) < 0.1, 3000, 'the torch dragged along the wall');
+    const moved = fx1(torch.id);
+    t.ok(Math.abs(moved.y / k - 3.278) < 0.02 && moved.rotation === 0, 'still on the wall\'s face', [moved.x / k, moved.y / k]);
     a = await t.scr(18 * k, 7.5 * k); await t.click(a.x, a.y);
     await t.until(() => t.g('Play.ui.os.lightSel').then((v) => !v), 3000, 'a click beside it lets go');
-    t.eq([M(t).layers.filter((l) => l.fixture).length, await t.count('#pop .os-lights')], [3, 1], 'nothing placed by that click; the kinds are back');
+    t.eq([lights().length, await t.count('#pop .os-lights')], [3, 1], 'nothing placed by that click; the kinds are back');
     a = await t.scr(left.x, left.y); await t.click(a.x, a.y);
     await t.until(() => t.g('Play.ui.os.lightSel').then((v) => v === left.id), 3000, 'the other torch picked');
     await t.key('Delete');
-    await t.until(() => M(t).layers.filter((l) => l.fixture).length === 2 && M(t).fx.filter((f) => f.fixture).length === 2, 3000, 'Delete takes it away with its flame');
+    await t.until(() => lights().length === 2, 3000, 'Delete takes it away');
+    await t.until(async () => (await t.count(`.sv-holder[data-id="h-${left.id}"]`)) === 0, 3000, 'with its holder');
     await t.cmd('history.undo', {});
-    await t.until(() => M(t).layers.filter((l) => l.fixture).length === 3, 3000, 'Undo brings it back');
-    // moved, the flame goes along; copied, the copy burns by itself; removed, the flame goes too
-    const cx0 = can.x;
-    t.handle('layer.update', { mapId: own, id: can.id, x: cx0 + k });
-    t.eq(M(t).fx.find((f) => f.id === cf.id).x, Math.round((cx0 + k) * 1000) / 1000, 'moved: the flame goes along');
-    t.handle('layer.duplicate', { mapId: own, id: can.id, dx: k, dy: 0 });
-    const two = M(t).layers.filter((l) => l.fixture && l.fixture.kind === 'candles');
-    t.ok(two.length === 2 && two[0].fixture.fx !== two[1].fixture.fx && M(t).fx.filter((f) => f.fixture).length === 4, 'a copy has a flame of its own', two.map((x) => x.fixture));
-    t.handle('layer.remove', { mapId: own, id: two[1].id });
-    t.eq(M(t).fx.filter((f) => f.fixture).length, 3, 'removed: its flame goes too');
-    // in the Play tools a click asks first, as a door does; the TV follows
+    await t.until(() => lights().length === 3, 3000, 'Undo brings it back');
+    // Beta 3.54: its marker in Effects is the same light: Delete there takes the holder too (3.53 left it behind)
+    await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'light'; Play.ui.lightTab = 'sources'; Play.openPop('fx')`);
+    const hm = await t.until(() => t.rect(`.sv-handle[data-id="${left.id}"]`), 3000, 'its marker in Effects');
+    await t.click(hm.cx, hm.cy);
+    await t.until(() => t.g('Play.ui.selFx').then((v) => v === left.id), 3000, 'picked in Effects');
+    await t.until(async () => (await t.text('#pop .look-head b')) === 'Wall torch', 3000, 'Effects shows the same light');
+    t.gm().webContents.focus();
+    await t.key('Delete');
+    await t.until(() => lights().length === 2, 3000, 'Delete in Effects takes the whole light');
+    await t.until(async () => (await t.count(`.sv-holder[data-id="h-${left.id}"]`)) === 0, 3000, 'no holder left behind');
+    await t.cmd('history.undo', {});
+    await t.until(() => lights().length === 3, 3000, 'Undo brings it back');
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
+    // copied, the copy is a light of its own; removed, nothing is left
+    t.handle('fx.duplicate', { mapId: own, id: can.id, dx: k, dy: 0 });
+    const two = lights().filter((f) => f.holder === 'candles');
+    t.ok(two.length === 2 && two[0].id !== two[1].id && two[1].x === Math.round((can.x + k) * 1000) / 1000, 'a copy beside it', two.map((x) => [x.id, x.x]));
+    t.handle('fx.remove', { mapId: own, id: two[1].id });
+    t.eq(lights().length, 3, 'removed');
+    // only the Select tool asks first, as a door does; the TV follows
     await t.send(own);
+    await t.g(`Play.setTool('fog')`);
+    { const tn = fx1(torch.id); a = await t.scr(tn.x, tn.y); } await t.click(a.x, a.y); await t.sleep(300);
+    t.eq(await t.count('.light-ask'), 0, 'the Fog tool does not ask');
     await t.g(`Play.setTool('select')`);
-    { const tn = M(t).layers.find((l) => l.id === torch.id); a = await t.scr(tn.x, tn.y); } await t.click(a.x, a.y);
+    await t.click(a.x, a.y);
     await t.until(async () => (await t.count('.light-ask')) === 1, 3000, 'the question');
     t.eq(await t.text('.light-ask b'), 'Put out the wall torch?', 'it asks');
-    t.eq(M(t).fx.find((f) => f.id === flame.id).hidden, false, 'nothing happens before the answer');
+    t.eq(fx1(torch.id).lit, undefined, 'nothing happens before the answer');
     await t.clickText('.light-ask .btn', 'No');
-    t.ok((await t.count('.light-ask')) === 0 && !M(t).fx.find((f) => f.id === flame.id).hidden, 'No: it burns on');
+    t.ok((await t.count('.light-ask')) === 0 && fx1(torch.id).lit !== false, 'No: it burns on');
     await t.click(a.x, a.y);
     await t.until(async () => (await t.count('.light-ask')) === 1, 3000, 'the question again');
     await t.clickText('.light-ask .btn', 'Yes');
-    await t.until(() => M(t).fx.find((f) => f.id === flame.id).hidden === true, 3000, 'the torch put out');
+    await t.until(() => fx1(torch.id).lit === false, 3000, 'the torch put out');
     await t.click(a.x, a.y);
     await t.until(async () => (await t.count('.light-ask')) === 1, 3000, 'the question for the dark torch');
     t.eq(await t.text('.light-ask b'), 'Light the wall torch?', 'now it offers to light it');
     await t.clickText('.light-ask .btn', 'Yes');
-    await t.until(() => M(t).fx.find((f) => f.id === flame.id).hidden === false, 3000, 'the torch lit again');
+    await t.until(() => fx1(torch.id).lit !== false, 3000, 'the torch lit again');
     await t.shot(t.tv(), 'lights-tv');
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`);
-    for (const l of M(t).layers.filter((x) => x.fixture)) t.handle('layer.remove', { mapId: own, id: l.id });
-    t.eq(M(t).fx.filter((f) => f.fixture).length, 0, 'all gone with their pictures');
+    // (Beta 3.54: a wall light going with its wall is checked in the light area, without a picture to make)
+    for (const f of lights()) t.handle('fx.remove', { mapId: own, id: f.id });
+    t.eq(lights().length, 0, 'all gone');
     await tool(t, 'room');
   }, { ms: 300000 });
 

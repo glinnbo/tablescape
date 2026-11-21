@@ -246,6 +246,13 @@ const FXDATA = (() => {
     return { x: (A ? A.x : 0) + Math.cos(a) * sp * dt, y: (A ? A.y : 0) + Math.sin(a) * sp * dt, s: (A ? A.s : 0) + sp * dt };
   }
 
-  return { SKINS, SPELLS, SHAPES, EMITTERS, WINDOW_SHAPES, WINDOW_GRIDS, REGIONS, WEATHER, WEATHER_TYPES, LIGHTS, COLORS, TINTS, MOODS, TBASE, SPEED_MAX, wxTravel };
+  // Beta 3.54: what counts as a light. A light is one effect: a light of the app with its holder (an emitter with
+  // .holder), a flame that gives light (Torch, Campfire, Candles), or just light (kind 'light', which a token can carry).
+  // lit: false = put out (its holder still shows); hidden = not on the TV. Other emitters (a glow, a light shaft) are not.
+  const FLAMES = EMITTERS.filter((d) => d.light);
+  const isLight = (f) => !!f && (f.kind === 'light' || (f.kind === 'emitter' && (!!f.holder || FLAMES.some((d) => d.id === f.preset))));
+  const givesLight = (f) => !!f && (f.kind === 'light' || (f.kind === 'emitter' && f.bright > 0)) && f.lit !== false;
+
+  return { SKINS, SPELLS, SHAPES, EMITTERS, FLAMES, isLight, givesLight, WINDOW_SHAPES, WINDOW_GRIDS, REGIONS, WEATHER, WEATHER_TYPES, LIGHTS, COLORS, TINTS, MOODS, TBASE, SPEED_MAX, wxTravel };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = FXDATA;

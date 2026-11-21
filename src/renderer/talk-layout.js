@@ -6,50 +6,30 @@
 // its own size (scale) and its own nudge (offset: x a share of its width, y of its height, up is +).
 //
 // Players on both long sides: each side has its own copy, turned round (the far side's copy stands mirrored through
-// the middle of the TV). Glinn, 21 Nov 2026: a tall portrait may reach over the far side's band, away from the players
-// who look at it; only where it would meet the far side's copy of a portrait does it keep below the bands (86 %).
+// the middle of the TV). Glinn, 21 Nov 2026 (second-conversation-rework): portraits may be as tall as wanted and run
+// off the top and the sides of the TV, over the far band and the far side's copies (they may cover each other); only
+// downwards they never go: their feet stay in their band (a nudge is never below 0).
 'use strict';
 window.TalkLayout = (() => {
-  const ROOM = 0.86; // (share of the TV's height between the two bands: no taller where a far copy stands above)
-  const MOST = 0.97; // (never taller than the TV)
   // W, H: the TV in any unit (pixels on the TV, pixels of the small TV); size, pos, anchor: settings.talk;
-  // seats: 'one' | 'both'; items: oldest first, the one speaking last: { aspect (width / height, or 0 when unknown), scale, offset }
-  // gives, per item: left, width, height (from the bottom of its side), dx, dy (its nudge in the same unit), front,
-  // capped (kept below the bands); and spans: [left, right] of each, for the bands' front copies
-  function compute({ W, H, size, pos, anchor, seats, items }) {
-    const n = items.length;
-    const base = Math.round((size || 0.34) * H);
-    const both = seats !== 'one';
-    let cap = new Array(n).fill(false);
-    let out = null;
-    for (let round = 0; round < 3; round++) {
-      out = place(W, H, base, pos, anchor, items, both, cap);
-      if (!both) break;
-      // where a portrait would meet the far copy of one (its own included), both keep below the bands
-      const next = cap.slice();
-      const span = (b) => [b.left + b.dx, b.left + b.dx + b.width];
-      const mirror = (s) => [W - s[1], W - s[0]];
-      for (let i = 0; i < n; i++) {
-        for (let j = 0; j < n; j++) {
-          const a = span(out[i]); const m = mirror(span(out[j]));
-          const meet = a[0] < m[1] - 1 && m[0] < a[1] - 1;
-          if (meet) { next[i] = true; next[j] = true; }
-        }
-      }
-      if (next.every((v, k) => v === cap[k])) break;
-      cap = next;
-    }
+  // items: oldest first, the one speaking last: { aspect (width / height, or 0 when unknown), scale, offset }
+  // gives, per item: left, width, height (from the bottom of its side), dx, dy (its nudge in the same unit), front;
+  // and spans: [left, right] of each, for the bands' front copies
+  function compute({ W, H, size, pos, anchor, items }) {
+    const out = place(W, H, Math.round((size || 0.34) * H), pos, anchor, items);
     return { items: out, spans: out.map((b) => [b.left + b.dx, b.left + b.dx + b.width]) };
   }
-  function place(W, H, base, pos, anchor, items, both, cap) {
+  // the room the speaker's left edge moves in for pos 0 … 1 (at least 30 % of the TV, also for a portrait wider than it)
+  const roomOf = (W, wf) => Math.max(W * 0.3, W - 2 * W * 0.04 - wf);
+  function place(W, H, base, pos, anchor, items) {
     const margin = W * 0.04;
-    const hs = items.map((it, i) => Math.min(Math.round(H * (both && cap[i] ? ROOM : MOST)), Math.round(base * ((it && it.scale) || 1))));
+    const hs = items.map((it) => Math.round(base * ((it && it.scale) || 1)));
     const widths = items.map((it, i) => (it && it.aspect ? hs[i] * it.aspect : hs[i] * 0.8));
     const order = items.map((it, i) => i).reverse(); // front first
     const left = new Array(items.length);
     const at = Number.isFinite(pos) ? pos : { left: 0, center: 0.5, right: 1 }[anchor] ?? 1;
     const fi = order[0]; const wf = fi != null ? widths[fi] : 0;
-    const frontLeft = margin + at * Math.max(0, W - 2 * margin - wf);
+    const frontLeft = margin + at * roomOf(W, wf);
     if (at > 0.35 && at < 0.65) {
       const mid = frontLeft + wf / 2;
       order.forEach((i, k) => {
@@ -69,13 +49,29 @@ window.TalkLayout = (() => {
     }
     return items.map((it, i) => {
       const off = (it && it.offset) || { x: 0, y: 0 };
-      return { left: left[i], width: widths[i], height: hs[i], dx: (off.x || 0) * widths[i], dy: -(off.y || 0) * hs[i], front: i === items.length - 1, capped: !!cap[i] && both };
+      return { left: left[i], width: widths[i], height: hs[i], dx: (off.x || 0) * widths[i], dy: -Math.max(0, off.y || 0) * hs[i], front: i === items.length - 1 }; // (never below its band)
     });
   }
-  // where the speaker's left edge goes for a given pos, and back (the small TV drags the speaker sideways)
+  // where the speaker's left edge goes for a given pos, and back (the small TV drags the speaker sideways). It may stand
+  // partly off the TV: up to 60 % of it past the left or the right edge
   function posFor(W, frontLeft, frontWidth) {
-    const margin = W * 0.04; const room = Math.max(1, W - 2 * margin - frontWidth);
-    return Math.min(1, Math.max(0, (frontLeft - margin) / room));
+    const margin = W * 0.04; const room = roomOf(W, frontWidth);
+    const lo = (-0.6 * frontWidth - margin) / room; const hi = (W - 0.4 * frontWidth - margin) / room;
+    return Math.min(hi, Math.max(lo, (frontLeft - margin) / room));
   }
-  return { compute, posFor, ROOM, MOST };
+  // Second Builder (second-conversation-rework): the band of one side is cut in two, its copy in front of this side's
+  // portraits just where they stand (their feet rise out of it) and the band under everything else: the clip-paths of both
+  function clips(spans, W) {
+    const merged = [];
+    for (const [a0, b0] of spans.map(([a, b]) => [Math.max(0, a), Math.min(W, b)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])) {
+      const last = merged[merged.length - 1];
+      if (last && a0 <= last[1]) last[1] = Math.max(last[1], b0); else merged.push([a0, b0]);
+    }
+    const gaps = []; let x = 0;
+    for (const [a, b] of merged) { if (a > x) gaps.push([x, a]); x = b; }
+    if (x < W) gaps.push([x, W]);
+    const rects = (list) => (list.length ? `polygon(${list.map(([a, b]) => `${Math.round(a)}px 300%, ${Math.round(a)}px -300%, ${Math.round(b)}px -300%, ${Math.round(b)}px 300%`).join(', ')})` : 'inset(0 0 100% 0)');
+    return { front: rects(merged), base: merged.length ? rects(gaps) : '' };
+  }
+  return { compute, posFor, clips };
 })();

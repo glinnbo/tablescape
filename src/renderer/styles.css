@@ -271,6 +271,7 @@ body.gm .sv-weather { opacity: 0.75; }
    middle: a long asset turned a quarter had that box lying across it, beside the picture */
 body.gm[data-tool="asset"] .sv-asset > img, body.gm[data-tool="asset"] .sv-asset > video, body.gm[data-tool="asset"] .sv-asset > canvas.sv-aframe { pointer-events: auto; cursor: move; }
 body.gm[data-tool="asset"] .sv-asset.is-locked > * { pointer-events: none; }
+.sv-asset.sv-holder > * { pointer-events: none !important; } /* (Beta 3.54: a light's holder is the light's: picked as the light) */
 body.gm .sv-asset.is-hidden { opacity: 0.4; }
 body.gm .sv-asset.is-selected > img, body.gm .sv-asset.is-selected > video, body.gm .sv-asset.is-selected > canvas.sv-aframe { outline: 2px solid var(--torch); outline-offset: 2px; } /* (Beta 3.10: round the picture as it lies) */
 /* Beta 3.10: one picked asset wears a frame that lies and turns with it: sides stretch, corners size, the knob turns */
@@ -352,6 +353,7 @@ body.table .sv-spell-label b { padding: 0 0.45em; }
 .sv-handle.kind-region { border-style: dashed; border-color: #9fe3ff; color: #9fe3ff; }
 .sv-handle.attached { border-color: var(--prep); color: var(--prep); }
 .sv-handle.is-hidden { opacity: 0.5; }
+.sv-handle.is-unlit { filter: grayscale(1); opacity: 0.6; border-style: dotted; } /* (Beta 3.54: a light that is put out) */
 .sv-handle.on { border-width: 3px; box-shadow: 0 0 0 3px rgba(227, 150, 62, 0.35); }
 .sv-handle.on .i { background: var(--torch); color: var(--torch-ink); border-color: var(--torch); }
 /* walls and doors (GM only) */
@@ -1224,7 +1226,7 @@ body.gm .sv-measure-label { transform: translate(10px, -100%) scale(var(--inv, 1
 .talk-layer.inkl { z-index: 2; }
 #table-overlays.one-side .far { display: none; }
 .talk-cast { position: absolute; inset: 0; }
-.talk-npc { position: absolute; bottom: 1vh; transition: left 0.5s ease, filter 0.5s ease, transform 0.5s ease, translate 0.25s ease; transform-origin: 50% 100%; }
+.talk-npc { position: absolute; bottom: 1vh; transition: left 0.45s ease, width 0.45s ease, height 0.45s ease, filter 0.5s ease, transform 0.5s ease, translate 0.45s ease; transform-origin: 50% 100%; } /* (Second Builder (second-conversation-rework): a new size or place glides there; the GM's window sends it once, when let go) */
 .talk-npc img { width: 100%; height: 100%; display: block; object-fit: contain; object-position: 50% 100%; animation: npc-in 1.15s cubic-bezier(0.2, 0.7, 0.2, 1) 0.25s both; filter: drop-shadow(0 0 1.2vh rgba(0, 0, 0, 0.55)); }
 .talk-npc.back { filter: brightness(0.62) saturate(0.8); transform: scale(0.93); }
 .talk-npc.opaque img { -webkit-mask-image: radial-gradient(ellipse 50% 52% at 50% 46%, #000 62%, transparent 100%); mask-image: radial-gradient(ellipse 50% 52% at 50% 46%, #000 62%, transparent 100%); filter: none; }
@@ -1659,18 +1661,7 @@ body.hud-sampling .sv-round, body.hud-sampling .tv-init, body.hud-sampling #tabl
 .talk-badges { display: contents; }
 /* Second Builder: a portrait's looks (Bloodied, Shaded, Hidden): the badge sits in the other corner; the popup's part */
 .talk-scale.talk-looks { right: auto; left: 4px; color: #ff8a80; }
-.talk-sizepop .tsp-looks { display: grid; gap: 4px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
-.talk-sizepop .tsp-sec { display: flex; align-items: baseline; gap: 8px; color: var(--text); font-weight: 600; font-size: 12px; }
-.talk-sizepop .tsp-pv { display: flex; justify-content: center; align-items: flex-end; height: 150px; border-radius: 8px; background: repeating-conic-gradient(#22252b 0 25%, #1a1c21 0 50%) 0 0 / 14px 14px; overflow: hidden; }
-.talk-sizepop .tsp-preview { display: block; max-width: 100%; max-height: 150px; }
-.talk-sizepop .tsp-sw { margin-top: 4px; }
-.talk-sizepop input[type="range"]:disabled { opacity: 0.35; }
-.talk-sizepop { position: fixed; z-index: 3200; width: 250px; display: grid; gap: 4px; padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: var(--shadow); font-size: 13px; }
-.talk-sizepop .tsp-head { display: flex; align-items: baseline; gap: 8px; }
-.talk-sizepop .tsp-lab { display: flex; align-items: baseline; gap: 8px; margin-top: 2px; color: var(--muted); font-size: 12px; }
-.talk-sizepop output { color: var(--torch); font-variant-numeric: tabular-nums; }
-.talk-sizepop input[type="range"] { width: 100%; }
-.tsp-row { display: flex; align-items: center; gap: 6px; }
+/* (Second Builder (second-conversation-rework): the right-click popup's rules went with it) */
 .talk-mirror { position: absolute; right: 4px; top: 4px; width: 24px; height: 24px; background: rgba(12, 13, 16, 0.75); opacity: 0; }
 .talk-pick:hover .talk-mirror, .talk-mirror.on { opacity: 1; }
 /* toolbox */
@@ -4070,36 +4061,69 @@ body.gm[data-tool="oldschool"] #viewport { cursor: crosshair; }
   -webkit-mask-composite: source-in; mask-composite: intersect; }
 /* Second Builder (second-conversation-stage): the Conversation window: a small TV with a frame on each portrait */
 .cs-panel { min-width: 300px; }
-.cs-wrap { position: relative; align-self: flex-start; }
-.cs-stage { position: relative; width: 420px; max-width: calc(100vw - 200px); aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; outline: none; touch-action: none;
+.cs-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; outline: none; touch-action: none; /* (second-conversation-rework: as wide as the window) */
   background: radial-gradient(ellipse at 50% 50%, #1d2026 0%, #121418 100%); border: 1px solid var(--line-2); }
 .cs-stage:focus-visible { border-color: var(--torch); }
 .cs-stage.drop-ok { border-color: var(--torch); box-shadow: 0 0 0 2px var(--torch-soft); }
-.cs-tv { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
-.cs-tv[src=""] { display: none; }
-.cs-stage.empty .cs-tv { filter: brightness(0.55); }
+/* Second Builder (second-conversation-rework): the small TV is drawn: the map on the TV blurred, the bands, the portraits
+   with their looks, still. Layers as on the TV: both bands under all portraits, each side's front copy over its own
+   portraits' feet, the name on top; the far side turned round */
+.cs-bg { position: absolute; inset: -16px; pointer-events: none; }
+.cs-bg-img { width: 100%; height: 100%; object-fit: cover; display: block; filter: blur(7px) brightness(0.55) saturate(0.85); }
+.cs-stage.empty .cs-bg-img { filter: blur(7px) brightness(0.35) saturate(0.7); }
+.cs-scene { position: absolute; inset: 0; pointer-events: none; }
+.cs-layer { position: absolute; inset: 0; }
+.cs-layer.far { rotate: 180deg; }
+.cs-layer.cs-base { z-index: 1; } .cs-layer.cs-cast { z-index: 2; } .cs-layer.cs-front { z-index: 3; } .cs-layer.cs-name { z-index: 4; }
+.cs-band { position: absolute; left: 0; bottom: 0; overflow: visible; transform-origin: 0 100%; }
+.cs-band svg { position: absolute; left: 0; bottom: 0; display: block; }
+.cs-band, .cs-band * { animation: none !important; transition: none !important; }
+.cs-npc { position: absolute; transform-origin: 50% 100%; }
+.cs-npc img { width: 100%; height: 100%; display: block; object-fit: contain; object-position: 50% 100%; filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.55)); }
+.cs-npc img:not([src]) { visibility: hidden; }
+.cs-npc.back { filter: brightness(0.62) saturate(0.8); transform: scale(0.93); }
+.cs-npc.opaque img { -webkit-mask-image: radial-gradient(ellipse 50% 52% at 50% 46%, #000 62%, transparent 100%), linear-gradient(180deg, transparent 0%, #000 13%);
+  mask-image: radial-gradient(ellipse 50% 52% at 50% 46%, #000 62%, transparent 100%), linear-gradient(180deg, transparent 0%, #000 13%); -webkit-mask-composite: source-in; mask-composite: intersect; filter: none; }
+.cs-speaker { position: absolute; translate: -50% 50%; font-family: var(--display); font-weight: 500; line-height: 1; color: #f3e9da; white-space: nowrap; letter-spacing: 0.02em; text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 1px 2px #000; }
+.cs-ghost { position: absolute; box-sizing: border-box; border: 1.5px dashed rgba(233, 227, 213, 0.55); border-radius: 3px; pointer-events: none; z-index: 5; }
+.cs-size { position: absolute; left: 50%; top: -5px; translate: -50% -100%; font: 700 11.5px/1 var(--ui); padding: 3px 7px; border-radius: 6px; background: var(--torch); color: var(--torch-ink); white-space: nowrap; pointer-events: none; }
+.cs-size[hidden] { display: none; }
+.cs-row b small.cs-pct { color: var(--faint); }
+/* the window's own corner sizes it; the thumbnails keep their size, more fit in a row */
+.cs-corner { position: absolute; right: 2px; bottom: 2px; width: 18px; height: 18px; display: grid; place-items: center; cursor: nwse-resize; color: var(--muted); opacity: 0.75; z-index: 3; }
+.cs-corner:hover, .fp.sizing .cs-corner { opacity: 1; color: var(--torch); }
+.cs-corner .i { width: 14px; height: 14px; rotate: 90deg; }
+.fp.folded .cs-corner { display: none; }
+.fp[data-id="talk"] .talk-strip { max-height: var(--cs-strip-h, clamp(200px, calc(100vh - 560px), 520px)); }
+.fp[data-id="talk"] .talk-row { grid-template-columns: repeat(auto-fill, 76px); justify-content: start; padding: 7px 7px 0 0; }
+.talk-off, .talk-hidden-in { position: absolute; display: grid; place-items: center; padding: 0; cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
+.talk-off { right: -7px; top: -7px; z-index: 2; width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--soot); background: var(--danger); color: #fff; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55); }
+.talk-off .i { width: 20px; height: 20px; stroke-width: 2.6; }
+.talk-hidden-in { right: 6px; top: 6px; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--line-2); background: rgba(12, 13, 16, 0.88); color: var(--prep); }
+.talk-hidden-in .i { width: 15px; height: 15px; }
+.talk-pick:hover .talk-off, .talk-pick:hover .talk-hidden-in, .talk-pick:focus-within .talk-off, .talk-pick:focus-within .talk-hidden-in { opacity: 1; }
+.talk-off:hover { filter: brightness(1.12); }
+.talk-hidden-in:hover { border-color: var(--prep); }
 .cs-frames { position: absolute; inset: 0; }
 .cs-hint { position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; padding: 0 18%; text-align: center; color: var(--text); font-size: 12.5px; text-shadow: 0 1px 4px #000; pointer-events: none; }
 .cs-hint[hidden] { display: none; }
-.cs-frame { position: absolute; box-sizing: border-box; border: 1px dashed rgba(233, 227, 213, 0.35); border-radius: 3px; cursor: pointer; transition: left 0.15s ease; }
+.cs-frame { position: absolute; box-sizing: border-box; border: 1px dashed rgba(233, 227, 213, 0.35); border-radius: 3px; cursor: pointer; }
 .cs-frame:hover { border-color: rgba(233, 227, 213, 0.75); }
 .cs-frame.front { border-style: solid; border-color: rgba(227, 150, 62, 0.75); cursor: ew-resize; }
 .cs-frame.picked { border: 1.5px solid var(--torch); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 14px rgba(227, 150, 62, 0.35); }
 .cs-h { position: absolute; top: -5px; width: 9px; height: 9px; border-radius: 2px; background: #fff3e0; border: 1px solid var(--torch); cursor: nesw-resize; display: none; }
 .cs-h.tl { left: -5px; cursor: nwse-resize; } .cs-h.tr { right: -5px; }
-.cs-x { position: absolute; right: -9px; top: -11px; width: 20px; height: 20px; border-radius: 50%; padding: 0; display: none; place-items: center; cursor: pointer;
+.cs-x { position: absolute; right: 5px; top: 6px; width: 20px; height: 20px; /* (second-conversation-rework: inside, off the top right handle) */ border-radius: 50%; padding: 0; display: none; place-items: center; cursor: pointer;
   background: #2a1a17; border: 1px solid var(--danger); color: var(--danger); }
 .cs-x .i { width: 12px; height: 12px; }
 .cs-frame.picked .cs-h { display: block; }
 .cs-frame.picked .cs-x { display: grid; }
-.cs-tag { position: absolute; left: 50%; bottom: 0; translate: -50% 100%; white-space: nowrap; font: 600 10.5px/1 var(--ui); padding: 3px 6px; border-radius: 0 0 5px 5px;
-  background: rgba(18, 19, 22, 0.85); color: var(--text); pointer-events: none; }
+.cs-tag { position: absolute; left: 50%; top: -5px; translate: -50% -100%; white-space: nowrap; font: 600 10.5px/1 var(--ui); padding: 3px 6px; border-radius: 5px;
+  background: rgba(18, 19, 22, 0.85); color: var(--text); pointer-events: none; } /* (second-conversation-rework: over its head, not cut off under the small TV) */
+.cs-frame.pulling .cs-tag { display: none; }
 .cs-frame.front .cs-tag { background: var(--torch); color: var(--torch-ink); }
 .cs-frame:not(.front):not(.picked) .cs-tag { opacity: 0; }
 .cs-frame:hover .cs-tag { opacity: 1; }
-.cs-grip { position: absolute; right: -8px; bottom: -8px; width: 18px; height: 18px; display: flex; cursor: nwse-resize; color: var(--muted); opacity: 0.7; }
-.cs-grip:hover { opacity: 1; color: var(--torch); }
-.cs-grip .i { width: 14px; height: 14px; rotate: 90deg; }
 .cs-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .cs-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); flex: none; }
 .cs-status.on .cs-dot { background: #5cc382; box-shadow: 0 0 6px #5cc382; }

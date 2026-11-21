@@ -355,8 +355,11 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       await key('E');
       C.fxTool = { tool: await js(gm, 'document.body.dataset.tool'), pop: await js(gm, 'document.querySelector("#pop.on .pop-title") && document.querySelector("#pop.on .pop-title").textContent') };
       const f0 = L().fx.length;
+      // (Beta 3.54: a torch is a light: Light → Light sources → Flame → Torch)
+      await js(gm, `Object.assign(Play.ui.lt, { group: 'flame', flame: 'torch', color: '', lit: true, reach: null, sat: null, intensity: 1 }); Play.ui.fxMode = 'light'; Play.ui.lightTab = 'sources'; Play.openPop('fx')`);
+      await sleep(200);
       const torchAt = await scr(12 * k, 3 * k);
-      await click(torchAt.x, torchAt.y); // default preset: torch
+      await click(torchAt.x, torchAt.y);
       await sleep(300);
       const torch = { ...L().fx[L().fx.length - 1] };
       C.placeTorch = { added: L().fx.length - f0, preset: torch.preset, light: torch.bright > 0, handles: await js(gm, 'document.querySelectorAll(".sv-handle").length'), fx: L().fx.length };
@@ -376,6 +379,7 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       handle('light.update', { darkness: 0.7 });
       await clickText('#pop .seg-btn', 'Light');
       await clickText('#pop .seg-btn', 'Light sources');
+      await clickText('#pop .lt-groups .seg-btn', 'Just light');
       await clickText('#pop .tile', 'Torch');
       const tok = L().layers.find((l) => l.id === gob.id);
       const tp = await scr(tok.x, tok.y);
@@ -465,6 +469,7 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
 
       // darkness up to 100%, a party light, lit areas remembered
       handle('light.update', { darkness: 1, memory: true });
+      await js(gm, `Play.ui.lt.group = 'plain'`); // (Beta 3.54: Just light, the lights a token can carry)
       await key('E');
       await clickText('#pop .seg-btn', 'Light');
       await clickText('#pop .seg-btn', 'Light sources');
@@ -504,11 +509,13 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       // (1.4: a party without walls reveals a circle once fog is on, so it leaves this map again)
       handle('fx.remove', { id: party.id });
 
-      // effect options: colour, amount, speed for the next torch and for a selected one
+      // effect options: colour, amount, speed for the next torch and for a selected one (Beta 3.54: a torch is a light:
+      // Light → Light sources → Flame, its colour and More in the Light panel)
+      await js(gm, `Object.assign(Play.ui.lt, { group: 'flame', flame: 'torch', color: '', lit: true, reach: null, sat: null, intensity: 1 }); Play.ui.ltMore = true`);
       await key('E');
-      await clickText('#pop .seg-btn', 'Place');
-      await clickText('#pop .tile', 'Torch');
-      await clickText('#pop .look .swatch', 'Hellfire green');
+      await clickText('#pop .seg-btn', 'Light');
+      await clickText('#pop .seg-btn', 'Light sources');
+      await clickText('#pop .swatch', 'Hellfire green');
       const tAt = await scr(10 * k, 10 * k);
       await click(tAt.x, tAt.y);
       await sleep(300);
@@ -518,17 +525,19 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       await click(gh.cx, gh.cy);
       await sleep(250);
       C.lookSelected = await js(gm, `(() => { const b = document.querySelector('#pop .look-head b'); return b && b.textContent; })()`);
-      await js(gm, `(() => { const s = [...document.querySelectorAll('#pop .look .ctl-slider')].find((x) => x.textContent.includes('Amount')).querySelector('input'); s.value = 2.5; s.dispatchEvent(new Event('input')); })()`);
+      await js(gm, `(() => { const s = [...document.querySelectorAll('#pop .lt-more .ctl-slider')].find((x) => x.textContent.includes('Brightness')).querySelector('input'); s.value = 0.5; s.dispatchEvent(new Event('input')); })()`);
       await sleep(400);
-      C.lookEdit = L().fx.find((f) => f.id === green.id).density;
+      C.lookEdit = L().fx.find((f) => f.id === green.id).intensity;
+      handle('fx.update', { id: green.id, intensity: 1 }); // (back to full for the colour checks below)
+      await js(gm, `Play.ui.lt.color = ''`);
       await sleep(300);
       const px = await probe('atmo', tablePx({ x: green.x + 0.9, y: green.y })); // in the glow, beside the white-hot core
       C.greenPixel = px;
       // Alpha 1.0: its colour tints the map around it, in daylight too
       const gdbg = await js(player, 'window.__table.debug()');
       C.greenGlow = { px: await probe('glow', tablePx({ x: green.x + 1.5, y: green.y + 0.5 })), glows: gdbg.fx.glows, darkness: L().light.darkness,
-        slider: await js(gm, `[...document.querySelectorAll('#pop .look .ctl-slider')].some((x) => x.textContent.includes('Colour of its light'))`) };
-      await js(gm, `(() => { const s = [...document.querySelectorAll('#pop .look .ctl-slider')].find((x) => x.textContent.includes('Colour of its light')).querySelector('input'); s.value = 1; s.dispatchEvent(new Event('input')); })()`);
+        slider: await js(gm, `[...document.querySelectorAll('#pop .lt-more .ctl-slider')].some((x) => x.textContent.includes('Colour strength'))`) };
+      await js(gm, `(() => { const s = [...document.querySelectorAll('#pop .lt-more .ctl-slider')].find((x) => x.textContent.includes('Colour strength')).querySelector('input'); s.value = 1; s.dispatchEvent(new Event('input')); })()`);
       await sleep(500);
       C.greenGlow.satAfter = L().fx.find((f) => f.id === green.id).sat;
       await shot(gm, '13e-effect-options');
@@ -1707,7 +1716,7 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       await key('Escape'); await key('V');
       C.gmTitle = gm.getTitle();
       // the Light tab: the scene's light, and the lights you place
-      await js(gm, `Play.ui.lightTab = 'scene'`);
+      await js(gm, `Play.ui.lightTab = 'scene'; Play.ui.lt.group = 'plain'`);
       await key('E');
       await sleep(250);
       await clickText('#pop .seg-btn', 'Light');
@@ -1718,7 +1727,7 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       await clickText('#pop .light-tabs .seg-btn', 'Light sources');
       await sleep(250);
       C.lightTabs.sources = await cardTiles();
-      C.lightTabs.sat = await js(gm, `[...document.querySelectorAll('#pop .look .ctl-slider')].some((x) => x.textContent.includes('Colour of its light'))`);
+      C.lightTabs.sat = await js(gm, `[...document.querySelectorAll('#pop .lt-more .ctl-slider')].some((x) => x.textContent.includes('Colour strength'))`);
       await shot(gm, '19k-light-sources');
 
       // weather: every single layer is a switch; a mix is lit by what is in it, not by its name

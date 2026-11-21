@@ -307,14 +307,13 @@ const TableOverlays = (() => {
       if (!talk) return;
       for (const s of sides) {
         const list = talk.cast.map((c) => s.nodes.get(c.path)).filter(Boolean);
-        const L = TalkLayout.compute({ W: geom.W, H: geom.H, size: talk.size, pos: talk.pos, anchor: talk.anchor, seats,
+        const L = TalkLayout.compute({ W: geom.W, H: geom.H, size: talk.size, pos: talk.pos, anchor: talk.anchor,
           items: list.map((n) => ({ aspect: n.img.naturalWidth ? n.img.naturalWidth / n.img.naturalHeight : 0, scale: (n.c && n.c.scale) || 1, offset: (n.c && n.c.offset) || null })) });
         const pos = L.items.map((b) => b.left); const widths = L.items.map((b) => b.width);
         list.forEach((n, i) => {
           const b = L.items[i];
           Object.assign(n.wrap.style, { left: `${Math.round(b.left)}px`, width: `${Math.round(b.width)}px`, height: `${b.height}px`, zIndex: String(10 + i), translate: b.dx || b.dy ? `${Math.round(b.dx)}px ${Math.round(b.dy)}px` : '' });
           n.wrap.classList.toggle('back', !b.front);
-          n.wrap.classList.toggle('capped', b.capped);
         });
         cutBand(s, L.spans);
         // the speaker's name on the band (every look but the parchment, which has its own plate)
@@ -336,18 +335,9 @@ const TableOverlays = (() => {
     // Second Builder (second-conversation-stage): the band under the portraits everywhere but where this side's portraits
     // stand, and its copy in front of them just there; each part of the band is drawn once
     function cutBand(s, spans) {
-      const W = geom.W;
-      const merged = [];
-      for (const [a0, b0] of spans.map(([a, b]) => [Math.max(0, a), Math.min(W, b)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])) {
-        const last = merged[merged.length - 1];
-        if (last && a0 <= last[1]) last[1] = Math.max(last[1], b0); else merged.push([a0, b0]);
-      }
-      const gaps = []; let x = 0;
-      for (const [a, b] of merged) { if (a > x) gaps.push([x, a]); x = b; }
-      if (x < W) gaps.push([x, W]);
-      const rects = (list) => (list.length ? `polygon(${list.map(([a, b]) => `${Math.round(a)}px 300%, ${Math.round(a)}px -300%, ${Math.round(b)}px -300%, ${Math.round(b)}px 300%`).join(', ')})` : 'inset(0 0 100% 0)');
-      s.front.style.clipPath = rects(merged);
-      s.ink.style.clipPath = merged.length ? rects(gaps) : '';
+      const c = TalkLayout.clips(spans, geom.W); // (second-conversation-rework: worked out in talk-layout.js, the small TV cuts its bands the same way)
+      s.front.style.clipPath = c.front;
+      s.ink.style.clipPath = c.base;
     }
     function drawInk() {
       const look = talk && ['smoke', 'parchment', 'embers', 'stone', 'meadow', 'city', 'winter', 'sand', 'dungeon', 'necro', 'forest'].includes(talk.look) ? talk.look : 'ink';

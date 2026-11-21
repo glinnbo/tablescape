@@ -3239,16 +3239,16 @@ function handle(type, p = {}) {
       else {
         const m = library.media(p.path);
         cast.push({ path: m.path, url: m.url, name: m.name, alpha: p.alpha !== false });
-        while (cast.length > 3) cast.shift();
+        while (cast.length > 5) cast.shift(); // (Second Builder (second-conversation-rework): five at most, was three)
       }
       if (!player) openPlayer();
       broadcast();
       return { ok: true, on: i < 0 };
     }
-    case 'talk.size': { // Prototype 12: one portrait bigger or smaller than the others (50 % to 200 %)
+    case 'talk.size': { // Prototype 12: one portrait bigger or smaller than the others (Second Builder (second-conversation-rework): 30 % to 400 %, it may run off the TV; was 50 to 200 %)
       if (!p.path) return { ok: false };
       settings.portraitSize = { ...(settings.portraitSize || {}) };
-      const v = Math.round(Math.min(2, Math.max(0.5, Number(p.scale) || 1)) * 20) / 20;
+      const v = Math.round(Math.min(4, Math.max(0.3, Number(p.scale) || 1)) * 20) / 20;
       if (Math.abs(v - 1) < 0.001) delete settings.portraitSize[p.path]; else settings.portraitSize[p.path] = v;
       clearTimeout(sizeSaveT); sizeSaveT = setTimeout(saveSettings, 600); // (the slider sends many; save once it rests)
       broadcast();
@@ -3257,8 +3257,8 @@ function handle(type, p = {}) {
     case 'talk.offset': { // Prototype 13: one portrait moved: x a share of its width (−0.5 … 0.5), y of its height (−0.4 … 0.4, up is +)
       if (!p.path) return { ok: false };
       settings.portraitOffset = { ...(settings.portraitOffset || {}) };
-      const cl = (v, m) => Math.round(Math.min(m, Math.max(-m, Number(v) || 0)) * 100) / 100;
-      const o = { x: cl(p.x, 0.5), y: cl(p.y, 0.4) };
+      const cl = (v, m, lo = -m) => Math.round(Math.min(m, Math.max(lo, Number(v) || 0)) * 100) / 100;
+      const o = { x: cl(p.x, 1), y: cl(p.y, 0.8, 0) }; // (Second Builder (second-conversation-rework): sideways up to its own width, up to 80 %, never down below its band)
       if (!o.x && !o.y) delete settings.portraitOffset[p.path]; else settings.portraitOffset[p.path] = o;
       clearTimeout(sizeSaveT); sizeSaveT = setTimeout(saveSettings, 600);
       broadcast();
@@ -4220,7 +4220,7 @@ ipcMain.handle('settings', (e, patch) => {
     const anchor = ['left', 'center', 'right'].includes(t.anchor) ? t.anchor : 'right';
     const pt = patch.talk || {};
     const pos = !('pos' in pt) && 'anchor' in pt ? { left: 0, center: 0.5, right: 1 }[anchor]
-      : t.pos != null && Number.isFinite(Number(t.pos)) ? Math.min(1, Math.max(0, Number(t.pos))) : { left: 0, center: 0.5, right: 1 }[anchor];
+      : t.pos != null && Number.isFinite(Number(t.pos)) ? Math.min(3, Math.max(-2, Number(t.pos))) : { left: 0, center: 0.5, right: 1 }[anchor]; // (Second Builder (second-conversation-rework): past 0 and 1, the speaker partly off the TV)
     settings.talk = { size: Math.min(0.7, Math.max(0.1, Number(t.size) || 0.34)), pos, anchor: pos < 0.34 ? 'left' : pos > 0.66 ? 'right' : 'center', blur: Math.min(1, Math.max(0, Number(t.blur) || 0)),
       look: TALK_LOOKS.includes(t.look) ? t.look : 'ink', names: !!t.names }; // 4.4: ink, smoke, parchment, embers (Second Builder, second-conversation-stage: names: the speaker's name on the band)
   }

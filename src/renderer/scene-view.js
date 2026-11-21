@@ -954,9 +954,26 @@ class SceneView {
   }
 
   // ---------- layers: tokens and overlays in map space, sounds ----------
+  // Beta 3.54: the holders of the app's lights (a wall torch, a lamp post …) are drawn like assets, from the light
+  // itself (fx.holder): there is no picture of their own to move, hide or remove apart from the light
+  holderLayers() {
+    const out = [];
+    if (typeof LIGHT_DATA !== 'object') return out;
+    const g = this.map.grid.size || 1;
+    for (const f of this.map.fx) {
+      if (!f.holder) continue;
+      const d = LIGHT_DATA.lights.find((x) => x.id === f.holder);
+      if (!d) continue;
+      out.push({ id: `h-${f.id}`, role: 'asset', kind: 'image', url: new URL(`lights/${d.file}`, document.baseURI).href, x: f.x, y: f.y, w: d.w * g * (f.hs || 1), rotation: f.rotation || 0, hidden: !!f.hidden, opacity: 1, holder: f.id });
+    }
+    return out;
+  }
+  layerOf(id) { return this.map ? this.map.layers.find((x) => x.id === id) || (this.holders || []).find((x) => x.id === id) || null : null; }
   renderLayers() {
     const seen = new Set();
-    for (const l of this.map.layers) {
+    const hs = this.holderLayers(); this.holders = hs;
+    const all = hs.length ? [...this.map.layers, ...hs] : this.map.layers;
+    for (const l of all) {
       seen.add(l.id);
       let n = this.nodes.get(l.id);
       const parent = l.role === 'overlay' ? (l.anchor === 'table' ? this.tableOv : this.overlaysEl) : l.role === 'asset' ? this.assetParent(l) : null; // (Prototype 18: in front of the effects; 23: above the tokens)
@@ -970,7 +987,7 @@ class SceneView {
     // Prototype 3: put them in layer order only where the order is off. (Re-attaching every element on every state
     // cancelled CSS transitions (a phone step never slid), restarted the turn glow, and cost a DOM move per layer.)
     const want = new Map(); // parent → its elements in layer order
-    for (const l of this.map.layers) {
+    for (const l of all) {
       const n = this.nodes.get(l.id);
       const par = n && n.el.parentNode;
       if (!par) continue;
@@ -1042,7 +1059,7 @@ class SceneView {
       });
       (l.anchor === 'table' ? this.tableOv : this.overlaysEl).appendChild(m);
     } else if (l.role === 'asset') {
-      const wrap = div('sv-asset');
+      const wrap = div(l.holder ? 'sv-asset sv-holder' : 'sv-asset');
       wrap.dataset.id = l.id;
       // (4.8: "Play as video (sharp)": an asset the GM wants at the video's own sharpness is never baked)
       n = { id: l.id, el: wrap, media: null, url: l.url, role: l.role, nw: 0, nh: 0, path: l.path || null, anim: l.kind === 'video' && !!l.path && !l.asVideo, vid: l.kind === 'video' && !!l.path };
@@ -1657,13 +1674,13 @@ class SceneView {
       if (n.media !== m) return;
       n.nw = m.videoWidth || m.naturalWidth;
       n.nh = m.videoHeight || m.naturalHeight;
-      const cur = this.map && this.map.layers.find((x) => x.id === n.id);
+      const cur = this.layerOf(n.id);
       if (cur) this.updateNode(cur, n);
       this.emit('render');
     });
     n.media = m;
     n.el.appendChild(m);
-    const cur = this.map && this.map.layers.find((x) => x.id === n.id);
+    const cur = this.layerOf(n.id);
     if (cur) this.updateNode(cur, n);
   }
   // how sharp a sheet this asset needs: its size on the TV in screen pixels
@@ -1968,7 +1985,7 @@ class SceneView {
     if (m.spells.some((s) => this.shown(s)) || this.ghost) return true;
     if (m.fx.some((f) => f.kind !== 'light' && f.preset !== 'roof' && this.shown(f))) return true; // (Beta 3.1: a Roof alone doesn't move)
     if (m.light.from && Date.now() - m.light.from.t0 < m.light.from.s * 1000 + 400) return true; // the light is changing
-    return m.light.darkness > 0 && m.fx.some((f) => f.kind === 'light' && (f.flicker || f.wave));
+    return m.light.darkness > 0 && m.fx.some((f) => f.kind === 'light' && f.lit !== false && (f.flicker || f.wave));
   }
   updateAnimation() {
     this.updateTreeLoop();
@@ -2245,7 +2262,7 @@ class SceneView {
   }
   drawAtmo(t) {
     this._lo = this.myMoments(Date.now()).find((m) => m.id === 'lightsout') || null;
-    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && this.shown(f)); // (Sway has a layer of its own; Roof only cuts the weather)
+    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f)); // (Sway has a layer of its own; Roof only cuts the weather; Beta 3.54: a light put out has no flame)
     this.stats.emitters = all.filter((f) => f.kind === 'emitter').length;
     this.stats.regions = all.filter((f) => f.kind === 'region').length;
     // magical darkness goes on its own layer above the grid, so grid lines don't show through it
@@ -2325,7 +2342,7 @@ class SceneView {
     const g = this.map.grid;
     // lights, plus flames (torches, campfires, candles) that carry their own light, in their own colour
     const idle = Vision.markersIdle(this.map); // (Prototype 17: the party marker rests while player tokens see for themselves)
-    const lights = this.map.fx.filter((f) => (f.kind === 'light' || (f.kind === 'emitter' && f.bright > 0)) && this.shown(f) && !Vision.idleMarker(f, idle)).map((f) => {
+    const lights = this.map.fx.filter((f) => FXDATA.givesLight(f) && this.shown(f) && !Vision.idleMarker(f, idle)).map((f) => { // (Beta 3.54: not one that is put out)
       const p = this.fxPos(f);
       const D = Math.max(0.05, Geom.ftToIn(g, Math.max(f.dim || 0, f.bright || 0)));
       const color = f.color || (f.kind === 'light' ? '#ffcf8a' : '#ffb45a');
@@ -2594,7 +2611,7 @@ class SceneView {
     const g = this.map.grid;
     const list = this.showHandles === 'party' ? this.map.fx.filter((f) => f.kind === 'light' && f.preset === 'party') : this.map.fx;
     const idle = Vision.markersIdle(this.map); // (Prototype 17)
-    const sig = JSON.stringify([this.showHandles, list.map((f) => [f.id, f.kind, f.preset, f.hidden, f.bright, f.dim, f.r, this.fxPos(f), f.kind === 'region' ? f.strokes.length : 0, f.eye]), this.v, g.size, this.selectedFx, this.ppi, idle]);
+    const sig = JSON.stringify([this.showHandles, list.map((f) => [f.id, f.kind, f.preset, f.hidden, f.lit, f.bright, f.dim, f.r, this.fxPos(f), f.kind === 'region' ? f.strokes.length : 0, f.eye]), this.v, g.size, this.selectedFx, this.ppi, idle]);
     if (sig === this.handleSig) return;
     this.handleSig = sig;
     this.handlesEl.innerHTML = '';
@@ -2612,7 +2629,7 @@ class SceneView {
           this.handlesEl.append(ring);
         }
       }
-      const el = div(`sv-handle kind-${f.kind} ${f.preset === 'party' ? 'party' : ''} ${f.id === this.selectedFx ? 'on' : ''} ${f.hidden ? 'is-hidden' : ''} ${f.attachTo ? 'attached' : ''} ${f.eye && f.attachTo ? 'eye' : ''} ${Vision.idleMarker(f, idle) ? 'idle' : ''}`);
+      const el = div(`sv-handle kind-${f.kind} ${f.preset === 'party' ? 'party' : ''} ${f.id === this.selectedFx ? 'on' : ''} ${f.hidden ? 'is-hidden' : ''} ${f.lit === false ? 'is-unlit' : ''} ${f.attachTo ? 'attached' : ''} ${f.eye && f.attachTo ? 'eye' : ''} ${Vision.idleMarker(f, idle) ? 'idle' : ''}`);
       el.dataset.id = f.id;
       if (Vision.idleMarker(f, idle)) el.dataset.tip = 'The party marker rests: the player tokens on this map see for themselves';
       el.style.left = `${at.x}px`;
@@ -2622,6 +2639,7 @@ class SceneView {
     }
   }
   static fxIcon(f) {
+    if (f.holder) return f.preset === 'torch' || f.preset === 'campfire' || f.preset === 'candle' ? { torch: 'flame', campfire: 'campfire', candle: 'candle' }[f.preset] : 'bulb'; // (Beta 3.54: a light of the app)
     if (f.kind === 'light') return f.preset === 'party' ? 'users-group' : f.preset === 'moon' ? 'moon' : 'bulb';
     const list = f.kind === 'region' ? FXDATA.REGIONS : FXDATA.EMITTERS;
     const d = list.find((x) => x.id === f.preset);
@@ -3225,9 +3243,8 @@ function ownColour(f, map) {
   if (!f.color) return false;
   const c = String(f.color).toLowerCase();
   if (f.kind === 'light') { const d = typeof FXDATA !== 'undefined' ? FXDATA.LIGHTS.find((x) => x.id === f.preset) : null; return !(d && String(d.color).toLowerCase() === c); }
-  if (f.fixture && typeof LIGHT_DATA === 'object') {
-    const l = map && (map.layers || []).find((x) => x.id === f.fixture);
-    const d = l && l.fixture ? LIGHT_DATA.lights.find((x) => x.id === l.fixture.kind) : null;
+  if (f.holder && typeof LIGHT_DATA === 'object') { // (Beta 3.54: a light of the app knows its holder)
+    const d = LIGHT_DATA.lights.find((x) => x.id === f.holder);
     return !(d && String(d.fx.color || '').toLowerCase() === c);
   }
   return true;

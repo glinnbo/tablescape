@@ -294,6 +294,7 @@ function normalize(m) {
   out.layers = Array.isArray(out.layers) ? out.layers.filter((l) => l && l.role) : [];
   for (const l of out.layers) if (l.role === 'overlay' && !l.anchor) l.anchor = 'map';
   out.fx = Array.isArray(out.fx) ? out.fx : [];
+  foldFixtures(out); // (Beta 3.54: a light of the app is one thing now)
   out.spells = Array.isArray(out.spells) ? out.spells : [];
   out.weather = normalizeWeather(m && m.weather);
   out.wind = cleanWind(m && m.wind);
@@ -600,26 +601,81 @@ function sceneSig(D) {
 const sceneMatches = (map, D) => { const cur = sceneOf(map); if (!('look' in D)) delete cur.look; return sceneSig(cur) === sceneSig(placeScene(D, map)); }; // (a snapshot from before 4.5 has no colours)
 
 // media(path) is injected by the caller: turns a file path into {path, rel, name, url}
-// Beta 3.49: a light of the app is a picture (an asset with .fixture) and its flame (an effect with .fixture). After
-// anything done to layers or effects they are put right: the flame lies where the picture lies, a copied picture has a
-// flame of its own, a flame whose picture is gone goes too.
+// Beta 3.49 made a light of the app two things: a picture (an asset with .fixture) and its flame (an effect with
+// .fixture). Beta 3.54 (Glinn: a flame removed left its holder behind, which could not be removed) makes a light one
+// thing: an effect that draws its holder itself (.holder: which light of the app; .rotation; .hs: the holder's size if
+// it was made bigger; .wall: the wall it hangs on). Old maps are folded together when they open (and after anything that
+// could bring the two pieces back, an undo step or a snapshot from before 3.54): the picture goes, its flame becomes the
+// light; a picture whose flame was removed becomes a light that is put out. lit: false is put out (it used to be hidden),
+// hidden is now only "not on the TV" (the picture's eye).
 const fixtureReach = (v) => Math.min(120, Math.max(5, Math.round((Number(v) || 20) / 5) * 5)); // (bright light in feet, in steps of 5)
-function syncFixtures(map) {
+function lightFxOf(d, x, y, g) { return { id: newId('x'), kind: 'emitter', preset: d.fx.preset, x, y, r: r3(d.fx.r * g), color: d.fx.color || null, intensity: 1, hidden: false, attachTo: null, density: 1, speed: 1, bright: d.fx.bright, dim: d.fx.dim, flicker: true, holder: d.id, rotation: 0 }; }
+function foldFixtures(map) {
   if (!Array.isArray(map.layers) || !Array.isArray(map.fx)) return;
   if (!map.layers.some((l) => l.fixture) && !map.fx.some((f) => f.fixture)) return;
+  const g = (map.grid && map.grid.size) || 1;
   const used = new Set();
   for (const l of map.layers) {
     if (!l.fixture) continue;
+    const d = lightOf(String(l.fixture.kind || ''));
+    if (!d) { delete l.fixture; continue; } // (a light this app no longer knows: its picture stays as an asset)
     let f = map.fx.find((x) => x.id === l.fixture.fx);
-    if (f && used.has(f.id)) { f = { ...structuredClone(f), id: newId('x') }; map.fx.push(f); l.fixture = { ...l.fixture, fx: f.id }; }
-    if (f) { used.add(f.id); f.fixture = l.id; f.x = l.x; f.y = l.y; }
+    if (f && used.has(f.id)) f = { ...structuredClone(f), id: newId('x') }; // (a copied picture had a flame of its own)
+    const lit = !!f && (f.holder ? f.lit !== false : !f.hidden); // (a flame hidden was a light put out)
+    if (!f) f = lightFxOf(d, l.x, l.y, g);
+    else if (!map.fx.includes(f)) map.fx.push(f);
+    used.add(f.id);
+    delete f.fixture;
+    Object.assign(f, { kind: 'emitter', holder: d.id, x: l.x, y: l.y, rotation: normDeg(Number(l.rotation) || 0), hidden: !!l.hidden });
+    if (lit) delete f.lit; else f.lit = false;
+    const hs = l.w > 0 ? l.w / (d.w * g) : 1;
+    if (Math.abs(hs - 1) > 0.02) f.hs = r3(hs);
+    if (!map.fx.includes(f)) map.fx.push(f);
   }
-  const have = new Set(map.layers.filter((l) => l.fixture).map((l) => l.id));
-  map.fx = map.fx.filter((f) => !f.fixture || have.has(f.fixture));
+  map.layers = map.layers.filter((l) => !l.fixture);
+  map.fx = map.fx.filter((f) => !f.fixture || used.has(f.id)); // (a flame whose picture was gone)
+  for (const f of map.fx) delete f.fixture;
+}
+// a light's name (its holder's, its flame's, its preset's) and the colour it comes in
+function lightName(f) {
+  if (f.holder) { const d = lightOf(f.holder); if (d) return d.label; }
+  const d = (f.kind === 'light' ? FXDATA.LIGHTS : FXDATA.EMITTERS).find((x) => x.id === f.preset);
+  return d ? d.label : 'Light';
+}
+function ownLightColor(f) {
+  if (f.holder) { const d = lightOf(f.holder); return (d && d.fx.color) || null; }
+  if (f.kind === 'light') { const d = FXDATA.LIGHTS.find((x) => x.id === f.preset); return (d && d.color) || '#ffb45a'; }
+  return null;
+}
+// Beta 3.54: a wall light hangs on its wall. When the walls of a drawn map are made again and its wall is gone, another
+// wall right there keeps it (it is hung on that one); none there: the light goes with its wall (Undo brings both back,
+// the walls are no undo step of their own). A light of the app that was never hung on a wall gets the one it is at.
+function wallLightsFollow(map) {
+  const g = (map.grid && map.grid.size) || 1;
+  const near = (f) => {
+    let best = null;
+    for (const w of map.walls) {
+      if (w.kind === 'invisible') continue;
+      const lx = w.x2 - w.x1; const ly = w.y2 - w.y1; const L2 = lx * lx + ly * ly; if (L2 < 1e-9) continue;
+      const u = Math.min(1, Math.max(0, ((f.x - w.x1) * lx + (f.y - w.y1) * ly) / L2));
+      const dist = Math.hypot(f.x - w.x1 - lx * u, f.y - w.y1 - ly * u);
+      if (dist < g * 0.75 && (!best || dist < best.dist)) best = { dist, w };
+    }
+    return best && best.w;
+  };
+  const gone = new Set();
+  for (const f of map.fx) {
+    if (!f.holder) continue;
+    const d = lightOf(f.holder); if (!d || d.wall == null) continue;
+    if (f.wall && map.walls.some((w) => w.id === f.wall)) continue;
+    const w = near(f);
+    if (w) f.wall = w.id; else if (f.wall) gone.add(f.id);
+  }
+  if (gone.size) map.fx = map.fx.filter((f) => !gone.has(f.id));
 }
 function apply(map, type, p, media) {
   const r = applyRaw(map, type, p, media);
-  if (r && r.changed && map && /^(layer|fx|scene)\./.test(type)) syncFixtures(map);
+  if (r && r.changed && map && /^(layer|fx|scene|history)\./.test(type)) foldFixtures(map);
   return r;
 }
 function applyRaw(map, type, p, media) {
@@ -755,7 +811,6 @@ function applyRaw(map, type, p, media) {
       const l = map.layers.find((x) => x.id === p.id);
       if (!l) return { changed: null };
       updateLayer(l, p);
-      if (l.fixture) { const f = map.fx.find((x) => x.id === l.fixture.fx); if (f) { f.x = l.x; f.y = l.y; } } // (Beta 3.49: a light's flame goes along)
       return { changed: 'all' };
     }
     case 'layer.reroll': { // (Beta 3.20) living trees: another look and movement (a new seed), one or several
@@ -808,7 +863,6 @@ function applyRaw(map, type, p, media) {
       const l = map.layers.find((x) => x.id === p.id);
       if (!l) return { changed: null };
       map.layers = map.layers.filter((x) => x.id !== p.id);
-      if (l.fixture) map.fx = map.fx.filter((x) => x.id !== l.fixture.fx); // (Beta 3.49: a light's flame goes with it)
       detach(map, l);
       return { changed: 'all', label: `${l.name} removed` };
     }
@@ -905,6 +959,7 @@ function applyRaw(map, type, p, media) {
         density: p.density ?? 1, speed: p.speed ?? 1,
       };
       if (p.sat != null) fx.sat = Math.min(1, Math.max(0, Number(p.sat) || 0)); // how strongly its light colours the map
+      if (p.lit === false) fx.lit = false; // (Beta 3.54: a light placed put out)
       // Beta 2: which way it faces (light shaft, arcs, a bullseye lantern), what kind (a vent), how its light lives
       if (p.angle != null) fx.angle = normDeg(p.angle);
       if (p.variant) fx.variant = String(p.variant).slice(0, 20);
@@ -917,13 +972,13 @@ function applyRaw(map, type, p, media) {
       if (p.stretch != null) fx.stretch = Math.min(3, Math.max(1, Number(p.stretch) || 1.5));
       if (fx.kind === 'light') Object.assign(fx, { bright: p.bright ?? 20, dim: p.dim ?? 40, flicker: p.flicker ?? true, color: p.color || '#ffb45a' });
       // flames also light up a dark map
-      if (fx.kind === 'emitter' && p.bright) Object.assign(fx, { bright: p.bright, dim: p.dim ?? p.bright * 2, flicker: true });
+      if (fx.kind === 'emitter' && p.bright) Object.assign(fx, { bright: p.bright, dim: p.dim ?? p.bright * 2, flicker: p.flicker ?? true });
       if (fx.kind === 'region') fx.strokes = [];
       // the party: what it carries, darkvision, how far it sees, locked to the grid
       if (fx.kind === 'light' && fx.preset === 'party') Object.assign(fx, partyFields(fx, p));
       if (p.byPhone) fx.eye = true; // (Prototype 14: a player's eye: it sits on the token and can't be grabbed off it)
       map.fx.push(fx);
-      return { changed: 'all', selected: fx.id, label: fx.kind === 'light' ? 'Light added' : 'Effect added' };
+      return { changed: 'all', selected: fx.id, label: FXDATA.isLight(fx) ? `${lightName(fx)} placed` : 'Effect added' };
     }
     case 'fx.update': {
       const fx = map.fx.find((x) => x.id === p.id);
@@ -931,6 +986,10 @@ function applyRaw(map, type, p, media) {
       Object.assign(fx, pick(p, ['x', 'y', 'r', 'color', 'intensity', 'hidden', 'bright', 'dim', 'flicker', 'attachTo', 'preset', 'density', 'speed', 'sat', 'variant', 'cone']));
       if ('angle' in p) fx.angle = normDeg(p.angle);
       if ('eye' in p) fx.eye = !!p.eye;
+      if ('lit' in p) { if (p.lit === false) fx.lit = false; else delete fx.lit; } // (Beta 3.54)
+      if (fx.holder && 'rotation' in p) fx.rotation = normDeg(Number(p.rotation) || 0);
+      if (fx.holder && 'wall' in p) { if (p.wall) fx.wall = String(p.wall); else delete fx.wall; }
+      if (fx.holder && 'hs' in p) fx.hs = Math.min(4, Math.max(0.25, Number(p.hs) || 1));
       if ('wave' in p) fx.wave = ['pulse', 'sputter'].includes(p.wave) ? p.wave : null;
       if ('dust' in p) fx.dust = Math.min(12, Math.max(0.05, Number(p.dust) || 1));
       if (p.shape) fx.shape = String(p.shape).slice(0, 20);
@@ -998,56 +1057,61 @@ function applyRaw(map, type, p, media) {
       if (gone.length) map.fx = map.fx.filter((f) => !gone.includes(f.id));
       return { changed: 'all', label: 'Effect erased' };
     }
-    // Beta 3.49: a light that comes with the app: its unlit picture (an asset) and what burns on it (the app's own
-    // flame or glow, with a light that walls stop), made together and kept together: moved, the light goes along;
-    // removed, both go. p: { kind, x, y, rotation, color, lit }
+    // Beta 3.49: a light that comes with the app: its unlit picture and what burns on it (the app's own flame or glow,
+    // with a light that walls stop). Beta 3.54: one effect that draws its holder (.holder) itself, so it is moved, put
+    // out, hidden and removed as one. p: { kind, x, y, rotation, wall, color, lit, bright, intensity, flicker, wave, sat, r }
     case 'fx.fixture': {
       const d = lightOf(String(p.kind || ''));
-      if (!d || !media) return { changed: null };
+      if (!d) return { changed: null };
       const g = map.grid.size || 1;
-      const layer = { id: newId('l'), role: 'asset', kind: 'image', ...media(d.path), ...ASSET_DEFAULTS, x: r3(+p.x || 0), y: r3(+p.y || 0), w: r3(d.w * g), rotation: normDeg(Number(p.rotation) || 0), name: d.label, named: true };
-      const own = HEX6.test(String(p.color || '').toLowerCase());
-      const color = own ? String(p.color).toLowerCase() : d.fx.color || null;
-      const bright = p.bright != null ? fixtureReach(p.bright) : d.fx.bright; // (Beta 3.51: a reach of its own; dim is twice bright)
-      const fx = { id: newId('x'), kind: 'emitter', preset: d.fx.preset, x: layer.x, y: layer.y, r: d.fx.r, color, intensity: 1, hidden: p.lit === false, attachTo: null, density: 1, speed: 1, bright, dim: p.bright != null ? bright * 2 : d.fx.dim, flicker: true, fixture: layer.id };
-      if (own) fx.sat = 0.7; // (a colour picked: it colours the map strongly, by day too)
-      layer.fixture = { kind: d.id, fx: fx.id };
-      fixStretch(layer);
-      map.layers.push(layer); map.fx.push(fx);
-      return { changed: 'all', label: `${d.label} placed`, id: layer.id };
+      const fx = lightFxOf(d, r3(+p.x || 0), r3(+p.y || 0), g);
+      fx.rotation = normDeg(Number(p.rotation) || 0);
+      if (p.wall) fx.wall = String(p.wall);
+      if (HEX6.test(String(p.color || '').toLowerCase())) { fx.color = String(p.color).toLowerCase(); fx.sat = 0.7; } // (a colour picked: it colours the map strongly, by day too)
+      if (p.bright != null) { fx.bright = fixtureReach(p.bright); fx.dim = fx.bright * 2; } // (Beta 3.51: a reach of its own; dim is twice bright)
+      if (p.lit === false) fx.lit = false;
+      if (p.intensity != null) fx.intensity = Math.min(1, Math.max(0.1, Number(p.intensity) || 1));
+      if (p.flicker === false) fx.flicker = false;
+      if (p.wave) fx.wave = ['pulse', 'sputter'].includes(p.wave) ? p.wave : null;
+      if (p.sat != null && fx.color) fx.sat = Math.min(1, Math.max(0, Number(p.sat) || 0));
+      if (p.r > 0) fx.r = r3(p.r);
+      map.fx.push(fx);
+      return { changed: 'all', selected: fx.id, label: `${d.label} placed`, id: fx.id };
     }
-    case 'fx.fixtureSet': { // Beta 3.51: a placed light changed (p.id: its picture): color ('' its own), bright (ft), lit
-      const layer = map.layers.find((x) => x.fixture && x.id === p.id);
-      const d = layer && lightOf(layer.fixture.kind);
-      const fx = layer && map.fx.find((x) => x.id === layer.fixture.fx);
-      if (!layer || !d || !fx) return { changed: null };
+    // Beta 3.54: any light changed at once (p.id): color ('' its own), bright (ft; dim is twice that), lit
+    case 'fx.lightSet': case 'fx.fixtureSet': {
+      const fx = map.fx.find((x) => x.id === p.id);
+      if (!fx || !FXDATA.isLight(fx)) return { changed: null };
       if ('color' in p) {
         const c = String(p.color || '').toLowerCase();
-        if (HEX6.test(c)) { fx.color = c; fx.sat = 0.7; } else { fx.color = d.fx.color || null; delete fx.sat; }
+        if (HEX6.test(c)) { fx.color = c; fx.sat = Math.max(0.7, Number(fx.sat) || 0); } else { fx.color = ownLightColor(fx); delete fx.sat; }
       }
       if (p.bright != null) { fx.bright = fixtureReach(p.bright); fx.dim = fx.bright * 2; }
-      if ('lit' in p) fx.hidden = !p.lit;
-      return { changed: 'all', label: `${layer.name || 'Light'} changed` };
+      if ('lit' in p) { if (p.lit) delete fx.lit; else fx.lit = false; }
+      return { changed: 'all', label: `${lightName(fx)} changed` };
     }
-    case 'fx.fixtureLit': { // lit or put out (p.id: the picture's or the effect's id; p.on: which, else the other of now)
-      const layer = map.layers.find((x) => x.fixture && (x.id === p.id || x.fixture.fx === p.id));
-      if (!layer) return { changed: null };
-      const d = lightOf(layer.fixture.kind);
-      let fx = map.fx.find((x) => x.id === layer.fixture.fx);
-      const on = p.on === undefined ? !(fx && !fx.hidden) : !!p.on;
-      if (!fx && d) { // (its flame was removed by hand: a new one)
-        fx = { id: newId('x'), kind: 'emitter', preset: d.fx.preset, x: layer.x, y: layer.y, r: d.fx.r, color: d.fx.color || null, intensity: 1, hidden: true, attachTo: null, density: 1, speed: 1, bright: d.fx.bright, dim: d.fx.dim, flicker: true, fixture: layer.id };
-        layer.fixture.fx = fx.id; map.fx.push(fx);
-      }
-      if (!fx || !fx.hidden === on) return { changed: null };
-      fx.hidden = !on;
-      return { changed: 'all', label: `${layer.name || 'Light'} ${on ? 'lit' : 'put out'}` };
+    // lit or put out (p.id: the light; p.on: which, else the other of now). The Play tools ask before, as doors do
+    case 'fx.lit': case 'fx.fixtureLit': {
+      const fx = map.fx.find((x) => x.id === p.id);
+      if (!fx || !FXDATA.isLight(fx)) return { changed: null };
+      const on = p.on === undefined ? fx.lit === false : !!p.on;
+      if ((fx.lit !== false) === on) return { changed: null };
+      if (on) delete fx.lit; else fx.lit = false;
+      return { changed: 'all', label: `${lightName(fx)} ${on ? 'lit' : 'put out'}` };
+    }
+    case 'fx.duplicate': { // (Beta 3.54) an effect copied beside it: a light with its holder stays one
+      const f = map.fx.find((x) => x.id === p.id);
+      if (!f || f.kind === 'region') return { changed: null };
+      const copy = { ...structuredClone(f), id: newId('x'), x: r3((f.x || 0) + (Number(p.dx) || 0)), y: r3((f.y || 0) + (Number(p.dy) || 0)), attachTo: null };
+      delete copy.wall; delete copy.eye; delete copy.imported;
+      map.fx.push(copy);
+      return { changed: 'all', selected: copy.id, label: 'Duplicated' };
     }
     case 'fx.remove': {
       const fx = map.fx.find((x) => x.id === p.id);
       if (!fx) return { changed: null };
       map.fx = map.fx.filter((x) => x.id !== p.id);
-      return { changed: 'all', label: fx.kind === 'light' ? 'Light removed' : 'Effect removed' };
+      return { changed: 'all', label: FXDATA.isLight(fx) ? `${lightName(fx)} removed` : 'Effect removed' };
     }
     case 'light.update': {
       const L = map.light;
@@ -1348,6 +1412,7 @@ function applyRaw(map, type, p, media) {
             if (old) { w.id = old.id; if (w.door || w.kind === 'window') { w.open = !!old.open; if (old.shut) w.shut = true; } }
             map.walls.push(w);
           }
+          wallLightsFollow(map); // (Beta 3.54: a wall light goes with its wall)
         }
       }
       return { changed: 'all' };
@@ -1566,8 +1631,7 @@ function recordSeen(map) {
   const ftIn = (ft) => (ft / 5) * map.grid.size;
   let added = false;
   for (const f of map.fx) {
-    const lit = f.kind === 'light' || (f.kind === 'emitter' && f.bright > 0);
-    if (!lit || f.hidden) continue;
+    if (!FXDATA.givesLight(f) || f.hidden) continue; // (Beta 3.54: not one that is put out)
     let x = f.x; let y = f.y;
     if (f.attachTo) { const t = map.layers.find((l) => l.id === f.attachTo); if (t) { x = t.x; y = t.y; } }
     const r = ftIn(Math.max(f.dim || 0, f.bright || 0));
