@@ -24,6 +24,16 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.46', [
+      'Draw → Tile now has a blue block of its own with the living effects: Grass, Water, Lava, Shimmer (it was called Glow), Pulse and Ripple. Pick one and draw it with a Box, Round, a Shape or a Brush; Erase brushes effects away and leaves the floor (Alt does the same with the other shapes)',
+      'Fill pours an effect over all the floor that lies at one height and is joined to the spot you click: water fills a pit and stops at its rim',
+      'Every effect has its own card of sliders, for all of it on the map (the button under its choices). Map settings keeps only the switch Living effects',
+      'Grass: it no longer vanishes between the gusts (Between gusts sets how much stays). Grows on lets it stand everywhere, on the bright or the dark parts of the floor, or on a colour you pick from the floor; where it fits best it is thickest and longest. Its blades can have any colour, and Colour variety mixes lighter, darker, yellower and bluer ones',
+      'Lava glows more where the floor is bright, throws embers that drift with the wind, and has a heat shimmer of light; the floor under it stays sharp. Sliders: Glow, Embers, Heat shimmer, Speed, Pick-up range',
+      'Water: a Transparency slider, and every pond can have its own colour',
+      'Shimmer, Pulse and Ripple: Intensity, Speed and Pick-up range each (how bright and strong a colour must be to shine)',
+      'Moving an effect\'s slider is no longer an empty step for Undo',
+    ]],
     ['Beta 3.45', [
       'Spell areas look new: every damage type has its own realistic look, drawn by the graphics card. Flames pour out of a Fireball, frost spreads along a Cone of Cold, bolts fork, gas rolls, vines tangle, water whirls, the ground breaks and insects swarm',
       'Each spell has its own moment when it is cast (the Fireball blooms, frost spreads, vines grow in), and a colour you pick for a spell still colours it',

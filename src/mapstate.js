@@ -31,12 +31,37 @@ const WIND_RANGE = { dir: [0, 360], strength: [0, 3], lean: [0, 1], branches: [0
 function defaultWind() { return { auto: true, storm: false, dir: 30, strength: 1, lean: 0, branches: 1, rustle: 1 }; }
 // Beta 3.42, living tiles (water, lava and grass that move on an Oldschool map): on or off for this map, and how the
 // grass is: how many blades (amount), how long (length), how soon they show in a light wind (breeze). Each about 1.
-function defaultLive() { return { on: true, amount: 1, length: 1, breeze: 1, glow: 1, speed: 1 }; } // (Beta 3.43: glow, speed)
+// Beta 3.46: what moves on an Oldschool map (living.js), set for the map and for each kind of effect on its own card.
+// [what a new map has, the least, the most]
+const LIVE_SPEC = {
+  grass: { amount: [1, 0, 1.5], length: [1, 0.3, 2.5], calm: [0.35, 0, 1], range: [0.5, 0.05, 1], vary: [0.3, 0, 1] },
+  water: { clear: [0.25, 0, 1], speed: [1, 0.3, 2.5] },
+  lava: { glow: [1, 0, 2], embers: [1, 0, 2], heat: [0.5, 0, 1], speed: [1, 0.3, 2.5], range: [0.5, 0, 1] },
+  shimmer: { power: [1, 0, 2], speed: [1, 0.3, 2.5], range: [0.5, 0, 1] },
+  pulse: { power: [1, 0, 2], speed: [1, 0.3, 2.5], range: [0.5, 0, 1] },
+  ripple: { power: [1, 0, 2], speed: [1, 0.3, 2.5], range: [0.5, 0, 1] },
+};
+const GROWS = ['all', 'bright', 'dark', 'colour']; // where grass grows: everywhere, on the floor's bright or dark parts, on a colour of it
+const HEX6 = /^#[0-9a-f]{6}$/;
+function defaultLive() {
+  const out = { on: true };
+  for (const [fx, spec] of Object.entries(LIVE_SPEC)) { out[fx] = {}; for (const [k, [d]] of Object.entries(spec)) out[fx][k] = d; }
+  out.grass.grow = 'all'; out.grass.growColor = '#5c8a34';
+  return out;
+}
 function cleanLive(v) {
   const out = defaultLive();
   if (!v || typeof v !== 'object') return out;
   out.on = v.on !== false;
-  for (const [k, [a, b]] of Object.entries({ amount: [0, 1.5], length: [0.3, 2.5], breeze: [0.3, 2.5], glow: [0, 2], speed: [0.3, 2.5] })) { const n = Number(v[k]); if (Number.isFinite(n)) out[k] = Math.round(Math.min(b, Math.max(a, n)) * 100) / 100; }
+  // (a map of Beta 3.42 to 3.45 had a few sliders for the whole map)
+  const old = { grass: { amount: v.amount, length: v.length }, shimmer: { power: v.glow, speed: v.speed }, pulse: { power: v.glow, speed: v.speed }, ripple: { power: v.glow, speed: v.speed } };
+  for (const [fx, spec] of Object.entries(LIVE_SPEC)) {
+    const src = { ...(old[fx] || {}), ...(v[fx] && typeof v[fx] === 'object' ? v[fx] : {}) };
+    for (const [k, [, a, b]] of Object.entries(spec)) { const n = Number(src[k]); if (src[k] != null && Number.isFinite(n)) out[fx][k] = Math.round(Math.min(b, Math.max(a, n)) * 100) / 100; }
+  }
+  const g = v.grass && typeof v.grass === 'object' ? v.grass : {};
+  if (GROWS.includes(g.grow)) out.grass.grow = g.grow;
+  if (HEX6.test(String(g.growColor || '').toLowerCase())) out.grass.growColor = String(g.growColor).toLowerCase();
   return out;
 }
 function cleanWind(w) {
@@ -61,8 +86,8 @@ function cleanTree(t, ref) {
 // the map's picture (renderer/oldschool.js) and the line-of-sight walls (os.result); the TV only shows that picture.
 const OS_EDGES = ['ledge', 'walls', 'rock', 'cliff', 'fade']; // (Beta 3.28: fade)
 const OS_SHAPES = ['rect', 'poly', 'round', 'path', 'brush'];
-const LIVE_FX = ['grass', 'water', 'lava', 'glow', 'pulse', 'ripple', 'none']; // (Beta 3.43)
-const GRASS_TINTS = ['green', 'dry', 'wheat', 'autumn'];
+const LIVE_FX = ['grass', 'water', 'lava', 'shimmer', 'pulse', 'ripple', 'none']; // (Beta 3.43; 3.46: Glow is called Shimmer)
+const OLD_TINT = { green: '#5c8a34', dry: '#9a8f4e', wheat: '#c8a548', autumn: '#a85f28' }; // (Beta 3.43 to 3.45: four colours by name)
 // Beta 3.25: ground drawn into an Oldschool map (the Draw tool's Ground): the picture shows the pool, an effect of the
 // same kind (fx, key os) makes it move
 const GROUND_KINDS = ['water', 'lava', 'acid', 'darkness', 'swamp'];
@@ -90,9 +115,13 @@ function cleanOsItem(it) {
   if (!kind) return null;
   const pts = ptsOf(it.pts);
   if (kind === 'live') { // (Beta 3.43) grass, water, lava, glow, pulse or ripple over whatever floor lies there; 'none' takes effects away
-    const shape = OS_SHAPES.includes(it.shape) ? it.shape : 'poly';
-    if (pts.length < (shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' ? 1 : 2) || !LIVE_FX.includes(it.fx)) return null;
-    return { id, kind, shape, pts, r: r3(osNum(it.r, 0.5, 0.05, 50)), fx: it.fx, ...(it.fx === 'grass' && GRASS_TINTS.includes(it.tint) ? { tint: it.tint } : {}), mixW: Math.round(osNum(it.mixW, 1.5, 0, 3) * 2) / 2 };
+    // (3.46: shape 'fill': from one spot over all the floor that lies at its height and is joined to it; a colour of
+    // one's own for grass and for water, any colour)
+    const shape = it.shape === 'fill' || OS_SHAPES.includes(it.shape) ? it.shape : 'poly';
+    const fx = it.fx === 'glow' ? 'shimmer' : it.fx;
+    if (pts.length < (shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' || shape === 'fill' ? 1 : 2) || !LIVE_FX.includes(fx)) return null;
+    const tint = OLD_TINT[it.tint] || String(it.tint || '').toLowerCase();
+    return { id, kind, shape, pts: shape === 'fill' ? pts.slice(0, 1) : pts, r: r3(osNum(it.r, 0.5, 0.05, 50)), fx, ...((fx === 'grass' || fx === 'water') && HEX6.test(tint) ? { tint } : {}), mixW: shape === 'fill' ? 0 : Math.round(osNum(it.mixW, 1.5, 0, 3) * 2) / 2 };
   }
   if (kind === 'paint') { // (Beta 3.26) a floor painted into the floors under a brush
     if (pts.length < 1) return null;
@@ -1009,9 +1038,11 @@ function apply(map, type, p, media) {
       if (JSON.stringify(map.wind) === before) return { changed: null };
       return { changed: 'all' };
     }
-    case 'live.set': { // (Beta 3.42) living tiles: on or off, and how the grass is
+    case 'live.set': { // (Beta 3.42) what moves on the map: on or off; (3.46) { fx, set }: one kind of effect's own settings
       const before = JSON.stringify(map.live);
-      map.live = cleanLive({ ...map.live, ...pick(p, ['on', 'amount', 'length', 'breeze', 'glow', 'speed']) });
+      const next = { ...map.live, ...pick(p, ['on']) };
+      if (LIVE_SPEC[p.fx] && p.set && typeof p.set === 'object') next[p.fx] = { ...map.live[p.fx], ...p.set };
+      map.live = cleanLive(next);
       if (JSON.stringify(map.live) === before) return { changed: null };
       return { changed: 'all' };
     }

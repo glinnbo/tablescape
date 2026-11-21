@@ -33,7 +33,7 @@ const Oldschool = (() => {
   // for every floor); a door: the wall line it opens
   const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 27; // (27: Beta 3.43, effects are drawn over the floors, no tile moves by itself; 26: Beta 3.42, living tiles: the picture comes with a map of where water, lava and grass lie; 25: Beta 3.40, stairs climb all the levels between their floors, floors blend at any height; 24: Beta 3.39, steps between floors of different height show on every side; 23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 28; // (28: Beta 3.46, an effect can be poured over one height (Fill), water has a colour of its own, Glow is Shimmer; 27: Beta 3.43, effects are drawn over the floors, no tile moves by itself; 26: Beta 3.42, living tiles: the picture comes with a map of where water, lava and grass lie; 25: Beta 3.40, stairs climb all the levels between their floors, floors blend at any height; 24: Beta 3.39, steps between floors of different height show on every side; 23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
   function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
 
@@ -148,12 +148,11 @@ const Oldschool = (() => {
   const LIVE_FX = [
     { id: 'grass', label: 'Grass', icon: 'plant', color: 'rgba(96,160,60,0.5)', tip: 'Blades that wave in the map\'s wind, in the colour of the floor under them or one you pick' },
     { id: 'water', label: 'Water', icon: 'droplet', color: 'rgba(50,140,170,0.5)', tip: 'The floor becomes the bed of moving water' },
-    { id: 'lava', label: 'Lava', icon: 'volcano', color: 'rgba(230,90,20,0.5)', tip: 'What is red-hot in the floor pulses and flickers' },
-    { id: 'glow', label: 'Glow', icon: 'sparkles', color: 'rgba(120,220,255,0.45)', tip: 'Bright colours in the floor shine, each spot in its own rhythm' },
+    { id: 'lava', label: 'Lava', icon: 'flame', color: 'rgba(230,90,20,0.5)', tip: 'What is red-hot in the floor glows, pulses and throws embers' },
+    { id: 'shimmer', label: 'Shimmer', icon: 'sparkles', color: 'rgba(120,220,255,0.45)', tip: 'Bright colours in the floor shine, each spot in its own rhythm' },
     { id: 'pulse', label: 'Pulse', icon: 'activity-heartbeat', color: 'rgba(200,120,255,0.45)', tip: 'Bright colours shine and breathe together, all over the map' },
     { id: 'ripple', label: 'Ripple', icon: 'target', color: 'rgba(255,220,120,0.45)', tip: 'Bright colours light up in rings that run outward from the middle of what you draw' },
   ];
-  const GRASS_TINT = { green: '#5c8a34', dry: '#9a8f4e', wheat: '#c8a548', autumn: '#a85f28' };
   const LIVE_SOFT = 0.2; // squares: how soft an effect's edge is when it was drawn soft
   const RIPPLE_MAX = 16; // squares: how far from its middle a ripple's rings are told apart
   function paintHalo(g, it, T, k, style, R) {
@@ -1151,25 +1150,77 @@ void main(){
         g2.restore();
       }
     };
+    // (Beta 3.46) Fill: an effect poured from one spot over all the floor that lies at that spot's height and is
+    // joined to it (water fills the pit and stops at its rim; a wall line or a pillar stops it as well). For it the
+    // floors' heights and the solid things are painted once beforehand, small, as the finished drawing has them
+    let fillOf = null;
+    if (lv && os.items.some((it) => it.kind === 'live' && it.shape === 'fill')) {
+      const w = lv.a.canvas.width; const hh = lv.a.canvas.height; const LSk = lv.a.getTransform().a;
+      const pc = canvas(w, hh); const pg = pc.getContext('2d', { willReadFrequently: true }); pg.setTransform(LSk, 0, 0, LSk, 0, 0);
+      for (const it of os.items) {
+        if (it.kind === 'area') paintArea(pg, it, T, k, `rgb(0,${128 + (it.level || 0) * 30},255)`, false);
+        else if (it.kind === 'cut') paintArea(pg, it, T, k, '#000', true);
+        else if (it.kind === 'line' || it.kind === 'pillar') paintSolid(pg, it, T, k, 'rgb(255,0,0)', false);
+      }
+      const d = pg.getImageData(0, 0, w, hh).data; pc.width = pc.height = 0;
+      const floorAt = (i, g0) => d[i * 4 + 3] > 128 && d[i * 4 + 2] > 128 && Math.abs(d[i * 4 + 1] - g0) <= 8;
+      fillOf = (it) => {
+        const [px, py] = T(it.pts[0][0], it.pts[0][1]); const sx = Math.round(px * LSk); const sy = Math.round(py * LSk);
+        if (sx < 0 || sy < 0 || sx >= w || sy >= hh) return null;
+        const g0 = d[(sy * w + sx) * 4 + 1];
+        if (!floorAt(sy * w + sx, g0)) return null; // (no floor at the spot)
+        const seen = new Uint8Array(w * hh); const stack = new Int32Array(w * hh); let n = 0;
+        const img = new ImageData(w, hh); const o = img.data;
+        let x0 = sx; let y0 = sy; let x1 = sx; let y1 = sy;
+        stack[n++] = sy * w + sx; seen[sy * w + sx] = 1;
+        while (n) {
+          const i = stack[--n]; const x = i % w; const y = (i - x) / w;
+          o[i * 4] = o[i * 4 + 1] = o[i * 4 + 2] = o[i * 4 + 3] = 255;
+          if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+          if (x > 0 && !seen[i - 1] && floorAt(i - 1, g0)) { seen[i - 1] = 1; stack[n++] = i - 1; }
+          if (x < w - 1 && !seen[i + 1] && floorAt(i + 1, g0)) { seen[i + 1] = 1; stack[n++] = i + 1; }
+          if (y > 0 && !seen[i - w] && floorAt(i - w, g0)) { seen[i - w] = 1; stack[n++] = i - w; }
+          if (y < hh - 1 && !seen[i + w] && floorAt(i + w, g0)) { seen[i + w] = 1; stack[n++] = i + w; }
+        }
+        const rc = canvas(w, hh); rc.getContext('2d').putImageData(img, 0, 0);
+        return { rc, w, hh, mid: [(x0 + x1 + 1) / 2, (y0 + y1 + 1) / 2], k: LSk };
+      };
+    }
     const liveOn = (it) => {
       if (!lv) return;
       const R = it.mixW > 0 ? LIVE_SOFT * P : 0;
-      const soft = (g2, style) => { g2.save(); if (R) g2.filter = blurOf(g2, R); paintArea(g2, it, T, k, style, false); g2.restore(); };
-      const hard = (g2, style) => (R ? paintHalo(g2, it, T, k, style, R) : paintArea(g2, it, T, k, style, false));
-      if (it.fx === 'none') { soft(lv.a, '#000000'); soft(lv.b, '#000000'); paintArea(lv.c, it, T, k, '#000000', false); paintArea(lv.d, it, T, k, '#000000', false); return; }
+      // how this effect is put into one of the paintings: softly, sharp (and as wide as the soft one), or just so
+      let soft; let hard; let plain; let mid; let done = () => {};
+      if (it.shape === 'fill') {
+        const f = fillOf && fillOf(it);
+        if (!f) return;
+        const stamp = (g2, style) => { // (the poured shape in this colour; a gradient is given in the small painting's own dots)
+          const t2 = canvas(f.w, f.hh); const q = t2.getContext('2d'); q.drawImage(f.rc, 0, 0); q.globalCompositeOperation = 'source-in'; q.fillStyle = style; q.fillRect(0, 0, f.w, f.hh);
+          g2.save(); g2.setTransform(1, 0, 0, 1, 0, 0); g2.drawImage(t2, 0, 0); g2.restore(); t2.width = t2.height = 0;
+        };
+        soft = hard = plain = stamp; mid = () => [f.mid[0], f.mid[1], f.k];
+        done = () => { f.rc.width = f.rc.height = 0; };
+      } else {
+        soft = (g2, style) => { g2.save(); if (R) g2.filter = blurOf(g2, R); paintArea(g2, it, T, k, style, false); g2.restore(); };
+        hard = (g2, style) => (R ? paintHalo(g2, it, T, k, style, R) : paintArea(g2, it, T, k, style, false));
+        plain = (g2, style) => paintArea(g2, it, T, k, style, false);
+        mid = () => { const b = itemBox(it); const [mx, my] = T((b[0] + b[2]) / 2, (b[1] + b[3]) / 2); return [mx, my, 1]; };
+      }
+      if (it.fx === 'none') { soft(lv.a, '#000000'); soft(lv.b, '#000000'); plain(lv.c, '#000000'); plain(lv.d, '#000000'); done(); return; }
       lv.any = true;
-      if (it.fx === 'water') soft(lv.a, '#ff0000');
+      if (it.fx === 'water') { soft(lv.a, '#ff0000'); hard(lv.d, it.tint || '#000000'); } // (3.46: a water of its own colour)
       else if (it.fx === 'lava') soft(lv.a, '#00ff00');
-      else if (it.fx === 'grass') { soft(lv.a, '#0000ff'); hard(lv.d, GRASS_TINT[it.tint] || '#000000'); }
-      else if (it.fx === 'glow' || it.fx === 'pulse' || it.fx === 'ripple') {
+      else if (it.fx === 'grass') { soft(lv.a, '#0000ff'); hard(lv.d, it.tint || '#000000'); }
+      else if (it.fx === 'shimmer' || it.fx === 'pulse' || it.fx === 'ripple') {
         soft(lv.b, '#ff0000');
         let style = it.fx === 'pulse' ? 'rgb(0,170,0)' : 'rgb(0,85,0)';
         if (it.fx === 'ripple') { // rings from its middle
-          const b = itemBox(it); const [mx, my] = T((b[0] + b[2]) / 2, (b[1] + b[3]) / 2);
-          style = lv.c.createRadialGradient(mx, my, 0, mx, my, RIPPLE_MAX * P); style.addColorStop(0, 'rgb(0,255,0)'); style.addColorStop(1, 'rgb(0,255,255)');
+          const [mx, my, kk] = mid();
+          style = lv.c.createRadialGradient(mx, my, 0, mx, my, RIPPLE_MAX * P * kk); style.addColorStop(0, 'rgb(0,255,0)'); style.addColorStop(1, 'rgb(0,255,255)');
         }
         hard(lv.c, style);
       }
+      done();
     };
     const patOf = (t) => {
       if (!t || !loaded.has(t.url)) return '#5a5650';
@@ -1980,6 +2031,6 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
 
   // (noSharp: the self-test's software graphics are slow; it switches the sharp tiles off where they are not the point.
   // noPill: and the progress pill, whose running maid would keep its window drawing all the while)
-  const api = { DATA, FLOORS, MATERIALS, EDGES, LIVE_FX, GRASS_TINT, RIPPLE_MAX, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, doorPlace, shadowOf, setSharp, stats, noSharp: false, noPill: false, sharpOf: (map) => { const b = boxOf(map); return b && b.sharp; }, supported: () => !!gl2(), DEFAULT_MAT };
+  const api = { DATA, FLOORS, MATERIALS, EDGES, LIVE_FX, RIPPLE_MAX, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, doorPlace, shadowOf, setSharp, stats, noSharp: false, noPill: false, sharpOf: (map) => { const b = boxOf(map); return b && b.sharp; }, supported: () => !!gl2(), DEFAULT_MAT };
   return api;
 })();

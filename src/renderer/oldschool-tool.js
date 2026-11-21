@@ -53,7 +53,7 @@ const OldschoolTool = (() => {
     const first = Oldschool.FLOORS[0];
     const prefs = {
       tool: 'room', snap: 'sq', level: 0, width: 1, brush: 1.5, erase: 'box', edge: 'walls', mats: { ...Oldschool.DEFAULT_MAT },
-      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', doorLeaf: 'wood', windowLeaf: 'clear', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box', mixW: 1.5, mixU: 0.5, mixT: 0.5, floorHow: 'click', fx: null, tint: '', fxSoft: true, // (Beta 3.43: an effect picked instead of a tile, the grass's colour, its soft edge)
+      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', doorLeaf: 'wood', windowLeaf: 'clear', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box', mixW: 1.5, mixU: 0.5, mixT: 0.5, floorHow: 'click', fx: null, tint: '', waterTint: '', fxSoft: true, fxShape: 'box', // (Beta 3.43: an effect picked instead of a tile, the grass's colour, its soft edge; 3.46: the water's colour, how the effect is drawn)
       floor: first ? { rel: Oldschool.relOf(first) } : null,
     };
     try { const saved = JSON.parse(localStorage.getItem('osPrefs') || '{}'); if ('mix' in saved && !('mixU' in saved)) { delete saved.mix; delete saved.mixW; } Object.assign(prefs, saved, { mats: { ...prefs.mats, ...(saved.mats || {}) }, line: { ...prefs.line, ...(saved.line || {}) }, pillar: { ...prefs.pillar, ...(saved.pillar || {}) } }); } catch {}
@@ -92,20 +92,31 @@ const OldschoolTool = (() => {
 
     // ---------- what a new floor gets ----------
     const areaLook = () => ({ tile: O.floor, edge: O.edge, mat: O.edge === 'ledge' ? 'stone_wall' : O.mats[O.edge] || Oldschool.DEFAULT_MAT[O.edge], level: O.level, mixW: O.mixW, mixU: O.mixU, mixT: O.mixT });
-    // Beta 3.43: an effect picked instead of a tile (grass, water, lava, glow, pulse, ripple). What is drawn then is the
-    // effect alone, over the floors that are there; Alt takes effects away there (and nothing else)
-    const FX_TOOLS = [...AREA_TOOLS, 'floor'];
+    // Beta 3.43: an effect picked instead of a tile (grass, water, lava, shimmer, pulse, ripple). What is drawn then
+    // is the effect alone, over the floors that are there. Beta 3.46: the effects are a blue block of their own under
+    // Tile, each drawn with a box, round, a shape, a brush, poured over one height (Fill) or taken away (Erase; Alt
+    // with the others does that too)
+    const FX_SHAPES = [
+      { id: 'box', label: 'Box', icon: 'square', tool: 'room', tip: 'Drag a box (Shift: a square · Alt: take the effect away)' },
+      { id: 'round', label: 'Round', icon: 'circle', tool: 'round', tip: 'Drag a round patch (Shift: a circle)' },
+      { id: 'shape', label: 'Shape', icon: 'polygon', tool: 'shape', tip: 'Click the corners; click the first again (or Enter) to close it' },
+      { id: 'brush', label: 'Brush', icon: 'brush', tool: 'brush', tip: 'Paint it on freely' },
+      { id: 'fill', label: 'Fill', icon: 'droplet', tool: 'fxfill', tip: 'Click a floor: the effect on all the floor at that height that is joined to it (water fills a pit to its rim)' },
+      { id: 'erase', label: 'Erase', icon: 'eraser', tool: 'brush', tip: 'Brush effects away; the floor stays' },
+    ];
+    const FX_TOOLS = [...AREA_TOOLS, 'fxfill'];
     const fxNow = () => (O.fx && FX_TOOLS.includes(O.tool) && Oldschool.LIVE_FX.some((x) => x.id === O.fx) ? O.fx : null);
     const fxInfo = (id) => Oldschool.LIVE_FX.find((x) => x.id === id) || null;
     const fxColor = (id) => (id === 'none' ? 'rgba(10,10,12,0.5)' : (fxInfo(id) || { color: 'rgba(255,255,255,0.4)' }).color);
+    const fxTint = (fx) => (fx === 'grass' ? O.tint : fx === 'water' ? O.waterTint : '') || '';
     const made = (geo, cut) => {
       const fx = fxNow();
-      if (fx) return { kind: 'live', ...geo, fx: cut ? 'none' : fx, ...(fx === 'grass' && !cut && O.tint ? { tint: O.tint } : {}), mixW: O.fxSoft === false ? 0 : 1.5 };
+      if (fx) return { kind: 'live', ...geo, fx: cut ? 'none' : fx, ...(!cut && /^#[0-9a-f]{6}$/.test(fxTint(fx)) ? { tint: fxTint(fx) } : {}), mixW: O.fxSoft === false || geo.shape === 'fill' ? 0 : 1.5 };
       return { kind: cut ? 'cut' : 'area', ...geo, ...(cut ? {} : areaLook()) };
     };
     function add(item, label) {
       if (!map() || !map().os) return;
-      pending.push({ ...item, at: Date.now() });
+      if (item.shape !== 'fill') pending.push({ ...item, at: Date.now() }); // (a poured effect has no outline to show until the picture knows where it ran)
       drawPreview();
       return cmd('os.add', { item }).then((r) => { if (r && r.ok && label !== false) toast(label || r.label || 'Drawn', { ms: 1400, undo: () => cmd('history.undo') }); return r; });
     }
@@ -114,8 +125,9 @@ const OldschoolTool = (() => {
     function pointerDown(e, pt) {
       const m = map(); if (!m || !m.os) return null;
       const free = e.altKey && !AREA_TOOLS.includes(O.tool) && O.tool !== 'erase';
-      const cut = O.tool === 'erase' || (e.altKey && AREA_TOOLS.includes(O.tool));
+      const cut = O.tool === 'erase' || (e.altKey && AREA_TOOLS.includes(O.tool)) || (!!fxNow() && O.fxShape === 'erase'); // (3.46: an effect's own Erase)
       const t = O.tool;
+      if (t === 'fxfill') { if (fxNow()) add(made({ shape: 'fill', pts: [[round(pt.x, 3), round(pt.y, 3)]] }, e.altKey)); return null; } // (3.46: poured over one height)
       if (t === 'shape') {
         const p = snapCorner(pt);
         if (!O.poly) { O.poly = { pts: [[p.x, p.y]], cut }; drawPreview(pt); return null; }
@@ -265,7 +277,6 @@ const OldschoolTool = (() => {
     function repaint(pt) {
       const it = Oldschool.areaAt(map().os, pt.x, pt.y);
       if (!it) { toast('No floor here', { ms: 1400 }); return; }
-      if (fxNow()) { add(made({ shape: it.shape, pts: it.pts, ...(it.shape === 'path' || it.shape === 'brush' ? { r: it.r } : {}) }, false)); return; } // (Beta 3.43: the effect on the whole floor clicked)
       const L = areaLook();
       const patch = O.floorMode === 'edge' ? { edge: L.edge, mat: L.mat } : O.floorMode === 'both' ? { tile: L.tile, edge: L.edge, mat: L.mat } : { tile: L.tile, mixW: L.mixW, mixU: L.mixU, mixT: L.mixT }; // (Beta 3.38: its blending with it)
       cmd('os.update', { id: it.id, ...patch }).then((r) => { if (r && r.ok) toast(O.floorMode === 'edge' ? 'New edge' : 'New floor', { ms: 1400, undo: () => cmd('history.undo') }); });
@@ -799,7 +810,7 @@ const OldschoolTool = (() => {
     // one of them is picked. Heights stack: Lower and Higher step a level each, the middle shows it and puts it back.
     // How floors meet is picked from four looks (Blending); a small button opens the three sliders in a card.
     let sides = null; let flyOpen = null; // (the card beside the tabs: 'map' the map's settings, 'blend' the sliders)
-    let lastTool = null; // (the tool the panel was built for last: what is new slides out from behind the panel)
+    let lastTool = null; let lastSecond = null; // (the tool the panel was built for last, and which blue block stood open: what is new slides out from behind the panel)
     let shownFly = null; let flyEl = null; // (Beta 3.41: the card shown at the last build, so a new one slides out and a closed one slides back)
     const osNow = () => (map() && map().os) || null; // (the panel may be asked to refresh while another map comes up)
     const PARTS = ['wall', 'pillar', 'stairs', 'door', 'window'];
@@ -831,15 +842,16 @@ const OldschoolTool = (() => {
       bind(() => {
         const t = O.tool; const tl = tileNow(); const tu = tileUrl(tl);
         const fx = fxNow();
-        const sig = JSON.stringify([t, tileKey(O.floor), tu, O.edge, O.mats, O.level, O.line, O.pillar, O.door, O.doorLeaf, O.windowLeaf, O.floorHow, fx, O.tint, O.fxSoft]);
+        const sig = JSON.stringify([t, tileKey(O.floor), tu, O.edge, O.mats, O.level, O.line, O.pillar, O.door, O.doorLeaf, O.windowLeaf, O.floorHow, fx, O.tint, O.waterTint, O.fxSoft, O.fxShape]);
         if (card.dataset.sig === sig) return; card.dataset.sig = sig;
         let art; let name; let sub;
         const ground = (cls, ...kids) => { const a = h('span', { class: `os-art a-${cls}` }, ...kids.filter(Boolean)); a.style.background = bgOf(tu, 78); return a; };
         if (fx) { // (Beta 3.43) an effect: drawn over the floors that are there
-          const F = fxInfo(fx); const tintWord = { green: 'green', dry: 'dry', wheat: 'wheat', autumn: 'autumn' }[O.tint];
-          const wash = h('i', { class: 'fxwash' }); wash.style.background = F.color;
+          const F = fxInfo(fx); const own = fxTint(fx);
+          const wash = h('i', { class: 'fxwash' }); wash.style.background = own ? `${own}99` : F.color;
           art = ground('fx', wash, iconEl(F.icon));
-          name = F.label; sub = `over any floor${fx === 'grass' ? ` · ${tintWord || 'the floor\'s colour'}` : ''}`;
+          const how = { box: 'a box', round: 'round', shape: 'a shape', brush: 'brushed on', fill: 'poured over one height', erase: 'brushed away' }[O.fxShape] || 'a box';
+          name = O.fxShape === 'erase' ? `${F.label}: erase` : F.label; sub = `${how} · over any floor${fx === 'grass' && !own ? ' · the floor\'s colour' : ''}`;
         } else if (AREA_TOOLS.includes(t)) {
           art = floorArt({ edge: O.edge, mat: O.mats[O.edge], tile: tu, level: O.level, shape: t === 'round' ? 'round' : t === 'brush' ? 'brush' : 'rect', ts: 30 });
           name = tl ? tl.name : 'Floor';
@@ -911,26 +923,37 @@ const OldschoolTool = (() => {
       const upd = () => { save(); ctx.refreshPop(); };
       const tab = (t) => h('button', {
         class: 'tile', dataset: { v: t.id }, 'data-tip': t.tip, 'aria-label': t.label,
-        onclick: () => { O.tool = t.id; O.poly = null; save(); ctx.openPop('oldschool'); drawPreview(); },
+        onclick: () => { O.tool = t.id; O.fx = null; O.poly = null; save(); ctx.openPop('oldschool'); drawPreview(); }, // (a tool picked puts an effect down)
       }, iconEl(t.icon), h('span', {}, t.label));
-      const inPart = PARTS.includes(O.tool); const partsOpen = O.tool === 'room' || inPart;
+      // Beta 3.46: the effects are Tile's own blue block (as Wall, Pillar … are Room's): Grass, Water, Lava, Shimmer, Pulse, Ripple
+      const fx = fxNow();
+      const fxTab = (f) => h('button', {
+        class: 'tile', dataset: { v: `fx-${f.id}` }, 'data-tip': f.tip, 'aria-label': f.label,
+        onclick: () => { O.fx = f.id; O.tool = (FX_SHAPES.find((x) => x.id === O.fxShape) || FX_SHAPES[0]).tool; O.poly = null; if (flyOpen === 'blend') flyOpen = null; save(); ctx.openPop('oldschool'); drawPreview(); },
+      }, iconEl(f.icon), h('span', {}, f.label));
+      const toolKey = fx ? `fx-${fx}` : O.tool; // (what is marked among the tabs)
+      const inPart = !fx && PARTS.includes(O.tool); const partsOpen = !fx && (O.tool === 'room' || inPart); const fxOpen = !!fx || O.tool === 'floor';
+      const second = partsOpen ? 'parts' : fxOpen ? 'fx' : null;
       const tools = h('div', { class: 'os-tools os-tabs' }, ...TOOLS.filter((t) => !PARTS.includes(t.id)).map(tab));
-      const parts = partsOpen ? h('div', { class: 'os-tools os-tabs os-tabs2' }, ...TOOLS.filter((t) => PARTS.includes(t.id)).map(tab)) : null;
+      const parts = partsOpen ? h('div', { class: 'os-tools os-tabs os-tabs2' }, ...TOOLS.filter((t) => PARTS.includes(t.id)).map(tab))
+        : fxOpen ? h('div', { class: 'os-tools os-tabs os-tabs2 os-fxtabs' }, ...Oldschool.LIVE_FX.map(fxTab)) : null;
       // the tabs come out from behind the panel when it opens, one after the other; Room's parts from behind the tools
       // when Room is picked; a tab picked comes out a little further
-      const hadParts = again && (lastTool === 'room' || PARTS.includes(lastTool));
+      const hadParts = again && lastSecond === second;
       [...tools.children].forEach((b, i) => b.style.setProperty('--i', String(i)));
       if (parts) [...parts.children].forEach((b, i) => b.style.setProperty('--i', String(i + (again ? 0 : 3))));
       if (!again) tools.classList.add('slide');
       if (parts && !hadParts) parts.classList.add('slide');
-      if (again && lastTool !== O.tool) { const b = [...tools.children, ...(parts && hadParts ? parts.children : [])].find((x) => x.dataset.v === O.tool); if (b) b.classList.add('pick'); }
-      lastTool = O.tool;
+      if (again && lastTool !== toolKey) { const b = [...tools.children, ...(parts && hadParts ? parts.children : [])].find((x) => x.dataset.v === toolKey); if (b) b.classList.add('pick'); }
+      lastTool = toolKey; lastSecond = second;
       bind(() => {
-        for (const b of [...tools.children, ...(parts ? parts.children : [])]) b.classList.toggle('on', b.dataset.v === O.tool);
-        tools.querySelector('[data-v="room"]').classList.toggle('open', PARTS.includes(O.tool)); // (Room stays marked while one of its parts is in use)
+        const key = fxNow() ? `fx-${fxNow()}` : O.tool;
+        for (const b of [...tools.children, ...(parts ? parts.children : [])]) b.classList.toggle('on', b.dataset.v === key);
+        tools.querySelector('[data-v="room"]').classList.toggle('open', !fxNow() && PARTS.includes(O.tool)); // (Room stays marked while one of its parts is in use)
+        tools.querySelector('[data-v="floor"]').classList.toggle('open', !!fxNow()); // (and Tile while one of its effects is)
       });
       const t = O.tool;
-      const area = AREA_TOOLS.includes(t);
+      const area = !fx && AREA_TOOLS.includes(t); // (an effect picked: its own few choices, see fxPanel)
       const choices = []; const after = [];
       const snap3 = () => seg({ options: [{ value: 'sq', label: 'Squares' }, { value: 'half', label: 'Half' }, { value: 'free', label: 'Free' }], get: () => O.snap, set: (v) => { O.snap = v; save(); } });
       const snap2 = () => seg({ options: [{ value: 'sq', label: 'Squares' }, { value: 'half', label: 'Half' }], get: () => (O.snap === 'half' ? 'half' : 'sq'), set: (v) => { O.snap = v; save(); } });
@@ -954,10 +977,27 @@ const OldschoolTool = (() => {
         return box;
       };
       const madeOf = () => [h('div', { class: 'ctl-label' }, 'Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; upd(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff'])];
-      const fx = fxNow(); // (Beta 3.43) an effect picked: no height, no edge, no blending of tiles
-      if (area && fx) {
-        choices.push(snap3());
-        if (t === 'brush') after.push(brush());
+      if (fx) { // (Beta 3.46) an effect: how it is drawn, its colour, its edge; its sliders on a card of its own
+        const shapeNow = () => (FX_SHAPES.some((x) => x.id === O.fxShape) ? O.fxShape : 'box');
+        const chip = (icon) => h('span', { class: 'os-art os-fxart' }, iconEl(icon));
+        const shapes = picks({ cls: 'os-fx os-fxshapes', options: () => FX_SHAPES.map((x) => ({ value: x.id, label: x.label, art: chip(x.icon) })), get: shapeNow,
+          set: (v) => { O.fxShape = v; O.tool = FX_SHAPES.find((x) => x.id === v).tool; O.poly = null; save(); ctx.openPop('oldschool'); drawPreview(); } });
+        for (const b of shapes.children) { const x = FX_SHAPES.find((y) => y.id === b.dataset.v); if (x) b.dataset.tip = x.tip; }
+        choices.push(shapes);
+        const sh = shapeNow();
+        if (sh === 'box' || sh === 'round' || sh === 'shape') choices.push(snap3());
+        if (sh === 'brush' || sh === 'erase') choices.push(brush());
+        if (fx === 'grass' || fx === 'water') { // a colour of its own for what is drawn next (each patch keeps its colour)
+          const key = fx === 'grass' ? 'tint' : 'waterTint'; const plain = fx === 'grass' ? 'Floor\'s colour' : 'Teal';
+          const inp = h('input', { type: 'color', class: 'os-fxcolor', value: O[key] || (fx === 'grass' ? '#5c8a34' : '#57a0aa'), 'aria-label': `${fxInfo(fx).label}: its own colour`, 'data-tip': 'Pick the colour (the picker can also take one from the screen)' });
+          inp.addEventListener('input', () => { O[key] = inp.value.toLowerCase(); upd(); });
+          const row = h('div', { class: 'row os-fxtint' },
+            seg({ options: [{ value: '', label: plain }, { value: 'own', label: 'Own colour' }], get: () => (O[key] ? 'own' : ''), set: (v) => { O[key] = v ? inp.value.toLowerCase() : ''; upd(); } }), inp);
+          bind(() => { inp.disabled = !O[key]; });
+          choices.push(row);
+        }
+        if (sh !== 'fill') choices.push(seg({ options: [{ value: 'soft', label: 'Soft edge' }, { value: 'sharp', label: 'Sharp edge' }], get: () => (O.fxSoft === false ? 'sharp' : 'soft'), set: (v) => { O.fxSoft = v !== 'sharp'; save(); } }));
+        after.push(btn(`${fxInfo(fx).label} settings`, 'adjustments-horizontal', () => { flyOpen = flyOpen === 'fx' ? null : 'fx'; ctx.openPop('oldschool'); }, { kind: `wide os-fxset${flyOpen === 'fx' ? ' on' : ''}`, tip: `How all the ${fxInfo(fx).label.toLowerCase()} on this map looks and moves` }));
       } else if (area) {
         { // (Beta 3.38) heights stack: Lower and Higher step one level, the middle shows the level and puts it back
           const step = (d) => { O.level = Math.max(-LEVEL_MAX, Math.min(LEVEL_MAX, (O.level || 0) + d)); upd(); };
@@ -986,7 +1026,7 @@ const OldschoolTool = (() => {
       } else if (t === 'floor') { // (Beta 3.37) the tile alone: of the whole floor clicked, or painted on with the brush
         choices.push(seg({ options: [{ value: 'click', label: 'Whole floor', icon: 'hand-click' }, { value: 'paint', label: 'Brush', icon: 'brush' }], get: () => (O.floorHow === 'paint' ? 'paint' : 'click'), set: (v) => { O.floorHow = v; save(); ctx.openPop('oldschool'); drawPreview(); } }));
         if (O.floorHow === 'paint') after.push(brush());
-        if (!fx) after.push(blending()); // (Beta 3.38: both ways blend as the looks say)
+        after.push(blending()); // (Beta 3.38: both ways blend as the looks say)
       } else if (t === 'erase') {
         choices.push(seg({ options: [{ value: 'box', label: 'Box', icon: 'square' }, { value: 'round', label: 'Round', icon: 'circle' }, { value: 'brush', label: 'Brush', icon: 'brush' }], get: () => O.erase, set: (v) => { O.erase = v; save(); ctx.openPop('oldschool'); } }));
         if (O.erase === 'brush') after.push(brush()); else choices.push(snap3());
@@ -1011,7 +1051,7 @@ const OldschoolTool = (() => {
         choices.push(snap2());
       }
       // its tiles: the last 8 used, in two rows; List … has them all
-      const usesTiles = area || t === 'stairs' || t === 'floor';
+      const usesTiles = !fx && (area || t === 'stairs' || t === 'floor');
       const floorBox = h('div', { class: 'tiles os-floors' });
       const paintFloors = () => {
         const list = recentTiles();
@@ -1028,19 +1068,6 @@ const OldschoolTool = (() => {
       };
       const listBtn = btn('List …', 'layout-grid', () => ctx.togglePanel(tileListDef()), { kind: 'wide os-tile-list', tip: 'All tiles: the app\'s and your own' });
       if (usesTiles) { bind(paintFloors); bind(() => listBtn.classList.toggle('on', !!ctx.panelOpen('ostiles'))); }
-      // Beta 3.43: the effects, picked like a tile and drawn with the same tools: grass, water, lava, glow, pulse, ripple
-      const fxPart = [];
-      if (area || t === 'floor') {
-        const chip = (color, icon, bg) => { const a = h('span', { class: 'os-art os-fxart' }, icon ? iconEl(icon) : null); a.style.background = bg || color; return a; };
-        fxPart.push(h('div', { class: 'ctl-label' }, 'Effects'),
-          picks({ cls: 'os-fx', options: () => Oldschool.LIVE_FX.map((f) => ({ value: f.id, label: f.label, art: chip(f.color, f.icon) })), get: () => fxNow() || '',
-            set: (v) => { O.fx = O.fx === v ? null : v; save(); ctx.openPop('oldschool'); drawPreview(); } }));
-        for (const b of fxPart[1].children) { const f = fxInfo(b.dataset.v); if (f) b.dataset.tip = f.tip; }
-        if (fx === 'grass') fxPart.push(picks({ cls: 'os-tints', sig: () => tileUrl(tileNow()),
-          options: () => [{ value: '', label: 'Floor', art: chip('', null, bgOf(tileUrl(tileNow()), 30)) }, ...Object.entries(Oldschool.GRASS_TINT).map(([id, col]) => ({ value: id, label: `${id[0].toUpperCase()}${id.slice(1)}`, art: chip(col) }))],
-          get: () => O.tint || '', set: (v) => { O.tint = v; upd(); } }));
-        if (fx) fxPart.push(seg({ options: [{ value: 'soft', label: 'Soft edge' }, { value: 'sharp', label: 'Sharp edge' }], get: () => (O.fxSoft === false ? 'sharp' : 'soft'), set: (v) => { O.fxSoft = v !== 'sharp'; save(); } }));
-      }
       // the map's own settings, behind their button (the light's dial, how long the shadows are, shadows all around)
       let fly = null;
       if (flyOpen === 'blend' && !usesBlend) flyOpen = null; // (a tool without blending: its card goes)
@@ -1049,22 +1076,40 @@ const OldschoolTool = (() => {
           h('div', { class: 'os-fly-head' }, h('b', {}, 'Blending'), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => { flyOpen = null; ctx.openPop('oldschool'); } }, iconEl('x'))),
           ...blendSliders());
       }
+      const liveNow = () => (map() && map().live) || {};
+      if (flyOpen === 'fx' && !fx) flyOpen = null; // (no effect picked: its card goes)
+      if (flyOpen === 'fx') { // (Beta 3.46) one kind of effect's own settings, for all of it on this map
+        const F = fxInfo(fx); const now = () => liveNow()[fx] || {};
+        const pct1 = (v) => `${Math.round(v * 100)} %`;
+        const sl = (label, f, min, max, tip) => { const el = slider({ label, min, max, step: 0.05, get: () => (map() && now()[f] != null ? now()[f] : null), set: (v, k) => ctx.send(k || `live-${fx}-${f}`, 'live.set', { fx, set: { [f]: v } }), fmt: pct1 }); if (tip) el.dataset.tip = tip; return el; };
+        const rows = [];
+        if (fx === 'grass') {
+          const col = h('input', { type: 'color', class: 'os-fxcolor', value: now().growColor || '#5c8a34', 'aria-label': 'The floor colour grass grows on', 'data-tip': 'The floor colour it grows on (the picker can take it from the screen)' });
+          col.addEventListener('input', () => ctx.send('live-grass-growColor', 'live.set', { fx, set: { growColor: col.value.toLowerCase() } }));
+          const range = sl('Range', 'range', 0.05, 1, 'How close to that colour the floor must be');
+          const pick = h('div', { class: 'row os-fxtint' }, h('span', { class: 'ctl-label grow' }, 'The colour'), col);
+          bind(() => { const on = now().grow === 'colour'; pick.hidden = !on; range.hidden = !on; });
+          rows.push(sl('Amount', 'amount', 0, 1.5), sl('Length', 'length', 0.3, 2.5), sl('Between gusts', 'calm', 0, 1, 'How much grass still shows where no gust is passing'), sl('Colour variety', 'vary', 0, 1),
+            h('div', { class: 'ctl-label' }, 'Grows on'),
+            seg({ options: [{ value: 'all', label: 'All' }, { value: 'bright', label: 'Bright' }, { value: 'dark', label: 'Dark' }, { value: 'colour', label: 'Colour' }], get: () => now().grow || 'all', set: (v) => cmd('live.set', { fx, set: { grow: v } }) }),
+            pick, range);
+        } else if (fx === 'water') rows.push(sl('Transparency', 'clear', 0, 1), sl('Speed', 'speed', 0.3, 2.5));
+        else if (fx === 'lava') rows.push(sl('Glow', 'glow', 0, 2), sl('Embers', 'embers', 0, 2), sl('Heat shimmer', 'heat', 0, 1), sl('Speed', 'speed', 0.3, 2.5), sl('Pick-up range', 'range', 0, 1, 'How much of the floor counts as red-hot'));
+        else rows.push(sl('Intensity', 'power', 0, 2), sl('Speed', 'speed', 0.3, 2.5), sl('Pick-up range', 'range', 0, 1, 'How bright and strong a colour must be to shine: further right picks up more'));
+        fly = h('div', { class: 'os-fly os-fly-fx stack' },
+          h('div', { class: 'os-fly-head' }, h('b', {}, F.label), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => { flyOpen = null; ctx.openPop('oldschool'); } }, iconEl('x'))),
+          ...rows);
+      }
       if (flyOpen === 'map') {
         const pctOff = (v) => (v > 0 ? `${Math.round(v * 100)} %` : 'off');
-        const liveNow = () => (map() && map().live) || {};
-        const pct1 = (v) => `${Math.round(v * 100)} %`;
-        const grass = (label, f, min, max) => slider({ label, min, max, step: 0.05, get: () => (map() ? (liveNow()[f] != null ? liveNow()[f] : 1) : null), set: (v, k) => ctx.send(k || `live-${f}`, 'live.set', { [f]: v }), fmt: pct1 });
-        const grassBox = h('div', { class: 'stack os-grass' }, grass('Grass', 'amount', 0, 1.5), grass('Grass length', 'length', 0.3, 2.5), grass('Grass in a breeze', 'breeze', 0.3, 2.5), grass('Glow', 'glow', 0, 2), grass('Glow speed', 'speed', 0.3, 2.5));
-        bind(() => { grassBox.hidden = liveNow().on === false; });
         fly = h('div', { class: 'os-fly stack' },
           h('div', { class: 'os-fly-head' }, h('b', {}, 'Map settings'), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => { flyOpen = null; ctx.openPop('oldschool'); } }, iconEl('x'))),
           sunDial(),
           slider({ label: 'Shadow length', min: 0, max: 1, step: 0.05, get: () => (osNow() ? Oldschool.shadowOf(osNow()).len : null), set: (v, k) => ctx.send(k || 'os-shlen', 'os.set', { shadowLen: v }), fmt: pctOff }),
           slider({ label: 'Shadows all around', min: 0, max: 1, step: 0.05, get: () => (osNow() ? Oldschool.shadowOf(osNow()).all : null), set: (v, k) => ctx.send(k || 'os-shall', 'os.set', { shadowAll: v }), fmt: pctOff }),
           toggle({ label: 'Walls for sight follow the drawing', get: () => !osNow() || osNow().sight !== false, set: (v) => cmd('os.set', { sight: v }) }),
-          // (Beta 3.42) what moves on the map: on or off, and tuned (3.43: the effects drawn over the floors)
+          // (Beta 3.42) what moves on the map: on or off (3.46: each effect's sliders are on its own card)
           toggle({ label: 'Living effects', get: () => liveNow().on !== false, set: (v) => cmd('live.set', { on: v }) }),
-          grassBox,
           h('div', { class: 'row' }, btn('Clear', 'trash', async () => { if (!osNow() || !osNow().items.length) return; const r = await cmd('os.clear', {}); if (r && r.ok) toast('Drawing cleared', { undo: () => cmd('history.undo') }); }, { kind: 'small', tip: 'Take everything drawn away (undo brings it back)' })));
       }
       const mapBtn = btn('Map settings', 'sun', () => { flyOpen = flyOpen === 'map' ? null : 'map'; ctx.openPop('oldschool'); }, { kind: `small os-mapbtn${flyOpen === 'map' ? ' on' : ''}`, tip: 'Where the light comes from, the shadows, walls for sight, Clear' });
@@ -1098,7 +1143,6 @@ const OldschoolTool = (() => {
       };
       return h('div', { class: 'stack' }, previewCard(), ...choices,
         ...(usesTiles ? [h('div', { class: 'ctl-label' }, 'Tiles'), floorBox, listBtn] : []),
-        ...fxPart,
         ...after,
         h('div', { class: 'row os-status' }, note, mapBtn));
     }

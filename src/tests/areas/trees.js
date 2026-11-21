@@ -115,6 +115,7 @@ module.exports = (area) => {
     t.handle('layer.update', { id: tok.id, hidden: true });
     await t.sleep(400);
     t.ok(await where(), 'a token hidden from the table opens it on your screen too');
+    await t.until(async () => !(await tv(t)).mask, 8000, 'the TV to close its window (the token is hidden from the table)'); // (not after a fixed wait: software graphics draw the TV's trees slowly)
     t.ok(!(await tv(t)).mask, 'but not on the TV');
     t.handle('layer.update', { id: tok.id, hidden: false });
     t.handle('layer.removeMany', { ids: [id] });

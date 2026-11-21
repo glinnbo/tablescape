@@ -635,10 +635,10 @@ module.exports = (area) => {
     await baked(t, 90000);
   }, { ms: 300000 });
 
-  // Beta 3.43: living effects. Grass, water, lava, glow, pulse and ripple are drawn over the floors like a tile that
+  // Beta 3.43 (3.46: a blue block under Tile, a card each, Fill): living effects. Grass, water, lava, shimmer, pulse and ripple are drawn over the floors like a tile that
   // cannot be seen (kind 'live'); no tile moves by itself. Where one lies the map moves, drawn above the picture by the
   // graphics card (living.js). What is laid over it later (a bridge) covers it.
-  area.deep('Beta 3.43: effects drawn over the floors: grass, water, lava, glow, pulse, ripple; a bridge covers them; on the TV too; off with one switch', async (t) => {
+  area.deep('Beta 3.46: effects drawn over the floors: grass, water, lava, shimmer, pulse, ripple; Fill by height; a card each; a bridge covers them; on the TV too', async (t) => {
     await clear(t);
     const T = (n) => ({ rel: `Tiles/Tablescape/${n}.webp` });
     const A = (x0, y0, x1, y1, tile, level) => ({ kind: 'area', shape: 'rect', pts: [[x0 * k, y0 * k], [x1 * k, y1 * k]], tile: T(tile), edge: 'ledge', mat: 'stone_wall', level, mixW: 0 });
@@ -647,11 +647,13 @@ module.exports = (area) => {
     await t.settle(); let m = await baked(t);
     t.ok(!m.bg.live, 'no tile moves by itself: a river bed, lava and a glowing floor alone make no living map', m.bg.live);
     t.handle('os.add', { mapId: own, items: [L(3, 3, 6, 7, 'water'), A(3, 4.5, 6, 5.5, 'Old cobblestone', 1), L(7, 3, 9, 5, 'lava'), L(9, 5, 11, 7, 'grass'), L(11, 5, 13, 7, 'grass', { tint: 'wheat' }),
-      L(7, 6, 9, 8, 'glow'), L(10, 3, 11, 4.5, 'pulse'), { ...L(11.5, 3, 13, 4.5, 'ripple'), shape: 'round' }, L(9.5, 5.5, 10, 6, 'none'), { kind: 'live', shape: 'rect', pts: [[0, 0], [k, k]], fx: 'fire' }] });
+      L(7, 6, 9, 8, 'glow'), L(10, 3, 11, 4.5, 'pulse'), { ...L(11.5, 3, 13, 4.5, 'ripple'), shape: 'round' }, L(9.5, 5.5, 10, 6, 'none'), { kind: 'live', shape: 'rect', pts: [[0, 0], [k, k]], fx: 'fire' },
+      { kind: 'live', shape: 'fill', pts: [[4.5 * k, 8.7 * k], [9 * k, 9 * k]], fx: 'water', tint: '#3A6B2F', mixW: 3 }] });
     await t.settle(); m = await baked(t);
     const lives = M(t).os.items.filter((x) => x.kind === 'live');
-    t.eq(lives.map((x) => x.fx), ['water', 'lava', 'grass', 'grass', 'glow', 'pulse', 'ripple', 'none'], 'the effects are kept as things drawn (an effect that does not exist is not)');
-    t.eq([lives[2].tint, lives[3].tint, lives[0].tint], [undefined, 'wheat', undefined], 'only grass has a colour of its own');
+    t.eq(lives.map((x) => x.fx), ['water', 'lava', 'grass', 'grass', 'shimmer', 'pulse', 'ripple', 'none', 'water'], 'the effects are kept as things drawn (Glow of 3.43 is Shimmer; an effect that does not exist is not kept)');
+    t.eq([lives[2].tint, lives[3].tint, lives[0].tint, lives[8].tint], [undefined, '#c8a548', undefined, '#3a6b2f'], 'grass and water can have a colour of their own (a colour name of 3.43 becomes its colour)');
+    t.eq([lives[8].shape, lives[8].pts.length, lives[8].mixW], ['fill', 1, 0], 'a poured effect: one spot, a sharp edge');
     // the picture comes with the living map: four small paintings, a b over c d
     t.ok(m.bg.live && /-live\.png$/.test(m.bg.live.path) && fs.existsSync(m.bg.live.path), 'the picture comes with a living map', m.bg.live && m.bg.live.path);
     const px = await t.g(`(async () => {
@@ -663,7 +665,7 @@ module.exports = (area) => {
       const w = img.naturalWidth / 2; const hh = img.naturalHeight / 2; const f = w / pic.naturalWidth;
       const at = (n, x, y) => [...g.getImageData((n % 2) * w + Math.round(((x * k - b.x) / b.scale) * f), Math.floor(n / 2) * hh + Math.round(((y * k - b.y) / b.scale) * f), 1, 1).data].slice(0, 3);
       const all = (x, y) => [0, 1, 2, 3].map((n) => at(n, x, y).reduce((p, q) => p + q, 0));
-      return { f, same: Math.abs(hh / pic.naturalHeight - f) < 0.01, water: at(0, 4.5, 3.7), bridge: all(4.5, 5), bed: all(4.5, 8.7), lava: at(0, 8, 4), grass: at(0, 10.5, 6.5), hole: at(0, 9.75, 5.75),
+      return { f, same: Math.abs(hh / pic.naturalHeight - f) < 0.01, water: at(0, 4.5, 3.7), bridge: all(4.5, 5), pour: [at(0, 4.5, 8.7), at(0, 3.3, 9.2), at(0, 5.7, 8.3), at(3, 4.5, 8.7)], beside: [all(6.6, 8.7), all(4.5, 7.6)], bed2: all(8, 9), lava: at(0, 8, 4), grass: at(0, 10.5, 6.5), hole: at(0, 9.75, 5.75),
         glow: [at(1, 8, 7), at(2, 8, 7)], pulse: [at(1, 10.5, 3.75), at(2, 10.5, 3.75)], ripple: [at(1, 12.25, 3.75), at(2, 12.25, 3.75), at(2, 12.85, 3.75)],
         wheat: at(3, 12, 6), floorGrass: at(3, 10.5, 6.5), floor: all(13.5, 9) };
     })()`);
@@ -673,7 +675,9 @@ module.exports = (area) => {
     t.ok(px.grass[2] > 200 && px.grass[0] < 30, 'grass where it was drawn', px.grass);
     t.ok(px.hole[2] < 30, 'an effect erased (Alt) leaves a hole in it', px.hole);
     t.ok(px.bridge.every((v) => v < 30), 'a floor laid over the water later covers it (a bridge)', px.bridge);
-    t.ok(px.bed.every((v) => v < 30), 'a river bed without the effect stays a still floor', px.bed);
+    t.ok(px.pour.slice(0, 3).every((q) => q[0] > 200), 'Fill: water poured at one spot covers the whole pit', px.pour);
+    t.ok(px.beside.every((q) => q.every((v) => v < 30)), 'and stops at its rim: none on the floor beside it, a level higher', px.beside);
+    t.ok(px.pour[3][1] > px.pour[3][0] && px.pour[3][1] > px.pour[3][2], 'the water\'s own colour is told (green)', px.pour[3]);
     t.ok(px.floor.every((v) => v < 30), 'nothing on a plain floor', px.floor);
     t.ok(px.glow[0][0] > 200 && Math.abs(px.glow[1][1] - 85) < 12, 'glow: each spot in its own rhythm', px.glow);
     t.ok(px.pulse[0][0] > 200 && Math.abs(px.pulse[1][1] - 170) < 12, 'pulse: the map\'s shared rhythm', px.pulse);
@@ -699,44 +703,81 @@ module.exports = (area) => {
     t.ok(gl.length === 9 && gl.every((q) => q && q[3] < 10) && Math.max(...gl.map((q) => q[2])) > 12, 'glow is light alone as well', gl);
     const t0 = (await t.g('Play.view().stats.living')).time; await t.sleep(1200);
     t.ok((await t.g('Play.view().stats.living')).time > t0, 'it moves', t0);
-    // Draw: the effects are picked like a tile and drawn with the same tools
-    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`); await tool(t, 'room');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fx .os-pick')].map((b) => b.textContent)`), ['Grass', 'Water', 'Lava', 'Glow', 'Pulse', 'Ripple'], 'Effects: six of them under the tiles');
-    t.ok((await t.count('#pop .os-level')) === 1 && (await t.count('#pop .os-edges')) === 1 && !(await t.count('#pop .os-tints')), 'a tile picked: heights and edges as before');
-    await t.clickSel('#pop .os-fx .os-pick[data-v="grass"]'); await tabsOut(t);
-    t.ok(!(await t.count('#pop .os-level')) && !(await t.count('#pop .os-edges')) && !(await t.count('#pop .os-blend')), 'an effect picked: no height, no edge, no blending');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tints .os-pick')].map((b) => b.textContent)`), ['Floor', 'Green', 'Dry', 'Wheat', 'Autumn'], 'grass: its colour, the floor\'s or one of four');
+    // Draw → Tile: the effects are its blue block; each has its own few choices and a card with its sliders
+    await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`); await tool(t, 'floor'); await tabsOut(t);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fxtabs .tile')].map((b) => b.textContent)`), ['Grass', 'Water', 'Lava', 'Shimmer', 'Pulse', 'Ripple'], 'Tile: a blue block with the six effects');
+    t.ok(!(await t.count('#pop .os-fxshapes')) && (await t.count('#pop .os-floors')) === 1, 'Tile itself is as before');
+    await tab(t, 'fx-grass'); await tabsOut(t);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fxshapes .os-pick')].map((b) => b.textContent)`), ['Box', 'Round', 'Shape', 'Brush', 'Fill', 'Erase'], 'Grass: six ways to draw it');
+    t.ok(!(await t.count('#pop .os-level')) && !(await t.count('#pop .os-edges')) && !(await t.count('#pop .os-blend')) && !(await t.count('#pop .os-floors')), 'no height, no edge, no blending, no tiles');
+    t.eq(await t.g(`[document.querySelector('#pop .os-fxtabs .tile.on').dataset.v, document.querySelector('#pop .os-tabs .tile[data-v="floor"]').classList.contains('open'), !!document.querySelector('#pop .os-tabs:not(.os-tabs2) .tile.on')]`), ['fx-grass', true, false], 'Grass is marked, Tile stays open, no other tool is marked');
     t.eq(await t.text('#pop .os-prev .cap b'), 'Grass', 'the picture at the top names it');
-    t.ok(!(await t.count('#pop .os-floors .tile.on')), 'no tile is marked while an effect is picked');
     await t.shot(t.gm(), 'effects-panel');
     const n0 = M(t).os.items.length;
-    await t.clickSel('#pop .os-tints .os-pick[data-v="autumn"]');
     await t.drag(await t.scr(16 * k, 3 * k), await t.scr(19 * k, 6 * k), 10);
     await t.until(() => M(t).os.items.length === n0 + 1, 5000, 'the grass drawn');
     let it = M(t).os.items[n0];
-    t.eq([it.kind, it.fx, it.tint, it.shape, it.pts, it.mixW], ['live', 'grass', 'autumn', 'rect', [[16 * k, 3 * k], [19 * k, 6 * k]], 1.5], 'Room with Grass picked draws grass, in the colour picked, with a soft edge', it);
+    t.eq([it.kind, it.fx, it.tint, it.shape, it.pts, it.mixW], ['live', 'grass', undefined, 'rect', [[16 * k, 3 * k], [19 * k, 6 * k]], 1.5], 'Box draws grass in the floor\'s colour, with a soft edge', it);
+    await t.g(`(() => { const i = document.querySelector('#pop input.os-fxcolor'); i.disabled = false; i.value = '#c8a548'; i.dispatchEvent(new Event('input')); })()`);
+    await t.drag(await t.scr(16 * k, 7 * k), await t.scr(18 * k, 9 * k), 8);
+    await t.until(() => M(t).os.items.length === n0 + 2, 5000, 'grass in its own colour');
+    t.eq(M(t).os.items[n0 + 1].tint, '#c8a548', 'a colour picked: the grass drawn next has it');
     await t.drag(await t.scr(17 * k, 4 * k), await t.scr(18 * k, 5 * k), 8, ['alt']);
-    await t.until(() => M(t).os.items.length === n0 + 2, 5000, 'the effect erased');
-    it = M(t).os.items[n0 + 1];
-    t.eq([it.kind, it.fx], ['live', 'none'], 'Alt takes effects away there, and nothing else (no floor is cut)', it);
-    t.ok(!M(t).os.items.slice(n0).some((x) => x.kind === 'cut' || x.kind === 'area'), 'no floor was drawn or erased');
-    await t.clickSel('#pop .os-floors .tile'); await tabsOut(t);
-    t.ok((await t.count('#pop .os-level')) === 1 && !(await t.count('#pop .os-tints')) && (await t.count('#pop .os-floors .tile.on')) === 1, 'a tile picked again: the effect is put down');
-    t.handle('history.undo', { mapId: own }); t.handle('history.undo', { mapId: own }); await t.settle(); await baked(t);
-    // Draw → Map settings: one switch, sliders for the grass and the glow
-    if (!(await t.count('#pop .os-fly .os-grass'))) await t.clickSel('#pop .os-mapbtn');
-    await cardOut(t);
-    const card = () => t.g(`(() => { const f = document.querySelector('#pop .os-fly'); const g = f.querySelector('.os-grass'); return { text: [...f.querySelectorAll('.ctl-label, .ctl')].map((e) => e.textContent).join(' | '), grass: !!g && !g.hidden, sliders: g ? [...g.querySelectorAll('input[type="range"]')].map((e) => e.getAttribute('aria-label')) : [] }; })()`);
+    await t.until(() => M(t).os.items.length === n0 + 3, 5000, 'the effect erased');
+    t.eq([M(t).os.items[n0 + 2].kind, M(t).os.items[n0 + 2].fx], ['live', 'none'], 'Alt takes effects away there, and nothing else');
+    await t.clickSel('#pop .os-fxshapes .os-pick[data-v="erase"]'); await tabsOut(t);
+    await t.drag(await t.scr(16.5 * k, 7.5 * k), await t.scr(17.5 * k, 8.5 * k), 8);
+    await t.until(() => M(t).os.items.length === n0 + 4, 5000, 'effects brushed away');
+    it = M(t).os.items[n0 + 3];
+    t.eq([it.kind, it.fx, it.shape], ['live', 'none', 'brush'], 'Erase: a brush that takes effects away (the floor stays)', it);
+    await t.clickSel('#pop .os-fxshapes .os-pick[data-v="brush"]'); await tabsOut(t);
+    await t.drag(await t.scr(20 * k, 3 * k), await t.scr(22 * k, 4 * k), 8);
+    await t.until(() => M(t).os.items.length === n0 + 5, 5000, 'grass brushed on');
+    it = M(t).os.items[n0 + 4];
+    t.eq([it.kind, it.fx, it.shape], ['live', 'grass', 'brush'], 'Brush paints the effect on', it);
+    await tab(t, 'fx-water'); await tabsOut(t);
+    await t.clickSel('#pop .os-fxshapes .os-pick[data-v="fill"]'); await tabsOut(t);
+    { const q = await t.scr(8 * k, 9 * k); await t.click(q.x, q.y); }
+    await t.until(() => M(t).os.items.length === n0 + 6, 5000, 'water poured');
+    it = M(t).os.items[n0 + 5];
+    t.eq([it.kind, it.fx, it.shape, it.pts.length], ['live', 'water', 'fill', 1], 'Fill: a click pours the effect', it);
+    t.ok(!M(t).os.items.slice(n0).some((x) => x.kind === 'cut' || x.kind === 'area' || x.kind === 'paint'), 'no floor was drawn, painted or erased');
+    // its card: the sliders of this kind of effect, for the whole map
+    await tab(t, 'fx-grass'); await tabsOut(t);
+    await t.clickSel('#pop .os-fxset'); await cardOut(t);
+    const card = () => t.g(`(() => { const f = document.querySelector('#pop .os-fly'); if (!f) return null; return { head: f.querySelector('.os-fly-head b').textContent, sliders: [...f.querySelectorAll('input[type="range"]')].filter((e) => !e.closest('[hidden]')).map((e) => e.getAttribute('aria-label')), segs: [...f.querySelectorAll('.seg button, .seg label')].map((e) => e.textContent) }; })()`);
     let c = await card();
-    t.ok(/Living effects/.test(c.text) && c.grass, 'Map settings: Living effects', c);
-    t.eq(c.sliders, ['Grass', 'Grass length', 'Grass in a breeze', 'Glow', 'Glow speed'], 'and sliders for the grass and the glow');
-    await t.shot(t.gm(), 'living-effects-card');
-    t.handle('live.set', { mapId: own, amount: 0.75 }); await t.settle();
+    t.eq([c.head, c.sliders], ['Grass', ['Amount', 'Length', 'Between gusts', 'Colour variety']], 'Grass settings: its card', c);
+    t.ok(['All', 'Bright', 'Dark', 'Colour'].every((w) => c.segs.includes(w)), 'Grows on: all, bright, dark, a colour', c.segs);
+    await t.shot(t.gm(), 'effects-card');
+    t.handle('live.set', { mapId: own, fx: 'grass', set: { grow: 'colour' } }); await t.settle();
+    t.ok((await card()).sliders.includes('Range'), 'Grows on a colour: its range');
+    t.handle('live.set', { mapId: own, fx: 'grass', set: { grow: 'all' } }); await t.settle();
+    for (const [fx, want] of [['water', ['Transparency', 'Speed']], ['lava', ['Glow', 'Embers', 'Heat shimmer', 'Speed', 'Pick-up range']], ['shimmer', ['Intensity', 'Speed', 'Pick-up range']], ['pulse', ['Intensity', 'Speed', 'Pick-up range']], ['ripple', ['Intensity', 'Speed', 'Pick-up range']]]) {
+      await tab(t, `fx-${fx}`); await tabsOut(t);
+      c = await card();
+      t.eq(c && c.sliders, want, `${fx}: its own sliders`, c);
+    }
+    await tab(t, 'room'); await tabsOut(t);
+    t.ok((await t.count('#pop .os-level')) === 1 && !(await t.count('#pop .os-fxshapes')) && !(await t.count('#pop .os-fly-fx')), 'a tool picked: the effect is put down, its card goes');
+    for (let i = 0; i < 6; i++) t.handle('history.undo', { mapId: own });
+    await t.settle(); await baked(t);
+    t.eq(M(t).os.items.length, n0, 'undo takes what was drawn away again (a slider moved in between is no step of its own)');
+    // the settings: each kind of effect its own
+    t.handle('live.set', { mapId: own, fx: 'grass', set: { amount: 0.75 } }); await t.settle();
     gm = await t.until(async () => { const s = await t.g('Play.view().stats.living'); return s && s.on && s.blades < full && s; }, 15000, 'fewer blades');
-    t.ok(Math.abs(gm.blades / full - 0.75) < 0.05, 'Grass at 75 %: three quarters of the blades', [gm.blades, full]);
-    t.handle('live.set', { mapId: own, amount: 9, length: 9, breeze: 0, glow: 9, speed: 0 }); await t.settle();
-    t.eq([M(t).live.amount, M(t).live.length, M(t).live.breeze, M(t).live.glow, M(t).live.speed], [1.5, 2.5, 0.3, 2, 0.3], 'the sliders have their ends');
-    t.handle('live.set', { mapId: own, amount: 1, length: 1, breeze: 1, glow: 1, speed: 1 }); await t.settle();
+    t.ok(Math.abs(gm.blades / full - 0.75) < 0.05, 'Grass amount at 75 %: three quarters of the blades', [gm.blades, full]);
+    t.handle('live.set', { mapId: own, fx: 'grass', set: { amount: 1, grow: 'bright' } }); await t.settle();
+    const picky = await t.until(async () => { const s = await t.g('Play.view().stats.living'); return s && s.on && s.blades > 0 && s.blades < full * 0.9 && s; }, 15000, 'grass on the bright parts only');
+    t.ok(picky.blades > full * 0.15, 'Grows on Bright: fewer blades, the most where the floor is brightest', [picky.blades, full]);
+    t.handle('live.set', { mapId: own, fx: 'grass', set: { grow: 'all' } }); await t.settle();
+    await t.until(async () => { const s = await t.g('Play.view().stats.living'); return s && s.blades === full; }, 15000, 'grass everywhere again');
+    t.handle('live.set', { mapId: own, fx: 'grass', set: { amount: 9, length: 9, calm: -1, vary: 9, grow: 'nowhere', growColor: 'red' } });
+    t.handle('live.set', { mapId: own, fx: 'lava', set: { glow: 9, embers: -3, range: 5 } }); t.handle('live.set', { mapId: own, fx: 'water', set: { clear: 4 } }); t.handle('live.set', { mapId: own, fx: 'ripple', set: { power: 9, speed: 0 } }); await t.settle();
+    const lv2 = M(t).live;
+    t.eq([lv2.grass.amount, lv2.grass.length, lv2.grass.calm, lv2.grass.vary, lv2.grass.grow, lv2.grass.growColor, lv2.lava.glow, lv2.lava.embers, lv2.lava.range, lv2.water.clear, lv2.ripple.power, lv2.ripple.speed, lv2.pulse.power],
+      [1.5, 2.5, 0, 1, 'all', '#5c8a34', 2, 0, 1, 1, 2, 0.3, 1], 'the sliders have their ends; one effect\'s settings leave the others alone');
+    t.handle('live.set', { mapId: own, fx: 'grass', set: { amount: 1, length: 1, calm: 0.35, vary: 0.3 } }); t.handle('live.set', { mapId: own, fx: 'lava', set: { glow: 1, embers: 1, range: 0.5 } }); t.handle('live.set', { mapId: own, fx: 'water', set: { clear: 0.25 } }); t.handle('live.set', { mapId: own, fx: 'ripple', set: { power: 1, speed: 1 } }); await t.settle();
     // on the TV
     await t.g('Trees.allowSoft(false)'); await nudge(21); // (software graphics: one screen at a time)
     await t.send(own); await t.t('Trees.allowSoft(true)'); await nudge(22);
@@ -747,12 +788,14 @@ module.exports = (area) => {
     await t.g('Trees.allowSoft(true)');
     t.handle('live.set', { mapId: own, on: false }); await t.settle();
     await t.until(async () => { const s = (await t.tvDebug()).living; const g = await t.g('Play.view().stats.living'); return s && !s.on && g && !g.on; }, 15000, 'the living effects to stop');
-    c = await card();
-    t.ok(!c.grass, 'Living effects off: the sliders leave', c);
     const off = (await spots([[4.5, 3.7]]))[0];
     t.ok(!off || off[3] < 10, 'and nothing is drawn above the picture', off);
     t.handle('live.set', { mapId: own, on: true }); await t.settle();
-    t.ok(M(t).live.on === true && (await card()).grass, 'on again: the sliders are back', M(t).live);
+    t.ok(M(t).live.on === true, 'on again', M(t).live);
+    if (!(await t.count('#pop .os-fly'))) await t.clickSel('#pop .os-mapbtn');
+    await cardOut(t);
+    c = await card();
+    t.ok(c.head === 'Map settings' && !c.sliders.some((x) => /Grass|Glow/.test(x)) && (await t.g(`[...document.querySelectorAll('#pop .os-fly .ctl-label')].some((e) => e.textContent === 'Living effects')`)), 'Map settings keeps only the switch for living effects', c);
     await t.t('Trees.allowSoft(false)'); await t.g('Trees.allowSoft(false)'); await nudge(23);
     // a drawing without effects has no living map
     const old = m.bg.live.path;

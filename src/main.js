@@ -2525,7 +2525,7 @@ function handle(type, p = {}) {
     if (type === 'view.update' && p.live) return liveView(map, p);
     if (type === 'view.update') { clearTimeout(liveViewEnd.get(mapId)); liveViewEnd.delete(mapId); if (previewQuiet) previewQuiet = Date.now() + 350; }
     const h = store.history(mapId);
-    const pushed = p.noHistory ? false : h.before(map, p.coalesce, type, p.stepLabel); // (Prototype 14: the phones' moves are no undo steps)
+    const pushed = p.noHistory || type === 'live.set' ? false : h.before(map, p.coalesce, type, p.stepLabel); // (Prototype 14: the phones' moves are no undo steps; Beta 3.46: nor are the living effects' sliders, which Undo does not turn back)
     if (type === 'spell.add' || type === 'spell.burst' || (type === 'spell.update' && 'mode' in p)) p.hold = settings.burstSeconds * 1000;
     const res = mapstate.apply(map, type, p, library.media);
     if (!res.changed) { if (pushed) h.drop(); return { ok: false }; }

@@ -3957,6 +3957,16 @@ body.gm .sv-asset.is-selected > .sv-treebox { outline: 2px solid var(--torch); o
 .os-pick .os-fxart { display: grid; place-items: center; height: 26px; color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
 .os-pick .os-fxart .i { width: 16px; height: 16px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
 .os-tints .os-fxart { height: 18px; }
+/* Beta 3.46: an effect's own panel: how it is drawn (six small picks), its colour, the button to its card */
+.os-fxshapes .os-fxart { background: var(--panel-2, rgba(255, 255, 255, 0.05)); color: var(--text); height: 24px; box-shadow: none; }
+.os-fxshapes .os-fxart .i { filter: none; }
+.os-fxtint { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+.os-fxtint > :first-child { flex: 1 1 auto; min-width: 0; }
+input.os-fxcolor { flex: 0 0 38px; width: 38px; height: 30px; padding: 0; border: 1px solid var(--line-2); border-radius: 8px; background: none; cursor: pointer; }
+input.os-fxcolor:disabled { opacity: 0.35; cursor: default; }
+input.os-fxcolor::-webkit-color-swatch-wrapper { padding: 2px; }
+input.os-fxcolor::-webkit-color-swatch { border: 0; border-radius: 5px; }
+.btn.os-fxset.on { border-color: var(--torch); color: var(--torch); }
 .os-art.a-fx { display: grid; place-items: center; color: #fff; }
 .os-art.a-fx .fxwash { inset: 0; }
 .os-art.a-fx > .i { position: relative; width: 34px; height: 34px; margin-bottom: 18px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.7)); }
