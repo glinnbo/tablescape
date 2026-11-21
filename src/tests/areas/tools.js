@@ -6,7 +6,7 @@ const RAIL = [
   ['map', 'M', { tool: 'map', pop: true }], ['grid', null, { pop: true }], ['fx', 'E', { tool: 'fx', pop: true }], ['asset', 'S', { tool: 'asset', pop: true }],
   ['walls', 'W', { tool: 'walls', pop: true }], ['layers', 'K', { pop: true }], ['sound', null, { pop: true }], ['toolbox', 'Q', { pop: true }],
   ['select', 'V', { tool: 'select' }], ['token', 'N', { tool: 'token', pop: true }], ['fog', 'R', { tool: 'fog', pop: true }], ['party', 'U', { tool: 'party', pop: true }],
-  ['spell', 'A', { tool: 'spell', pop: true }], ['talk', 'O', { pop: true }],
+  ['spell', 'A', { tool: 'spell', pop: true }], ['talk', 'O', { win: true }], // (Second Builder, second-conversation-stage: Conversation is a window of its own)
 ];
 // the map tools in the Toolbox: label, tool, mode
 const MAP_TOOLS = [['Ping', 'point', 'ping'], ['Laser', 'point', 'laser'], ['Spotlight', 'point', 'spot'], ['Ruler', 'point', 'measure'], ['Chalk', 'draw', 'chalk'], ['Pen', 'draw', 'pen'],
@@ -38,7 +38,15 @@ module.exports = (area) => {
     t.ok(!(await folded()), 'open on the map on the table');
   });
 
-  const after = async (t, id, want) => {
+  const win = (id) => `.fp[data-id="${id}"]`;
+  const after = async (t, id, want, open = true) => {
+    if (want.win) { // a window of its own: the rail opens it, its key opens and closes it
+      if (!open) { await t.until(async () => !(await t.count(win(id))), 3000, `the ${id} window to close`); return; }
+      await t.until(() => t.count(win(id)), 3000, `the ${id} window`);
+      const chars = await t.g(`document.querySelector('${win(id)} .fp-body').textContent.length`);
+      t.ok(chars > 10, `the ${id} window has content`, chars);
+      return;
+    }
     if (want.tool) t.eq(await t.tool(), want.tool, `the tool after picking ${id}`);
     if (want.pop) {
       const title = await t.until(() => t.popTitle(), 3000, `the ${id} panel`);
@@ -60,6 +68,7 @@ module.exports = (area) => {
       await t.key(key);
       await t.sleep(250);
       await after(t, id, want);
+      if (want.win) { await t.key(key); await after(t, id, want, false); }
     });
   }
 

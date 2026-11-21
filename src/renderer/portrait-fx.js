@@ -24,7 +24,7 @@ window.PortraitFx = (() => {
   // it may turn (degrees), from / to: the amount over which it fades in, a: how strong at most.
   //   0-30 %   the wound at the neck or shoulder, drops on the face
   //   30-70 %  a second splat on the chest; the spray over the lower two thirds, dense on the wound's side
-  //   70-100 % drips and a slash streak; everything a little stronger
+  //   70-100 % drips and a slash streak; a second spray, splats and drips down the body: very covered; all stronger
   const PIECES = [
     { t: 'blood-8', x: 0.17, y: 0.3, size: 0.46, turn: 40, from: 0, to: 0.3, a: 1 },
     { t: 'blood-9', x: 0.07, y: 0.13, size: 0.17, turn: 60, from: 0.05, to: 0.3, a: 0.85 },
@@ -32,6 +32,14 @@ window.PortraitFx = (() => {
     { t: 'blood-spray', x: 0.05, y: 0.68, size: 1.15, turn: 10, from: 0.3, to: 0.7, a: 0.9, spray: true },
     { t: 'blood-2', x: 0.22, y: 0.42, size: 0.3, turn: 12, from: 0.7, to: 1, a: 0.8 },
     { t: 'blood-6', x: 0.02, y: 0.5, size: 0.42, turn: 60, from: 0.8, to: 1, a: 0.75 },
+    // Second Builder (second-conversation-stage): Glinn, 21 Nov 2026: "VERY covered" at 100 %, above all the lower two
+    // thirds: a second spray from the other side, splats on the belly, the hip and the legs, more drips
+    { t: 'blood-spray', x: -0.06, y: 0.66, size: 1.1, turn: 14, from: 0.6, to: 0.95, a: 0.95, spray: true, other: true },
+    { t: 'blood-8', x: 0.1, y: 0.55, size: 0.36, turn: 50, from: 0.7, to: 0.9, a: 0.95 },
+    { t: 'blood-9', x: -0.16, y: 0.74, size: 0.32, turn: 40, from: 0.75, to: 0.95, a: 0.9 },
+    { t: 'blood-8', x: 0.18, y: 0.86, size: 0.3, turn: 50, from: 0.8, to: 1, a: 0.9 },
+    { t: 'blood-2', x: -0.06, y: 0.62, size: 0.3, turn: 12, from: 0.85, to: 1, a: 0.85 },
+    { t: 'blood-spray', x: 0.02, y: 0.82, size: 0.9, turn: 20, from: 0.85, to: 1, a: 0.85, spray: true },
   ];
   const BIG = 1800; // the longest side a composed picture gets (the TV is 4K at most; portraits are rarely taller)
 
@@ -98,7 +106,7 @@ window.PortraitFx = (() => {
       const jx = (r() * 2 - 1) * 0.04; const jy = (r() * 2 - 1) * 0.03; const js = 0.9 + 0.2 * r(); const rot = ((r() * 2 - 1) * p.turn * Math.PI) / 180; const flip = r() < 0.5;
       const a = p.a * k * ramp(amount, p.from, p.to);
       if (a <= 0.01) continue;
-      out.push({ t: T[p.t], x: b.x + b.w * (0.5 + side * p.x + jx), y: b.y + b.h * (p.y + jy), size: b.w * p.size * js, rot, flip: p.spray ? side < 0 : flip, a });
+      out.push({ t: T[p.t], x: b.x + b.w * (0.5 + side * p.x + jx), y: b.y + b.h * (p.y + jy), size: b.w * p.size * js, rot, flip: p.spray ? (p.other ? side > 0 : side < 0) : flip, a });
     }
     return out;
   }

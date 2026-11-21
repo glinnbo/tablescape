@@ -4222,7 +4222,7 @@ ipcMain.handle('settings', (e, patch) => {
     const pos = !('pos' in pt) && 'anchor' in pt ? { left: 0, center: 0.5, right: 1 }[anchor]
       : t.pos != null && Number.isFinite(Number(t.pos)) ? Math.min(1, Math.max(0, Number(t.pos))) : { left: 0, center: 0.5, right: 1 }[anchor];
     settings.talk = { size: Math.min(0.7, Math.max(0.1, Number(t.size) || 0.34)), pos, anchor: pos < 0.34 ? 'left' : pos > 0.66 ? 'right' : 'center', blur: Math.min(1, Math.max(0, Number(t.blur) || 0)),
-      look: TALK_LOOKS.includes(t.look) ? t.look : 'ink' }; // 4.4: ink, smoke, parchment, embers
+      look: TALK_LOOKS.includes(t.look) ? t.look : 'ink', names: !!t.names }; // 4.4: ink, smoke, parchment, embers (Second Builder, second-conversation-stage: names: the speaker's name on the band)
   }
   if ('boardVolume' in patch) settings.boardVolume = Math.min(1, Math.max(0, Number(patch.boardVolume) || 0));
   if (patch.weatherPresets) settings.weatherPresets = patch.weatherPresets.slice(0, 24);

@@ -62,6 +62,24 @@ const Toolbox = (() => {
       return r;
     }
     const onStage = (path) => { const t = S().talk; return t ? t.cast.findIndex((x) => x.path === path) : -1; };
+    // Second Builder (second-conversation-stage): a portrait clicked (or dropped on the small TV) comes in and speaks; one
+    // that already stands there speaks; one speaking stays (only ✕ or Delete take anyone out). A 4th pushes the oldest
+    // out: a notice says who, with Undo
+    async function bringIn(it) {
+      if (!it || !it.path) return null;
+      const t = S().talk; const i = onStage(it.path);
+      TalkStage.pick(it.path);
+      if (i >= 0) { if (i < t.cast.length - 1) return cmd('talk.toggle', { path: it.path }); TalkStage.refresh(); return { ok: true }; }
+      const out = t && t.cast.length >= 3 ? t.cast[0] : null;
+      const r = await talkToggle(it);
+      if (r && r.ok && out) {
+        toast(`${out.name} stepped out: three stand there at most`, { ms: 6000, action: { label: 'Undo', run: async () => {
+          await cmd('talk.toggle', { path: it.path, out: true });
+          await cmd('talk.toggle', { path: out.path, alpha: out.alpha !== false });
+        } } });
+      }
+      return r;
+    }
     // 4.7: the small panel shows the party and this chapter's Ready list; List … opens all portraits in a window of its own
     function portraits() {
       const out = [];
@@ -188,12 +206,12 @@ const Toolbox = (() => {
       setTimeout(() => { document.addEventListener('pointerdown', outSizePop, true); document.addEventListener('keydown', escSizePop, true); }, 0);
       input.focus();
     }
-    const tipFor = (it, i, t) => (i < 0 ? `${it.name}: click to bring in` : i === t.cast.length - 1 ? `${it.name}: in front. Click to take out` : `${it.name}: on the table. Click to bring to the front`);
+    const tipFor = (it, i, t) => (i < 0 ? `${it.name}: click to bring in` : i === t.cast.length - 1 ? `${it.name}: speaking (✕ on the small TV takes them out)` : `${it.name}: on the table. Click: they speak`); // (Second Builder, second-conversation-stage)
     const readyAdd = (it) => ctx.ready.add('portraits', [{ path: it.path, name: it.name }]);
     // Talk → List: every portrait in the library; click: in or out of the conversation, tick: ready for this chapter
     const talkListDef = () => ({
       id: 'talklist', title: 'Conversation', icon: 'messages',
-      tips: ['Click a portrait to bring it into the conversation, click it again to take it out.', 'The tick puts it on this chapter\'s Ready list, or takes it off.',
+      tips: ['Click a portrait to bring it into the conversation; click one that stands there and it speaks. ✕ on the small TV takes it out.', 'The tick puts it on this chapter\'s Ready list, or takes it off.',
         'The chips are the folders in Portraits: make folders like Villains or Town.', 'The party\'s pictures belong in the Party folder: their cards pick from there.'],
       build: () => {
         loadLib(true);
@@ -202,7 +220,7 @@ const Toolbox = (() => {
           items: () => lib.filter((x) => x.cat === 'portraits' && x.kind === 'image'),
           pathOf: PickList.pathOf, shortName: PickList.shortName, rootLabel: 'Portraits', memKey: 'portraits', // (4.11: its folders, all of them)
           shelves: [{ id: 'on', label: 'In the conversation', icon: 'messages', has: (it) => onStage(it.path) >= 0 }, { id: 'fav', label: 'Favourites', icon: 'star', has: (it) => !!it.fav }],
-          pick: (it) => talkToggle(it),
+          pick: (it) => bringIn(it),
           state: (it) => { const i = onStage(it.path); const t = S().talk; return { on: i >= 0, badge: i < 0 ? null : i === t.cast.length - 1 ? 'Speaking' : 'On', tip: tipFor(it, i, t) }; },
           ready: { chapter: () => ctx.ready.chapter(), has: (p) => ctx.ready.list('portraits').some((x) => x.path === p), toggle: (it, on) => (on ? readyAdd(it) : ctx.ready.remove('portraits', it.path)) },
           menu: (e, it) => openSizePop(e, it), // (right-click a portrait: its size)
@@ -214,62 +232,77 @@ const Toolbox = (() => {
         });
       },
     });
+    // Second Builder (second-conversation-stage): Conversation is a window of its own (O, or the rail), sized from the
+    // small TV's corner: the small TV (talk-stage.js), ⚙ with the look settings, then the party, this chapter's Ready
+    // portraits (all of them while none are ready) and List …
+    let gearOpen = false; let gearEl = null;
+    const talkDef = () => ({
+      id: 'talk', title: 'Conversation', icon: 'messages', build: buildTalkPop,
+      // (main Builder at integration: the first time it opens beside the table preview, not over it: it is wider than the other windows)
+      place: (r) => { let w = 420; try { w = Number(localStorage.getItem('talkStageW')) || 420; } catch {} return { x: Math.max(8, r.width - 212 - 24 - (w + 28) - 12), y: 12 }; }, // (talkStageW: the small TV's width, talk-stage.js)
+      tips: ['Click a portrait below, or drag it onto the small TV: it comes in and speaks. The first one starts the conversation.',
+        'On the small TV: click a portrait and it speaks. Drag the one speaking sideways to move them all; drag one up or down to raise or lower it; pull a top corner to size it.',
+        '✕ on the small TV, Take out or Delete: it leaves. A click never takes anyone out. Three stand there at most.',
+        'The bar under the small TV: Mirror, Bloodied, Shaded and Hidden for the picked portrait. Right-click a portrait below to set its looks before it comes in.',
+        '⚙: how big they stand, the blur behind them, and the speaker\'s name on the band. The band\'s look: Options → Looks.',
+        'With players on both sides, the far side gets a turned copy. A tall portrait may reach over the far band, away from the players looking at it.',
+        'Drag the corner of the small TV to make this window bigger.'],
+      headExtra: () => h('button', { class: `icon-btn cs-gear ${gearOpen ? 'on' : ''}`, 'aria-label': 'Look settings', 'data-tip': 'How big, the blur behind, names',
+        onclick: (e) => { gearOpen = !gearOpen; e.currentTarget.classList.toggle('on', gearOpen); if (gearEl) gearEl.hidden = !gearOpen; } }, iconEl('settings')),
+    });
     function buildTalkPop() {
       loadLib();
-      const toggleBtn = h('button', { class: 'btn wide', onclick: async () => { const r = await cmd(S().talk ? 'talk.off' : 'talk.on'); if (r && r.error) toast(r.error, { kind: 'error', ms: 3500 }); } });
-      c().bind(() => {
-        const on = !!S().talk;
-        if (toggleBtn.dataset.on === String(on)) return;
-        toggleBtn.dataset.on = String(on);
-        toggleBtn.className = `btn wide ${on ? 'danger' : 'primary'}`;
-        toggleBtn.innerHTML = '';
-        toggleBtn.append(iconEl(on ? 'player-stop' : 'messages'), on ? 'End the conversation' : 'Start a conversation');
+      const stage = TalkStage.build({
+        S, cmd, toast, bind: c().bind, bringIn, refresh: () => ctx.refreshPop(),
+        preview: () => (ctx.preview ? ctx.preview() : ''), previewSize: () => { if (ctx.previewSize) ctx.previewSize(); },
+        fx: { of: (path) => fxOf(path), send: (path, patch) => cmd('talk.fx', { path, ...patch }) },
       });
+      const set = (patch) => ts.settings({ talk: patch });
+      const prefs = () => (S().settings && S().settings.talk) || { size: 0.34, pos: 1, blur: 0.5, look: 'ink' };
+      gearEl = h('div', { class: 'cs-gear-box stack', hidden: !gearOpen },
+        c().slider({ label: 'Size', min: 0.1, max: 0.7, step: 0.01, get: () => prefs().size, set: (v) => set({ size: v }), fmt: (v) => `${Math.round(v * 100)}% of the TV height` }),
+        c().slider({ label: 'Blur the map behind', min: 0, max: 1, step: 0.05, get: () => prefs().blur, set: (v) => set({ blur: v }), fmt: (v) => (v < 0.05 ? 'Off' : `${Math.round(v * 100)}%`) }),
+        c().toggle({ label: 'The speaker\'s name on the band', get: () => !!prefs().names, set: (v) => set({ names: v }) }),
+        c().btn('The band\'s look …', 'sparkles', () => { if (window.App && App.openOptions) App.openOptions('looks'); }, { kind: 'small ghost' }));
       const strip = h('div', { class: 'talk-strip' });
       c().bind(() => {
-        const groups = portraits();
+        let groups = portraits();
+        // when nothing is ready: all portraits (H1/H6: no dead end on first use)
+        if (!groups.some(([, l, o]) => o.ready && l.length)) {
+          const all = lib.filter((x) => x.cat === 'portraits' && x.kind === 'image').slice(0, 48);
+          groups = groups.filter(([, , o]) => !o.ready);
+          if (all.length) groups.push(['Portraits', all, { all: true }]);
+        }
         const t = S().talk;
         const mirror = (S().settings && S().settings.portraitMirror) || {};
         const sig = JSON.stringify([groups.map(([g, l]) => [g, l.map((x) => x.path)]), t && t.cast.map((x) => x.path), mirror, (S().settings && S().settings.portraitSize) || {}, (S().settings && S().settings.portraitOffset) || {}, (S().settings && S().settings.portraitFx) || {}]);
         if (strip.dataset.sig === sig) return;
         strip.dataset.sig = sig;
         strip.innerHTML = '';
-        if (!groups.length) { strip.append(c().hint('Open List … to pick portraits; tick them there to have them ready here.')); return; }
+        if (!groups.length) { strip.append(c().hint('No portraits yet: List … → From this PC.')); return; }
         for (const [title, list, o] of groups) {
           strip.append(h('div', { class: 'tok-group' }, h('span', { class: 'grow ellipsis' }, title),
             o.ready && list.length ? h('button', { class: 'tg-clear', 'data-tip': 'Empty this chapter\'s Ready list', onclick: () => ctx.ready.clear('portraits') }, 'Clear') : null));
           const row = h('div', { class: `talk-row ${o.ready ? 'ready-row' : ''}` });
-          if (o.ready) {
-            if (!list.length) row.append(h('p', { class: 'hint ready-empty' }, 'Nothing ready yet: tick portraits in List …'));
-            ctx.ready.drop(row, 'portraits');
-          }
+          if (o.ready || o.all) ctx.ready.drop(row, 'portraits');
           for (const it of list.slice(0, 48)) {
             const i = onStage(it.path);
-            const use = () => (it.missing ? toast(`${it.name} is no longer in the library: ✕ takes it off the Ready list`, { ms: 3500 }) : talkToggle(it));
-            row.append(h('div', { class: `talk-pick ${i >= 0 ? 'on' : ''} ${it.missing ? 'missing' : ''}`, dataset: { flash: it.path }, role: 'button', tabindex: '0', oncontextmenu: (e) => { if (!it.missing) openSizePop(e, it); }, 'data-tip': it.missing ? `${it.name}: no longer in the library (✕ takes it off)` : `${tipFor(it, i, t || { cast: [] })} · right-click: its size, place and looks`, 'aria-label': it.name,
+            const use = () => (it.missing ? toast(`${it.name} is no longer in the library: ✕ takes it off the Ready list`, { ms: 3500 }) : bringIn(it));
+            const drag = !it.missing ? { draggable: 'true', ondragstart: (e) => { e.dataTransfer.setData('application/x-ts-asset', JSON.stringify({ path: it.path, name: it.name, cat: 'portraits', kind: it.kind || 'image' })); e.dataTransfer.effectAllowed = 'copy'; } } : {};
+            row.append(h('div', { class: `talk-pick ${i >= 0 ? 'on' : ''} ${it.missing ? 'missing' : ''}`, dataset: { flash: it.path }, role: 'button', tabindex: '0', ...drag, oncontextmenu: (e) => { if (!it.missing) openSizePop(e, it); }, 'data-tip': it.missing ? `${it.name}: no longer in the library (✕ takes it off)` : tipFor(it, i, t || { cast: [] }),
               onclick: use, onkeydown: (e) => { if (e.key === 'Enter') use(); } },
             h('span', { class: 'talk-thumb' }, it.missing ? iconEl('alert-triangle') : Thumbs.img(it.path, it.kind || 'image', it.thumb)),
             h('span', { class: 'talk-name' }, it.name),
             i >= 0 ? h('b', { class: 'talk-badge' }, i === t.cast.length - 1 ? 'Speaking' : 'On') : null,
-            mirrorBtn(it),
             sizeBadge(it),
             o.ready ? h('button', { class: 'icon-btn ready-x', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('portraits', it.path); } }, iconEl('x')) : null));
           }
           strip.append(row);
         }
       });
-      const set = (patch) => ts.settings({ talk: patch });
-      const prefs = () => (S().settings && S().settings.talk) || { size: 0.34, pos: 1, blur: 0.5, look: 'ink' };
-      const posOf = (p) => (Number.isFinite(p.pos) ? p.pos : { left: 0, center: 0.5, right: 1 }[p.anchor] ?? 1);
       const listBtn = c().btn('List …', 'layout-grid', () => ctx.togglePanel(talkListDef()), { kind: 'wide', tip: 'All portraits: click one to bring it in, tick it to have it ready here' });
       c().bind(() => listBtn.classList.toggle('on', !!ctx.panelOpen('talklist')));
-      return h('div', { class: 'stack' },
-        toggleBtn, strip, listBtn,
-        c().sep(),
-        c().slider({ label: 'Size', min: 0.1, max: 0.7, step: 0.01, get: () => prefs().size, set: (v) => set({ size: v }), fmt: (v) => `${Math.round(v * 100)}% of the TV height` }),
-        // 4.7: anywhere from the left end to the right end (was Left / Middle / Right)
-        c().slider({ label: 'Stand at', min: 0, max: 1, step: 0.01, get: () => posOf(prefs()), set: (v) => set({ pos: v }), fmt: (v) => (v < 0.04 ? 'Left' : v > 0.96 ? 'Right' : Math.abs(v - 0.5) < 0.03 ? 'Middle' : `${Math.round(v * 100)}% from the left`) }),
-        c().slider({ label: 'Blur the map behind', min: 0, max: 1, step: 0.05, get: () => prefs().blur, set: (v) => set({ blur: v }), fmt: (v) => (v < 0.05 ? 'Off' : `${Math.round(v * 100)}%`) }));
+      return h('div', { class: 'stack cs-panel' }, stage, gearEl, strip, listBtn);
     }
 
     // =====================================================================
@@ -401,6 +434,7 @@ const Toolbox = (() => {
     };
     const defOf = (id) => {
       if (id === 'atlas') return ctx.Atlas.def(); // (Beta 3.12: the Cartographer is a window of its own, the Map table)
+      if (id === 'talk') return talkDef(); // (Second Builder, second-conversation-stage: Conversation is a window of its own)
       const p = PANELS.find((x) => x.id === id) || PANELS[0];
       return { id: p.id, title: p.label, icon: p.icon, build: () => panel(p.id), tips: PANEL_TIPS[p.id] };
     };

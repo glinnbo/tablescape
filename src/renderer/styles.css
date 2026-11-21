@@ -4053,3 +4053,70 @@ body.gm[data-tool="oldschool"] #viewport { cursor: crosshair; }
 .frame-tab { pointer-events: auto; cursor: grab; display: inline-flex; align-items: center; gap: 5px; touch-action: none; user-select: none; }
 .frame-tab .i { width: 13px; height: 13px; flex: none; }
 .frame-tab.grabbing { cursor: grabbing; }
+/* Second Builder (second-conversation-stage): on the TV a tall portrait reaches over the far side's band (away from the
+   players who look at it). The bands lie under both sides' portraits; each side's band has a copy in front of its own
+   portraits' feet (table-overlays.js cuts the two apart). The speaker's name can stand on any band. */
+.talk-layer.inkl { z-index: 1; }
+.talk-layer.castl { z-index: 2; }
+.talk-layer.inkf { z-index: 3; }
+.talk-front { position: absolute; inset: 0; }
+.talk-speaker { position: absolute; translate: -50% 50%; font: 500 3.4vh/1 var(--display); color: #f3e9da; white-space: nowrap; letter-spacing: 0.02em;
+  padding: 0.5vh 1.4vh 0.7vh; border-radius: 1vh; background: rgba(8, 8, 10, 0.55); text-shadow: 0 0.2vh 0.8vh #000; transition: left 0.5s ease; z-index: 60; }
+.talk-speaker[hidden] { display: none; }
+/* a portrait without transparency (a JPG): its top edge fades out too, not only the oval (it used to end in a soft line) */
+.talk-npc.opaque img, .talk-npc.opaque .talk-veil {
+  -webkit-mask-image: radial-gradient(ellipse 50% 52% at 50% 46%, #000 62%, transparent 100%), linear-gradient(180deg, transparent 0%, #000 13%);
+  mask-image: radial-gradient(ellipse 50% 52% at 50% 46%, #000 62%, transparent 100%), linear-gradient(180deg, transparent 0%, #000 13%);
+  -webkit-mask-composite: source-in; mask-composite: intersect; }
+/* Second Builder (second-conversation-stage): the Conversation window: a small TV with a frame on each portrait */
+.cs-panel { min-width: 300px; }
+.cs-wrap { position: relative; align-self: flex-start; }
+.cs-stage { position: relative; width: 420px; max-width: calc(100vw - 200px); aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; outline: none; touch-action: none;
+  background: radial-gradient(ellipse at 50% 50%, #1d2026 0%, #121418 100%); border: 1px solid var(--line-2); }
+.cs-stage:focus-visible { border-color: var(--torch); }
+.cs-stage.drop-ok { border-color: var(--torch); box-shadow: 0 0 0 2px var(--torch-soft); }
+.cs-tv { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.cs-tv[src=""] { display: none; }
+.cs-stage.empty .cs-tv { filter: brightness(0.55); }
+.cs-frames { position: absolute; inset: 0; }
+.cs-hint { position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; padding: 0 18%; text-align: center; color: var(--text); font-size: 12.5px; text-shadow: 0 1px 4px #000; pointer-events: none; }
+.cs-hint[hidden] { display: none; }
+.cs-frame { position: absolute; box-sizing: border-box; border: 1px dashed rgba(233, 227, 213, 0.35); border-radius: 3px; cursor: pointer; transition: left 0.15s ease; }
+.cs-frame:hover { border-color: rgba(233, 227, 213, 0.75); }
+.cs-frame.front { border-style: solid; border-color: rgba(227, 150, 62, 0.75); cursor: ew-resize; }
+.cs-frame.picked { border: 1.5px solid var(--torch); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 14px rgba(227, 150, 62, 0.35); }
+.cs-h { position: absolute; top: -5px; width: 9px; height: 9px; border-radius: 2px; background: #fff3e0; border: 1px solid var(--torch); cursor: nesw-resize; display: none; }
+.cs-h.tl { left: -5px; cursor: nwse-resize; } .cs-h.tr { right: -5px; }
+.cs-x { position: absolute; right: -9px; top: -11px; width: 20px; height: 20px; border-radius: 50%; padding: 0; display: none; place-items: center; cursor: pointer;
+  background: #2a1a17; border: 1px solid var(--danger); color: var(--danger); }
+.cs-x .i { width: 12px; height: 12px; }
+.cs-frame.picked .cs-h { display: block; }
+.cs-frame.picked .cs-x { display: grid; }
+.cs-tag { position: absolute; left: 50%; bottom: 0; translate: -50% 100%; white-space: nowrap; font: 600 10.5px/1 var(--ui); padding: 3px 6px; border-radius: 0 0 5px 5px;
+  background: rgba(18, 19, 22, 0.85); color: var(--text); pointer-events: none; }
+.cs-frame.front .cs-tag { background: var(--torch); color: var(--torch-ink); }
+.cs-frame:not(.front):not(.picked) .cs-tag { opacity: 0; }
+.cs-frame:hover .cs-tag { opacity: 1; }
+.cs-grip { position: absolute; right: -8px; bottom: -8px; width: 18px; height: 18px; display: flex; cursor: nwse-resize; color: var(--muted); opacity: 0.7; }
+.cs-grip:hover { opacity: 1; color: var(--torch); }
+.cs-grip .i { width: 14px; height: 14px; rotate: 90deg; }
+.cs-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.cs-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); flex: none; }
+.cs-status.on .cs-dot { background: #5cc382; box-shadow: 0 0 6px #5cc382; }
+.cs-picked { display: flex; flex-direction: column; gap: 7px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--soot); }
+.cs-picked[hidden] { display: none; }
+.cs-row { display: flex; align-items: center; gap: 6px; }
+.cs-row b small { color: var(--torch); font-weight: 500; }
+.cs-look { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line-2); background: transparent; color: var(--muted); font: 500 12px/1.2 var(--ui); cursor: pointer; }
+.cs-look .i { width: 14px; height: 14px; }
+.cs-look:hover { color: var(--text); }
+.cs-look.on { background: var(--torch); border-color: var(--torch); color: var(--torch-ink); font-weight: 600; }
+.cs-slider { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.cs-slider > span:first-child { width: 58px; }
+.cs-slider input { flex: 1; }
+.cs-amt { width: 40px; text-align: right; color: var(--text); white-space: nowrap; }
+.cs-gear-box { padding: 8px 9px; border: 1px solid var(--line); border-radius: 10px; }
+.cs-gear-box[hidden] { display: none; }
+.fp-head .cs-gear.on { color: var(--torch); }
+.fp[data-id="talk"] { max-width: calc(100% - 24px); }
+.fp[data-id="talk"] .fp-extra.cs-gear { display: grid; } /* (Second Builder: ⚙ in Conversation's title bar, open or folded) */

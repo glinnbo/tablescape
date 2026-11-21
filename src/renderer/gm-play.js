@@ -342,6 +342,7 @@ const Play = (() => {
       const img = $('#tc-preview', els.tctl); if (img) img.src = url;
       const rp = $('#pop .rp-img'); if (rp) rp.src = url;
       const big = $('.fp[data-id="preview"] .big-preview'); if (big) big.src = url;
+      if (typeof TalkStage === 'object') TalkStage.preview(url); // (Second Builder: the small TV in Conversation)
     });
     setTool('select');
   }
@@ -588,7 +589,7 @@ const Play = (() => {
       if (b.closest('.rail-pins')) continue; // (renderPins: their own open and running state)
       const id = b.dataset.id;
       b.classList.toggle('is-tool', id === ui.tool);
-      b.classList.toggle('is-open', id === popId || (id === 'library' && !!ui.drawer) || (id === 'snaps' && !!Floats && Floats.isOpen('snaps')));
+      b.classList.toggle('is-open', id === popId || (id === 'library' && !!ui.drawer) || (id === 'snaps' && !!Floats && Floats.isOpen('snaps')) || (id === 'talk' && !!Floats && Floats.isOpen('talk')));
     }
     // undo and redo say what they take back
     const hs = (S && S.history) || {};
@@ -856,6 +857,7 @@ const Play = (() => {
       toggle({ label: 'Players see the round', get: () => !!(cb() && cb().show), set: (v) => { if (cb()) cmd('round.set', { mapId: cb().mapId, show: v }); } }));
   }
   function openPop(id, anchor) {
+    if (id === 'talk' && S) { if (popId) closePop(); TB.openPanel('talk'); renderRail(); return; } // (Second Builder, second-conversation-stage: a window of its own)
     if (!POPS[id] || !S) return;
     if (id !== 'toolbox' || popId !== 'toolbox') popTicker = null;
     if (id === 'toolbox' && popId !== 'toolbox' && !anchor && !ui.tbKeep) ui.tb = ui.tb || 'home';
@@ -901,7 +903,7 @@ const Play = (() => {
     const ph = els.pop.getBoundingClientRect().height;
     els.pop.style.top = `${clamp(popWant, 10, Math.max(10, sr.height - roster - ph - 12))}px`;
   }
-  function togglePop(id, btn) { if (popId === id) closePop(); else openPop(id, btn); }
+  function togglePop(id, btn) { if (id === 'talk') { if (Floats && Floats.isOpen('talk')) Floats.hide('talk'); else openPop('talk'); renderRail(); return; } if (popId === id) closePop(); else openPop(id, btn); } // (Second Builder: Conversation, a window)
   function closePop() {
     popId = null;
     popTicker = null;
@@ -2395,7 +2397,9 @@ const Play = (() => {
   function sendPreviewSize() {
     const big = Floats && Floats.isOpen('preview');
     const shown = big ? 960 : (els.tctl.getBoundingClientRect().width || previewW) - 16;
-    ts.previewSize({ width: Math.round(Math.min(1280, shown * (window.devicePixelRatio || 1))), fast: big });
+    // (Second Builder, second-conversation-stage: as wide as the small TV in Conversation, and quicker while someone talks)
+    const talkW = typeof TalkStage === 'object' && Floats && Floats.isOpen('talk') ? TalkStage.wantWidth() : 0;
+    ts.previewSize({ width: Math.round(Math.min(1280, Math.max(shown * (window.devicePixelRatio || 1), talkW))), fast: big || (talkW > 0 && !!(S && S.talk)) });
   }
   function previewDrag(e) {
     if (e.button !== 0) return;
@@ -3744,6 +3748,7 @@ const Play = (() => {
     refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), closePop: () => closePop(), get Drawer() { return Drawer; }, get Tools() { return Tools; }, get Show() { return Show; }, get Spot() { return Spot; }, get Lights() { return Lights; }, get Remote() { return Remote; }, get Players() { return PlayersP; }, get Atlas() { return AtlasP; }, get Chars() { return Chars; }, get Dice() { return Dice; },
     setTick: (fn) => { popTicker = fn; }, nextTurn: () => Tools.nextRound(),
     showPanel: (def) => Floats.show(def), togglePanel: (def) => Floats.toggle(def), panelOpen: (id) => Floats.isOpen(id),
+    preview: () => lastPreview, previewSize: () => sendPreviewSize(), // (Second Builder: the small TV in Conversation)
     pins: () => pins, togglePin: (id) => togglePin(id),
     // 4.5: Snapshots live in the Toolbox (Atmosphere, next to Moments)
     snaps: (toggle) => { if (toggle && Floats.isOpen('snaps')) Floats.hide('snaps'); else Snaps.openFor(null); renderRail(); },

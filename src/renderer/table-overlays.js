@@ -149,9 +149,15 @@ const TableOverlays = (() => {
       const side = el('div', `talk-side ${s}`);
       const back = el('div', 'talk-back'); // Prototype 27: what stands behind the portraits (the forest's tall trees)
       side.append(back);
-      return { s, side, back, cast: el('div', 'talk-cast'), ink: el('div', 'talk-ink'), nodes: new Map() };
+      // Second Builder (second-conversation-stage): the band is drawn twice, cut apart: under the portraits everywhere
+      // except where this side's portraits stand, and in front of them just there (their feet rise out of it). So a
+      // tall portrait reaches over the far side's band, away from the players who look at it (Glinn, 21 Nov 2026).
+      // name: the speaker's name on the band, for every look (Conversation → ⚙ → Show the name)
+      const front = el('div', 'talk-ink talk-ink-front'); const name = el('div', 'talk-speaker'); const fr = el('div', 'talk-front');
+      fr.append(front, name);
+      return { s, side, back, cast: el('div', 'talk-cast'), ink: el('div', 'talk-ink'), front, name, fr, nodes: new Map() };
     });
-    talkEl.append(...sides.map((x) => x.side), ...sides.map((x) => layer(x.s, 'castl', x.cast)), ...sides.map((x) => layer(x.s, 'inkl', x.ink)));
+    talkEl.append(...sides.map((x) => x.side), ...sides.map((x) => layer(x.s, 'castl', x.cast)), ...sides.map((x) => layer(x.s, 'inkl', x.ink)), ...sides.map((x) => layer(x.s, 'inkf', x.fr)));
     const handoutEl = el('div', 'tv-handout');
     const hItems = new Map(); // Prototype 26: several handouts at once; path → { el, faces: [{ f, img }], one, data }
     const breakEl = el('div', 'tv-break');
@@ -222,7 +228,7 @@ const TableOverlays = (() => {
           talk = null;
           for (const s of sides) for (const [path, n] of s.nodes) { leave(n); s.nodes.delete(path); }
           talkEl.classList.add('leaving');
-          setTimeout(() => { if (!talk) { talkEl.classList.remove('on', 'leaving'); for (const s of sides) { s.ink.innerHTML = ''; s.back.innerHTML = ''; } inkKey = ''; } }, 1200);
+          setTimeout(() => { if (!talk) { talkEl.classList.remove('on', 'leaving'); for (const s of sides) { s.ink.innerHTML = ''; s.front.innerHTML = ''; s.name.textContent = ''; s.back.innerHTML = ''; } inkKey = ''; } }, 1200);
         }
         return;
       }
@@ -295,58 +301,53 @@ const TableOverlays = (() => {
       n.wrap.classList.add('out');
       setTimeout(() => n.wrap.remove(), 900);
     }
-    // the newest stands in front at the anchor; earlier ones step back beside it
+    // the newest stands in front at the anchor; earlier ones step back beside it (Second Builder,
+    // second-conversation-stage: worked out by talk-layout.js, which the small TV in the Conversation window uses too)
     function layout() {
       if (!talk) return;
-      const H = Math.round(talk.size * geom.H);
-      const margin = geom.W * 0.04;
       for (const s of sides) {
         const list = talk.cast.map((c) => s.nodes.get(c.path)).filter(Boolean);
-        // (Prototype 12: each one's own size. Beta 3.19: with players on both sides no taller than the room between the
-        // two bands, so no head goes under the other side's band)
-        const most = seats === 'both' ? Math.round(geom.H * 0.86) : Infinity;
-        const hs = list.map((n) => Math.min(most, Math.round(H * ((n.c && n.c.scale) || 1))));
-        const widths = list.map((n, i) => (n.img.naturalWidth ? (hs[i] * n.img.naturalWidth) / n.img.naturalHeight : hs[i] * 0.8));
-        const order = list.map((n, i) => i).reverse(); // front first
-        const pos = new Array(list.length);
-        // 4.7: where the one speaking stands, anywhere from the left end (0) to the right end (1); the others step back
-        // beside them towards the middle of the TV (round them, alternating, when they stand in the middle)
-        const at = Number.isFinite(talk.pos) ? talk.pos : { left: 0, center: 0.5, right: 1 }[talk.anchor] ?? 1;
-        const fi = order[0]; const wf = fi != null ? widths[fi] : 0;
-        const frontLeft = margin + at * Math.max(0, geom.W - 2 * margin - wf);
-        if (at > 0.35 && at < 0.65) {
-          const mid = frontLeft + wf / 2;
-          order.forEach((i, k) => {
-            if (k === 0) { pos[i] = mid - widths[i] / 2; return; }
-            const side = k % 2 ? -1 : 1;
-            const step = Math.ceil(k / 2) * 0.62;
-            pos[i] = mid - widths[i] / 2 + side * step * widths[i];
-          });
-        } else {
-          const right = at < 0.5; // standing at the left: the others step back to the right of them
-          let edge = right ? frontLeft : frontLeft + wf;
-          order.forEach((i, k) => {
-            const w = widths[i];
-            if (right) { pos[i] = edge; edge += w * 0.6; } else { pos[i] = edge - w; edge -= w * 0.6; }
-            if (k === 0) edge += right ? w * 0.05 : -w * 0.05;
-          });
-        }
+        const L = TalkLayout.compute({ W: geom.W, H: geom.H, size: talk.size, pos: talk.pos, anchor: talk.anchor, seats,
+          items: list.map((n) => ({ aspect: n.img.naturalWidth ? n.img.naturalWidth / n.img.naturalHeight : 0, scale: (n.c && n.c.scale) || 1, offset: (n.c && n.c.offset) || null })) });
+        const pos = L.items.map((b) => b.left); const widths = L.items.map((b) => b.width);
         list.forEach((n, i) => {
-          const front = i === list.length - 1;
-          const off = (n.c && n.c.offset) || { x: 0, y: 0 }; // (Prototype 13: its own offset)
-          Object.assign(n.wrap.style, { left: `${Math.round(pos[i])}px`, width: `${Math.round(widths[i])}px`, height: `${hs[i]}px`, zIndex: String(10 + i), translate: off.x || off.y ? `${Math.round(off.x * widths[i])}px ${Math.round(-off.y * hs[i])}px` : '' });
-          n.wrap.classList.toggle('back', !front);
+          const b = L.items[i];
+          Object.assign(n.wrap.style, { left: `${Math.round(b.left)}px`, width: `${Math.round(b.width)}px`, height: `${b.height}px`, zIndex: String(10 + i), translate: b.dx || b.dy ? `${Math.round(b.dx)}px ${Math.round(b.dy)}px` : '' });
+          n.wrap.classList.toggle('back', !b.front);
+          n.wrap.classList.toggle('capped', b.capped);
         });
+        cutBand(s, L.spans);
+        // the speaker's name on the band (every look but the parchment, which has its own plate)
+        const f = list[list.length - 1];
+        const nm = talk.names && f && f.c && f.c.name && talk.look !== 'parchment' ? String(f.c.name).replace(/[_-]+/g, ' ') : '';
+        if (s.name.textContent !== nm) s.name.textContent = nm;
+        s.name.hidden = !nm;
+        if (f && nm) { const b = L.items[list.length - 1]; s.name.style.left = `${Math.round(b.left + b.dx + b.width / 2)}px`; s.name.style.bottom = `${Math.round((parseFloat(s.ink.style.height) || geom.H * 0.14) * 0.42)}px`; }
         // 4.4: on the parchment banner, the name of the one in front (under them)
-        const plate = s.ink.querySelector('.tb-parch-name');
-        if (plate) {
-          const f = list[list.length - 1];
-          const nm = f && f.c && f.c.name ? String(f.c.name).replace(/[_-]+/g, ' ') : '';
-          if (plate.textContent !== nm) plate.textContent = nm;
+        for (const plate of [s.ink.querySelector('.tb-parch-name'), s.front.querySelector('.tb-parch-name')]) {
+          if (!plate) continue;
+          const pn = f && f.c && f.c.name ? String(f.c.name).replace(/[_-]+/g, ' ') : '';
+          if (plate.textContent !== pn) plate.textContent = pn;
           if (f) plate.style.left = `${Math.round(pos[list.length - 1] + widths[list.length - 1] / 2)}px`;
-          plate.hidden = !nm;
+          plate.hidden = !pn;
         }
       }
+    }
+    // Second Builder (second-conversation-stage): the band under the portraits everywhere but where this side's portraits
+    // stand, and its copy in front of them just there; each part of the band is drawn once
+    function cutBand(s, spans) {
+      const W = geom.W;
+      const merged = [];
+      for (const [a0, b0] of spans.map(([a, b]) => [Math.max(0, a), Math.min(W, b)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])) {
+        const last = merged[merged.length - 1];
+        if (last && a0 <= last[1]) last[1] = Math.max(last[1], b0); else merged.push([a0, b0]);
+      }
+      const gaps = []; let x = 0;
+      for (const [a, b] of merged) { if (a > x) gaps.push([x, a]); x = b; }
+      if (x < W) gaps.push([x, W]);
+      const rects = (list) => (list.length ? `polygon(${list.map(([a, b]) => `${Math.round(a)}px 300%, ${Math.round(a)}px -300%, ${Math.round(b)}px -300%, ${Math.round(b)}px 300%`).join(', ')})` : 'inset(0 0 100% 0)');
+      s.front.style.clipPath = rects(merged);
+      s.ink.style.clipPath = merged.length ? rects(gaps) : '';
     }
     function drawInk() {
       const look = talk && ['smoke', 'parchment', 'embers', 'stone', 'meadow', 'city', 'winter', 'sand', 'dungeon', 'necro', 'forest'].includes(talk.look) ? talk.look : 'ink';
@@ -358,6 +359,7 @@ const TableOverlays = (() => {
       const svg = look === 'ink' ? inkBand(geom.W, hgt, seed, { sweep: 0.45, unit: 0.1, every: 95 }) : Looks.talkBand(look, geom.W, hgt, seed);
       for (const s of sides) {
         s.ink.innerHTML = svg;
+        s.front.innerHTML = svg; s.front.style.height = `${hgt}px`; s.front.classList.remove('in'); void s.front.offsetWidth; s.front.classList.add('in'); // (Second Builder: the copy in front of the feet)
         s.back.innerHTML = Looks.talkBack(look, geom.W, Math.round((talk ? talk.size : 0.4) * geom.H * 1.45), seed) || '';
         s.back.classList.remove('in'); void s.back.offsetWidth; s.back.classList.add('in');
         s.ink.style.height = `${hgt}px`;

@@ -11,7 +11,9 @@ module.exports = (area) => {
   area.quick('O opens Conversation; a portrait clicked there rises on the TV, clicked again it leaves', async (t) => {
     t.gm().webContents.focus();
     await t.key('O');
-    t.eq(await t.popTitle(), 'Conversation', 'the panel after O');
+    // (Second Builder, second-conversation-stage: Conversation is a window of its own, with the small TV)
+    await t.until(() => t.g(`!!document.querySelector('.fp[data-id="talk"] .cs-stage')`), 3000, 'the Conversation window after O');
+    t.eq(await t.g(`document.querySelector('.fp[data-id="talk"] .fp-title').textContent`), 'Conversation', 'its title');
     const p = faces(t)[0];
     t.ok(p, 'the library has a portrait');
     const r = await t.cmd('talk.toggle', { path: p.path });
@@ -21,27 +23,108 @@ module.exports = (area) => {
     await t.cmd('talk.toggle', { path: p.path });
     await t.cmd('talk.off', {});
     await t.until(async () => !(await talk(t)), 5000, 'the portrait to leave the TV');
+    await t.key('O');
+    await t.until(() => t.g(`!document.querySelector('.fp[data-id="talk"]')`), 3000, 'O again closes it');
   });
 
-  // Beta 3.19: with players on both sides, a big portrait stays clear of the other side's band, on both sides alike
-  area.quick('both sides: a big portrait stays below the other side\'s band; the bands lie over both sides\' portraits', async (t) => {
+  // Second Builder (second-conversation-stage), Glinn 21 Nov 2026: a tall portrait may reach over the far side's band,
+  // away from the players who look at it (in front of that band); its feet still rise out of its own band. Where it
+  // would meet the far copy (standing in the middle) it keeps below the bands as before (Beta 3.19)
+  area.quick('both sides: a tall portrait reaches over the far band (in front of it); in the middle it keeps below the bands', async (t) => {
     const p = faces(t)[0];
     t.eq(t.settings.seats || 'both', 'both', 'players on both sides');
     if (t.state.talk) await t.cmd('talk.off', {});
     await t.cmd('talk.size', { path: p.path, scale: 2 });
-    await t.g(`window.ts.settings({ talk: { size: 0.7 } })`);
+    await t.g(`window.ts.settings({ talk: { size: 0.46, pos: 1 } })`);
+    const look = () => t.t(`(() => { const n = [...document.querySelectorAll('.tv-talk .talk-npc:not(.out)')]; const z = (sel) => +getComputedStyle(document.querySelector(sel)).zIndex;
+      const fr = document.querySelector('.talk-layer.inkf.near .talk-ink-front'); const base = document.querySelector('.talk-layer.inkl.near .talk-ink');
+      return { n: n.length, far: n.filter((x) => x.closest('.far')).length, hs: n.map((x) => x.getBoundingClientRect().height), H: innerHeight, cast: z('.talk-layer.castl.far'), ink: z('.talk-layer.inkl.near'), front: z('.talk-layer.inkf.near'),
+        clipFront: fr ? fr.style.clipPath : '', clipBase: base ? base.style.clipPath : '' }; })()`);
     try {
       await t.cmd('talk.toggle', { path: p.path });
-      const look = () => t.t(`(() => { const n = [...document.querySelectorAll('.tv-talk .talk-npc:not(.out)')]; const z = (sel) => +getComputedStyle(document.querySelector(sel)).zIndex;
-        return { n: n.length, far: n.filter((x) => x.closest('.far')).length, hs: n.map((x) => x.getBoundingClientRect().height), H: innerHeight, cast: z('.talk-layer.castl.far'), ink: z('.talk-layer.inkl.near') }; })()`);
       const r = await t.until(async () => { const x = await look(); return x.n === 2 && x.hs.every((hh) => hh > 50) && x; }, 5000, 'the portrait on both sides');
       t.eq(r.far, 1, 'one copy for the far side');
-      t.ok(r.hs.every((hh) => hh <= r.H * 0.87) && Math.abs(r.hs[0] - r.hs[1]) < 2, 'both no taller than the room between the bands, the same size', r);
-      t.ok(r.ink > r.cast, 'the near band lies over the far side\'s portrait as the far band over the near one', r);
+      t.ok(r.hs.every((hh) => hh > r.H * 0.87) && Math.abs(r.hs[0] - r.hs[1]) < 2, 'standing at the side: taller than the room between the bands, both the same', r);
+      t.ok(r.cast > r.ink && r.front > r.cast, 'the portraits over the bands; each band\'s own copy over its own portraits\' feet', r);
+      t.ok(/polygon/.test(r.clipFront) && /polygon/.test(r.clipBase), 'the band cut in two: in front where the portraits stand, behind elsewhere', r);
+      await t.g(`window.ts.settings({ talk: { pos: 0.5 } })`);
+      const m = await t.until(async () => { const x = await look(); return x.hs.every((hh) => hh <= x.H * 0.87) && x; }, 4000, 'in the middle: below the bands');
+      t.ok(m.hs.every((hh) => hh <= m.H * 0.87), 'in the middle (where it meets the far copy): no taller than the room between the bands', m);
     } finally {
       await t.cmd('talk.off', {});
       await t.cmd('talk.size', { path: p.path, scale: 1 });
-      await t.g(`window.ts.settings({ talk: { size: 0.34 } })`);
+      await t.g(`window.ts.settings({ talk: { size: 0.34, pos: 1 } })`);
+    }
+  });
+
+  // Second Builder (second-conversation-stage): the Conversation window. A click brings a portrait in and lets it speak,
+  // never takes it out; ✕ and Delete do. The small TV lays them out as the TV does, the speaker drags sideways
+  area.quick('Conversation window: a click brings in and lets speak, never takes out; ✕ and Delete do; the small TV matches the TV', async (t) => {
+    const list = faces(t);
+    t.ok(list.length >= 2, 'two portraits in the library', list.length);
+    if (t.state.talk) await t.cmd('talk.off', {});
+    await t.g(`App && Play; TalkStage.pick(null)`);
+    t.gm().webContents.focus();
+    if (!(await t.g(`!!document.querySelector('.fp[data-id="talk"]')`))) await t.key('O');
+    await t.until(() => t.g(`!!document.querySelector('.fp[data-id="talk"] .cs-stage')`), 3000, 'the window');
+    const click = (path) => t.g(`(() => { const el = [...document.querySelectorAll('.fp[data-id="talk"] .talk-pick')].find((x) => x.dataset.flash === ${JSON.stringify(path)}); if (el) el.click(); return !!el; })()`);
+    const cast = () => (t.state.talk ? t.state.talk.cast.map((c) => c.path) : []);
+    try {
+      t.ok(!(await t.g(`!!document.querySelector('.fp[data-id="talk"] .btn.primary')`)), 'no Start button: the first portrait starts it');
+      t.ok(await click(list[0].path), 'the first portrait in the window');
+      await t.until(() => cast().length === 1, 3000, 'it comes in');
+      await click(list[0].path); await t.sleep(400);
+      t.eq(cast(), [list[0].path], 'clicked again while speaking: it stays');
+      await click(list[1].path);
+      await t.until(() => cast().length === 2, 3000, 'the second comes in');
+      t.eq(cast()[1], list[1].path, 'and speaks');
+      // the small TV: a frame on each, as the TV lays them out
+      await t.until(() => t.g(`document.querySelectorAll('.fp[data-id="talk"] .cs-frame').length === 2`), 3000, 'two frames on the small TV');
+      await t.sleep(1800);
+      const g = await t.g(`(() => { const st = document.querySelector('.fp[data-id="talk"] .cs-stage').getBoundingClientRect(); return [...document.querySelectorAll('.fp[data-id="talk"] .cs-frame')].map((f) => { const r = f.getBoundingClientRect(); return { p: f.dataset.path, x: (r.left - st.left) / st.width, w: r.width / st.width, h: r.height / st.height }; }); })()`);
+      const tv = await t.t(`(() => [...document.querySelectorAll('.tv-talk .talk-layer.castl.near .talk-npc:not(.out)')].map((n) => { const r = n.getBoundingClientRect(); return { p: n.dataset.src, x: r.left / innerWidth, w: r.width / innerWidth, h: r.height / innerHeight }; }))()`);
+      const near = (a, b) => Math.abs(a - b) < 0.03;
+      const pairs = g.map((f, i) => [f, tv[i]]);
+      t.ok(tv.length === 2 && pairs.every(([f, v]) => v && near(f.x, v.x) && near(f.w, v.w) && near(f.h, v.h)), 'each frame where its portrait stands on the TV', { g, tv });
+      // a click on the one behind: it speaks
+      await t.g(`(() => { const f = [...document.querySelectorAll('.fp[data-id="talk"] .cs-frame')].find((x) => x.dataset.path === ${JSON.stringify(list[0].path)}); const r = f.getBoundingClientRect(); const o = { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0, pointerId: 1 };
+        f.dispatchEvent(new PointerEvent('pointerdown', o)); f.dispatchEvent(new PointerEvent('pointerup', o)); })()`);
+      await t.until(() => cast()[1] === list[0].path, 3000, 'the one clicked on the small TV to speak');
+      // drag the speaker sideways: where they all stand
+      const pos0 = (t.settings.talk || {}).pos;
+      await t.g(`(() => { const f = [...document.querySelectorAll('.fp[data-id="talk"] .cs-frame')].find((x) => x.classList.contains('front')); const r = f.getBoundingClientRect(); const o = (dx) => ({ bubbles: true, clientX: r.left + r.width / 2 + dx, clientY: r.top + r.height / 2, button: 0, pointerId: 1 });
+        f.dispatchEvent(new PointerEvent('pointerdown', o(0))); for (let k = 1; k <= 8; k++) f.dispatchEvent(new PointerEvent('pointermove', o(-k * 12))); f.dispatchEvent(new PointerEvent('pointerup', o(-96))); })()`);
+      await t.until(() => (t.settings.talk || {}).pos < (pos0 == null ? 1 : pos0) - 0.05, 3000, 'dragged left: they stand further left');
+      // ✕ on the picked one, then Delete
+      await t.g(`document.querySelector('.fp[data-id="talk"] .cs-frame.picked .cs-x').click()`);
+      await t.until(() => cast().length === 1, 3000, '✕ takes it out');
+      await t.until(() => t.g(`document.querySelectorAll('.fp[data-id="talk"] .cs-frame').length === 1`), 3000, 'the small TV to follow');
+      await t.g(`(() => { const st = document.querySelector('.fp[data-id="talk"] .cs-stage'); st.focus(); st.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
+      await t.until(() => cast().length === 0, 3000, 'Delete takes the last one out');
+    } finally {
+      await t.cmd('talk.off', {});
+      await t.g(`window.ts.settings({ talk: { pos: 1 } })`);
+    }
+  });
+
+  area.quick('Conversation ⚙: the speaker\'s name on the band for every look; a JPG portrait\'s top edge fades', async (t) => {
+    const p = faces(t)[0];
+    if (t.state.talk) await t.cmd('talk.off', {});
+    if (!(await t.g(`!!document.querySelector('.fp[data-id="talk"]')`))) { t.gm().webContents.focus(); await t.key('O'); }
+    await t.until(() => t.g(`!!document.querySelector('.fp[data-id="talk"] .cs-gear')`), 3000, 'the ⚙ in the title bar');
+    await t.g(`document.querySelector('.fp[data-id="talk"] .cs-gear').click()`);
+    t.ok(await t.g(`!document.querySelector('.fp[data-id="talk"] .cs-gear-box').hidden`), '⚙ opens the look settings');
+    await t.g(`window.ts.settings({ talk: { names: true } })`);
+    try {
+      await t.cmd('talk.toggle', { path: p.path });
+      const nm = await t.until(() => t.t(`(() => { const n = document.querySelector('.talk-layer.inkf.near .talk-speaker'); return n && !n.hidden && n.textContent; })()`), 5000, 'the name on the band');
+      t.eq(nm, p.name.replace(/[_-]+/g, ' '), 'the speaker\'s name');
+      const mask = await t.t(`(() => { const w = document.createElement('div'); w.className = 'talk-npc opaque'; const i = document.createElement('img'); w.append(i); document.body.append(w); const m = getComputedStyle(i).maskImage || getComputedStyle(i).webkitMaskImage; w.remove(); return m; })()`);
+      t.ok(/linear-gradient/.test(mask) && /radial-gradient/.test(mask), 'a portrait without transparency: the oval and a fade at the top', mask);
+    } finally {
+      await t.cmd('talk.off', {});
+      await t.g(`window.ts.settings({ talk: { names: false } })`);
+      await t.g(`(() => { const b = document.querySelector('.fp[data-id="talk"] .cs-gear'); if (b && b.classList.contains('on')) b.click(); })()`);
     }
   });
 
@@ -140,8 +223,8 @@ module.exports = (area) => {
     const ch = t.store.cur.meta.chapters.find((c) => (c.maps || []).some((m) => (m.id || m) === t.state.editMapId)) || t.store.cur.meta.chapters[0];
     t.ok(t.handle('ready.set', { chapterId: ch.id, kind: 'portraits', items: [{ path: p.path, name: p.name }] }).ok, 'the portrait on the Ready list');
     try {
-      if (!(await t.popTitle())) { t.gm().webContents.focus(); await t.key('O'); }
-      const sel = `#pop.on .talk-pick[data-flash=${JSON.stringify(p.path)}]`;
+      if (!(await t.g(`!!document.querySelector('.fp[data-id="talk"]')`))) { t.gm().webContents.focus(); await t.key('O'); } // (Second Builder, second-conversation-stage: a window now)
+      const sel = `.fp[data-id="talk"] .talk-pick[data-flash=${JSON.stringify(p.path)}]`;
       await t.until(() => t.count(sel), 4000, 'the portrait in the panel');
       await t.rightClickSel(sel);
       await t.until(() => t.count('.talk-sizepop .tsp-looks'), 3000, 'the popup with its looks');

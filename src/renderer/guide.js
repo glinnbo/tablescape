@@ -24,6 +24,12 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.50', [
+      'Conversation is a window of its own with a small TV: click a portrait and it speaks, drag the speaker sideways, pull a corner to size one, ✕ takes it out (a click never does)',
+      'The picked portrait\'s Bloodied, Shaded and Hidden sit right under the small TV; ⚙ holds the size, the blur and a new switch: the speaker\'s name on the band',
+      'Tall portraits may reach over the far side\'s band, away from the players looking at them; portraits without transparency fade out at the top edge too',
+      'Bloodied at 100 % now covers the figure: a second spray, splats and drips down the body',
+    ]],
     ['Beta 3.49', [
       'Draw has four groups now, each with its colour: Terrain (floors and rooms), Structure (walls, pillars, stairs, doors, windows, lights), Texture (it was called Tile) and Style (the living effects). The tabs beside the groups are the painting tools: Box, Round, Shape, Brush, Erase, and Fill where it fits',
       'Texture paints with every tool: a box, a round, a shape or the brush lay the tile onto the floors under them; Fill gives the whole floor you click the tile (it was Whole floor); Erase takes painted textures away',
