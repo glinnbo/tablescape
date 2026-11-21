@@ -1,8 +1,9 @@
 // Play tools on the GM screen:
 //   Tokens  drop NPCs with a click: numbered copies, 5e sizes, hidden if you like
 //   Point   ping, laser pointer, spotlight, ruler
-//   Draw    chalk (fades), pen (stays with the map), text labels, eraser
-//   Mark    pins, crosses, numbered markers, counters, notes only the GM sees
+//   Sketch  chalk (fades), pen (stays with the map), eraser (the tool is still called 'draw' inside)
+//   Marks   pins, crosses, numbers (each can say something), labels, counters; on the table or only for the GM
+//           (Third Builder, third-marks-tool: Text from Draw and the Map notes joined the Marker tool)
 //   Timer   countdowns on the TV, normal or dramatic
 //   and the round counter ("Next round" moves spell areas and counters along).
 // gm-play.js owns the canvas input; it hands the pointer to these tools and asks them for popovers and cards.
@@ -31,7 +32,7 @@ const PlayTools = (() => {
   const TEXT_SIZES = [{ id: 's', in: 0.32, label: 'Small' }, { id: 'm', in: 0.5, label: 'Medium' }, { id: 'l', in: 0.85, label: 'Large' }];
   const TIMES = [10, 30, 60, 120, 300, 600];
   const POINT_MODES = ['ping', 'laser', 'spot', 'measure'];
-  const DRAW_MODES = ['chalk', 'pen', 'text', 'erase'];
+  const DRAW_MODES = ['chalk', 'pen', 'erase']; // (Third Builder (third-marks-tool): Text moved to Marks)
 
   function create(ctx) {
     const { ui, cmd, send, undoable } = ctx;
@@ -48,7 +49,7 @@ const PlayTools = (() => {
       tok: { brush: null, size: 'medium', hidden: false, number: true, tag: 'off', recent: [] },
       point: { mode: 'ping', spotR: 7, spotDim: 0.85, rule: 'phb', ring: true, share: true },
       draw: { mode: 'chalk', color: '#ffffff', width: 'mid', textSize: 'm' },
-      mark: { mode: 'marker', shape: 'pin', color: '#e3963e', label: 'Counter', value: 3, auto: null },
+      mark: { mode: 'marker', shape: 'pin', color: '#e3963e', label: 'Counter', value: 3, auto: null, text: '', me: false, ink: '#ffffff' }, // (Third Builder (third-marks-tool): text, me = Only me, ink = a label's colour)
       timer: { mode: 'dramatic', seconds: 30, label: '', sound: true, side: 'right' },
     };
     try {
@@ -56,6 +57,7 @@ const PlayTools = (() => {
       if (p) for (const k of Object.keys(prefs)) if (p[k]) Object.assign(prefs[k], p[k]);
       // 2.2: notes have their own tool (Build → Notes); a new counter only moves on Next round when ticked
       if (prefs.mark.mode === 'note') prefs.mark.mode = 'marker';
+      if (prefs.draw.mode === 'text') { prefs.draw.mode = 'chalk'; prefs.mark.mode = 'label'; } // (Third Builder (third-marks-tool): Text is a kind of mark now)
       if (localStorage.getItem('markAuto22') !== '1') { prefs.mark.auto = null; localStorage.setItem('markAuto22', '1'); }
       // Prototype 30: new tokens come without a name tag (a choice remembered from Beta 4.7 kept showing names); Options → Tokens → New tokens still sets it
       if (localStorage.getItem('tokTagOff30') !== '1') { prefs.tok.tag = 'off'; localStorage.setItem('tokTagOff30', '1'); }
@@ -68,7 +70,7 @@ const PlayTools = (() => {
 
     // Beta 3.11: on a world or regional map (the atlas) the Mark tool also sets places and draws routes
     const onAtlas = () => { const st = S(); return !!(st && st.atlas && st.atlas.maps.some((x) => x.id === st.editMapId)); };
-    const markMode = () => (ui.mark.mode === 'counter' ? 'counter' : onAtlas() && (ui.mark.mode === 'place' || ui.mark.mode === 'route') ? ui.mark.mode : 'marker');
+    const markMode = () => (ui.mark.mode === 'counter' ? 'counter' : ui.mark.mode === 'label' ? 'label' : onAtlas() && (ui.mark.mode === 'place' || ui.mark.mode === 'route') ? ui.mark.mode : 'marker');
     let routeId = null; // the route being drawn: every click adds a point
     const routeNow = () => (routeId && map() ? map().marks.find((m) => m.id === routeId && m.kind === 'route') || null : null);
     function routeEnd() { if (!routeId) return false; const id = routeId; routeId = null; if (map() && map().marks.some((m) => m.id === id)) selectMark(id); ctx.refreshPop(); return true; } // (picked once it is done: its card would lie in the way of the next click)
@@ -87,6 +89,36 @@ const PlayTools = (() => {
       view().setSelectedMark(id);
       ctx.placeCard();
     }
+    // Third Builder (third-marks-tool): one Marks tool. What the next click places (a kind) and who sees it (On the table / Only me)
+    const KINDS = [
+      { id: 'pin', label: 'Pin', icon: 'map-pin', tip: 'A pin; it can say something' },
+      { id: 'x', label: 'Cross', icon: 'x', tip: 'A cross; it can say something' },
+      { id: 'dot', label: 'Number', icon: 'circle-number-1', tip: 'Numbered: 1, 2, 3 …; it can say something' },
+      { id: 'label', label: 'Label', icon: 'typography', tip: 'Words on the map' },
+      { id: 'counter', label: 'Counter', icon: 'plus-minus', tip: 'A number that counts, e.g. rounds until the ritual completes' }];
+    const ATLAS_KINDS = [
+      { id: 'place', label: 'Place', icon: 'flag', tip: 'A named place: it can lead to a regional map, and bring a note or a handout' },
+      { id: 'route', label: 'Route', icon: 'route', tip: 'A path from click to click; its length shows in its label' }];
+    const markKind = () => { const m = markMode(); return m === 'marker' ? (['pin', 'x', 'dot'].includes(ui.mark.shape) ? ui.mark.shape : 'pin') : m; };
+    function setMarkKind(v) {
+      if (v !== 'route') routeEnd();
+      if (['pin', 'x', 'dot'].includes(v)) { ui.mark.mode = 'marker'; ui.mark.shape = v; } else ui.mark.mode = v;
+      save(); ctx.refreshPop();
+    }
+    function noteMode() { routeEnd(); ui.mark.mode = 'label'; ui.mark.me = true; save(); } // (J: a note only you see)
+    // old names still on a hotbar or the rail: Draw → Text and Map notes open Marks
+    const normTool = (t, mode) => (t === 'draw' && mode === 'text' ? ['mark', 'label'] : t === 'notes' ? ['mark', 'label'] : [t, mode]);
+    const isMe = (m) => m.kind === 'note' || !!m.hidden;
+    // who sees it: hidden for the others; a label for Only me becomes a note, and a note on the table a label (mapstate)
+    async function setWho(m, me) {
+      const r = await cmd(isText(m) ? 'draw.update' : 'mark.update', { id: m.id, hidden: me, ...(isText(m) ? { asNote: me } : m.kind === 'note' ? { asLabel: !me } : {}) });
+      if (r && r.selected && ui.selMark === m.id) selectMark(r.selected);
+    }
+    const markName = (m) => (isText(m) || m.kind === 'note' ? m.text : m.kind === 'counter' ? `${m.label}: ${m.value}` : m.kind === 'dot' ? (m.text ? `${m.n} · ${m.text}` : `Number ${m.n}`)
+      : m.kind === 'place' ? m.title : m.kind === 'route' ? (m.title || 'Route') : (m.text || (m.kind === 'x' ? 'Cross' : 'Pin')));
+    const markIcon = (m) => (isText(m) ? 'typography' : { pin: 'map-pin', x: 'x', dot: 'circle-number-1', counter: 'plus-minus', note: 'note', place: 'flag', route: 'route' }[m.kind] || 'map-pin');
+    const allMarks = () => (map() ? [...map().marks.filter((m) => onAtlas() || (m.kind !== 'place' && m.kind !== 'route')), ...map().draw.filter((d) => d.kind === 'text')] : []);
+    let markTextEl = null; // the Text box of the Marks panel (emptied once its words are on the map)
     const swatchRow = (get, set, list = INK) => {
       const wrap = h('div', { class: 'swatches color-row' });
       for (const col of list) wrap.append(h('button', { class: 'swatch', style: `background:${col.hex}`, dataset: { v: col.hex }, 'aria-label': col.label, 'data-tip': col.label, onclick: () => set(col.hex) }));
@@ -330,7 +362,7 @@ const PlayTools = (() => {
     // =====================================================================
     const widthIn = () => (WIDTHS.find((w) => w.id === ui.draw.width) || WIDTHS[1]).in;
     const textIn = () => (TEXT_SIZES.find((w) => w.id === ui.draw.textSize) || TEXT_SIZES[1]).in;
-    function buildDrawPop() {
+    function buildDrawPop() { // (Third Builder (third-marks-tool): Sketch: Chalk, Pen, Erase; labels are in Marks)
       const extra = h('div', { class: 'stack' });
       c().bind(() => {
         if (extra.dataset.mode === ui.draw.mode) return;
@@ -340,20 +372,18 @@ const PlayTools = (() => {
         if (m === 'chalk' || m === 'pen') {
           extra.append(c().seg({ label: 'Line', options: WIDTHS.map((w) => ({ value: w.id, label: w.label })), get: () => ui.draw.width, set: (v) => { ui.draw.width = v; save(); } }));
         }
-        if (m === 'text') extra.append(c().seg({ label: 'Text size', options: TEXT_SIZES.map((w) => ({ value: w.id, label: w.label })), get: () => ui.draw.textSize, set: (v) => { ui.draw.textSize = v; save(); } }));
       });
       const count = h('span', { class: 'grow hint' });
-      c().bind(() => { const n = map().draw.length; count.textContent = n ? `${n} drawing${n === 1 ? '' : 's'} on this map` : 'Nothing drawn on this map'; });
+      c().bind(() => { const n = map().draw.filter((d) => d.kind === 'pen').length; count.textContent = n ? `${n} line${n === 1 ? '' : 's'} on this map` : 'No lines on this map'; });
       return h('div', { class: 'stack' },
         c().tiles([
           { id: 'chalk', label: 'Chalk', icon: 'scribble', tip: 'Fades after a few seconds' },
           { id: 'pen', label: 'Pen', icon: 'ballpen', tip: 'Stays on the map' },
-          { id: 'text', label: 'Text', icon: 'typography', tip: 'A label on the map' },
-          { id: 'erase', label: 'Erase', icon: 'eraser', tip: 'Erase pen lines and labels' }], () => ui.draw.mode, (v) => { ui.draw.mode = v; save(); ctx.refreshPop(); ctx.updateCursor(); }),
+          { id: 'erase', label: 'Erase', icon: 'eraser', tip: 'Erase pen lines' }], () => ui.draw.mode, (v) => { ui.draw.mode = v; save(); ctx.refreshPop(); ctx.updateCursor(); }),
         swatchRow(() => ui.draw.color, (v) => { ui.draw.color = v; save(); ctx.refreshPop(); }),
         extra,
         c().sep(),
-        c().row(count, c().btn('Clear', 'trash', () => undoable('draw.clear', {}), { kind: 'danger', tip: 'Remove every pen line and label from this map' })));
+        c().row(count, c().btn('Clear', 'trash', () => undoable('draw.clear', { kinds: ['pen'] }), { kind: 'danger', tip: 'Remove every pen line from this map' })));
     }
     function flushChalk(d, end) {
       if (!d.buf.length && !end) return;
@@ -366,7 +396,7 @@ const PlayTools = (() => {
       d.buf = [];
       cmd('draw.stroke', { id: d.id, color: d.color, w: d.w, pts, coalesce: d.id });
     }
-    // pen lines the eraser touched on its way from a to b, and labels under the pointer (map inches)
+    // pen lines the eraser touched on its way from a to b, in map inches (Third Builder (third-marks-tool): labels are no longer erased here)
     function drawAt(a, b, clientX, clientY) {
       const hits = [];
       const tol = 0.16 / zoom();
@@ -384,14 +414,7 @@ const PlayTools = (() => {
         }
         if (hit) hits.push(d.id);
       }
-      for (const el of document.elementsFromPoint(clientX, clientY)) if (el.classList && el.classList.contains('sv-text')) hits.push(el.dataset.id);
       return hits;
-    }
-    async function writeText(pt) {
-      const text = await askText('Write on the map', '', { ok: 'Place label', placeholder: 'The old well' });
-      if (!text) return;
-      const r = await cmd('draw.add', { x: pt.x, y: pt.y, text, color: ui.draw.color, size: textIn() });
-      if (r && r.selected) selectMark(r.selected);
     }
     async function editText(d) {
       const text = await askText('Change the label', d.text, { ok: 'Save' });
@@ -401,27 +424,34 @@ const PlayTools = (() => {
     }
 
     // =====================================================================
-    // Markers and counters (Toolbox → On the map) and GM notes (Build → Notes)
+    // Marks (Toolbox, X; J: a note only you see). Third Builder (third-marks-tool): pins, crosses, numbers, labels, counters
+    // (and places and routes on a world map) in one tool, one list, one Clear
     // =====================================================================
     function buildMarkPop() {
+      const kinds = h('div', {});
+      c().bind(() => {
+        const atlas = onAtlas();
+        if (kinds.dataset.atlas === String(atlas)) return;
+        kinds.dataset.atlas = String(atlas);
+        const t = c().tiles(atlas ? [...KINDS, ...ATLAS_KINDS] : KINDS, markKind, setMarkKind);
+        t.classList.add('mk-kinds');
+        kinds.replaceChildren(t);
+      });
       const extra = h('div', { class: 'stack' });
       c().bind(() => {
-        const sig = `${markMode()}|${ui.mark.auto}|${routeNow() ? 1 : 0}`;
+        const k = markKind();
+        const sig = `${k}|${ui.mark.auto}|${routeNow() ? 1 : 0}`;
         if (extra.dataset.sig === sig) return;
         extra.dataset.sig = sig;
         extra.innerHTML = '';
-        if (markMode() === 'place') {
-          extra.append(swatchRow(() => ui.mark.color, (v) => { ui.mark.color = v; save(); ctx.refreshPop(); }));
-        } else if (markMode() === 'route') {
-          extra.append(swatchRow(() => ui.mark.color, (v) => { ui.mark.color = v; save(); ctx.refreshPop(); }),
-            c().row(c().btn('Finish the route', 'check', () => routeEnd(), { kind: routeNow() ? 'primary' : 'ghost', tip: 'Also: double click, or Esc' }),
-              c().btn('One point back', 'arrow-back-up', () => { const r = routeNow(); if (r) cmd('mark.route', { id: r.id, back: true }); }, { kind: 'ghost' })));
-        } else if (ui.mark.mode !== 'counter') {
-          extra.append(
-            c().seg({ label: 'Shape', options: [{ value: 'pin', label: 'Pin', icon: 'map-pin' }, { value: 'x', label: 'Cross', icon: 'x' }, { value: 'dot', label: 'Number', icon: 'circle-number-1', tip: 'Numbered markers: 1, 2, 3 …' }],
-              get: () => ui.mark.shape, set: (v) => { ui.mark.shape = v; save(); ctx.refreshPop(); } }),
-            swatchRow(() => ui.mark.color, (v) => { ui.mark.color = v; save(); ctx.refreshPop(); }));
-        } else if (ui.mark.mode === 'counter') {
+        markTextEl = null;
+        if (k === 'pin' || k === 'x' || k === 'dot' || k === 'label') {
+          markTextEl = h('input', { type: 'text', value: ui.mark.text || '', maxlength: k === 'label' ? '200' : '80', 'aria-label': 'Text',
+            placeholder: k === 'label' ? 'The old well (or type it after the click)' : 'Old well, Trap … (or nothing)', oninput: (e) => { ui.mark.text = e.target.value; save(); } });
+          extra.append(h('label', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Text'), markTextEl));
+        }
+        if (k === 'label') extra.append(c().seg({ label: 'Text size', options: TEXT_SIZES.map((w) => ({ value: w.id, label: w.label })), get: () => ui.draw.textSize, set: (v) => { ui.draw.textSize = v; save(); } }));
+        if (k === 'counter') {
           const name = h('input', { type: 'text', value: ui.mark.label, placeholder: 'Ritual, Reinforcements, Torches …', 'aria-label': 'Counter name', oninput: (e) => { ui.mark.label = e.target.value; save(); } });
           extra.append(...[
             h('label', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Name'), name),
@@ -430,61 +460,73 @@ const PlayTools = (() => {
             ui.mark.auto ? c().seg({ options: [{ value: 'down', label: 'Count down', icon: 'trending-down' }, { value: 'up', label: 'Count up', icon: 'trending-up' }],
               get: () => ui.mark.auto, set: (v) => { ui.mark.auto = v; save(); ctx.refreshPop(); } }) : null].filter(Boolean)); // (append would write "null")
         }
+        if (k === 'route') {
+          extra.append(c().row(c().btn('Finish the route', 'check', () => routeEnd(), { kind: routeNow() ? 'primary' : 'ghost', tip: 'Also: double click, or Esc' }),
+            c().btn('One point back', 'arrow-back-up', () => { const r = routeNow(); if (r) cmd('mark.route', { id: r.id, back: true }); }, { kind: 'ghost' })));
+        }
+        extra.append(k === 'label' ? swatchRow(() => ui.mark.ink || '#ffffff', (v) => { ui.mark.ink = v; save(); ctx.refreshPop(); })
+          : swatchRow(() => ui.mark.color, (v) => { ui.mark.color = v; save(); ctx.refreshPop(); }));
       });
-      const count = h('span', { class: 'grow hint' });
-      c().bind(() => { const n = map().marks.filter((m) => m.kind !== 'note').length; count.textContent = n ? `${n} marker${n === 1 ? '' : 's'} and counters` : 'No markers on this map'; });
-      // (Beta 3.11) world and regional maps: named places and routes too (the choice follows the map being worked on)
-      const modeBox = h('div', {});
+      const who = c().seg({ cls: 'mk-who', options: [
+        { value: 'table', label: 'On the table', icon: 'device-tv', tip: 'The players see the next mark' },
+        { value: 'me', label: 'Only me', icon: 'eye-off', tip: 'Only on your screen, never on the TV (J)' }],
+      get: () => (ui.mark.me ? 'me' : 'table'), set: (v) => { ui.mark.me = v === 'me'; save(); ctx.refreshPop(); } });
+      const list = h('div', { class: 'mk-list' });
       c().bind(() => {
-        const atlas = onAtlas();
-        if (modeBox.dataset.atlas === String(atlas)) return;
-        modeBox.dataset.atlas = String(atlas);
-        const modes = [{ value: 'marker', label: 'Marker', icon: 'map-pin', tip: 'Pins, crosses and numbered markers' }, { value: 'counter', label: 'Counter', icon: 'plus-minus', tip: 'A number on the map, e.g. rounds until the ritual completes' }];
-        if (atlas) modes.push({ value: 'place', label: 'Place', icon: 'flag', tip: 'A named place: it can lead to a regional map, and bring a note or a handout' }, { value: 'route', label: 'Route', icon: 'route', tip: 'A dotted path from click to click; its length is counted in grid cells' });
-        modeBox.replaceChildren(c().seg({ cls: modes.length > 2 ? 'seg-4' : '', options: modes,
-          get: () => markMode(), set: (v) => { if (v !== 'route') routeEnd(); ui.mark.mode = v; save(); ctx.refreshPop(); } }));
-      });
-      return h('div', { class: 'stack' },
-        modeBox,
-        extra,
-        c().sep(),
-        c().row(count, c().btn('Clear', 'trash', () => undoable('mark.clear', { kinds: ['pin', 'x', 'dot', 'counter'] }), { kind: 'danger', tip: 'Remove every marker and counter from this map (notes stay)' })));
-    }
-    // GM notes (Build → Notes): pinned on the map, only on this screen, never on the TV
-    function buildNotesPop() {
-      const list = h('div', { class: 'note-list' });
-      c().bind(() => {
-        const notes = map().marks.filter((m) => m.kind === 'note');
-        const sig = JSON.stringify([notes.map((n) => [n.id, n.text]), ui.selMark]);
+        const items = allMarks();
+        const sig = JSON.stringify([items.map((m) => [m.id, markName(m), isMe(m), m.color]), ui.selMark]);
         if (list.dataset.sig === sig) return;
         list.dataset.sig = sig;
         list.innerHTML = '';
-        if (!notes.length) { list.append(c().hint('No notes on this map yet.')); return; }
-        for (const n of notes) {
-          list.append(h('div', { class: `note-row ${ui.selMark === n.id ? 'on' : ''}`, dataset: { flash: n.id } },
-            iconEl('note'),
-            h('button', { class: 'note-text', 'data-tip': 'Show it on the map', onclick: () => { selectMark(n.id); if (ctx.showPoint) ctx.showPoint(n.x, n.y); } }, n.text),
-            c().ib('pencil', 'Edit', async () => { const t = await askText('Note (only you see it)', n.text, { ok: 'Save' }); if (t) cmd('mark.update', { id: n.id, text: t }); }),
-            c().ib('trash', 'Remove', () => undoable('mark.remove', { id: n.id }, 'Note removed'), { danger: true })));
+        if (!items.length) { list.append(c().hint('Nothing marked on this map yet.')); return; }
+        for (const m of items) {
+          const me = isMe(m);
+          list.append(h('div', { class: `mk-row ${me ? 'me' : ''} ${ui.selMark === m.id ? 'on' : ''}`, dataset: { flash: m.id, id: m.id } },
+            h('span', { class: 'mk-ico', style: `color:${m.kind === 'note' ? '#e2b44f' : m.color || '#ffffff'}` }, iconEl(markIcon(m))),
+            h('button', { class: 'mk-text', 'data-tip': 'Show it on the map', onclick: () => { selectMark(m.id); if (ctx.showPoint) ctx.showPoint(m.x, m.y); } }, markName(m)),
+            c().ib(me ? 'eye-off' : 'eye', me ? 'Only you see it. Click: on the table' : 'On the table. Click: only you', () => setWho(m, !me), { on: me }),
+            c().ib('trash', 'Remove', () => { undoable(isText(m) ? 'draw.remove' : 'mark.remove', { id: m.id }); if (ui.selMark === m.id) selectMark(null); }, { danger: true })));
         }
       });
+      const count = h('span', { class: 'grow hint' });
+      c().bind(() => {
+        const all = allMarks(); const me = all.filter(isMe).length;
+        count.textContent = all.length ? `${all.length} mark${all.length === 1 ? '' : 's'}${me ? ` · ${me} only for you` : ''}` : 'No marks on this map';
+      });
       return h('div', { class: 'stack' },
+        kinds,
+        extra,
+        who,
+        c().sep(),
+        h('span', { class: 'ctl-label' }, 'On this map'),
         list,
-        c().row(h('span', { class: 'grow' }), c().btn('Remove all notes', 'trash', () => undoable('mark.clear', { kinds: ['note'] }, 'Notes removed'), { kind: 'danger' })));
+        c().row(count, c().btn('Clear', 'trash', () => { undoable('mark.clear', { kinds: ['pin', 'x', 'dot', 'counter', 'note'], labels: true }, 'Marks cleared'); selectMark(null); },
+          { kind: 'danger', tip: 'Remove every mark and label from this map (Ctrl + Z brings them back)' })));
     }
-    async function placeMark(pt, mode = ui.mark.mode) {
+    async function placeMark(pt, mode = markMode()) {
       const m = ui.mark;
+      const hidden = !!m.me;
+      const said = String(m.text || '').trim();
+      const used = () => { if (!said) return; m.text = ''; save(); if (markTextEl) markTextEl.value = ''; }; // (the words went on the map; the next mark starts empty)
       let p = null;
-      if (mode === 'note') {
+      if (mode === 'note') { // (an old hotbar item or key)
         const text = await askText('Note (only you see it)', '', { ok: 'Pin note', placeholder: 'Silver key opens this door' });
         if (!text) return;
         p = { kind: 'note', text, color: '#e2b44f' };
-      } else if (mode === 'counter') p = { kind: 'counter', label: (m.label || 'Counter').trim() || 'Counter', value: m.value, auto: m.auto || null, color: m.color };
+      } else if (mode === 'label') {
+        const text = said || await askText(hidden ? 'Note (only you see it)' : 'Write on the map', '', { ok: hidden ? 'Pin note' : 'Place label', placeholder: hidden ? 'Silver key opens this door' : 'The old well' });
+        if (!text) return;
+        used();
+        const r = hidden ? await cmd('mark.add', { kind: 'note', text, x: pt.x, y: pt.y, color: '#e2b44f', size: textIn(), ink: m.ink || '#ffffff' })
+          : await cmd('draw.add', { x: pt.x, y: pt.y, text, color: m.ink || '#ffffff', size: textIn() });
+        if (r && r.selected) selectMark(r.selected);
+        return;
+      } else if (mode === 'counter') p = { kind: 'counter', label: (m.label || 'Counter').trim() || 'Counter', value: m.value, auto: m.auto || null, color: m.color, hidden };
       else if (mode === 'place') {
         const title = await askText('Name the place', '', { ok: 'Place it', placeholder: 'Kintsugi' });
         if (!title) return;
-        p = { kind: 'place', title, color: m.color };
-      } else p = { kind: m.shape, color: m.color };
+        p = { kind: 'place', title, color: m.color, hidden };
+      } else { p = { kind: ['pin', 'x', 'dot'].includes(m.shape) ? m.shape : 'pin', color: m.color, text: said || undefined, hidden }; used(); }
       const r = await cmd('mark.add', { ...p, x: pt.x, y: pt.y });
       if (r && r.selected) selectMark(r.selected);
     }
@@ -517,14 +559,7 @@ const PlayTools = (() => {
         return { kind: 'laser', x: e.clientX, y: e.clientY, moved: false, pt };
       }
       if (t === 'draw') {
-        const m = ui.draw.mode;
-        const textEl = e.target.closest('.sv-text');
-        if (textEl && (m === 'text' || m === 'chalk' || m === 'pen')) {
-          const d = markOf(textEl.dataset.id);
-          if (!d) return null;
-          selectMark(d.id);
-          return { kind: 'textmove', id: d.id, dx: d.x - pt.x, dy: d.y - pt.y, sx: e.clientX, sy: e.clientY, moved: false, key: `tx-${d.id}-${Date.now()}`, edit: m === 'text' };
-        }
+        const m = ui.draw.mode; // (Third Builder (third-marks-tool): labels are picked and moved in Marks now)
         if (ui.selMark) selectMark(null);
         if (m === 'chalk') {
           const d = { kind: 'chalk', id: uid('c'), color: ui.draw.color, w: widthIn() * 1.4, buf: [pt.x, pt.y], last: pt, r: 0.05 / zoom() };
@@ -536,12 +571,18 @@ const PlayTools = (() => {
           flushPen(d);
           return d;
         }
-        if (m === 'text') { writeText(pt); return null; }
         const d = { kind: 'erase', key: `erase-${Date.now()}`, gone: new Set(), last: pt };
         eraseAt(d, pt, e);
         return d;
       }
       if (t === 'mark' || t === 'notes') {
+        const textEl = e.target.closest('.sv-text'); // (Third Builder (third-marks-tool): a label is a mark now)
+        if (textEl) {
+          const d = markOf(textEl.dataset.id);
+          if (!d) return null;
+          selectMark(d.id);
+          return { kind: 'textmove', id: d.id, dx: d.x - pt.x, dy: d.y - pt.y, sx: e.clientX, sy: e.clientY, moved: false, key: `tx-${d.id}-${Date.now()}`, edit: false };
+        }
         const el = e.target.closest(t === 'notes' ? '.sv-note' : '.sv-mark, .sv-note');
         if (el) {
           const m = markOf(el.dataset.id);
@@ -614,7 +655,7 @@ const PlayTools = (() => {
     }
     function toolChanged(t) {
       if (t !== 'point') spotOff();
-      if (t !== 'mark' && t !== 'notes' && t !== 'draw' && ui.selMark) { ui.selMark = null; view().setSelectedMark(null); }
+      if (t !== 'mark' && t !== 'notes' && ui.selMark) { ui.selMark = null; view().setSelectedMark(null); } // (Third Builder (third-marks-tool): labels belong to Marks)
       if (t !== 'mark') routeId = null;
       document.body.dataset.pointMode = ui.point.mode;
       document.body.dataset.drawMode = ui.draw.mode;
@@ -623,12 +664,16 @@ const PlayTools = (() => {
     // P and D pressed again step through their modes
     function setMode(t, v) {
       if (t === 'point') { setPointMode(v); return; }
-      if (t === 'mark') { if (v !== 'route') routeId = null; ui.mark.mode = ['counter', 'place', 'route'].includes(v) ? v : 'marker'; save(); ctx.refreshPop(); return; }
-      if (t === 'draw') { ui.draw.mode = v; save(); document.body.dataset.drawMode = v; ctx.refreshPop(); if (ctx.updateCursor) ctx.updateCursor(); }
+      if (t === 'mark') { // (Third Builder (third-marks-tool): also a kind: pin, x, dot, label)
+        if (v !== 'route') routeId = null;
+        if (['pin', 'x', 'dot'].includes(v)) { ui.mark.mode = 'marker'; ui.mark.shape = v; } else ui.mark.mode = ['counter', 'place', 'route', 'label'].includes(v) ? v : 'marker';
+        save(); ctx.refreshPop(); return;
+      }
+      if (t === 'draw') { if (!DRAW_MODES.includes(v)) return; ui.draw.mode = v; save(); document.body.dataset.drawMode = v; ctx.refreshPop(); if (ctx.updateCursor) ctx.updateCursor(); }
     }
     function cycle(t) {
       if (t === 'point') { setPointMode(POINT_MODES[(POINT_MODES.indexOf(ui.point.mode) + 1) % POINT_MODES.length]); return { ping: 'Ping', laser: 'Laser pointer', spot: 'Spotlight', measure: 'Ruler' }[ui.point.mode]; }
-      if (t === 'draw') { ui.draw.mode = DRAW_MODES[(DRAW_MODES.indexOf(ui.draw.mode) + 1) % DRAW_MODES.length]; save(); document.body.dataset.drawMode = ui.draw.mode; ctx.refreshPop(); return { chalk: 'Chalk', pen: 'Pen', text: 'Text', erase: 'Eraser' }[ui.draw.mode]; }
+      if (t === 'draw') { ui.draw.mode = DRAW_MODES[(DRAW_MODES.indexOf(ui.draw.mode) + 1) % DRAW_MODES.length]; save(); document.body.dataset.drawMode = ui.draw.mode; ctx.refreshPop(); return { chalk: 'Chalk', pen: 'Pen', erase: 'Eraser' }[ui.draw.mode]; }
       return null;
     }
 
@@ -638,7 +683,7 @@ const PlayTools = (() => {
     function cardTarget() {
       const m = markOf(ui.selMark);
       if (!m) return null;
-      if (isText(m) ? ui.tool !== 'draw' : !(ui.tool === 'mark' || (ui.tool === 'notes' && m.kind === 'note'))) return null;
+      if (!(ui.tool === 'mark' || (ui.tool === 'notes' && m.kind === 'note'))) return null; // (Third Builder (third-marks-tool): labels too)
       return { kind: 'mark', item: m };
     }
     function cardAnchor(t) {
@@ -655,7 +700,7 @@ const PlayTools = (() => {
       const { ib, cardSep } = c();
       const upd = (patch) => cmd(isText(m) ? 'draw.update' : 'mark.update', { id: m.id, ...patch });
       const remove = () => { undoable(isText(m) ? 'draw.remove' : 'mark.remove', { id: m.id }); selectMark(null); };
-      const hide = ib(m.hidden ? 'eye-off' : 'eye', m.hidden ? 'Hidden. Click to show players' : 'Hide from players', () => upd({ hidden: !m.hidden }), { on: m.hidden, key: 'H' });
+      const hide = ib(isMe(m) ? 'eye-off' : 'eye', isMe(m) ? 'Only you see it. Click: on the table' : 'On the table. Click: only you', () => setWho(m, !isMe(m)), { on: isMe(m), key: 'H' }); // (Third Builder (third-marks-tool))
       const del = ib('trash', 'Remove', remove, { danger: true, key: 'Del' });
       const col = ib('palette', 'Colour', (e) => colorMenu(e.currentTarget, (hex) => upd({ color: hex })));
       if (isText(m)) {
@@ -667,7 +712,7 @@ const PlayTools = (() => {
       }
       if (m.kind === 'note') {
         return [h('span', { class: 'card-title ellipsis' }, iconEl('note'), 'Note (only you)'),
-          ib('pencil', 'Edit the note', async () => { const text = await askText('Note (only you see it)', m.text, { ok: 'Save' }); if (text != null) upd({ text }); }), cardSep(), del];
+          ib('pencil', 'Edit the note', async () => { const text = await askText('Note (only you see it)', m.text, { ok: 'Save' }); if (text != null) upd({ text }); }), cardSep(), hide, del]; // (Third Builder (third-marks-tool): the eye puts it on the table as a label)
       }
       if (m.kind === 'counter') {
         const auto = m.auto === 'down' ? 'trending-down' : m.auto === 'up' ? 'trending-up' : 'minus';
@@ -719,8 +764,9 @@ const PlayTools = (() => {
           ib('arrow-back-up', 'One point back', () => cmd('mark.route', { id: m.id, back: true })),
           col, cardSep(), hide, del];
       }
-      const name = m.kind === 'pin' ? 'Pin' : m.kind === 'x' ? 'Cross' : `Marker ${m.n}`;
-      const out = [h('span', { class: 'card-title ellipsis' }, iconEl(m.kind === 'x' ? 'x' : m.kind === 'dot' ? 'circle-number-1' : 'map-pin'), name)];
+      const name = markName(m); // (Third Builder (third-marks-tool): what it says, if anything)
+      const out = [h('span', { class: 'card-title ellipsis' }, iconEl(m.kind === 'x' ? 'x' : m.kind === 'dot' ? 'circle-number-1' : 'map-pin'), name),
+        ib('pencil', m.text ? 'Change what it says' : 'Make it say something', async () => { const n = await askText('What it says (empty: nothing)', m.text || '', { ok: 'Save', placeholder: 'Old well, Trap …', allowEmpty: true }); if (n != null) upd({ text: n }); })];
       if (m.kind === 'dot') out.push(ib('minus', 'Lower number', () => upd({ n: Math.max(0, (m.n || 1) - 1) })), ib('plus', 'Higher number', () => upd({ n: (m.n || 0) + 1 })));
       out.push(col, cardSep(), hide, del);
       return out;
@@ -731,13 +777,14 @@ const PlayTools = (() => {
       selectMark(m.id);
       const upd = (patch) => cmd(isText(m) ? 'draw.update' : 'mark.update', { id: m.id, ...patch });
       const items = [
-        { icon: m.hidden ? 'eye' : 'eye-off', label: m.hidden ? 'Show' : 'Hide', run: () => upd({ hidden: !m.hidden }) },
+        { icon: isMe(m) ? 'eye' : 'eye-off', label: isMe(m) ? 'On the table' : 'Only me', run: () => setWho(m, !isMe(m)) }, // (Third Builder (third-marks-tool))
         { icon: 'trash', label: 'Remove', danger: true, run: () => { undoable(isText(m) ? 'draw.remove' : 'mark.remove', { id: m.id }); selectMark(null); } },
         { icon: 'target', label: 'Ping', run: () => ts.ping({ mapId: S().editMapId, x: m.x, y: m.y }) },
       ];
       if (m.kind === 'counter') items.unshift({ icon: 'plus', label: '+1', run: () => counterStep(m.id, 1) }, { icon: 'minus', label: '−1', run: () => counterStep(m.id, -1) });
       if (isText(m)) items.unshift({ icon: 'pencil', label: 'Edit', run: () => editText(m) });
-      if (m.kind === 'note') items.splice(0, 1, { icon: 'pencil', label: 'Edit', run: async () => { const text = await askText('Note (only you see it)', m.text, { ok: 'Save' }); if (text != null) upd({ text }); } });
+      if (m.kind === 'note') items.unshift({ icon: 'pencil', label: 'Edit', run: async () => { const text = await askText('Note (only you see it)', m.text, { ok: 'Save' }); if (text != null) upd({ text }); } });
+      if (m.kind === 'pin' || m.kind === 'x' || m.kind === 'dot') items.unshift({ icon: 'pencil', label: 'Text', run: async () => { const n = await askText('What it says (empty: nothing)', m.text || '', { ok: 'Save', allowEmpty: true }); if (n != null) upd({ text: n }); } }); // (Third Builder (third-marks-tool))
       if (m.kind === 'place' && m.to) items.unshift({ icon: 'door-enter', label: 'Open', run: () => cmd('atlas.show', { id: m.to }) });
       ctx.Radial.open(x, y, items, isText(m) ? 'Label' : m.kind === 'counter' ? m.label : m.kind === 'note' ? 'Note' : m.kind === 'place' ? m.title : m.kind === 'route' ? 'Route' : 'Marker');
       return true;
@@ -752,7 +799,7 @@ const PlayTools = (() => {
     function toggleSelectedHidden() {
       const m = markOf(ui.selMark);
       if (!m) return false;
-      cmd(isText(m) ? 'draw.update' : 'mark.update', { id: m.id, hidden: !m.hidden });
+      setWho(m, !isMe(m)); // (Third Builder (third-marks-tool): a label goes to Only me as a note, a note to the table as a label)
       return true;
     }
 
@@ -953,7 +1000,7 @@ const PlayTools = (() => {
     document.body.dataset.drawMode = ui.draw.mode;
 
     return {
-      buildTokenPop, buildPointPop, buildDrawPop, buildMarkPop, buildNotesPop, buildTimerPop,
+      buildTokenPop, buildPointPop, buildDrawPop, buildMarkPop, buildTimerPop, noteMode, normTool, markKind, // (Third Builder (third-marks-tool): no Map notes panel; noteMode for J, normTool for old hotbar items)
       pointerDown, pointerMove, pointerUp, hover, leave, toolChanged, cycle, setMode, owns: (k) => OWN.has(k),
       cardTarget, cardAnchor, card, markRadial, removeSelected, toggleSelectedHidden, selectMark, routeEnd, onAtlas,
       setTokenBrush, placeToken, counterStep, nextRound, renderHud, update, spotOff, sizeName, SIZES,

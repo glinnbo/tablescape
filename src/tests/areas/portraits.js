@@ -295,6 +295,95 @@ module.exports = (area) => {
     }
   });
 
+  // Beta 3.56 (Glinn): the small TV green while it runs, End in its corner, no count; the party's tokens on its edge
+  area.quick('Beta 3.56: green while it runs, End in its corner, no count; the party\'s tokens on the small TV\'s edge bring in their cut-out (greyed without one)', async (t) => {
+    const p = faces(t)[0];
+    const party0 = [...((t.store.cur && t.store.cur.meta.party) || [])];
+    if (t.state.talk) await t.cmd('talk.off', {});
+    t.handle('party.set', { names: ['Mira', 'Thorin'] });
+    t.handle('char.set', { name: 'Mira', patch: { token: t.pic('tokens', /Hero/i), sprite: p.path, color: '#6cc3ff' } });
+    t.handle('char.set', { name: 'Thorin', patch: { token: t.pic('tokens', /Goblin/i), color: '#ffb35c' } });
+    const W = '.fp[data-id="talk"]';
+    try {
+      if (!(await t.g(`!!document.querySelector('${W}')`))) { t.gm().webContents.focus(); await t.key('O'); }
+      await t.until(() => t.count(`${W} .cs-pc`).then((n) => n === 2), 4000, 'the party\'s two tokens');
+      const look = () => t.g(`(() => { const w = document.querySelector('${W}'); const st = w.querySelector('.cs-stage'); const end = w.querySelector('.cs-end'); const pcs = [...w.querySelectorAll('.cs-pc')];
+        const sr = st.getBoundingClientRect(); const pr = pcs[0].getBoundingClientRect();
+        return { live: st.classList.contains('live'), end: !!end && !end.hidden, status: w.querySelectorAll('.cs-status, .cs-count, .cs-dot').length, on: pcs.map((x) => [x.dataset.name, [...x.classList].join(' ')]), onEdge: pr.top < sr.bottom && pr.bottom > sr.bottom }; })()`);
+      let v = await look();
+      t.ok(!v.live && !v.end && v.status === 0, 'no conversation: no green, no End, no count', v);
+      t.ok(v.onEdge, 'the tokens sit on the small TV\'s bottom edge', v);
+      t.ok(/\boff\b/.test(v.on.find((x) => x[0] === 'Thorin')[1]) && !/\boff\b/.test(v.on.find((x) => x[0] === 'Mira')[1]), 'Thorin greyed (no cut-out), Mira not', v.on);
+      await t.clickSel(`${W} .cs-pc[data-name="Mira"]`);
+      await t.until(() => t.state.talk && t.state.talk.cast.some((c) => c.path === p.path), 3000, 'Mira\'s cut-out comes in');
+      await t.until(async () => { v = await look(); return v.live && v.end; }, 3000, 'green, with End');
+      await t.until(async () => /\bspeak\b/.test((await look()).on.find((x) => x[0] === 'Mira')[1]), 3000, 'her token lit: speaking');
+      await t.clickSel(`${W} .cs-pc[data-name="Thorin"]`); await t.sleep(300);
+      t.eq(t.state.talk.cast.length, 1, 'Thorin without a cut-out brings in nothing');
+      await t.clickSel(`${W} .cs-end`);
+      await t.until(() => !t.state.talk, 3000, 'End ends it');
+      await t.until(async () => !(await look()).live, 3000, 'no longer green');
+    } finally {
+      if (t.state.talk) await t.cmd('talk.off', {});
+      t.handle('party.set', { names: party0 });
+    }
+  });
+
+  area.quick('Beta 3.56: Blood in four notches and Shade up to 100 % (the head black), Hidden, as sliders under the small TV; Ctrl + wheel sizes the picked portrait, the TV once the wheel rests', async (t) => {
+    const p = faces(t)[0];
+    const W = '.fp[data-id="talk"]';
+    if (t.state.talk) await t.cmd('talk.off', {});
+    try {
+      if (!(await t.g(`!!document.querySelector('${W}')`))) { t.gm().webContents.focus(); await t.key('O'); }
+      await t.cmd('talk.toggle', { path: p.path });
+      await t.until(() => t.count(`${W} .cs-blood input`).then((n) => n === 1), 4000, 'the bar with its sliders');
+      const fx = () => (t.settings.portraitFx || {})[p.path] || {};
+      const slide = (cls, v) => t.g(`(() => { const i = document.querySelector('${W} ${cls} input'); i.value = ${v}; i.dispatchEvent(new Event('input', { bubbles: true })); return [i.min, i.max]; })()`);
+      t.eq(await t.g(`[...document.querySelectorAll('${W} .cs-blood .cs-ticks span')].map((x) => x.textContent)`), ['Soaked', 'Heavy', 'Light', 'Clean'], 'Blood: four notches');
+      t.eq(await slide('.cs-blood', 2), ['0', '3'], 'upright, 0 … 3');
+      await t.until(() => fx().blood === 0.7 && fx().bloodOn === true, 3000, 'Heavy: 70 %');
+      await t.until(() => t.count(`${W} .cs-blood input`).then((n) => n === 1), 3000, 'the bar again');
+      await slide('.cs-blood', 0);
+      await t.until(() => fx().bloodOn === false, 3000, 'Clean: no blood');
+      await t.until(() => t.count(`${W} .cs-shade input`).then((n) => n === 1), 3000, 'the bar again');
+      t.eq(await slide('.cs-shade', 20), ['0', '20'], 'Shade: 0 … 100 % in steps of 5');
+      await t.until(() => fx().shade === 1 && fx().shadeOn === true, 3000, 'Shade 100 %');
+      // at 100 % the head is black: the top of the figure has no light left
+      const top = await t.g(`(async () => { const im = await new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = ${JSON.stringify(p.url)}; });
+        const c = await PortraitFx.compose(im, { shadeOn: true, shade: 1 }, {}); const g = c.getContext('2d'); const d = g.getImageData(0, 0, c.width, c.height).data;
+        let y0 = -1; for (let y = 0; y < c.height && y0 < 0; y++) for (let x = 0; x < c.width; x += 2) if (d[(y * c.width + x) * 4 + 3] > 200) { y0 = y; break; }
+        let max = 0; const y1 = y0 + Math.round(c.height * 0.12); for (let y = y0; y < y1; y++) for (let x = 0; x < c.width; x++) { const k = (y * c.width + x) * 4; if (d[k + 3] > 200) max = Math.max(max, d[k], d[k + 1], d[k + 2]); } return max; })()`);
+      t.ok(top <= 6, 'the head black at 100 %', top);
+      await t.clickText(`${W} .cs-picked .cs-look`, 'Hidden');
+      await t.until(() => fx().hidden === true, 3000, 'Hidden');
+      // Ctrl + wheel: the small TV at once, the TV once the wheel rests
+      const sz0 = ((t.settings.portraitSize || {})[p.path]) || 1;
+      await t.g(`(() => { const st = document.querySelector('${W} .cs-stage'); const r = st.getBoundingClientRect(); for (let k = 0; k < 3; k++) st.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); })()`);
+      await t.until(async () => /115 %/.test(await t.g(`(document.querySelector('${W} .cs-frame .cs-size:not([hidden])') || {}).textContent || ''`)), 2000, 'the size shown on the small TV');
+      t.eq(((t.settings.portraitSize || {})[p.path]) || 1, sz0, 'the TV not yet');
+      await t.until(() => Math.abs((((t.settings.portraitSize || {})[p.path]) || 1) - (sz0 + 0.15)) < 0.001, 3000, 'once it rests: 115 % on the TV');
+    } finally {
+      await t.cmd('talk.off', {});
+      await t.cmd('talk.fx', { path: p.path, reset: true });
+      await t.cmd('talk.size', { path: p.path, scale: 1 });
+    }
+  });
+
+  area.quick('Beta 3.56: chips and Library over one row of portraits that does not wrap', async (t) => {
+    const W = '.fp[data-id="talk"]';
+    if (!(await t.g(`!!document.querySelector('${W}')`))) { t.gm().webContents.focus(); await t.key('O'); }
+    await t.until(() => t.count(`${W} .cs-chip`).then((n) => n >= 1), 4000, 'the chips');
+    const v = await t.g(`(() => { const w = document.querySelector('${W}'); const row = w.querySelector('.cs-one'); const cs = getComputedStyle(row);
+      return { chips: [...w.querySelectorAll('.cs-chip')].map((x) => x.textContent), on: (w.querySelector('.cs-chip.on') || {}).textContent, lib: !!w.querySelector('.cs-chips .cs-lib'), wrap: cs.flexWrap, ox: cs.overflowX,
+        tops: [...row.querySelectorAll('.talk-pick')].map((x) => Math.round(x.getBoundingClientRect().top)), list: w.querySelectorAll('.btn.wide').length }; })()`);
+    t.ok(v.chips.includes('All') && v.on && v.lib && v.list === 0, 'chips, one of them on, Library beside them; no List … under the row', v);
+    t.ok(v.wrap === 'nowrap' && v.ox === 'auto' && new Set(v.tops).size <= 1, 'one row that scrolls sideways', v);
+    await t.clickSel(`${W} .cs-lib`);
+    await t.until(() => t.count('.fp[data-id="talklist"]').then((n) => n === 1), 3000, 'Library: all portraits in a window');
+    await t.clickSel(`${W} .cs-lib`);
+    await t.until(() => t.count('.fp[data-id="talklist"]').then((n) => n === 0), 3000, 'and closed again');
+  });
+
   area.deep('two portraits stand together; ending the talk clears the TV', async (t) => {
     const list = faces(t);
     t.ok(list.length >= 2, 'the library has two portraits', list.length);

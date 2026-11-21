@@ -65,9 +65,11 @@ module.exports = (area) => {
     t.eq(M(t).draw.length, n0, 'drawings kept with the map');
   });
 
-  area.deep('Text: a click, a few words and Enter put a label on the map and the TV', async (t) => {
+  area.deep('Marks → Label: a click, a few words and Enter put a label on the map and the TV', async (t) => { // (Third Builder (third-marks-tool): Text moved from Draw into Marks)
     await clean(t);
-    await tile(t, 'Text');
+    await tile(t, 'Marks');
+    await t.g(`Play.ui.mark.me = false; Play.ui.mark.text = ''; document.querySelector('#pop .mk-kinds .tile[data-v="label"]').click()`);
+    await t.sleep(200);
     const p = await cell(t, 17, 5);
     await t.click(p.x, p.y);
     await t.sleep(250);
@@ -92,9 +94,11 @@ module.exports = (area) => {
     await t.until(() => M(t).draw.filter((d) => d.kind === 'pen').length === 1, 3000, 'the line to come back');
   });
 
-  area.deep('a Marker placed with a click shows on the TV; Clear removes it and Undo brings it back', async (t) => {
+  area.deep('a pin placed with a click shows on the TV; Clear removes it and Undo brings it back', async (t) => {
     await clean(t);
-    await tile(t, 'Marker');
+    await tile(t, 'Marks'); // (Third Builder (third-marks-tool): was Marker)
+    await t.g(`Play.ui.mark.me = false; Play.ui.mark.text = ''; document.querySelector('#pop .mk-kinds .tile[data-v="pin"]').click()`);
+    await t.sleep(200);
     const p = await cell(t, 19, 5);
     await t.click(p.x, p.y);
     const mk = await t.until(() => M(t).marks.find((m) => m.kind !== 'note' && m.kind !== 'counter'), 3000, 'the marker');

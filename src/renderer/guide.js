@@ -12,7 +12,7 @@ const Guide = (() => {
 
   const KEYS = [
     ['Build', [['M', 'Move the map (also while Build is folded)'], ['S', 'Assets: trees, rocks, furniture'], ['E', 'Effects, lights and weather'], ['W', 'Walls and doors (W again: next mode)'], ['K', 'Layers'], ['G', 'Grid on or off']]],
-    ['Play', [['V', 'Select and move tokens'], ['N', 'Tokens: click to drop NPCs'], ['U', 'Party marker: where it is (arrow keys: one square)'], ['R / C', 'Reveal / cover fog'], ['A', 'Spells'], ['P', 'Point: ping, laser, spotlight, ruler (P again: next)'], ['D', 'Draw: chalk, pen, text, eraser (D again: next)'], ['X', 'Markers and counters (Toolbox)'], ['J', 'Map notes only you see (Build)'], ['O', 'Conversation: NPC portraits on the table'], ['Q', 'Toolbox: map tools and panels'], ['I', 'Initiative'], ['Enter', 'Next turn / next round']]],
+    ['Play', [['V', 'Select and move tokens'], ['N', 'Tokens: click to drop NPCs'], ['U', 'Party marker: where it is (arrow keys: one square)'], ['R / C', 'Reveal / cover fog'], ['A', 'Spells'], ['P', 'Point: ping, laser, spotlight, ruler (P again: next)'], ['D', 'Sketch: chalk, pen, eraser (D again: next)'], ['X', 'Marks: pins, numbers, labels, counters'], ['J', 'Marks: a note only you see'], ['O', 'Conversation: NPC portraits on the table'], ['Q', 'Toolbox: map tools and panels'], ['I', 'Initiative'], ['Enter', 'Next turn / next round']]], // Third Builder (third-marks-tool): D, X, J
     ['Spells and assets', [['Click', 'Cast or stamp'], ['Drag', 'Aim a cone, line or cube / scatter assets'], ['Ctrl + wheel', 'Turn by 15° (Shift: 5°), also placed areas and assets'], ['Shift while aiming', 'Snap to 15°'], ['+  −', 'Spell size in 5 ft steps'], ['[  ]', 'Asset size'], ['A picked asset\'s frame', 'Sides: flat or long · corners: size · knob: turn'], ['Shift + drag', 'Select several assets'], ['Alt', 'Place or measure without snapping']]],
     ['Draw (Oldschool maps)', [['Drag', 'A room, a round room, a wall, stairs (Shift: square, circle, straight)'], ['Click', 'A shape corner by corner; Enter, double-click or right-click closes it'], ['Alt while drawing', 'Erase instead'], ['Backspace / Esc', 'Take the last corner back / drop the shape']]],
     ['Walls', [['Click', 'Wall corner by corner (Alt: no snapping)'], ['Double-click / Enter', 'End the line of walls'], ['Click a door', 'Open or close it (also with V)'], ['Delete', 'Remove the selected wall']]],
@@ -25,6 +25,19 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.57', [
+      'Marks (X): pins, crosses, numbers, labels and counters in one tool. A pin or number can say something ("Old well", "3 · Trap"), shown under it on the TV too',
+      'Marks: On the table or Only me for every mark; J starts a note only you see. One list of everything on the map, with an eye and a bin, and one Clear with Undo',
+      'A label hidden from the table becomes a note, and a note can go on the table as a label (the eye in Marks)',
+      'Draw (chalk, pen, eraser) is now called Sketch; Text moved to Marks. The rail calls the Party marker Party again',
+    ]],
+    ['Beta 3.56', [
+      'Conversation: the small TV turns green while a conversation runs, with End in its corner; the count under it is gone',
+      'Conversation: the party\'s tokens sit on the small TV\'s edge: a click brings in their cut-out; a greyed one has none yet (set it on the character card)',
+      'Conversation: under the small TV, for the picked portrait: Take out, Mirror, Hidden, and two small upright sliders: Blood in four steps (Clean, Light, Heavy, Soaked) and Shade up to 100 %, where the head is black',
+      'Conversation: Ctrl + wheel on the small TV sizes the picked portrait; the TV follows once the wheel rests',
+      'Conversation: the portraits in one row that scrolls sideways (the wheel too); chips pick Ready, All or one of your Portraits folders; Library beside them has them all',
+    ]],
     ['Beta 3.55', [
       'Conversation: the small TV now draws only the map (blurred), the bands and the portraits with their looks: no effects, and it no longer costs the TV pictures',
       'Conversation: sizing and moving portraits happen on the small TV first; when you let go the TV glides there',

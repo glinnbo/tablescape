@@ -3264,7 +3264,7 @@ function handle(type, p = {}) {
       broadcast();
       return { ok: true, ...o };
     }
-    case 'talk.fx': { // Second Builder: a portrait's looks: Bloodied (amount 0 … 1), Shaded (how dark the top, 0 … 0.9), Hidden
+    case 'talk.fx': { // Second Builder: a portrait's looks: Bloodied (amount 0 … 1), Shaded (how dark the top, 0 … 1; Beta 3.56: was 0.9), Hidden
       if (!p.path) return { ok: false };
       settings.portraitFx = { ...(settings.portraitFx || {}) };
       const cur = { ...(settings.portraitFx[p.path] || {}) };
@@ -3272,7 +3272,7 @@ function handle(type, p = {}) {
       if ('bloodOn' in p) cur.bloodOn = !!p.bloodOn;
       if ('blood' in p) cur.blood = n01(p.blood, 1);
       if ('shadeOn' in p) cur.shadeOn = !!p.shadeOn;
-      if ('shade' in p) cur.shade = n01(p.shade, 0.9);
+      if ('shade' in p) cur.shade = n01(p.shade, 1);
       if ('hidden' in p) cur.hidden = !!p.hidden;
       if (p.reset) for (const k of Object.keys(cur)) delete cur[k];
       // (only what differs from a plain portrait is kept; the sliders' values stay while a look is switched off)

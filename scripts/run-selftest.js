@@ -129,7 +129,7 @@ const checks = [
   ['pen line stays with the map', c.pen?.points >= 5 && c.pen.color === '#e4675e' && c.pen.table === 1, JSON.stringify(c.pen)],
   ['text label on the map and the TV', c.text?.map === 'The old well' && (c.text.table || []).includes('The old well'), JSON.stringify(c.text)],
   ['eraser removes the pen line, undo brings it back', c.erase?.pens === 0 && c.erase.texts === 1 && c.eraseUndo === 1, JSON.stringify([c.erase, c.eraseUndo])],
-  ['2.2: Notes in Build (J), Marker and Counter in the Toolbox (X); no Mark on the rail; a note shows in the Notes list', c.notesTool?.tool === 'notes' && c.notesTool.inBuild && !c.notesTool.markInRail && (c.notesTool.list || []).some((t) => /Trap: DC 14/.test(t)), JSON.stringify(c.notesTool)],
+  ['3.57: J is Marks → Label with Only me (a note only the GM sees); no Mark on the rail; the note shows in the Marks list', c.notesTool?.tool === 'mark' && c.notesTool.kind === 'label' && c.notesTool.me === true && !c.notesTool.markInRail && (c.notesTool.list || []).some((t) => /Trap: DC 14/.test(t)), JSON.stringify(c.notesTool)],
   ['2.2: a new counter does not move on Next round; ticked, Count up and Count down light up when clicked', c.counterOpts?.off && !c.counterOpts.segs.includes('Count up') && (c.counterOpts.up || []).includes('Count up') && (c.counterOpts.down || []).includes('Count down') && !(c.counterOpts.down || []).includes('Count up'), JSON.stringify(c.counterOpts)],
   ['2.2: no Count rounds button under the preview (Enter starts counting)', c.noCountRounds === true && c.roundsNext?.start === 1, JSON.stringify([c.noCountRounds, c.roundsNext && c.roundsNext.start])],
   ['marks: pin and counter on the TV, the note only for the GM', ['pin', 'counter', 'note'].every((k) => (c.marks?.kinds || []).includes(k)) && c.marks.tableMarks.join() === 'pin,counter'
@@ -557,7 +557,7 @@ const checks = [
   ['long names wrap onto up to three lines (the whole name on hover); Assets and Layers keep their width', (() => {
     const t = c.v24; return !!t && t.assetW.w === 312 && t.assetW.over <= 1 && t.assetW.lines >= 2 && t.assetW.lines <= 3 && !!t.assetW.tip && t.layersW.over <= 1 && t.layersW.lines >= 2 && t.layersW.open;
   })(), JSON.stringify(c.v24 && [c.v24.assetW, c.v24.layersW])],
-  ['every panel opens with a token and an asset selected and a Layers row open (Layers used to stay invisible)', (() => { const p = c.v24 && c.v24.panels; return !!p && Object.keys(p).length === 20 && Object.values(p).every(Boolean); })(), JSON.stringify(c.v24 && c.v24.panels)],
+  ['every panel opens with a token and an asset selected and a Layers row open (Layers used to stay invisible)', (() => { const p = c.v24 && c.v24.panels; return !!p && Object.keys(p).length === 19 && Object.values(p).every(Boolean); })(), JSON.stringify(c.v24 && c.v24.panels)],
   ['bake rules (2.5): the file\'s own speed up to 30 a second at the size the TV needs, in pieces; only very long and big ones get smaller', (() => {
     const p = c.v24 && c.v24.plans; if (!p) return false;
     const at = (d, t) => p.find((x) => x.dur === d && x.tier === t) || {};
@@ -663,7 +663,7 @@ const checks = [
   })(), JSON.stringify(c.beta43 && [c.beta43.pickFor, c.beta43.picked])],
   ['4.3.1: every map tool, every Toolbox panel and Options has a "?" with its tips; no long explanations left in the panels', (() => {
     const b = c.beta431 || {}; const P = Object.values(b.popTips || {}); const Q = Object.values(b.panelTips || {});
-    return P.length === 22 && P.every((x) => x.q && !x.long.length) && Q.length === 11 && Q.every((x) => x.q && !x.long.length);
+    return P.length === 21 && P.every((x) => x.q && !x.long.length) && Q.length === 11 && Q.every((x) => x.q && !x.long.length);
   })(), JSON.stringify(c.beta431 && [c.beta431.popTips, c.beta431.panelTips])],
   ['4.3.1: Initiative stays in the Toolbox (no Pin to the rail), other panels can still be pinned', (() => {
     const m = (c.beta431 || {}).pinMenus || {}; return !!m.init && !m.init.some((x) => /rail/.test(x)) && m.init.some((x) => /hotbar/i.test(x)) && (m.sound || []).includes('Pin to the rail');

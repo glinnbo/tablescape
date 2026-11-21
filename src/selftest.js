@@ -729,7 +729,11 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       await dragPath(await cell(12, 9), await cell(20, 10), 12);
       const pen = L().draw.find((d) => d.kind === 'pen');
       C.pen = { points: pen ? pen.pts.length / 2 : 0, color: pen && pen.color, table: (await dbg()).pens };
-      await clickText('#pop .tile', 'Text');
+      // (Beta 3.57, third-marks-tool: a label is a kind of mark: Marks → Label, on the table)
+      await key('X');
+      await sleep(250);
+      await js(gm, `Play.ui.mark.me = false; Play.ui.mark.text = ''; document.querySelector('#pop .mk-kinds .tile[data-v="label"]').click()`);
+      await sleep(150);
       await clickText('#pop .swatch', 'White chalk');
       const tx = await cell(15, 4);
       await click(tx.x, tx.y);
@@ -741,6 +745,8 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       C.text = { map: (L().draw.find((d) => d.kind === 'text') || {}).text, table: (await dbg()).texts };
       await shot(gm, '15g-draw');
       await shot(player, '15h-table-draw');
+      await key('Escape'); await key('D');
+      await sleep(250);
       await clickText('#pop .tile', 'Erase');
       await dragPath(await cell(16, 7.6), await cell(16.3, 11), 10);
       C.erase = { pens: L().draw.filter((d) => d.kind === 'pen').length, texts: L().draw.filter((d) => d.kind === 'text').length };
@@ -751,12 +757,12 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       // Mark: a pin, a counter that counts down with the rounds (Toolbox, X), a note only the GM sees (Build → Notes, J)
       await key('X');
       await sleep(250);
-      if (await js(gm, 'Play.ui.mark.mode') !== 'marker') await clickText('#pop .seg-btn', 'Marker');
-      await clickText('#pop .seg-btn', 'Pin');
+      await js(gm, `Play.ui.mark.me = false; Play.ui.mark.text = ''; document.querySelector('#pop .mk-kinds .tile[data-v="pin"]').click()`); // (Beta 3.57: the kinds of Marks)
+      await sleep(150);
       const pin = await cell(21, 4);
       await click(pin.x, pin.y);
       await sleep(250);
-      await clickText('#pop .seg-btn', 'Counter');
+      await js(gm, `document.querySelector('#pop .mk-kinds .tile[data-v="counter"]').click()`);
       await sleep(150);
       // 2.2: "Moves on Next round" is off for a new counter; ticked, Count down and Count up light up when clicked
       const ctrOpts = { off: !(await js(gm, `document.querySelector('#pop .ctl-toggle input').checked`)), segs: await js(gm, `[...document.querySelectorAll('#pop .seg-btn')].map((b) => b.textContent.trim())`) };
@@ -775,8 +781,8 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       await sleep(250);
       await key('Escape'); await key('J');
       await sleep(250);
-      C.notesTool = { tool: await js(gm, 'Play.ui.tool'), inBuild: await js(gm, `!!document.querySelector('.g-build .rail-btn[data-id="notes"]')`), markInRail: await js(gm, `!!document.querySelector('#rail .rail-btn[data-id="mark"]')`),
-        inToolbox: null };
+      // (Beta 3.57, third-marks-tool: J is Marks → Label with Only me, which pins a note)
+      C.notesTool = { tool: await js(gm, 'Play.ui.tool'), kind: await js(gm, 'Play.ui.mark.mode'), me: await js(gm, 'Play.ui.mark.me'), markInRail: await js(gm, `!!document.querySelector('#rail .rail-btn[data-id="mark"]')`) };
       const note = await cell(27, 7);
       await click(note.x, note.y);
       await sleep(300);
@@ -784,7 +790,8 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       await gm.webContents.insertText('Trap: DC 14 Perception');
       await key('Enter');
       await sleep(400);
-      C.notesTool.list = await js(gm, `[...document.querySelectorAll('#pop .note-row')].map((r) => r.textContent.trim())`);
+      C.notesTool.list = await js(gm, `[...document.querySelectorAll('#pop .mk-row.me')].map((r) => r.textContent.trim())`);
+      await js(gm, 'Play.ui.mark.me = false');
       await key('Escape'); // closes the popover
       await key('Escape'); // and the selection
       await key('V');
@@ -3739,7 +3746,7 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
       await shot(gm, '50b-long-name-layers');
       // every panel, with a token and an asset selected and a Layers row open
       await js(gm, `Play.closePop(); Play.ui.selected = ${JSON.stringify(tok ? tok.id : null)}; Play.ui.expanded = ${JSON.stringify(la.id)}`);
-      const panels = await js(gm, `(() => { const out = {}; for (const id of ['map', 'fog', 'fx', 'walls', 'party', 'spell', 'asset', 'layers', 'grid', 'sound', 'table', 'token', 'point', 'draw', 'mark', 'notes', 'timer', 'talk', 'toolbox', 'round']) { Play.openPop(id); const p = document.getElementById('pop'); out[id] = p.classList.contains('on') && !/ran into a problem/.test(p.textContent) && p.querySelector('.pop-body').childElementCount > 0 && p.scrollWidth - p.clientWidth <= 1; } Play.closePop(); return out; })()`);
+      const panels = await js(gm, `(() => { const out = {}; for (const id of ['map', 'fog', 'fx', 'walls', 'party', 'spell', 'asset', 'layers', 'grid', 'sound', 'table', 'token', 'point', 'draw', 'mark', 'timer', 'talk', 'toolbox', 'round']) { Play.openPop(id); const p = document.getElementById('pop'); out[id] = p.classList.contains('on') && !/ran into a problem/.test(p.textContent) && p.querySelector('.pop-body').childElementCount > 0 && p.scrollWidth - p.clientWidth <= 1; } Play.closePop(); return out; })()`);
       await js(gm, `Play.ui.selected = null; Play.ui.expanded = null; Play.ui.selAssets = []; Play.setTool('select')`);
       handle('layer.remove', { mapId: lm.id, id: la.id });
       try { fs.unlinkSync(longFile); } catch {}
@@ -4531,7 +4538,7 @@ exports.run = async ({ app, store, state, handle, getWindows, library, settings 
 
       // 4.3.1: every panel keeps its explanations behind a "?" (only short status lines stay in it)
       const popTips = {};
-      for (const [id, sub] of [['map'], ['fx', 'place'], ['fx', 'paint'], ['fx', 'light'], ['fx', 'weather'], ['walls'], ['party'], ['spell'], ['asset'], ['layers'], ['grid'], ['sound', 'chapter'], ['sound', 'combat'], ['token'], ['point'], ['draw'], ['mark'], ['notes'], ['timer'], ['talk'], ['toolbox'], ['fog']]) {
+      for (const [id, sub] of [['map'], ['fx', 'place'], ['fx', 'paint'], ['fx', 'light'], ['fx', 'weather'], ['walls'], ['party'], ['spell'], ['asset'], ['layers'], ['grid'], ['sound', 'chapter'], ['sound', 'combat'], ['token'], ['point'], ['draw'], ['mark'], ['timer'], ['talk'], ['toolbox'], ['fog']]) {
         if (id === 'fx') await js(gm, `Play.ui.fxMode = '${sub}'`);
         if (id === 'sound') await js(gm, `Play.ui.soundTab = '${sub}'`);
         await js(gm, `Play.openPop('${id}')`);

@@ -59,14 +59,18 @@ window.PortraitFx = (() => {
   // ---------- what is set ----------
   const clamp = (v, a, b) => Math.min(b, Math.max(a, Number(v) || 0));
   // settings.portraitFx[path] → the three looks as numbers; bloodOn / shadeOn keep the slider's value while switched off
+  // (Beta 3.56: no switches in the window any more, the sliders set both: Bloodied in four notches, Shaded up to 100 %)
+  const BLOOD_STEPS = [0, 0.3, 0.7, 1]; // Clean, Light (neck and face), Heavy (the chest, the spray), Soaked (drips, the streak)
   function norm(fx) {
     const o = fx || {};
     return {
       blood: o.bloodOn ? clamp(o.blood == null ? 0.4 : o.blood, 0, 1) : 0,
-      shade: o.shadeOn ? clamp(o.shade == null ? 0.5 : o.shade, 0, 0.9) : 0,
+      shade: o.shadeOn ? clamp(o.shade == null ? 0.5 : o.shade, 0, 1) : 0,
       hidden: !!o.hidden,
     };
   }
+  // the notch of Bloodied nearest to what is set (0 … 3)
+  const bloodStep = (fx) => { const b = norm(fx).blood; let k = 0; BLOOD_STEPS.forEach((v, i) => { if (Math.abs(v - b) < Math.abs(BLOOD_STEPS[k] - b)) k = i; }); return k; };
   const active = (fx) => { const n = norm(fx); return n.blood > 0 || n.shade > 0 || n.hidden; };
   const keyOf = (url, fx, opaque) => { const n = norm(fx); return `${url}|${n.blood.toFixed(2)}|${n.shade.toFixed(2)}|${n.hidden ? 1 : 0}|${opaque ? 1 : 0}`; };
 
@@ -140,12 +144,13 @@ window.PortraitFx = (() => {
       g.save(); g.globalCompositeOperation = 'darken'; g.drawImage(b, 0, 0); g.restore();
     }
     if (n.shade > 0) {
-      // (full strength on the top of the head, still most of it over the face, gone by the middle of the figure)
-      const top = fig.box.y; const end = top + fig.box.h * 0.6;
+      // (Beta 3.56, Glinn: up to 100 % the head can be hidden entirely: full strength over the head and the face,
+      // half of it by the shoulders, gone by the chest)
+      const top = fig.box.y; const end = top + fig.box.h * 0.75;
       const gr = g.createLinearGradient(0, top, 0, end);
       gr.addColorStop(0, `rgba(0,0,0,${n.shade})`);
-      gr.addColorStop(0.3, `rgba(0,0,0,${(n.shade * 0.72).toFixed(3)})`);
-      gr.addColorStop(0.65, `rgba(0,0,0,${(n.shade * 0.25).toFixed(3)})`);
+      gr.addColorStop(0.5, `rgba(0,0,0,${n.shade})`);
+      gr.addColorStop(0.75, `rgba(0,0,0,${(n.shade * 0.5).toFixed(3)})`);
       gr.addColorStop(1, 'rgba(0,0,0,0)');
       g.save(); g.globalCompositeOperation = 'source-atop'; g.fillStyle = gr; g.fillRect(0, 0, w, h); g.restore();
     }
@@ -171,5 +176,5 @@ window.PortraitFx = (() => {
     return out;
   }
 
-  return { norm, active, keyOf, compose, url, textures, STAINS };
+  return { norm, active, keyOf, compose, url, textures, STAINS, BLOOD_STEPS, bloodStep };
 })();

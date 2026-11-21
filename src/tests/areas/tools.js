@@ -10,7 +10,7 @@ const RAIL = [
 ];
 // the map tools in the Toolbox: label, tool, mode
 const MAP_TOOLS = [['Ping', 'point', 'ping'], ['Laser', 'point', 'laser'], ['Spotlight', 'point', 'spot'], ['Ruler', 'point', 'measure'], ['Chalk', 'draw', 'chalk'], ['Pen', 'draw', 'pen'],
-  ['Text', 'draw', 'text'], ['Erase', 'draw', 'erase'], ['Marker', 'mark', 'marker'], ['Counter', 'mark', 'counter']];
+  ['Erase', 'draw', 'erase'], ['Marks', 'mark', 'marker']]; // (Third Builder (third-marks-tool): Text and Counter are kinds in Marks)
 
 module.exports = (area) => {
   area.title('Tools and keys');
@@ -167,8 +167,78 @@ module.exports = (area) => {
     await t.g(`document.querySelector('#pop .skin-grid .skin[data-v="fire"]').click()`);
     await t.until(async () => (await look()) === 'Look: Fire', 2000, 'and again after another pick');
     await t.g(`Play.closePop()`);
-    t.eq(await t.g(`(document.querySelector('.rail-btn[data-id="party"] .rail-label') || {}).textContent`), 'Marker', 'the rail: Party marker is short for Marker, not Party');
+    t.eq(await t.g(`(document.querySelector('.rail-btn[data-id="party"] .rail-label') || {}).textContent`), 'Party', 'the rail: Party marker is short for Party (third-marks-tool: no tool is called Marker any more)');
     const tb = await t.g(`(() => { Play.openPop('toolbox'); const b = document.querySelector('#pop [data-id="atlas"]'); const r = b && [b.textContent.trim(), b.dataset.tip || '']; Play.closePop(); return r; })()`);
     t.ok(tb && tb[0].includes('Cartographer') && !/Atlas|Map table/.test(tb.join(' ')), 'the Toolbox tile says Cartographer and nothing else', tb);
+  });
+
+  // Third Builder (third-marks-tool): one Marks tool: kinds, text on a mark, Only me, labels and notes, one list, one Clear
+  area.quick('Marks: pin with words, label, Only me, a note to the table and back, one list, one Clear; Sketch has no Text', async (t) => {
+    const E = () => t.E();
+    const tvCaps = () => t.t(`[...document.querySelectorAll('.sv-mark-cap')].map((e) => e.textContent)`);
+    const clickAt = async (x, y) => { const p = await t.scr(x, y); await t.click(p.x, p.y); await t.sleep(250); };
+    const n0 = { marks: E().marks.length, texts: E().draw.filter((d) => d.kind === 'text').length };
+    t.gm().webContents.focus();
+    await t.key('D');
+    await t.until(() => t.popTitle(), 3000, 'the Sketch panel');
+    t.eq(await t.popTitle(), 'Sketch', 'D opens Sketch');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .tile')].map((b) => b.textContent.trim())`), ['Chalk', 'Pen', 'Erase'], 'Sketch: no Text any more');
+    await t.key('X');
+    await t.until(async () => (await t.popTitle()) === 'Marks', 3000, 'the Marks panel');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .mk-kinds .tile')].map((b) => b.textContent.trim())`), ['Pin', 'Cross', 'Number', 'Label', 'Counter'], 'the kinds');
+    // a pin that says something; the Text box is empty again afterwards
+    await t.g(`Play.ui.mark.me = false; document.querySelector('#pop .mk-kinds .tile[data-v="pin"]').click()`);
+    await t.sleep(200);
+    await t.g(`(() => { const i = document.querySelector('#pop input[aria-label="Text"]'); i.value = 'Old well'; i.dispatchEvent(new Event('input')); })()`);
+    await clickAt(6, 5);
+    const pin = E().marks.find((m) => m.kind === 'pin' && m.text === 'Old well');
+    t.ok(pin && !pin.hidden, 'a pin that says "Old well", on the table', E().marks.slice(-1));
+    t.eq(await t.g(`document.querySelector('#pop input[aria-label="Text"]').value`), '', 'the Text box is empty again');
+    await t.until(async () => (await tvCaps()).includes('Old well'), 3000, 'the TV shows what the pin says');
+    // Only me: a number the TV never shows, with a dashed edge on the GM screen
+    await t.g(`document.querySelector('#pop .mk-kinds .tile[data-v="dot"]').click()`);
+    await t.g(`document.querySelector('#pop .mk-who .seg-btn[data-v="me"]').click()`);
+    await t.sleep(200);
+    await t.g(`(() => { const i = document.querySelector('#pop input[aria-label="Text"]'); i.value = 'Trap'; i.dispatchEvent(new Event('input')); })()`);
+    await clickAt(9, 5);
+    const dot = E().marks.find((m) => m.kind === 'dot' && m.text === 'Trap');
+    t.ok(dot && dot.hidden, 'a number for Only me is hidden', dot);
+    await t.sleep(400);
+    t.ok(!(await tvCaps()).includes('Trap'), 'not on the TV');
+    t.ok(await t.g(`!!document.querySelector('.sv-mark.kind-dot.is-hidden .sv-mark-cap')`), 'on the GM screen, marked as only yours');
+    // a label for Only me is a note; its eye puts it on the table as a label, and back
+    await t.g(`document.querySelector('#pop .mk-kinds .tile[data-v="label"]').click()`);
+    await t.sleep(200);
+    await t.g(`(() => { const i = document.querySelector('#pop input[aria-label="Text"]'); i.value = 'Silver key opens this door'; i.dispatchEvent(new Event('input')); })()`);
+    await clickAt(12, 5);
+    const note = E().marks.find((m) => m.kind === 'note' && m.text === 'Silver key opens this door');
+    t.ok(note, 'Label + Only me makes a note', E().marks.slice(-1));
+    const rowEye = (id) => t.g(`document.querySelector('#pop .mk-row[data-id="${id}"] .icon-btn').click()`);
+    await rowEye(note.id);
+    await t.until(() => E().draw.some((d) => d.kind === 'text' && d.text === 'Silver key opens this door' && !d.hidden), 3000, 'its eye: a label on the table');
+    t.ok(!E().marks.some((m) => m.id === note.id), 'the note is gone');
+    await t.until(async () => (await t.tvDebug()).texts.includes('Silver key opens this door'), 3000, 'the TV shows the label');
+    const lab = E().draw.find((d) => d.kind === 'text' && d.text === 'Silver key opens this door');
+    await rowEye(lab.id);
+    await t.until(() => E().marks.some((m) => m.kind === 'note' && m.text === 'Silver key opens this door'), 3000, 'its eye again: back to a note only you see');
+    // a label on the table
+    await t.g(`document.querySelector('#pop .mk-who .seg-btn[data-v="table"]').click()`);
+    await t.sleep(150);
+    await t.g(`(() => { const i = document.querySelector('#pop input[aria-label="Text"]'); i.value = 'The Sunken Hall'; i.dispatchEvent(new Event('input')); })()`);
+    await clickAt(15, 5);
+    t.ok(E().draw.some((d) => d.kind === 'text' && d.text === 'The Sunken Hall' && !d.hidden), 'Label on the table: a label');
+    // the list has every mark and label of this map; one Clear takes them all, Ctrl + Z brings them back
+    const rows = await t.g(`[...document.querySelectorAll('#pop .mk-row .mk-text')].map((b) => b.textContent)`);
+    for (const r of ['Old well', 'Silver key opens this door', 'The Sunken Hall']) t.ok(rows.includes(r), `the list has "${r}"`, rows);
+    t.ok(rows.some((x) => / · Trap$/.test(x)), 'and the number that says Trap', rows);
+    await t.clickText('#pop .btn', 'Clear');
+    await t.until(() => !E().marks.some((m) => ['pin', 'x', 'dot', 'counter', 'note'].includes(m.kind)) && !E().draw.some((d) => d.kind === 'text'), 3000, 'Clear takes every mark and label');
+    await t.key('Z', ['control']);
+    await t.until(() => E().draw.filter((d) => d.kind === 'text').length === n0.texts + 1 && E().marks.length === n0.marks + 3, 3000, 'Ctrl + Z brings them back');
+    // an old hotbar item for Draw → Text opens Marks → Label
+    await t.g(`Play.hotRun({ kind: 'tool', ref: 'draw:text' })`);
+    await t.sleep(300);
+    t.eq([await t.tool(), await t.g('Play.ui.mark.mode')], ['mark', 'label'], 'Draw → Text from before is Marks → Label');
+    await t.key('Escape'); await t.key('V');
   });
 };

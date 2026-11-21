@@ -15,7 +15,7 @@ module.exports = (area) => {
     const tiles = await t.g(`[...document.querySelectorAll('#pop .tb-tile')].map((x) => x.textContent.trim())`);
     const known = await t.g(`Play.TB.PANELS.map((p) => p.id)`);
     t.eq([...known].sort(), [...PANELS.map((p) => p[0]), 'mapnotes'].sort(), 'the panels the app knows (a new one needs a check here)');
-    t.ok(tiles.length >= known.length + 10, 'a tile for every panel and map tool', tiles.length);
+    t.ok(tiles.length >= known.length - 1 + 8, 'a tile for every panel and map tool', tiles.length); // (Third Builder (third-marks-tool): 8 map tools; Map notes have no tile, they are in Marks)
   });
 
   for (const [id, label] of PANELS) {
@@ -46,10 +46,13 @@ module.exports = (area) => {
     for (const id of ['init', 'timer', 'dice']) t.has(ids, id, 'open panels');
   });
 
-  area.quick('J picks Map notes', async (t) => {
+  area.quick('J picks Marks with Only me (a note)', async (t) => { // (Third Builder (third-marks-tool))
     t.gm().webContents.focus();
     await t.key('J');
     await t.sleep(300);
-    t.eq(await t.tool(), 'notes', 'the tool after J');
+    t.eq(await t.tool(), 'mark', 'the tool after J');
+    t.eq(await t.popTitle(), 'Marks', 'its panel');
+    t.eq(await t.g(`[Play.ui.mark.mode, Play.ui.mark.me]`), ['label', true], 'a label only you see');
+    await t.g(`Play.ui.mark.me = false`);
   });
 };

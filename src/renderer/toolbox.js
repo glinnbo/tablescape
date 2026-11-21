@@ -81,15 +81,6 @@ const Toolbox = (() => {
       }
       return r;
     }
-    // 4.7: the small panel shows the party and this chapter's Ready list; List … opens all portraits in a window of its own
-    function portraits() {
-      const out = [];
-      const party = Characters.talkItems(S()); // 4.2: their Talk sprites (campaign page → Players → the card)
-      if (party.length) out.push(['The party', party, { party: true }]);
-      const ch = ctx.ready.chapter();
-      if (ch) out.push([`Ready · ${ch.name}`, ctx.ready.list('portraits').filter((t) => !party.some((x) => x.path === t.path)), { ready: true }]); // (4.10.1: missing ones too, greyed, to take off)
-      return out;
-    }
     const mirrorBtn = (it) => {
       const mirror = (S().settings && S().settings.portraitMirror) || {};
       return h('button', { class: `icon-btn talk-mirror ${mirror[it.path] ? 'on' : ''}`, 'aria-label': 'Mirror', 'data-tip': 'Mirror (face the other way)',
@@ -147,21 +138,51 @@ const Toolbox = (() => {
       // (main Builder at integration: the first time it opens beside the table preview, not over it: it is wider than the other windows)
       place: (r) => { let w = 600; try { w = Number(localStorage.getItem(TalkStage.KEY_W)) || 600; } catch {} return { x: Math.max(8, r.width - 212 - 24 - w - 12), y: 12 }; }, // (the window's width, talk-stage.js)
       // (Second Builder (second-conversation-rework): the tips for the drawn small TV, five portraits, no right-click)
-      tips: ['Click a portrait below, or drag it onto the small TV: it comes in and speaks. The first one starts the conversation. The eye on a thumbnail brings it in Hidden.',
-        'On the small TV: click a portrait and it speaks. Drag the one speaking sideways to move them all; drag one up or down to raise it; pull a top corner to size it. The TV follows when you let go.',
+      tips: ['Click a portrait below, or drag it onto the small TV: it comes in and speaks. The first one starts the conversation (the small TV turns green); End sits in its corner. The eye on a thumbnail brings it in Hidden.',
+        'The party\'s tokens sit on the small TV\'s edge: a click brings in their cut-out (set it on the character card). A greyed one has none yet.',
+        'On the small TV: click a portrait and it speaks. Drag the one speaking sideways to move them all; drag one up or down to raise it; pull a top corner or Ctrl + wheel to size it. The TV follows when you let go.',
         '✕ on the small TV, the big ✕ on its thumbnail, Take out or Delete: it leaves. A click never takes anyone out. Five stand there at most.',
-        'The bar under the small TV: Mirror, Bloodied, Shaded and Hidden for the picked portrait.',
+        'Under the small TV, for the picked portrait: Take out, Mirror, Hidden, and two sliders: Blood in four steps, Shade up to 100 % (the head black).',
+        'The chips pick what the row shows: this chapter\'s Ready portraits, all of them, or one of your Portraits folders. The wheel scrolls the row. Library has them all.',
         'The small TV shows the map behind blurred, the bands and the portraits: no effects, no weather.',
         '⚙: how big they stand, the blur behind them, and the speaker\'s name on the band. The band\'s look: Options → Looks.',
         'Portraits may run off the top and the sides of the TV, and over the far side\'s band; never below their own band.',
-        'Drag the window\'s bottom right corner: the small TV grows with it, the list gets taller.'],
+        'Drag the window\'s bottom right corner: the small TV grows with it.'],
       headExtra: () => h('button', { class: `icon-btn cs-gear ${gearOpen ? 'on' : ''}`, 'aria-label': 'Look settings', 'data-tip': 'How big, the blur behind, names',
         onclick: (e) => { gearOpen = !gearOpen; e.currentTarget.classList.toggle('on', gearOpen); if (gearEl) gearEl.hidden = !gearOpen; } }, iconEl('settings')),
     });
+    // Beta 3.56 (Glinn): the party's tokens on the small TV's bottom edge (a click: their cut-out comes in; greyed: none
+    // yet); chips (Ready, All, the Portraits folders) and Library beside them; the portraits in one row that scrolls sideways
+    const CHIP_KEY = 'talkChip';
+    let chip = null; try { chip = localStorage.getItem(CHIP_KEY); } catch {}
+    const setChip = (v) => { chip = v; try { localStorage.setItem(CHIP_KEY, v); } catch {} };
+    const portraitLib = () => lib.filter((x) => x.cat === 'portraits' && x.kind === 'image');
+    const folderOf = (it) => (PickList.pathOf(it) || [])[0] || null;
+    function partyRow() {
+      const row = h('div', { class: 'cs-party' });
+      c().bind(() => {
+        const t = S().talk; const list = (S().chars || []).filter((x) => x.here);
+        const sig = JSON.stringify([list.map((x) => [x.name, x.face, x.token && x.token.url, x.sprite && x.sprite.path]), t && t.cast.map((x) => x.path)]);
+        if (row.dataset.sig === sig) return;
+        row.dataset.sig = sig;
+        row.replaceChildren(...list.map((ch) => {
+          const pic = (ch.token && ch.token.url) || ch.face || null;
+          const i = ch.sprite ? onStage(ch.sprite.path) : -1;
+          const speak = i >= 0 && t && i === t.cast.length - 1;
+          const tip = !ch.sprite ? `${ch.name}: no cut-out yet (set one on the character card)` : speak ? `${ch.name}: speaking` : i >= 0 ? `${ch.name}: on the TV. Click: they speak` : `${ch.name}: click to bring in`;
+          return h('button', { class: `cs-pc ${!ch.sprite ? 'off' : ''} ${i >= 0 ? 'on' : ''} ${speak ? 'speak' : ''}`, 'aria-label': ch.name, 'data-tip': tip, dataset: { name: ch.name },
+            style: ch.color ? `--pc:${ch.color}` : '',
+            onclick: () => (ch.sprite ? bringIn({ path: ch.sprite.path, name: ch.name, kind: 'image', url: ch.sprite.url }) : toast(`${ch.name} has no cut-out yet: set one on the character card (campaign page → Players)`, { ms: 4000 })) },
+          pic ? h('img', { src: pic, alt: '', draggable: false }) : h('span', { class: 'cs-pc-i' }, String(ch.name || '?').trim().charAt(0).toUpperCase()));
+        }));
+        row.hidden = !list.length;
+      });
+      return row;
+    }
     function buildTalkPop() {
       loadLib();
       const stage = TalkStage.build({
-        S, cmd, toast, bind: c().bind, bringIn, refresh: () => ctx.refreshPop(),
+        S, cmd, toast, bind: c().bind, bringIn, refresh: () => ctx.refreshPop(), party: partyRow(),
         fx: { of: (path) => fxOf(path), send: (path, patch) => cmd('talk.fx', { path, ...patch }) },
       });
       let sizeT = 0;
@@ -173,51 +194,52 @@ const Toolbox = (() => {
         c().slider({ label: 'Blur the map behind', min: 0, max: 1, step: 0.05, get: () => prefs().blur, set: (v) => set({ blur: v }), fmt: (v) => (v < 0.05 ? 'Off' : `${Math.round(v * 100)}%`) }),
         c().toggle({ label: 'The speaker\'s name on the band', get: () => !!prefs().names, set: (v) => set({ names: v }) }),
         c().btn('The band\'s look …', 'sparkles', () => { if (window.App && App.openOptions) App.openOptions('looks'); }, { kind: 'small ghost' }));
-      const strip = h('div', { class: 'talk-strip' });
+      // the chips and Library
+      const chips = h('div', { class: 'cs-chips' });
+      const libBtn = c().btn('Library', 'layout-grid', () => ctx.togglePanel(talkListDef()), { kind: 'small cs-lib', tip: 'All portraits: click one to bring it in, tick it to have it ready here' });
+      c().bind(() => libBtn.classList.toggle('on', !!ctx.panelOpen('talklist')));
+      const strip = h('div', { class: 'talk-strip cs-strip' });
+      const row = h('div', { class: 'talk-row cs-one' });
+      row.addEventListener('wheel', (e) => { if (e.ctrlKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; row.scrollLeft += e.deltaY; e.preventDefault(); }, { passive: false }); // (the wheel scrolls the row sideways)
+      strip.append(row);
+      ctx.ready.drop(row, 'portraits');
       c().bind(() => {
-        let groups = portraits();
-        // when nothing is ready: all portraits (H1/H6: no dead end on first use)
-        if (!groups.some(([, l, o]) => o.ready && l.length)) {
-          const all = lib.filter((x) => x.cat === 'portraits' && x.kind === 'image').slice(0, 48);
-          groups = groups.filter(([, , o]) => !o.ready);
-          if (all.length) groups.push(['Portraits', all, { all: true }]);
-        }
+        const ch = ctx.ready.chapter();
+        const ready = ch ? ctx.ready.list('portraits') : [];
+        const all = portraitLib();
+        const folders = [...new Set(all.map(folderOf).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+        const opts = [...(ch ? [['ready', 'Ready']] : []), ['all', 'All'], ...folders.map((f) => [`f:${f}`, f])];
+        let cur = opts.some(([v]) => v === chip) ? chip : (ready.length ? 'ready' : 'all');
+        if (!opts.some(([v]) => v === cur)) cur = 'all';
+        const list = cur === 'ready' ? ready : cur === 'all' ? all : all.filter((x) => folderOf(x) === cur.slice(2));
         const t = S().talk;
-        const mirror = (S().settings && S().settings.portraitMirror) || {};
-        const sig = JSON.stringify([groups.map(([g, l]) => [g, l.map((x) => x.path)]), t && t.cast.map((x) => x.path), mirror, (S().settings && S().settings.portraitSize) || {}, (S().settings && S().settings.portraitOffset) || {}, (S().settings && S().settings.portraitFx) || {}]);
+        const sig = JSON.stringify([opts, cur, list.map((x) => [x.path, x.missing]), t && t.cast.map((x) => x.path), (S().settings && S().settings.portraitSize) || {}, (S().settings && S().settings.portraitOffset) || {}, (S().settings && S().settings.portraitFx) || {}]);
         if (strip.dataset.sig === sig) return;
         strip.dataset.sig = sig;
-        strip.innerHTML = '';
-        if (!groups.length) { strip.append(c().hint('No portraits yet: List … → From this PC.')); return; }
-        for (const [title, list, o] of groups) {
-          strip.append(h('div', { class: 'tok-group' }, h('span', { class: 'grow ellipsis' }, title),
-            o.ready && list.length ? h('button', { class: 'tg-clear', 'data-tip': 'Empty this chapter\'s Ready list', onclick: () => ctx.ready.clear('portraits') }, 'Clear') : null));
-          const row = h('div', { class: `talk-row ${o.ready ? 'ready-row' : ''}` });
-          if (o.ready || o.all) ctx.ready.drop(row, 'portraits');
-          for (const it of list.slice(0, 48)) {
-            const i = onStage(it.path);
-            const use = () => (it.missing ? toast(`${it.name} is no longer in the library: ✕ takes it off the Ready list`, { ms: 3500 }) : bringIn(it));
-            const drag = !it.missing ? { draggable: 'true', ondragstart: (e) => { e.dataTransfer.setData('application/x-ts-asset', JSON.stringify({ path: it.path, name: it.name, cat: 'portraits', kind: it.kind || 'image' })); e.dataTransfer.effectAllowed = 'copy'; } } : {};
-            row.append(h('div', { class: `talk-pick ${i >= 0 ? 'on' : ''} ${it.missing ? 'missing' : ''}`, dataset: { flash: it.path }, role: 'button', tabindex: '0', ...drag, 'data-tip': it.missing ? `${it.name}: no longer in the library (✕ takes it off)` : tipFor(it, i, t || { cast: [] }),
-              onclick: use, onkeydown: (e) => { if (e.key === 'Enter') use(); } },
-            h('span', { class: 'talk-thumb' }, it.missing ? iconEl('alert-triangle') : Thumbs.img(it.path, it.kind || 'image', it.thumb)),
-            h('span', { class: 'talk-name' }, it.name),
-            i >= 0 ? h('b', { class: 'talk-badge' }, i === t.cast.length - 1 ? 'Speaking' : 'On') : null,
-            sizeBadge(it),
-            o.ready ? h('button', { class: 'icon-btn ready-x', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('portraits', it.path); } }, iconEl('x')) : null,
-            // Second Builder (second-conversation-rework), on hover: one on the TV shows a big ✕ that takes it off; one not
-            // on the TV the eye that brings it in Hidden (its looks are set first, so the TV never shows it uncovered)
-            !it.missing && i >= 0 ? h('button', { class: 'talk-off', 'aria-label': `Take ${it.name} off the TV`, 'data-tip': 'Take off the TV', onkeydown: (e) => e.stopPropagation(),
-              onclick: (e) => { e.stopPropagation(); if (TalkStage.picked() === it.path) TalkStage.pick(null); cmd('talk.toggle', { path: it.path, out: true }); } }, iconEl('x')) : null,
-            !it.missing && i < 0 ? h('button', { class: 'talk-hidden-in', 'aria-label': `Bring ${it.name} in hidden`, 'data-tip': 'Bring in hidden', onkeydown: (e) => e.stopPropagation(),
-              onclick: (e) => { e.stopPropagation(); bringIn(it, { hidden: true }); } }, iconEl('eye-off')) : null));
-          }
-          strip.append(row);
+        chips.replaceChildren(...opts.map(([v, label]) => h('button', { class: `cs-chip ${v === cur ? 'on' : ''}`, dataset: { v }, 'data-tip': v === 'ready' ? `Ready for ${ch.name}` : v === 'all' ? 'All your portraits' : `The folder ${label}`, onclick: () => { setChip(v); strip.dataset.sig = ''; ctx.refreshPop(); } }, label)), libBtn);
+        row.replaceChildren();
+        row.classList.toggle('ready-row', cur === 'ready');
+        if (!list.length) { row.append(c().hint(cur === 'ready' ? 'Nothing ready for this chapter: tick portraits in Library.' : 'No portraits yet: Library → From this PC.')); return; }
+        for (const it of list.slice(0, 200)) {
+          const i = onStage(it.path);
+          const use = () => (it.missing ? toast(`${it.name} is no longer in the library: ✕ takes it off the Ready list`, { ms: 3500 }) : bringIn(it));
+          const drag = !it.missing ? { draggable: 'true', ondragstart: (e) => { e.dataTransfer.setData('application/x-ts-asset', JSON.stringify({ path: it.path, name: it.name, cat: 'portraits', kind: it.kind || 'image' })); e.dataTransfer.effectAllowed = 'copy'; } } : {};
+          row.append(h('div', { class: `talk-pick ${i >= 0 ? 'on' : ''} ${it.missing ? 'missing' : ''}`, dataset: { flash: it.path }, role: 'button', tabindex: '0', ...drag, 'data-tip': it.missing ? `${it.name}: no longer in the library (✕ takes it off)` : tipFor(it, i, t || { cast: [] }),
+            onclick: use, onkeydown: (e) => { if (e.key === 'Enter') use(); } },
+          h('span', { class: 'talk-thumb' }, it.missing ? iconEl('alert-triangle') : Thumbs.img(it.path, it.kind || 'image', it.thumb)),
+          h('span', { class: 'talk-name' }, it.name),
+          i >= 0 ? h('b', { class: 'talk-badge' }, i === t.cast.length - 1 ? 'Speaking' : 'On') : null,
+          sizeBadge(it),
+          cur === 'ready' ? h('button', { class: 'icon-btn ready-x', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('portraits', it.path); } }, iconEl('x')) : null,
+          // Second Builder (second-conversation-rework), on hover: one on the TV shows a big ✕ that takes it off; one not
+          // on the TV the eye that brings it in Hidden (its looks are set first, so the TV never shows it uncovered)
+          !it.missing && i >= 0 ? h('button', { class: 'talk-off', 'aria-label': `Take ${it.name} off the TV`, 'data-tip': 'Take off the TV', onkeydown: (e) => e.stopPropagation(),
+            onclick: (e) => { e.stopPropagation(); if (TalkStage.picked() === it.path) TalkStage.pick(null); cmd('talk.toggle', { path: it.path, out: true }); } }, iconEl('x')) : null,
+          !it.missing && i < 0 ? h('button', { class: 'talk-hidden-in', 'aria-label': `Bring ${it.name} in hidden`, 'data-tip': 'Bring in hidden', onkeydown: (e) => e.stopPropagation(),
+            onclick: (e) => { e.stopPropagation(); bringIn(it, { hidden: true }); } }, iconEl('eye-off')) : null));
         }
       });
-      const listBtn = c().btn('List …', 'layout-grid', () => ctx.togglePanel(talkListDef()), { kind: 'wide', tip: 'All portraits: click one to bring it in, tick it to have it ready here' });
-      c().bind(() => listBtn.classList.toggle('on', !!ctx.panelOpen('talklist')));
-      return h('div', { class: 'stack cs-panel' }, stage, gearEl, strip, listBtn);
+      return h('div', { class: 'stack cs-panel' }, stage, gearEl, chips, strip);
     }
 
     // =====================================================================
@@ -239,10 +261,10 @@ const Toolbox = (() => {
       { id: 'chars', label: 'Character cards', short: 'Cards', icon: 'id-badge-2', tip: 'The party at a glance, only for you (Shift + I)' },
       { id: 'remote', label: 'Remote', short: 'Remote', icon: 'device-mobile', tip: 'Your phone or tablet as a remote or a player screen' },
       { id: 'players', label: 'Player phones', short: 'Players', icon: 'device-gamepad-2', tip: 'Players move their own tokens from their phones' },
-      { id: 'mapnotes', label: 'Map notes', short: 'Notes', icon: 'note', tool: true, tip: 'Notes pinned on the map, only you see them (J)' }, // Prototype 14: from the rail
+      { id: 'mapnotes', label: 'Map notes', short: 'Notes', icon: 'note', tool: true, tip: 'Marks only you see (J)' }, // Prototype 14: from the rail; Third Builder (third-marks-tool): not in the grid any more, kept for a rail or hotbar that has it: it opens Marks with Only me
     ];
     // Prototype 14: one grid in a fixed order (no groups); the favourites (a star) above it
-    const ORDER = ['init', 'chars', 'timer', 'dice', 'moments', 'snaps', 'sound', 'spotify', 'handouts', 'atlas', 'mapnotes', 'notes', 'break', 'lights', 'players', 'remote'];
+    const ORDER = ['init', 'chars', 'timer', 'dice', 'moments', 'snaps', 'sound', 'spotify', 'handouts', 'atlas', 'notes', 'break', 'lights', 'players', 'remote']; // (Third Builder (third-marks-tool): Map notes are in Marks)
     let favs = [];
     try { const v = JSON.parse(localStorage.getItem('toolboxFavs') || 'null'); if (Array.isArray(v)) favs = v.filter((x) => typeof x === 'string'); } catch {}
     function toggleFav(id) {
@@ -258,10 +280,9 @@ const Toolbox = (() => {
       { t: 'point', mode: 'measure', label: 'Ruler', icon: 'ruler-measure', tip: 'Measure in feet' },
       { t: 'draw', mode: 'chalk', label: 'Chalk', icon: 'scribble', tip: 'Draw something; it fades after a few seconds (D)' },
       { t: 'draw', mode: 'pen', label: 'Pen', icon: 'ballpen', tip: 'Lines that stay on the map' },
-      { t: 'draw', mode: 'text', label: 'Text', icon: 'typography', tip: 'A label on the map' },
-      { t: 'draw', mode: 'erase', label: 'Erase', icon: 'eraser', tip: 'Erase pen lines and labels' },
-      { t: 'mark', mode: 'marker', label: 'Marker', icon: 'map-pin', tip: 'Pins, crosses and numbered markers on the map (X)' },
-      { t: 'mark', mode: 'counter', label: 'Counter', icon: 'plus-minus', tip: 'A number on the map, e.g. rounds until the ritual completes' },
+      { t: 'draw', mode: 'erase', label: 'Erase', icon: 'eraser', tip: 'Erase pen lines' },
+      // Third Builder (third-marks-tool): one tile for pins, crosses, numbers, labels, counters and notes (Text and Counter were tiles of their own)
+      { t: 'mark', mode: 'marker', label: 'Marks', icon: 'map-pin', tip: 'Pins, crosses, numbers, labels and counters; on the table or only for you (X)' },
     ];
     function running(id) {
       const s = S();
@@ -271,7 +292,7 @@ const Toolbox = (() => {
     function buildToolbox() {
       // Prototype 16: the tools for the map (Ping … Counter) and the panels in one grid, in a fixed order; any of them
       // can be a favourite (a star) and then stands on top
-      const mapOn = (m) => ui.tool === m.t && (m.t === 'point' ? ui.point.mode : m.t === 'mark' ? (ui.mark.mode === 'counter' ? 'counter' : 'marker') : ui.draw.mode) === m.mode;
+      const mapOn = (m) => ui.tool === m.t && (m.t === 'point' ? ui.point.mode : m.t === 'mark' ? 'marker' : ui.draw.mode) === m.mode; // (Third Builder (third-marks-tool): the Marks tile lights for every kind)
       const tiles = []; const mapTiles = [];
       const starOf = (id) => {
         const fav = favs.includes(id);
@@ -313,7 +334,7 @@ const Toolbox = (() => {
       const grid = h('div', { class: 'tb-grid tb-panels' }, ...rest.map(make).filter(Boolean));
       c().bind(() => {
         for (const [b, m] of mapTiles) b.classList.toggle('on', mapOn(m));
-        for (const b of tiles) { b.classList.toggle('live', !!running(b.dataset.id)); b.classList.toggle('open', b.dataset.id === 'mapnotes' ? ui.tool === 'notes' : ctx.panelOpen(b.dataset.id)); b.classList.toggle('pinned', ctx.pins().includes(b.dataset.id)); }
+        for (const b of tiles) { b.classList.toggle('live', !!running(b.dataset.id)); b.classList.toggle('open', b.dataset.id === 'mapnotes' ? ui.tool === 'mark' && ui.mark.me : ctx.panelOpen(b.dataset.id)); b.classList.toggle('pinned', ctx.pins().includes(b.dataset.id)); }
       });
       return h('div', { class: 'stack' },
         favRow ? c().ctlLabel('Favourites') : null, favRow,

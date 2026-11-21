@@ -1253,6 +1253,12 @@ function applyRaw(map, type, p, media) {
     case 'draw.update': {
       const d = map.draw.find((x) => x.id === p.id);
       if (!d) return { changed: null };
+      if (d.kind === 'text' && p.hidden === true && p.asNote) { // Third Builder (third-marks-tool): a label set to "Only me" in the Marks tool becomes a note (size and colour kept for the way back)
+        const m = { id: newId('k'), kind: 'note', x: d.x, y: d.y, color: '#e2b44f', hidden: true, text: d.text, size: d.size, ink: d.color };
+        map.draw = map.draw.filter((x) => x !== d);
+        map.marks.push(m);
+        return { changed: 'all', selected: m.id, label: 'Only you see it now' };
+      }
       Object.assign(d, pick(p, ['x', 'y', 'text', 'color', 'size', 'hidden', 'w']));
       return { changed: 'all' };
     }
@@ -1263,10 +1269,12 @@ function applyRaw(map, type, p, media) {
       const n = before - map.draw.length;
       return n ? { changed: 'all', label: n === 1 ? 'Erased' : `${n} drawings erased` } : { changed: null };
     }
-    case 'draw.clear':
-      if (!map.draw.length) return { changed: null };
-      map.draw = [];
+    case 'draw.clear': { // (Third Builder (third-marks-tool): kinds: only these, e.g. Sketch clears only pen lines)
+      const keep = p.kinds ? map.draw.filter((d) => !p.kinds.includes(d.kind)) : [];
+      if (keep.length === map.draw.length) return { changed: null };
+      map.draw = keep;
       return { changed: 'all', label: 'Drawings cleared' };
+    }
 
     // ---------- marks: pins, crosses, numbered dots, counters, GM notes ----------
     case 'mark.add': {
@@ -1275,17 +1283,26 @@ function applyRaw(map, type, p, media) {
       if (kind === 'dot') m.n = Number.isFinite(p.n) ? p.n : Math.max(0, ...map.marks.filter((x) => x.kind === 'dot').map((x) => x.n || 0)) + 1;
       if (kind === 'counter') Object.assign(m, { label: String(p.label || 'Counter').slice(0, 40), value: Math.round(num(p.value, 0)), auto: ['up', 'down'].includes(p.auto) ? p.auto : null });
       if (kind === 'note') m.text = String(p.text || '').slice(0, 600);
+      if (kind === 'note' && p.size) Object.assign(m, { size: Math.max(0.1, Number(p.size) || 0.5), ink: String(p.ink || '#ffffff') }); // (Third Builder (third-marks-tool): a label made for Only me)
+      if ((kind === 'pin' || kind === 'x' || kind === 'dot') && p.text) m.text = short(p.text, 80); // (Third Builder (third-marks-tool): a pin, cross or number can say something)
       if (kind === 'place') Object.assign(m, { style: PLACE_STYLES.includes(p.style) ? p.style : 'medallion', icon: placeIcon(p.icon), title: short(p.title, 60) || 'New place', sub: short(p.sub, 80), to: typeof p.to === 'string' ? p.to : null, note: String(p.note || '').slice(0, 600), ho: p.ho && p.ho.path && media ? media(String(p.ho.path)) : null });
       if (kind === 'route') { Object.assign(m, { title: short(p.title, 60), pts: [r3(m.x), r3(m.y)], look: 'dash', width: 2, arrow: true, round: true, walked: 0 }); routeLook(m, p); }
       map.marks.push(m);
-      const what = { pin: 'Pin', x: 'Cross', dot: `Marker ${m.n}`, counter: m.label, note: 'Note', place: m.title, route: 'Route' }[kind];
+      const what = m.text && kind !== 'note' ? m.text : { pin: 'Pin', x: 'Cross', dot: `Marker ${m.n}`, counter: m.label, note: 'Note', place: m.title, route: 'Route' }[kind];
       return { changed: 'all', selected: m.id, label: `${what} added` };
     }
     case 'mark.update': {
       const m = map.marks.find((x) => x.id === p.id);
       if (!m) return { changed: null };
+      if (m.kind === 'note' && p.hidden === false && p.asLabel) { // Third Builder (third-marks-tool): a note put on the table from the Marks tool becomes a label (with its size and colour if it was one)
+        const d = { id: newId('d'), kind: 'text', x: m.x, y: m.y, text: short(m.text, 200) || 'Note', color: String(m.ink || '#ffffff'), size: Math.max(0.1, Number(m.size) || 0.5), hidden: false };
+        map.marks = map.marks.filter((x) => x !== m);
+        map.draw.push(d);
+        return { changed: 'all', selected: d.id, label: 'On the table now' };
+      }
       const was = { x: m.x, y: m.y };
       Object.assign(m, pick(p, ['x', 'y', 'color', 'label', 'value', 'auto', 'text', 'hidden', 'n']));
+      if ('text' in p && m.kind !== 'note') m.text = short(p.text, 80); // (Third Builder (third-marks-tool))
       if (m.kind === 'counter') { m.value = Math.round(num(m.value, 0)); if (!['up', 'down'].includes(m.auto)) m.auto = null; }
       if (m.kind === 'place') {
         if ('title' in p) m.title = short(p.title, 60) || m.title;
@@ -1328,9 +1345,10 @@ function applyRaw(map, type, p, media) {
     }
     case 'mark.clear': {
       const kinds = new Set(p.kinds || MARK_KINDS);
-      const before = map.marks.length;
+      const before = map.marks.length + map.draw.length;
       map.marks = map.marks.filter((m) => !kinds.has(m.kind));
-      return map.marks.length === before ? { changed: null } : { changed: 'all', label: 'Markers cleared' };
+      if (p.labels) map.draw = map.draw.filter((d) => d.kind !== 'text'); // (Third Builder (third-marks-tool): the Marks tool's one Clear takes the labels too)
+      return map.marks.length + map.draw.length === before ? { changed: null } : { changed: 'all', label: p.labels ? 'Marks cleared' : 'Markers cleared' };
     }
 
     // ---------- Beta 3.22: Oldschool maps: the drawing ----------

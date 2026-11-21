@@ -11,8 +11,10 @@
 // While dragging only this small TV changes, at once; on letting go one change goes to the TV, which glides there.
 // The window's own bottom right corner sizes it: the small TV fills its width, the list of portraits below gets the
 // rest of its height (the thumbnails keep their size).
-// Under it: how many stand there and End, then the picked portrait: Mirror, back to 100 %, Take out, and its looks
-// with their amounts.
+// Beta 3.56 (Glinn): while a conversation runs the small TV has a green frame and End in its corner; the party's
+// tokens sit on its bottom edge (toolbox.js); under them the picked portrait: Take out, Mirror, Hidden, and its looks
+// as two small upright sliders (Blood in four notches, Shade up to 100 %). Ctrl + wheel on the small TV sizes the
+// picked portrait (the TV gets it once the wheel rests).
 'use strict';
 window.TalkStage = (() => {
   const { h, iconEl, clamp, Thumbs } = UI;
@@ -96,7 +98,8 @@ window.TalkStage = (() => {
     const scene = h('div', { class: 'cs-scene' }, ...sides.map((x) => x.base), ...sides.map((x) => x.cast), ...sides.map((x) => x.front), ...sides.map((x) => x.name));
     const frames = h('div', { class: 'cs-frames' });
     const hint = h('p', { class: 'cs-hint' }, 'Click a portrait below, or drag one here');
-    const stage = h('div', { class: 'cs-stage', tabindex: '0', 'aria-label': 'The conversation on the TV' }, bg, scene, frames, hint);
+    const endBtn = h('button', { class: 'cs-end', 'data-tip': 'End the conversation', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); o.cmd('talk.off'); } }, iconEl('player-stop'), 'End');
+    const stage = h('div', { class: 'cs-stage', tabindex: '0', 'aria-label': 'The conversation on the TV' }, bg, scene, frames, hint, endBtn);
     const me = { stage, draw: () => { redraw(); barSig = ''; drawBar(); } };
     stages.add(me);
 
@@ -219,7 +222,7 @@ window.TalkStage = (() => {
         if (tag.textContent !== tt) tag.textContent = tt;
         // while its size is pulled: how big, and where it was
         const sz = f.querySelector('.cs-size');
-        const pulling = act && act.moved && act.hnd && act.path === c.path;
+        const pulling = ((act && act.moved && act.hnd) || Date.now() - wheelAt < 900) && local && local.scale && local.scale.path === c.path;
         sz.hidden = !pulling;
         if (pulling) sz.textContent = `${Math.round(local.scale.v * 100)} %`;
         f.classList.toggle('pulling', !!pulling);
@@ -230,6 +233,22 @@ window.TalkStage = (() => {
       }
     }
     function takeOut(path) { if (picked === path) picked = null; o.cmd('talk.toggle', { path, out: true }); }
+    // Beta 3.56: Ctrl + wheel sizes the picked portrait (the speaker when none is picked) in steps of 5 %: this small TV
+    // at once, the TV once the wheel rests
+    let wheelAt = 0; let wheelT = 0;
+    stage.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey) return;
+      const list = cast(); const p = picked && list.some((c) => c.path === picked) ? picked : list.length ? list[list.length - 1].path : null;
+      if (!p) return;
+      e.preventDefault(); e.stopPropagation();
+      const cur = local && local.scale && local.scale.path === p && Date.now() - local.t < 1500 ? local.scale.v : sizeOf(p);
+      const v = clamp(Math.round((cur + (e.deltaY < 0 ? 0.05 : -0.05)) * 20) / 20, 0.3, 4);
+      local = { scale: { path: p, v }, t: Date.now() };
+      wheelAt = Date.now();
+      redraw();
+      clearTimeout(wheelT);
+      wheelT = setTimeout(() => { if (local && local.scale && local.scale.path === p) local.t = Date.now(); o.cmd('talk.size', { path: p, scale: v }); setTimeout(redraw, 950); }, 300);
+    }, { passive: false });
     // ---------- the pointer: only this small TV changes while dragging; the TV gets it when let go ----------
     function down(e, path) {
       if (e.button !== 0) return;
@@ -292,18 +311,24 @@ window.TalkStage = (() => {
       o.bringIn(a);
     });
 
-    // ---------- under the picture: how many, End; the picked one ----------
-    const count = h('span', { class: 'grow cs-count' });
-    const end = h('button', { class: 'btn small danger', onclick: () => o.cmd('talk.off') }, iconEl('player-stop'), 'End');
-    const status = h('div', { class: 'cs-status' }, h('span', { class: 'cs-dot' }), count, end);
+    // ---------- under the picture: the picked one (Beta 3.56: no count any more; the frame is green while it runs) ----------
     const bar = h('div', { class: 'cs-picked' });
     let barSig = '';
+    // a small upright slider with its notches written beside it (the one set lit); ticksOf (k) → [[text, lit], …] top first
+    function upright(label, cls, n, idx, ticksOf, set) {
+      const input = h('input', { type: 'range', min: '0', max: String(n - 1), step: '1', value: String(idx), 'aria-label': label });
+      const ticks = h('span', { class: 'cs-ticks' });
+      const paint = (k) => ticks.replaceChildren(...ticksOf(k).map(([t, lit]) => h('span', { class: lit ? 'on' : '' }, t)));
+      paint(idx);
+      let tm = 0;
+      input.addEventListener('input', () => { const k = Number(input.value); paint(k); clearTimeout(tm); tm = setTimeout(() => set(k), 60); });
+      return h('div', { class: `cs-vs ${cls}` }, h('span', { class: 'cs-vs-l' }, label), h('div', { class: 'cs-vs-b' }, input, ticks));
+    }
     function drawBar() {
       const list = cast();
       const on = list.length > 0;
-      count.textContent = on ? `On the TV: ${list.length} of 5` : (talk() ? 'Nobody on the TV yet' : 'No conversation');
-      status.classList.toggle('on', on);
-      end.hidden = !talk();
+      stage.classList.toggle('live', !!talk());
+      endBtn.hidden = !talk();
       const path = picked && list.some((c) => c.path === picked) ? picked : on ? list[list.length - 1].path : null;
       const c = path ? list.find((x) => x.path === path) : null;
       const raw = c ? (o.fx.of(c.path) || {}) : {};
@@ -315,30 +340,29 @@ window.TalkStage = (() => {
       bar.hidden = !c;
       if (!c) { bar.replaceChildren(); return; }
       const front = list[list.length - 1].path === c.path;
-      const look = (key, label, icon, onKey) => h('button', { class: `cs-look ${raw[onKey] ? 'on' : ''}`, 'aria-pressed': String(!!raw[onKey]),
-        onclick: () => o.fx.send(c.path, { [onKey]: !raw[onKey] }) }, iconEl(icon), label);
-      const amount = (label, key, max, def) => {
-        const v = raw[key] == null ? def : raw[key];
-        const out = h('span', { class: 'cs-amt' }, `${Math.round(v * 100)} %`);
-        const input = h('input', { type: 'range', min: '0', max: String(Math.round(max * 100)), step: '1', value: String(Math.round(v * 100)), 'aria-label': `${label} amount` });
-        let tm = 0;
-        input.addEventListener('input', () => { out.textContent = `${input.value} %`; clearTimeout(tm); tm = setTimeout(() => o.fx.send(c.path, { [key]: Number(input.value) / 100 }), 60); });
-        return h('label', { class: 'cs-slider' }, h('span', {}, label), input, out);
-      };
+      const n = PortraitFx.norm(raw);
       const sz = sizeOf(c.path);
+      // Blood: four notches (Clean, Light, Heavy, Soaked); Shade: 0 to 100 % in steps of 5 (the head black at the top)
+      const blood = upright('Blood', 'cs-blood', 4, PortraitFx.bloodStep(raw), (k) => ['Soaked', 'Heavy', 'Light', 'Clean'].map((t, i) => [t, 3 - i === k]),
+        (k) => { const v = PortraitFx.BLOOD_STEPS[k]; o.fx.send(c.path, { blood: v, bloodOn: v > 0 }); });
+      const shade = upright('Shade', 'cs-shade', 21, Math.round(n.shade * 20), (k) => [['100 %', k === 20], [k > 0 && k < 20 ? `${k * 5} %` : '', true], ['0', k === 0]],
+        (k) => o.fx.send(c.path, { shade: k / 20, shadeOn: k > 0 }));
       bar.replaceChildren(
-        h('div', { class: 'cs-row' }, h('b', { class: 'grow ellipsis' }, c.name, front ? h('small', {}, ' speaking') : null, Math.abs(sz - 1) > 0.001 ? h('small', { class: 'cs-pct' }, ` ${Math.round(sz * 100)} %`) : null),
-          moved ? h('button', { class: 'icon-btn', 'aria-label': 'Back to 100 %, in its place', 'data-tip': 'Back to 100 %, in its place', onclick: () => { o.cmd('talk.size', { path: c.path, scale: 1 }); o.cmd('talk.offset', { path: c.path, x: 0, y: 0 }); } }, iconEl('arrow-back-up')) : null,
-          h('button', { class: `icon-btn ${mirror ? 'on' : ''}`, 'aria-label': 'Mirror', 'data-tip': 'Mirror (face the other way)', onclick: () => o.cmd('talk.mirror', { path: c.path }) }, iconEl('flip-horizontal')),
-          h('button', { class: 'btn small danger', onclick: () => takeOut(c.path) }, iconEl('x'), 'Take out')),
-        h('div', { class: 'cs-row cs-looks' }, look('blood', 'Bloodied', 'droplet', 'bloodOn'), look('shade', 'Shaded', 'contrast', 'shadeOn'), look('hidden', 'Hidden', 'eye-off', 'hidden')),
-        ...[raw.bloodOn ? amount('Bloodied', 'blood', 1, 0.4) : null, raw.shadeOn ? amount('Shaded', 'shade', 0.9, 0.5) : null].filter(Boolean));
+        h('div', { class: 'cs-bar-l' },
+          h('b', { class: 'ellipsis' }, c.name, front ? h('small', {}, ' speaking') : null, Math.abs(sz - 1) > 0.001 ? h('small', { class: 'cs-pct' }, ` ${Math.round(sz * 100)} %`) : null),
+          h('div', { class: 'cs-row' },
+            h('button', { class: 'btn small danger', onclick: () => takeOut(c.path) }, iconEl('x'), 'Take out'),
+            h('button', { class: `btn small ${mirror ? 'on' : ''}`, 'data-tip': 'Mirror (face the other way)', onclick: () => o.cmd('talk.mirror', { path: c.path }) }, iconEl('flip-horizontal'), 'Mirror'),
+            moved ? h('button', { class: 'icon-btn', 'aria-label': 'Back to 100 %, in its place', 'data-tip': 'Back to 100 %, in its place', onclick: () => { o.cmd('talk.size', { path: c.path, scale: 1 }); o.cmd('talk.offset', { path: c.path, x: 0, y: 0 }); } }, iconEl('arrow-back-up')) : null),
+          h('div', { class: 'cs-row' },
+            h('button', { class: `cs-look ${raw.hidden ? 'on' : ''}`, 'aria-pressed': String(!!raw.hidden), 'data-tip': 'Hidden: a black figure; off, it fades in', onclick: () => o.fx.send(c.path, { hidden: !raw.hidden }) }, iconEl('eye-off'), 'Hidden'))),
+        h('div', { class: 'cs-bar-r' }, blood, shade));
     }
     o.bind(() => { redraw(); drawBar(); });
     let rT = 0;
     if (window.ResizeObserver) new ResizeObserver(() => { if (!rT) rT = requestAnimationFrame(() => { rT = 0; redraw(); }); }).observe(stage);
     requestAnimationFrame(() => { const fp = stage.closest('.fp'); applySize(fp); corner(fp); redraw(); });
-    return h('div', { class: 'cs stack' }, stage, status, bar);
+    return h('div', { class: 'cs stack' }, stage, o.party || null, bar); // (Beta 3.56: the party's tokens on the small TV's edge)
   }
   const pick = (path) => { picked = path || null; };
   // draw the open ones again (a portrait picked from the list below)

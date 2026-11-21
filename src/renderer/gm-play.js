@@ -200,12 +200,12 @@ const Play = (() => {
       { id: 'sound', icon: 'volume', label: 'Ambience', pop: true, tip: 'Chapter ambience, map sounds, fight music and Spotify' }] }, // (Prototype 14: Map notes moved to the Toolbox)
     // 4.5: the Toolbox on its own between Build and Play (and the panels pinned from it); 4.5.1: without a heading
     { group: 'extra', items: [
-      { id: 'toolbox', icon: 'briefcase', label: 'Toolbox', key: 'Q', pop: true, tip: 'Map tools and panels: pointer, draw, markers, initiative, sounds, screen effects and more' }] },
+      { id: 'toolbox', icon: 'briefcase', label: 'Toolbox', key: 'Q', pop: true, tip: 'Map tools and panels: pointer, sketch, marks, initiative, sounds, screen effects and more' }] },
     { group: 'play', title: 'Play', items: [
       { id: 'select', icon: 'pointer', label: 'Select', key: 'V', tool: true, tip: 'Select and move tokens, spell areas and lights' },
       { id: 'token', icon: 'user-plus', label: 'Tokens', key: 'N', tool: true, pop: true, tip: 'Drop NPCs with a click' },
       { id: 'fog', icon: 'cloud-fog', label: 'Fog', key: 'R / C', tool: true, pop: true, tip: 'Reveal (R) or cover (C) with fog' },
-      { id: 'party', icon: 'users-group', label: 'Party marker', short: 'Marker', key: 'U', tool: true, pop: true, tip: 'The party marker: where it is, its light and darkvision' }, // Third Builder (third-small-labels): H3, the rail's short name says what it is
+      { id: 'party', icon: 'users-group', label: 'Party marker', short: 'Party', key: 'U', tool: true, pop: true, tip: 'The party marker: where it is, its light and darkvision' }, // Third Builder (third-small-labels): H3; Third Builder (third-marks-tool): back to Party (Marker is no tool's name any more, but Marks is close)
       { id: 'spell', icon: 'wand', label: 'Spells', key: 'A', tool: true, pop: true, tip: 'Spells: spheres, cones, lines, cubes and auras' },
       { id: 'talk', icon: 'messages', label: 'Conversation', short: 'Converse', key: 'O', pop: true, tip: 'NPC portraits rise out of a band on the table' }] },
     'spacer',
@@ -543,10 +543,10 @@ const Play = (() => {
 
   const MAP_TOOLS = {
     'point:ping': { label: 'Ping', icon: 'target' }, 'point:laser': { label: 'Laser', icon: 'pointer' }, 'point:spot': { label: 'Spotlight', icon: 'focus-2' }, 'point:measure': { label: 'Ruler', icon: 'ruler-measure' },
-    'draw:chalk': { label: 'Chalk', icon: 'scribble' }, 'draw:pen': { label: 'Pen', icon: 'ballpen' }, 'draw:text': { label: 'Text', icon: 'typography' }, 'draw:erase': { label: 'Erase', icon: 'eraser' },
-    'mark:marker': { label: 'Marker', icon: 'map-pin' }, 'mark:counter': { label: 'Counter', icon: 'plus-minus' },
+    'draw:chalk': { label: 'Chalk', icon: 'scribble' }, 'draw:pen': { label: 'Pen', icon: 'ballpen' }, 'draw:text': { label: 'Label', icon: 'typography' }, 'draw:erase': { label: 'Erase', icon: 'eraser' },
+    'mark:marker': { label: 'Marks', icon: 'map-pin' }, 'mark:counter': { label: 'Counter', icon: 'plus-minus' }, // (Third Builder (third-marks-tool): Text and Counter left the Toolbox; a hotbar that has them opens Marks)
   };
-  const TOOLBOX_TIP = 'Map tools and panels: pointer, draw, markers, initiative, sounds, screen effects and more';
+  const TOOLBOX_TIP = 'Map tools and panels: pointer, sketch, marks, initiative, sounds, screen effects and more';
   // 4.3: panels pinned to the rail: one click opens or closes them (right-click a panel in the Toolbox to pin it).
   // 4.3.1: Initiative is not one of them: it stays in the Toolbox (Fight), and I opens it.
   const UNPINNED = new Set(['init']);
@@ -578,7 +578,7 @@ const Play = (() => {
     }
     for (const b of box.children) {
       const id = b.dataset.id.slice(4);
-      b.classList.toggle('is-open', id === 'mapnotes' ? ui.tool === 'notes' : !!(Floats && Floats.isOpen(id)));
+      b.classList.toggle('is-open', id === 'mapnotes' ? ui.tool === 'mark' && ui.mark.me : !!(Floats && Floats.isOpen(id)));
       b.classList.toggle('is-running', !!(S && TB.running(id)));
     }
   }
@@ -702,16 +702,14 @@ const Play = (() => {
     draw: () => [({
       chalk: 'Draw on the map to show something. Chalk fades after a few seconds.',
       pen: 'Draw on the map. Pen lines stay with the map (and move with it) until you erase them.',
-      text: 'Click the map to write a label. Click a label to change it, drag it to move it.',
-      erase: 'Drag over pen lines and labels to erase them. Ctrl + Z brings them back.',
-    }[ui.draw && ui.draw.mode] || null), 'D switches between Chalk, Pen, Text and Erase.'],
-    mark: () => (ui.mark && ui.mark.mode === 'counter'
+      erase: 'Drag over pen lines to erase them. Ctrl + Z brings them back.',
+    }[ui.draw && ui.draw.mode] || null), 'D switches between Chalk, Pen and Erase. Labels are in Marks (X).'],
+    mark: () => (ui.mark && ui.mark.mode === 'counter' // (Third Builder (third-marks-tool))
       ? ['Click the map to place the counter. Its − and + work in every tool.', ui.mark.auto ? 'It moves on Next round; counting down stops at 0 and lights up.' : 'It changes only when you click − or +.']
-      : ['Click the map to place it. Drag a marker to move it; click it for its options.', 'Numbered markers count up by themselves: 1, 2, 3 …']),
-    notes: ['Click the map to pin a note only you see, e.g. "Silver key opens this door".', 'Drag a note to move it.'],
+      : ['Click the map to place it; type in Text first and it says something.', 'Only me: only on your screen, never on the TV. J starts a note like that.', 'Drag a mark to move it; click it, or its row in the list, for its options.']),
     timer: ['Normal: a round dial at a short end or in the middle of the TV.', 'Dramatic: a big number in the middle, pulsing darker towards zero.', 'A running dial can still move to another end.'],
     talk: ['Click a portrait to bring it in, click it again to take it out. The newest one stands in front.', 'With players on both long sides, the far side gets its own copy.',
-      'List … has every portrait: click to bring one in, tick to keep it ready here.', 'The mirror button turns a portrait to face the other way.', 'The look of the band: Campaign settings → Looks.'],
+      'The chips pick Ready, All or one of your Portraits folders; Library has every portrait.', 'The mirror button turns a portrait to face the other way.', 'The look of the band: Campaign settings → Looks.'],
     toolbox: ['P and D switch the map tools, X is the marker.', 'Right-click a panel to pin it to the rail or put it on the hotbar.'],
     round: ['Drag the badge over the picture of the TV.', 'With players on both long sides, the second badge follows, turned towards the far side.'],
   };
@@ -726,8 +724,8 @@ const Play = (() => {
     walls: ['wall', 'room', 'door', 'edit', 'erase'].map((m) => ({ 'walls.mode': m })),
     sound: ['chapter', 'map', 'combat'].map((t) => ({ soundTab: t })),
     point: ['ping', 'laser', 'spot', 'measure'].map((m) => ({ 'point.mode': m })),
-    draw: ['chalk', 'pen', 'text', 'erase'].map((m) => ({ 'draw.mode': m })),
-    mark: [{ 'mark.mode': 'marker' }, { 'mark.mode': 'counter', 'mark.auto': true }, { 'mark.mode': 'counter', 'mark.auto': false }],
+    draw: ['chalk', 'pen', 'erase'].map((m) => ({ 'draw.mode': m })),
+    mark: [{ 'mark.mode': 'marker' }, { 'mark.mode': 'label' }, { 'mark.mode': 'counter', 'mark.auto': true }, { 'mark.mode': 'counter', 'mark.auto': false }],
   };
   function allTips(id, tips) {
     if (typeof tips !== 'function') return (tips || []).filter(Boolean);
@@ -770,9 +768,8 @@ const Play = (() => {
     party: 'Drag it or click where it goes · arrow keys: one square',
     spell: 'Drag aims · Ctrl + wheel turns · + and − size · Shift snaps to 15° · Alt skips the grid',
     point: () => ({ ping: 'Click pings · drag: laser', laser: 'Move the mouse · click pings', spot: 'Move the mouse · Esc ends it', measure: 'Drag between squares · Alt measures freely' }[ui.point && ui.point.mode] || ''),
-    draw: () => ({ chalk: 'Draw · chalk fades by itself', pen: 'Draw · pen lines stay with the map', text: 'Click to write · drag a label to move it', erase: 'Drag over lines and labels' }[ui.draw && ui.draw.mode] || ''),
-    mark: 'Click places it · drag moves it · click it for its options',
-    notes: 'Click pins a note only you see · drag moves it',
+    draw: () => ({ chalk: 'Draw · chalk fades by itself', pen: 'Draw · pen lines stay with the map', erase: 'Drag over pen lines' }[ui.draw && ui.draw.mode] || ''),
+    mark: () => (ui.mark && ui.mark.me ? 'Only me · click places it · drag moves it' : 'Click places it · drag moves it · click it for its options'), // (Third Builder (third-marks-tool))
   };
   let hintT = 0; let hintSig = '';
   const hintsOn = () => { try { return localStorage.getItem('toolHints') !== '0'; } catch { return true; } };
@@ -804,9 +801,8 @@ const Play = (() => {
     sound: { title: 'Ambience', icon: 'volume', build: buildSoundPop, tips: TIPS.sound },
     token: { title: 'Tokens', icon: 'user-plus', build: () => Tools.buildTokenPop(), tips: TIPS.token },
     point: { title: 'Point', icon: 'target', build: () => Tools.buildPointPop(), tips: TIPS.point },
-    draw: { title: 'Draw', icon: 'scribble', build: () => Tools.buildDrawPop(), tips: TIPS.draw },
-    mark: { title: 'Markers and counters', icon: 'map-pin', build: () => Tools.buildMarkPop(), tips: TIPS.mark },
-    notes: { title: 'Map notes (only you see them)', icon: 'note', build: () => Tools.buildNotesPop(), tips: TIPS.notes },
+    draw: { title: 'Sketch', icon: 'scribble', build: () => Tools.buildDrawPop(), tips: TIPS.draw }, // (Third Builder (third-marks-tool): Sketch, so only the Oldschool tool is called Draw)
+    mark: { title: 'Marks', icon: 'map-pin', build: () => Tools.buildMarkPop(), tips: TIPS.mark }, // (Third Builder (third-marks-tool): Map notes are Only-me marks now)
     timer: { title: 'Countdown', icon: 'hourglass', build: () => Tools.buildTimerPop(), tips: TIPS.timer },
     talk: { title: 'Conversation', icon: 'messages', build: () => TB.buildTalkPop(), tips: TIPS.talk },
     toolbox: { title: 'Toolbox', icon: 'briefcase', build: () => TB.buildToolbox(), tips: TIPS.toolbox },
@@ -3514,7 +3510,7 @@ const Play = (() => {
   function toolRun(r) {
     if (typeof r !== 'string') return;
     if (r.includes(':')) { // a map tool: the mouse switches to it; pressed again, its panel opens
-      const [t, mode] = r.split(':');
+      const [t, mode] = Tools.normTool(...r.split(':')); // (Third Builder (third-marks-tool): Draw → Text on an old hotbar is Marks → Label)
       if (toolLive(r)) { togglePop(t); return; }
       Tools.setMode(t, mode); setTool(t);
       return;
@@ -3843,9 +3839,9 @@ const Play = (() => {
     // 4.5: Snapshots live in the Toolbox (Atmosphere, next to Moments)
     snaps: (toggle) => { if (toggle && Floats.isOpen('snaps')) Floats.hide('snaps'); else Snaps.openFor(null); renderRail(); },
     // a map tool from the Toolbox: switch the mouse to it and show its settings
-    useTool: (t, mode) => { Tools.setMode(t, mode); setTool(t); openPop(t); },
+    useTool: (t0, mode0) => { const [t, mode] = Tools.normTool(t0, mode0); Tools.setMode(t, mode); setTool(t); openPop(t); },
     // Prototype 14: Map notes, a tool from the Toolbox (or pinned to the rail): the mouse pins notes, its list opens
-    mapNotes: (toggle) => { if (toggle && ui.tool === 'notes') { setTool('select'); closePop(); } else { setTool('notes'); openPop('notes'); } renderRail(); },
+    mapNotes: (toggle) => { if (toggle && ui.tool === 'mark' && ui.mark.me) { setTool('select'); closePop(); } else { Tools.noteMode(); setTool('mark'); openPop('mark'); } renderRail(); }, // (Third Builder (third-marks-tool): Marks with Only me)
   });
   // Spotify as a remote (spotify-panel.js): Sound → Spotify, the Spotify panel, what plays under the preview
   const Spot = SpotifyPanel.create({
@@ -5283,7 +5279,7 @@ const Play = (() => {
         case 'q': if (popId === 'toolbox') closePop(); else { ui.tb = 'home'; openPop('toolbox'); } break;
         case 'i': TB.togglePanel(e.shiftKey ? 'chars' : 'init'); break;
         case 'x': setTool('mark'); if (popId !== 'mark') openPop('mark'); break;
-        case 'j': setTool('notes'); if (popId !== 'notes') openPop('notes'); break;
+        case 'j': Tools.noteMode(); setTool('mark'); if (popId !== 'mark') openPop('mark'); else refreshPop(); break; // (Third Builder (third-marks-tool): a note only you see, in Marks)
         case 'enter':
           if (a && a !== document.body && a.tagName === 'BUTTON') break; // Enter on a focused button clicks that button
           e.preventDefault();

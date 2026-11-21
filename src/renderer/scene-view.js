@@ -2957,6 +2957,7 @@ class SceneView {
         const far = Geom.routeLabel(this.map.grid, m);
         const s = document.createElement('span'); s.className = 'sv-place-sub'; s.textContent = far || 'Route'; el.append(s);
       }
+      if (m.text && (m.kind === 'pin' || m.kind === 'x' || m.kind === 'dot')) { const t = document.createElement('span'); t.className = 'sv-mark-cap'; t.textContent = m.text; el.append(t); } // Third Builder (third-marks-tool): what a mark says
       this.annoEl.append(el);
     }
   }
