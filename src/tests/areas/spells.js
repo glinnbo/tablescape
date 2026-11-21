@@ -52,8 +52,10 @@ module.exports = (area) => {
   area.quick('spell looks are drawn by the graphics card: fire burns orange, cold is blue, a picked colour is used', async (t) => {
     const m = t.L(); const k = m.grid.size;
     t.handle('spell.clear', { mapId: m.id });
-    const gl = await t.t('typeof SpellGL === "object" && SpellGL.supported()');
-    if (!gl) { t.ok(true, 'no WebGL 2 here: the old drawing is used (checked by the other spell checks)'); return; }
+    await t.t('SpellGL.allowSoft(true)'); // (Second Builder, second-spell-warmup: software graphics only in the self-test)
+    const st = await t.t('SpellGL.warm()');
+    const gl = st && st.state === 'ready';
+    if (!gl) { t.ok(true, `no WebGL 2 here (${st && st.state}: ${st && st.why}): the old drawing is used (checked by the other spell checks)`); return; }
     const cast = async (skin, at, color) => {
       t.handle('spell.add', { mapId: m.id, name: `Look ${skin}`, shape: 'sphere', size: 15, skin, x: at.x * k, y: at.y * k, mode: 'stay', ...(color ? { color } : {}) });
       await t.sleep(150);
@@ -71,6 +73,41 @@ module.exports = (area) => {
     t.ok(fire[0] > 60 && fire[0] > fire[2] * 1.6, 'the fire is orange-red where it burns', fire);
     t.ok(cold[2] >= cold[0] && cold[2] > 30, 'the cold is blue-white', cold);
     t.ok(green[1] > green[0] && green[1] > green[2], 'a fire the GM made green burns green', green);
+    t.handle('spell.clear', { mapId: m.id });
+  });
+
+  // Second Builder (second-spell-warmup): the spells' program is built in the background from the start; a spell
+  // never waits for it (before, the first spell held the GM window for ten seconds on Windows), each window writes
+  // what it found into the log, and Options → Performance switches the realistic spell areas off on both screens
+  area.quick('the spells\' program builds in the background: a spell never waits for it; the log says how it went', async (t) => {
+    const how = await t.g('SpellGL.warm()');
+    t.ok(how && ['ready', 'slow', 'off', 'failed'].includes(how.state), 'the GM window settled on a way to draw spells', how);
+    const logFile = (await t.g('window.ts.app("about")')).log;
+    const log = () => require('fs').readFileSync(logFile, 'utf8');
+    t.ok(/\[gm\] spells: /.test(log()), 'the GM window wrote how it draws spells into the log');
+    await t.until(() => /\[table\] spells: /.test(log()), 8000, 'the TV writing it too');
+    // built again from nothing (software graphics allowed): asking right away returns at once, the old drawing meanwhile
+    await t.t('SpellGL.allowSoft(true)');
+    const r = await t.t(`(() => { SpellGL.retry(); const a = performance.now(); const ok = SpellGL.supported(); return { ok, ms: performance.now() - a, state: SpellGL.status().state }; })()`);
+    t.ok(r.ms < 50, 'asking while it builds does not wait', r);
+    t.ok(!r.ok || r.state === 'ready', 'while it builds, the old drawing', r);
+    const after = await t.t('SpellGL.warm()');
+    t.ok(['ready', 'off', 'failed'].includes(after.state), 'then it is ready (or there are no graphics for it here)', after);
+  });
+
+  area.quick('Options → Performance: Realistic spell areas off draws the simple ones on both screens', async (t) => {
+    await t.g('window.ts.settings({ spellGpu: false })');
+    await t.until(() => t.settings.spellGpu === false, 3000, 'the setting');
+    await t.until(async () => (await t.t('SpellGL.status().off')) && (await t.g('SpellGL.status().off')), 5000, 'both screens to switch to the simple spells');
+    const m = t.L(); const k = m.grid.size;
+    t.handle('spell.add', { mapId: m.id, name: 'Simple', shape: 'sphere', size: 15, skin: 'fire', x: 8 * k, y: 8 * k, mode: 'stay' });
+    const n0 = await t.t('SpellGL.stats.drawn');
+    await t.sleep(600);
+    t.eq(await t.t('SpellGL.stats.drawn'), n0, 'nothing drawn by the graphics card while it is off');
+    const px = await t.t(`window.__table.probeMap('spell', ${8 * k}, ${8 * k})`);
+    t.ok(px && px[3] > 0, 'the spell still shows on the TV (the simple drawing)', px);
+    await t.g('window.ts.settings({ spellGpu: true })');
+    await t.until(async () => !(await t.t('SpellGL.status().off')), 5000, 'the realistic spells back');
     t.handle('spell.clear', { mapId: m.id });
   });
 

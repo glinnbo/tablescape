@@ -75,6 +75,7 @@ let settings = {
   fightAuto: true, // fight music starts with a fight (Initiative) and ends with it
   picture: {}, // per TV (tvKey): { brightness, contrast, gamma, saturation, warmth, black }
   fpsWatch: true, // ask to lower the effects when the TV stutters
+  spellGpu: true, // Second Builder (second-spell-warmup): spell areas drawn by the graphics card (off: the simple drawing)
   mapQuality: {}, // map id -> 'medium' | 'low': lower effects for that map (remembered when the TV stuttered on it)
   momentStars: ['earthquake', 'explosion', 'blood', 'gas'], // starred moments: on top, and on Shift + 1 to 9
   momentSounds: {}, // moment id -> a sound file, or 'none' (else a matching sound from Audio/SFX, or the built-in one)
@@ -1577,7 +1578,7 @@ function gmState() {
       quality: settings.quality || 'high', gmAnim: ['smooth', 'light', 'still'].includes(settings.gmAnim) ? settings.gmAnim : 'light', gmFx: ['smooth', 'light', 'still'].includes(settings.gmFx) ? settings.gmFx : 'light', animDraw: settings.animDraw === 'gpu' ? 'gpu' : 'cpu',
       soundOut: settings.soundOut || '', soundOutLabel: settings.soundOutLabel || '', fxOut: settings.fxOut ?? null, fxOutLabel: settings.fxOutLabel || '',
       duck: settings.duck !== false, fightAuto: settings.fightAuto !== false,
-      picture: pictureFor(v.tvKey), fpsWatch: settings.fpsWatch !== false, buildWide: settings.buildWide !== false, mapQuality: settings.mapQuality || {},
+      picture: pictureFor(v.tvKey), fpsWatch: settings.fpsWatch !== false, spellGpu: settings.spellGpu !== false, buildWide: settings.buildWide !== false, mapQuality: settings.mapQuality || {},
       liveQuality: qualityFor(state.liveMapId), editQuality: qualityFor(state.editMapId),
       momentStars: settings.momentStars || [], momentSounds: momentSoundNames(), boardVolumeNow: settings.boardVolume ?? 0.8,
       tokens: tokenLook(),
@@ -1723,6 +1724,7 @@ function tableState() {
     transition: transitionOf(),
     styles: stylesNow(), // Prototype 7: the look and variant of a new map, Talk, the turn order, the round's banner
     quality: qualityFor(state.liveMapId),
+    spellGpu: settings.spellGpu !== false, // Second Builder (second-spell-warmup)
     animDraw: settings.animDraw === 'gpu' ? 'gpu' : 'cpu',
     soundOut: settings.soundOut || '', // background videos with sound play there too
     talk: talkInfo(),
@@ -4077,6 +4079,7 @@ ipcMain.handle('app', async (e, action, arg = {}) => {
   switch (action) {
     case 'about': return { version: PKG.version, label: LABEL, electron: process.versions.electron, log: applog.file, update: state.update, test: !!TEST_DIR };
     case 'update.check': return checkUpdates(true); // Prototype 20
+    case 'note': applog.log.info(String((arg && arg.text) || '').slice(0, 400)); return true; // Second Builder (second-spell-warmup): a line from a window
     case 'whatsnew': { // Prototype 21: the first start of a new version (after an update): What's new opens once
       const prev = settings.lastVersion; const cur = PKG.version;
       if (TEST_DIR) return { show: false };
@@ -4269,6 +4272,7 @@ ipcMain.handle('settings', (e, patch) => {
     }
   }
   if ('fpsWatch' in patch) settings.fpsWatch = !!patch.fpsWatch;
+  if ('spellGpu' in patch) settings.spellGpu = !!patch.spellGpu; // Second Builder (second-spell-warmup)
   if ('buildWide' in patch) settings.buildWide = !!patch.buildWide; // Prototype 5
   if (patch.videoPath) settings.videoPath = VIDEO_PATHS.includes(patch.videoPath) ? patch.videoPath : 'noOverlay'; // 4.11.3 (after a restart)
   if (patch.tokens) { // 4.10: Options → Tokens

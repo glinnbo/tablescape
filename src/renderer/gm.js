@@ -30,6 +30,29 @@ const App = (() => {
     window.__tsReady = true; // used by the self-test
   }
 
+  // Second Builder (second-spell-warmup): Options → Performance: spell areas by the graphics card, and why not when
+  // this PC cannot (no graphics card, software graphics, too slow: then Try again times it once more)
+  function spellGpuCtl(set, bind) {
+    const line = h('div', { class: 'ctl-row map-quality spell-gpu-note', hidden: true });
+    const show = () => {
+      const st = typeof SpellGL === 'object' ? SpellGL.status() : { state: 'off', why: 'not here' };
+      const sig = `${st.state}|${st.why}|${set().spellGpu}`;
+      if (line.dataset.sig === sig) return;
+      line.dataset.sig = sig;
+      line.innerHTML = '';
+      const bad = set().spellGpu !== false && ['slow', 'off', 'failed'].includes(st.state);
+      line.hidden = !bad;
+      if (!bad) return;
+      line.append(iconEl('gauge'), h('span', { class: 'grow' }, `Simple spells on this computer: ${st.why}`));
+      if (st.state !== 'off') line.append(h('button', { class: 'btn small', onclick: () => SpellGL.retry().then(() => { line.dataset.sig = ''; show(); }) }, 'Try again'));
+    };
+    bind(show);
+    if (typeof SpellGL === 'object') SpellGL.warm().then(() => { line.dataset.sig = ''; show(); });
+    return h('div', { class: 'stack' },
+      toggleCtl(bind, { label: 'Realistic spell areas (graphics card)', get: () => set().spellGpu !== false, set: (v) => ts.settings({ spellGpu: v }) }),
+      line);
+  }
+
   // Beta 3.17: the start. The name stands still on its own for a moment, then fades out and the home fades in. A click
   // or a key skips it; a slow start keeps it until the GM screen is ready. (Not in the self-test.)
   async function splash() {
@@ -38,10 +61,24 @@ const App = (() => {
     const about = await ts.app('about').catch(() => null);
     if (!(about && about.test)) {
       const until = (window.__bootAt || 0) + 2000; // (0.5 s to fade in, then 1.5 s still)
+      // Second Builder (second-spell-warmup): the bar fills while the spells' program is built (at most 15 s, then the
+      // home comes and it goes on in the background; a click or a key still skips)
+      const bar = boot.querySelector('.splash-bar i');
+      let ready = typeof SpellGL !== 'object';
+      const cap = new Promise((r) => setTimeout(r, Math.max(0, (window.__bootAt || 0) + 15000 - performance.now())));
+      const warm = ready ? Promise.resolve() : Promise.race([SpellGL.warm(), cap]).then(() => { ready = true; });
+      const fill = () => {
+        if (!bar || !boot.isConnected) return;
+        const ms = performance.now() - (window.__bootAt || 0);
+        bar.style.width = `${ready ? 100 : Math.round(92 * (1 - Math.exp(-ms / 3500)))}%`;
+        if (!ready) requestAnimationFrame(fill);
+      };
+      fill();
       await new Promise((res) => {
-        const done = () => { clearTimeout(tm); window.removeEventListener('keydown', skip, true); window.removeEventListener('pointerdown', skip, true); res(); };
+        let tm = 0; let gone = false;
+        const done = () => { if (gone) return; gone = true; clearTimeout(tm); window.removeEventListener('keydown', skip, true); window.removeEventListener('pointerdown', skip, true); res(); };
         const skip = (e) => { e.preventDefault(); e.stopPropagation(); done(); };
-        const tm = setTimeout(done, Math.max(0, until - performance.now()));
+        warm.then(() => { fill(); tm = setTimeout(done, Math.max(250, until - performance.now())); }); // (a moment to see the bar full)
         window.addEventListener('keydown', skip, true);
         window.addEventListener('pointerdown', skip, true);
       });
@@ -498,6 +535,7 @@ const App = (() => {
         get: () => set().quality || 'high', set: (v) => ts.settings({ quality: v }) }),
         mapLine,
         toggleCtl(bind, { label: 'Ask to lower the effects when the TV stutters', get: () => set().fpsWatch, set: (v) => ts.settings({ fpsWatch: v }) }),
+        spellGpuCtl(set, bind), // Second Builder (second-spell-warmup)
         toggleCtl(bind, { label: 'Build tools show the whole map with light and effects', get: () => set().buildWide !== false, set: (v) => ts.settings({ buildWide: v }) }),
         h('p', { class: 'hint' }, 'Off: light and effects are drawn only inside the TV\'s frame, as while playing.'),
         h('div', { class: 'pop-sep' }),

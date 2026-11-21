@@ -24,6 +24,14 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.48', [
+      'Conversation → Bloodied looks soaked in now, not stuck on: new splats and a spray, blended like paint (Darken)',
+      'The Bloodied slider builds up: a wound at the neck first, then blood running down the body, then more',
+    ]],
+    ['Beta 3.47', [
+      'The first spell no longer freezes the GM window: the spell effects get ready while the start screen shows (a thin bar under the name)',
+      'Computers without a graphics card, or too slow for the realistic spell areas, get the simple ones on their own; Options → Performance → Realistic spell areas switches them off by hand',
+    ]],
     ['Beta 3.46', [
       'Draw → Tile now has a blue block of its own with the living effects: Grass, Water, Lava, Shimmer (it was called Glow), Pulse and Ripple. Pick one and draw it with a Box, Round, a Shape or a Brush; Erase brushes effects away and leaves the floor (Alt does the same with the other shapes)',
       'Fill pours an effect over all the floor that lies at one height and is joined to the spot you click: water fills a pit and stops at its rim',

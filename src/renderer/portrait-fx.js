@@ -1,5 +1,6 @@
 // Second Builder (portrait looks): how a portrait looks in a conversation, drawn into the picture itself.
-//   Bloodied  stains from looks/blood/, more of them the higher the amount; the same ones stay where they are
+//   Bloodied  stains from looks/blood/ that come in by stages as the amount rises; the same ones stay where they are
+//             (Second Builder, second-bloodied-darken: Glinn's splats and his hand-made spray, blended with Darken)
 //   Shaded    darker from the top of the head down (the strength is how dark the very top is), gone by the middle
 //   Hidden    the whole figure black: only its outline shows
 // They stack in that order: the blood first, the shade over it, the silhouette over everything.
@@ -8,30 +9,41 @@
 // preview in the GM's portrait popup (toolbox.js).
 'use strict';
 window.PortraitFx = (() => {
-  // the eight stains (Higgsfield, gpt_image_2_6): how far each may turn (drips run down, so hardly), how big against
-  // the figure's width, and how much of it lies over the figure at most
+  // the stains: Glinn's two splats and his hand-made spray (21 Nov 2026, second-bloodied-darken) and the first eight
+  // (Higgsfield, gpt_image_2_6). Of the first eight only the drips and the slash streak are still used (the smear read
+  // as a lump with Darken).
   const STAINS = [
-    { f: 'blood-0', turn: 180, size: [0.34, 0.5] }, // a big splash with drops round it
-    { f: 'blood-1', turn: 180, size: [0.36, 0.55] }, // a wiped smear
-    { f: 'blood-2', turn: 12, size: [0.3, 0.46] }, // runs down in drips
-    { f: 'blood-3', turn: 180, size: [0.4, 0.6] }, // a fine spray
-    { f: 'blood-4', turn: 180, size: [0.3, 0.46] }, // soaked into cloth
-    { f: 'blood-5', turn: 180, size: [0.3, 0.44] }, // a few splats
-    { f: 'blood-6', turn: 60, size: [0.4, 0.6] }, // the streak of a slash
-    { f: 'blood-7', turn: 40, size: [0.26, 0.38] }, // an old handprint
+    { f: 'blood-0' }, { f: 'blood-1' }, { f: 'blood-2' }, { f: 'blood-3' }, { f: 'blood-4' }, { f: 'blood-5' }, { f: 'blood-6' }, { f: 'blood-7' },
+    { f: 'blood-8' }, // Glinn: a big splat
+    { f: 'blood-9' }, // Glinn: a splat with long runs
+    { f: 'blood-spray' }, // Glinn, by hand: a spray, dense on one side, fading out across
   ];
-  const MOST = 16; // stains at 100 %
+  const T = Object.fromEntries(STAINS.map((x, i) => [x.f, i]));
+  // Second Builder (second-bloodied-darken): what lies where and when it comes. x: from the figure's middle towards the
+  // wound's side (a share of its width), y: from its top (a share of its height), size: against its width, turn: how far
+  // it may turn (degrees), from / to: the amount over which it fades in, a: how strong at most.
+  //   0-30 %   the wound at the neck or shoulder, drops on the face
+  //   30-70 %  a second splat on the chest; the spray over the lower two thirds, dense on the wound's side
+  //   70-100 % drips and a slash streak; everything a little stronger
+  const PIECES = [
+    { t: 'blood-8', x: 0.17, y: 0.3, size: 0.46, turn: 40, from: 0, to: 0.3, a: 1 },
+    { t: 'blood-9', x: 0.07, y: 0.13, size: 0.17, turn: 60, from: 0.05, to: 0.3, a: 0.85 },
+    { t: 'blood-9', x: -0.12, y: 0.42, size: 0.36, turn: 40, from: 0.3, to: 0.5, a: 0.9 },
+    { t: 'blood-spray', x: 0.05, y: 0.68, size: 1.15, turn: 10, from: 0.3, to: 0.7, a: 0.9, spray: true },
+    { t: 'blood-2', x: 0.22, y: 0.42, size: 0.3, turn: 12, from: 0.7, to: 1, a: 0.8 },
+    { t: 'blood-6', x: 0.02, y: 0.5, size: 0.42, turn: 60, from: 0.8, to: 1, a: 0.75 },
+  ];
   const BIG = 1800; // the longest side a composed picture gets (the TV is 4K at most; portraits are rarely taller)
 
   const base = new URL('looks/blood/', document.baseURI).href;
   let texP = null;
   function textures() {
     if (!texP) {
-      texP = Promise.all(STAINS.map((s) => new Promise((res) => {
+      texP = Promise.all(STAINS.map((s) => (!PIECES.some((p) => p.t === s.f) ? null : new Promise((res) => { // (only the ones still used)
         const im = new Image();
         im.onload = () => res(im); im.onerror = () => res(null);
         im.src = `${base}${s.f}.webp`;
-      })));
+      }))));
     }
     return texP;
   }
@@ -75,22 +87,18 @@ window.PortraitFx = (() => {
     };
   }
 
-  // the stains for one portrait, always the same list: a higher amount only uses more of it
-  function plan(seedKey, fig) {
+  // the stains for one portrait: always the same places; a higher amount only lets more of them come in, and stronger
+  const ramp = (v, lo, hi) => clamp((v - lo) / Math.max(1e-6, hi - lo), 0, 1);
+  function plan(seedKey, fig, amount) {
     const r = rng(hash(seedKey));
-    const order = STAINS.map((s, i) => i);
-    for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
-    const b = fig.box; const out = [];
-    for (let k = 0; k < MOST; k++) {
-      const t = order[k % order.length]; const s = STAINS[t];
-      // on the figure, mostly between the head and the knees (not the bottom edge, where the band covers it)
-      let x = 0; let y = 0;
-      for (let n = 0; n < 40; n++) {
-        x = b.x + b.w * (0.08 + 0.84 * r()); y = b.y + b.h * (0.04 + 0.78 * r() ** 1.15);
-        if (fig.on(x, y)) break;
-      }
-      const size = b.w * (s.size[0] + (s.size[1] - s.size[0]) * r()) * (k < 3 ? 1 : 0.85);
-      out.push({ t, x, y, size, rot: ((r() * 2 - 1) * s.turn * Math.PI) / 180, flip: r() < 0.5, a: 0.82 + 0.18 * r() });
+    const side = r() < 0.5 ? 1 : -1; // (the wound's side)
+    const b = fig.box; const k = 0.85 + 0.15 * ramp(amount, 0.7, 1);
+    const out = [];
+    for (const p of PIECES) {
+      const jx = (r() * 2 - 1) * 0.04; const jy = (r() * 2 - 1) * 0.03; const js = 0.9 + 0.2 * r(); const rot = ((r() * 2 - 1) * p.turn * Math.PI) / 180; const flip = r() < 0.5;
+      const a = p.a * k * ramp(amount, p.from, p.to);
+      if (a <= 0.01) continue;
+      out.push({ t: T[p.t], x: b.x + b.w * (0.5 + side * p.x + jx), y: b.y + b.h * (p.y + jy), size: b.w * p.size * js, rot, flip: p.spray ? side < 0 : flip, a });
     }
     return out;
   }
@@ -107,20 +115,21 @@ window.PortraitFx = (() => {
     const fig = figure(img, w, h, o.opaque);
     if (n.blood > 0) {
       const tex = await textures();
-      const list = plan(o.seed || '', fig).slice(0, Math.max(1, Math.ceil(n.blood * MOST)));
+      const list = plan(o.seed || '', fig, n.blood);
       const b = document.createElement('canvas'); b.width = w; b.height = h;
       const bg = b.getContext('2d');
       for (const s of list) {
         const im = tex[s.t]; if (!im) continue;
         bg.save(); bg.globalAlpha = s.a; bg.translate(s.x, s.y); bg.rotate(s.rot); if (s.flip) bg.scale(-1, 1);
-        bg.drawImage(im, -s.size / 2, -s.size / 2, s.size, s.size);
+        const iw = im.naturalWidth || im.width; const ih = im.naturalHeight || im.height; const f = s.size / Math.max(iw, ih); // (the spray is wider than high)
+        bg.drawImage(im, (-iw * f) / 2, (-ih * f) / 2, iw * f, ih * f);
         bg.restore();
       }
       bg.globalCompositeOperation = 'destination-in'; // only on the figure
       bg.drawImage(img, 0, 0, w, h);
-      // the blood soaks in (multiply keeps the folds and the light of the picture) and still shows on dark cloth
-      g.save(); g.globalCompositeOperation = 'multiply'; g.globalAlpha = 0.75; g.drawImage(b, 0, 0); g.restore();
-      g.save(); g.globalAlpha = 0.72; g.drawImage(b, 0, 0); g.restore();
+      // Second Builder (second-bloodied-darken): Darken, as Glinn blends it by hand: blood shows where it is darker than
+      // the picture (skin, a white shirt) and soaks into dark cloth; the stains' shine does not show
+      g.save(); g.globalCompositeOperation = 'darken'; g.drawImage(b, 0, 0); g.restore();
     }
     if (n.shade > 0) {
       // (full strength on the top of the head, still most of it over the face, gone by the middle of the figure)

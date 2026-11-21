@@ -598,27 +598,135 @@ void main() {
 }`;
 
   const stats = { drawn: 0, px: 0, why: '' };
-  let gl = null; let prog = null; let U = null; let canvas = null; let failed = false; let buf = null;
-  function init() {
-    if (gl || failed) return !!gl;
+  let gl = null; let prog = null; let U = null; let canvas = null; let buf = null;
+  // Second Builder (second-spell-warmup): the program is built without making the window wait. Built on the first
+  // spell, on Windows it held the GM window for about ten seconds (DirectX translates this big program slowly). Now
+  // warm() starts it while the start screen shows (KHR_parallel_shader_compile: the graphics process builds it, the
+  // window goes on); until it is ready every spell is drawn the old way. Software graphics, no WebGL 2, a graphics
+  // card too slow for it (timed once when built) or the GM's switch in Options → Performance: the old drawing.
+  // state: idle → building → ready, or slow / off / failed (all three: the old drawing)
+  let state = 'idle'; let soft = false; let off = false; let ext = null; let fsh = null; let t0 = 0; let pollT = 0;
+  let renderer = ''; let waiters = [];
+  const info = { buildMs: 0, testMs: 0, parallel: false };
+  const SOFTWARE = /swiftshader|llvmpipe|software|basic render|softpipe/i; // (as trees.js)
+  const SLOW_MS = 40; // three looks, each at the most pixels a spell takes (both passes): slower than this, the old drawing
+  const role = /role=table/.test(location.search) ? 'table' : 'gm';
+  const note = (text) => { try { if (window.ts && window.ts.app) window.ts.app('note', { text: `[${role}] spells: ${text}` }).catch(() => {}); } catch { /* */ } };
+  function settle() { const w = waiters; waiters = []; for (const f of w) f(status()); }
+  function quit(next, why) {
+    clearTimeout(pollT);
+    state = next; stats.why = String(why || '').slice(0, 300);
+    if (next !== 'slow') { gl = null; prog = null; } // (slow: the program stays, Try again times it once more)
+    note(`the old drawing (${stats.why})`);
+    settle();
+  }
+  function begin() {
+    if (state !== 'idle') return;
     try {
       canvas = document.createElement('canvas');
       canvas.width = 256; canvas.height = 256;
-      gl = canvas.getContext('webgl2', { premultipliedAlpha: false, alpha: true, antialias: false, preserveDrawingBuffer: true, depth: false, stencil: false });
-      if (!gl) throw new Error('no WebGL 2');
-      const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+      gl = canvas.getContext('webgl2', { premultipliedAlpha: false, alpha: true, antialias: false, preserveDrawingBuffer: true, depth: false, stencil: false, failIfMajorPerformanceCaveat: !soft });
+      if (!gl) { quit('off', 'no WebGL 2 with a graphics card'); return; }
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      renderer = String(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+      if (!soft && SOFTWARE.test(renderer)) { quit('off', `software graphics: ${renderer}`); return; }
+      ext = gl.getExtension('KHR_parallel_shader_compile'); info.parallel = !!ext;
+      const sh = (type, src) => { const x = gl.createShader(type); gl.shaderSource(x, src); gl.compileShader(x); return x; };
+      t0 = performance.now();
       prog = gl.createProgram();
-      gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
-      gl.linkProgram(prog);
-      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+      gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, (fsh = sh(gl.FRAGMENT_SHADER, FS)));
+      gl.linkProgram(prog); // (no status asked here: asking would wait for the build)
+      canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); quit('failed', 'the graphics card reset'); });
+      state = 'building';
+      pollT = setTimeout(poll, ext ? 50 : 0); // (without the extension the first status waits for the build: once, here)
+    } catch (err) { quit('failed', (err && err.message) || err); }
+  }
+  function poll() {
+    if (state !== 'building' || !gl) return;
+    if (ext && !gl.getProgramParameter(prog, ext.COMPLETION_STATUS_KHR)) { pollT = setTimeout(poll, 50); return; }
+    try {
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getShaderInfoLog(fsh) || gl.getProgramInfoLog(prog) || 'the program did not build');
       U = {};
       for (const n of ['uBox', 'uSkin', 'uKind', 'uN', 'uPass', 'uBurst', 'uShape', 'uCirc', 'uPoly', 'uO', 'uDir', 'uCell', 'uT', 'uAge', 'uLevel', 'uA', 'uLen', 'uC', 'uL', 'uD', 'uSeed']) U[n] = gl.getUniformLocation(prog, n);
       buf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
-      canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); gl = null; failed = true; });
-      return true;
-    } catch (err) { stats.why = String((err && err.message) || err).slice(0, 300); gl = null; failed = true; return false; } // (no graphics card: the old drawing, quietly; a shader that does not compile shows here)
+      info.buildMs = Math.round(performance.now() - t0);
+      timeIt();
+    } catch (err) { quit('failed', (err && err.message) || err); }
+  }
+  // how long this graphics card takes: three looks, the fastest of two runs each, at a quarter of the most pixels a
+  // spell takes (times four). One draw a turn, so the window never waits long even on a very slow card; a first look
+  // far too slow ends it at once. (Not on the self-test's software graphics: always slow, they still check the drawing.)
+  function timeIt() {
+    const side = Math.floor(Math.sqrt(MAXPX / 4)); const px = new Uint8Array(4);
+    const skins = [SKIN_IDS.fire ?? 0, SKIN_IDS.cloud ?? 10, SKIN_IDS.water ?? 14];
+    const runs = [-1, 0, 0, 1, 1, 2, 2]; const best = [Infinity, Infinity, Infinity]; let i = 0;
+    const done = (ms) => {
+      info.testMs = Math.round(ms * 10) / 10;
+      if (ms > SLOW_MS) { quit('slow', `this graphics card is too slow for it: ${info.testMs} ms a spell`); return; }
+      state = 'ready'; stats.why = '';
+      note(`drawn by the graphics card (built in ${info.buildMs} ms${info.parallel ? ' in the background' : ''}, ${soft ? 'not timed' : `${info.testMs} ms a spell`}; ${renderer})`);
+      settle();
+    };
+    if (soft) { done(0); return; }
+    const step = () => {
+      if (state !== 'building' || !gl) return;
+      try {
+        const k = runs[i++];
+        setTest(skins[Math.max(0, k)]);
+        const a = performance.now();
+        if (k < 0) paint(64, 64); else paint(side, side);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); // (waits until the card is done)
+        if (k >= 0) {
+          best[k] = Math.min(best[k], (performance.now() - a) * 4);
+          if (best[k] > SLOW_MS * 3) { done(best[k]); return; }
+        }
+        if (i < runs.length) { pollT = setTimeout(step, 0); return; }
+        done(Math.max(...best));
+      } catch (err) { quit('failed', (err && err.message) || err); }
+    };
+    step();
+  }
+  function setTest(skin) {
+    gl.useProgram(prog);
+    gl.uniform4f(U.uBox, 0, 0, 10, 10); gl.uniform1i(U.uSkin, skin); gl.uniform1i(U.uKind, 0); gl.uniform1i(U.uShape, 0); gl.uniform1i(U.uBurst, 0);
+    gl.uniform3f(U.uCirc, 5, 5, 5); gl.uniform1i(U.uN, 0); gl.uniform2f(U.uO, 5, 5); gl.uniform2f(U.uDir, 1, 0); gl.uniform1f(U.uCell, 1); gl.uniform1f(U.uLen, 5);
+    gl.uniform1f(U.uT, 12.3); gl.uniform1f(U.uAge, 4); gl.uniform1f(U.uLevel, 1); gl.uniform1f(U.uA, 1);
+    gl.uniform3f(U.uC, 1, 0.5, 0.15); gl.uniform3f(U.uL, 1, 0.85, 0.5); gl.uniform3f(U.uD, 0.3, 0.08, 0.02); gl.uniform2f(U.uSeed, 1.37, 2.11);
+  }
+  // both passes side by side: body on the left, light on the right (W × H each)
+  function paint(W, H) {
+    if (canvas.width < 2 * W || canvas.height < H) { canvas.width = Math.max(canvas.width, 2 * W); canvas.height = Math.max(canvas.height, H); }
+    gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.viewport(0, 0, W, H);
+    gl.uniform1i(U.uPass, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.viewport(W, 0, W, H);
+    gl.uniform1i(U.uPass, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+  function status() { return { state, why: stats.why, renderer, buildMs: info.buildMs, testMs: info.testMs, parallel: info.parallel, off }; }
+  // start building (if not yet) and wait until it is ready or given up
+  function warm() {
+    begin();
+    if (state !== 'building') return Promise.resolve(status());
+    return new Promise((res) => waiters.push(res));
+  }
+  // Options → Performance: time it once more (after "too slow"), or try again after a failure
+  function retry() {
+    if (state === 'slow' && gl) { state = 'building'; timeIt(); return warm(); }
+    if (state === 'building') return warm();
+    state = 'idle'; gl = null; prog = null;
+    return warm();
   }
   const rgb = (hex) => { const n = parseInt(String(hex).slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; };
   const MAXPX = 700000; // (the most pixels one spell takes; bigger ones are drawn coarser and scaled: they are soft anyway)
@@ -627,7 +735,9 @@ void main() {
   // env: FX.envelope; opts.cell: map units a square
   function draw(ctx, sp, tpl, sk, env, now, opts = {}) {
     if (!(sp.skin in SKIN_IDS) && sp.skin) { /* unknown look: arcane */ }
-    if (!init()) return false;
+    if (off) return false;
+    if (state === 'idle') begin(); // (Second Builder, second-spell-warmup: never waits for the build)
+    if (state !== 'ready') return false;
     const m = ctx.getTransform();
     const k = Math.hypot(m.a, m.b); // layer pixels a map unit
     const cell = opts.cell || cellOf(sp, tpl);
@@ -638,12 +748,7 @@ void main() {
     let W = Math.max(2, Math.ceil(w * k * lin)); let H = Math.max(2, Math.ceil(hgt * k * lin));
     const over = (W * H) / MAXPX;
     if (over > 1) { const f = Math.sqrt(over); W = Math.ceil(W / f); H = Math.ceil(H / f); }
-    if (canvas.width < 2 * W || canvas.height < H) { canvas.width = Math.max(canvas.width, 2 * W); canvas.height = Math.max(canvas.height, H); }
     gl.useProgram(prog);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.disable(gl.BLEND);
     const shape = { sphere: 0, cylinder: 0, aura: 0, cone: 1, line: 2, cube: 3 }[sp.shape] ?? 0;
     const a = ((sp.angle || 0) * Math.PI) / 180;
     gl.uniform4f(U.uBox, x0, y0, w, hgt);
@@ -679,16 +784,7 @@ void main() {
       ctx.drawImage(canvas, sx, canvas.height - H, W, H, x0, y0, w, hgt);
       ctx.restore();
     };
-    gl.disable(gl.SCISSOR_TEST);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.viewport(0, 0, W, H);
-    gl.uniform1i(U.uPass, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    gl.viewport(W, 0, W, H);
-    gl.uniform1i(U.uPass, 1);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    paint(W, H);
     put(0, 'source-over');
     put(W, 'lighter');
     stats.drawn++; stats.px = W * H;
@@ -702,6 +798,11 @@ void main() {
     if (sp.shape === 'cone') return Math.hypot((P[2] + P[4]) / 2 - P[0], (P[3] + P[5]) / 2 - P[1]) / (ft / 5);
     return L / (ft / 5);
   }
-  const supported = () => init();
-  return { draw, supported, stats, SKIN_IDS, cellOf };
+  const supported = () => { begin(); return state === 'ready'; }; // (never waits: warm() does)
+  // Second Builder (second-spell-warmup): the GM's switch; tests on software graphics (as Trees.allowSoft)
+  const setOff = (v) => { off = !!v; };
+  const allowSoft = (v) => { soft = !!v; if (soft && state === 'off') { state = 'idle'; gl = null; prog = null; } return soft; };
+  return { draw, supported, stats, SKIN_IDS, cellOf, warm, retry, status, setOff, allowSoft };
 })();
+// Second Builder (second-spell-warmup): build it from the start, in the background (the start screen waits for it)
+if (!/role=sound/.test(location.search)) setTimeout(() => SpellGL.warm(), 0);

@@ -51,7 +51,8 @@ module.exports = (area) => {
     const f = [...document.querySelectorAll('.tv-talk .talk-side.near ~ .talk-layer.castl.near .talk-npc:not(.out) img, .tv-talk .talk-layer.castl.near .talk-npc:not(.out) img')][0];
     if (!f || !f.naturalWidth) return null;
     const draw = (im) => { const c = document.createElement('canvas'); c.width = 120; c.height = Math.round(120 * im.naturalHeight / im.naturalWidth); const g = c.getContext('2d'); g.drawImage(im, 0, 0, c.width, c.height); return g.getImageData(0, 0, c.width, c.height).data; };
-    return new Promise((res) => { const o = new Image(); o.onload = () => {
+    return new Promise((res) => { const o = new Image(); o.onerror = () => res(null); o.onload = () => {
+      if (!f.naturalWidth || !f.naturalHeight || !o.naturalHeight) { res(null); return; } // (Second Builder, second-bloodied-darken: a picture swapping in)
       const a = draw(o); const b = draw(f); const n = Math.min(a.length, b.length);
       let red0 = 0; let red1 = 0; let on = 0; let lum0 = 0; let lum1 = 0; let topOn = 0; let top0 = 0; let top1 = 0; let most = 0;
       const rows = n / 4 / 120; let first = -1;
@@ -68,6 +69,33 @@ module.exports = (area) => {
       res({ on, red0: red0 / on, red1: red1 / on, lum: lum1 / Math.max(1, lum0), top: top1 / Math.max(1, top0), most });
     }; o.src = f.closest('.talk-npc').dataset.src; });
   })()`);
+  // Second Builder (second-bloodied-darken): Glinn's splats and hand-made spray, blended with Darken (blood never makes
+  // the picture lighter, so no shine), coming in by stages: at 30 % only the upper third, from 70 % the spray below
+  area.quick('Bloodied: blended with Darken (never lighter), by stages: the upper third first, the spray below from 70 %', async (t) => {
+    const r = await t.t(`(async () => {
+      const c = document.createElement('canvas'); c.width = 300; c.height = 600;
+      const g = c.getContext('2d'); g.fillStyle = '#d8d2c8'; g.fillRect(40, 20, 220, 560); // (a light figure on transparency)
+      const src = g.getImageData(0, 0, 300, 600).data;
+      const measure = async (amount) => {
+        const out = await PortraitFx.compose(c, { bloodOn: true, blood: amount }, { seed: 'stages' });
+        const d = out.getContext('2d').getImageData(0, 0, 300, 600).data;
+        let up = 0; let low = 0; let upN = 0; let lowN = 0; let lighter = 0;
+        for (let y = 20; y < 580; y++) for (let x = 40; x < 260; x++) {
+          const i = (y * 300 + x) * 4; const red = d[i] > d[i + 1] * 1.6 && d[i] > 60 ? 1 : 0;
+          if (y < 20 + 560 / 3) { up += red; upN++; } else { low += red; lowN++; }
+          if (d[i] > src[i] + 2 || d[i + 1] > src[i + 1] + 2 || d[i + 2] > src[i + 2] + 2) lighter++;
+        }
+        return { up: up / upN, low: low / lowN, lighter };
+      };
+      return { a30: await measure(0.3), a70: await measure(0.7), a100: await measure(1) };
+    })()`);
+    t.ok(r.a30.up > 0.03, 'at 30 % blood on the upper third', r.a30);
+    t.ok(r.a30.low < r.a30.up * 0.35, 'at 30 % hardly any below (the spray comes later)', r.a30);
+    t.ok(r.a70.low > r.a30.low + 0.03, 'at 70 % the spray over the lower two thirds', r.a70);
+    t.ok(r.a100.up >= r.a70.up && r.a100.low >= r.a70.low * 0.95, 'at 100 % at least as much', r.a100);
+    t.eq(r.a30.lighter + r.a70.lighter + r.a100.lighter, 0, 'no pixel lighter than the portrait (Darken: no shine)');
+  });
+
   area.quick('looks: Bloodied, Shaded and Hidden stack on the TV; Hidden off fades the figure in', async (t) => {
     const p = faces(t)[0];
     const looks = async () => { const x = await talk(t); return x && x.looks && x.looks[0]; };
@@ -78,20 +106,20 @@ module.exports = (area) => {
       await t.cmd('talk.toggle', { path: p.path });
       await t.until(async () => { const l = await looks(); return l && l.composed && l.blood === 0.8; }, 8000, 'the bloodied picture on the TV');
       await t.sleep(1600); // (its entry animation)
-      const b = await tvPixels(t);
+      // (Second Builder, second-bloodied-darken: each look waits for its picture on the TV: swapping it in can take a moment)
+      const seen = (ok, what) => t.until(async () => { const x = await tvPixels(t); return x && ok(x) ? x : null; }, 4000, what).catch(() => tvPixels(t));
+      const b = await seen((x) => x.red1 > x.red0 + 0.04, 'the bloodied picture');
       t.ok(b && b.red1 > b.red0 + 0.04, 'clearly more blood red on the figure than in the portrait itself', b);
       await t.shot(t.tv(), 'looks-bloodied');
       await t.cmd('talk.fx', { path: p.path, shadeOn: true, shade: 0.6 });
       await t.until(async () => { const l = await looks(); return l && l.shade === 0.6 && !l.veil; }, 6000, 'shaded as well');
-      await t.sleep(300);
-      const s = await tvPixels(t);
-      t.ok(s.top < 0.75 && s.red1 > s.red0, 'the top of the head darker, the blood still there', s);
+      const s = await seen((x) => x.top < 0.75, 'the shaded picture');
+      t.ok(s && s.top < 0.75 && s.red1 > s.red0, 'the top of the head darker, the blood still there', s);
       await t.shot(t.tv(), 'looks-bloodied-shaded');
       await t.cmd('talk.fx', { path: p.path, hidden: true });
       await t.until(async () => { const l = await looks(); return l && l.hidden && !l.veil; }, 6000, 'hidden');
-      await t.sleep(300);
-      const k = await tvPixels(t);
-      t.ok(k.most < 40, 'only a black silhouette: no light pixel left on the figure', k);
+      const k = await seen((x) => x.most < 40, 'the silhouette');
+      t.ok(k && k.most < 40, 'only a black silhouette: no light pixel left on the figure', k);
       await t.shot(t.tv(), 'looks-hidden');
       await t.cmd('talk.fx', { path: p.path, hidden: false });
       await t.until(async () => { const l = await looks(); return l && !l.hidden && l.veil; }, 3000, 'the dark picture lying over the new one');

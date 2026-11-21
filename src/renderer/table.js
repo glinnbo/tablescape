@@ -228,6 +228,7 @@ const Table = (() => {
     dice.set(s.dice || null, { seats: s.seats, hud: s.hud || 1, volume: s.sfx ? s.sfx.volume : 0.7 });
     FX.setQuality(s.quality);
     Moments.setQuality(s.quality);
+    if (typeof SpellGL === 'object') SpellGL.setOff(s.spellGpu === false); // Second Builder (second-spell-warmup)
     for (const [id, v] of views) { v.view.setQuality(s.quality); v.view.setRoundLook(s.roundLook); v.view.setHud(s.hud || 1, s.seats); v.view.setTokenLook(s.tokens); v.view.setMoments(s.moments || [], id === liveId); v.view.setDrawMode(s.animDraw); v.view.setTrails(s.trails || []); }
     if (typeof AnimCache === 'object' && s.view) AnimCache.setMemory(s.view.memGB);
     const lvw = views.get(liveId);

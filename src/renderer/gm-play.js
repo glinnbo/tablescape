@@ -407,6 +407,7 @@ const Play = (() => {
     }
     const q = (s.settings && (s.settings.editQuality || s.settings.quality)) || 'high';
     FX.setQuality(q); Moments.setQuality(q); view.setQuality(q);
+    if (typeof SpellGL === 'object') SpellGL.setOff(!!(s.settings && s.settings.spellGpu === false)); // Second Builder (second-spell-warmup)
     view.setWide(wideFor(ui.tool));
     view.setAnimMode((s.settings && s.settings.gmAnim) || 'light');
     view.setFxMode((s.settings && s.settings.gmFx) || 'light'); // Prototype 19
