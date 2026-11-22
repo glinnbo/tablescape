@@ -148,9 +148,16 @@ module.exports = (area) => {
     const b = await box(t, id); const beside = await t.scr(b.x + b.w * 2, b.y);
     await t.click(beside.x, beside.y);
     await t.until(async () => !(await t.g(`Play.ui.selAssets.length`)), 3000, 'nothing picked');
+    // (Beta 3.61: the look of the next one is the card "Look", beside the panel)
+    await t.until(() => t.count('#pop .asset-pop .os-fxset'), 3000, 'the panel is back on what is in hand, with its Look button');
+    t.eq(await t.count('#pop .pop-fly'), 0, 'the Look card is shut at first');
+    await t.g(`document.querySelector('#pop .asset-pop .os-fxset').click()`);
+    await t.until(() => t.count('#pop .pop-fly .ctl-slider'), 3000, 'the Look card with its sliders');
     const hueTo = (v) => t.g(`(() => { const l = [...document.querySelectorAll('#pop .ctl-slider')].find((x) => x.querySelector('.ctl-label').textContent === 'Hue'); const i = l.querySelector('input'); i.value = ${v}; i.dispatchEvent(new Event('input', { bubbles: true })); return Play.ui.assetLook.hue; })()`);
     t.eq(await hueTo(-60), -60, 'with nothing picked the slider sets the look of the next one');
     t.eq(A(t, id).hue, 120, 'and leaves the placed one alone');
     await hueTo(0);
+    await t.g(`document.querySelector('#pop .pop-fly .os-fly-head .icon-btn').click()`);
+    await t.until(async () => !(await t.count('#pop .pop-fly')), 3000, 'the card shuts with its ✕');
   });
 };

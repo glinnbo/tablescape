@@ -188,20 +188,17 @@ module.exports = (area) => {
     await t.key('Escape');
     // the Assets panel: Library | Living
     await t.g(`Play.setTool('asset'); Play.openPop('asset')`);
-    await t.until(() => t.count('#pop .asset-tabs'), 4000, 'the tabs');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .asset-tabs .seg-btn')].map((b) => b.textContent).join('|')`), 'Library|Living', 'Library | Living');
-    await t.clickSel('#pop .asset-tabs [data-v="living"]');
+    await t.until(() => t.count('#pop .as-groups'), 4000, 'the groups at the side (Beta 3.61)');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .as-groups .tile')].map((b) => b.textContent).join('|')`), 'Library|Living', 'Library | Living');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .as-tools .tile')].map((b) => b.textContent).join('|')`), 'Stamp|Scatter', 'Stamp | Scatter beside them');
+    await t.g(`document.querySelector('#pop .as-groups [data-v="living"]').click()`);
     await t.until(() => t.count('#pop .living-tiles .tile'), 4000, 'the Living tab');
     t.eq(await t.count('#pop .living-tiles .tile'), 16, 'every kind as a tile');
     t.eq(await t.g(`[...document.querySelectorAll('#pop .living-group')].map((x) => x.textContent).join()`), 'Trees,Bushes,Mushrooms', 'by group');
     const pick = await t.g(`(() => { const b = document.querySelector('#pop .living-pick'); return { h: b.clientHeight, all: b.scrollHeight }; })()`);
     t.ok(pick.h < 240 && pick.all > pick.h + 100, 'two rows show, the rest scrolls', pick);
-    t.ok(await t.count('#pop .wind-box') && !(await t.g(`document.querySelector('#pop .wind-box').hidden`)), 'the wind at the bottom, also before the map has a tree');
-    t.ok(await t.findText('#pop .wind-box', 'Follows the weather') && await t.findText('#pop .wind-box button', 'Storm'), 'Follows the weather, and Storm');
-    t.ok(await t.g(`[...document.querySelectorAll('#pop .wind-box .compass')].every((x) => !x.offsetParent)`), 'no direction to set while it follows the weather');
-    t.handle('wind.set', { auto: false });
-    await t.until(() => t.g(`[...document.querySelectorAll('#pop .wind-box .compass')].some((x) => x.offsetParent)`), 4000, 'your own wind: a direction and a strength');
-    t.handle('wind.set', { auto: true });
+    t.eq(await t.count('#pop .wind-box'), 0, 'no wind box here any more: the wind is in Effects → Scene (Beta 3.61)');
+    t.ok(await t.count('#pop .as-ban .cap b') && (await t.text('#pop .as-ban .cap b')).length > 2, 'the banner names the tree in hand', await t.text('#pop .as-ban .cap'));
     // free spots on the map, well apart, clear of the tokens and the panel
     const spots = await t.g(`(() => {
       const v = Play.view(); const pop = document.getElementById('pop').getBoundingClientRect();
@@ -245,22 +242,24 @@ module.exports = (area) => {
     const id = oaks[0].id; const seed = oaks[0].tree.seed;
     const r = await t.until(() => t.rect(`.sv-asset[data-id="${id}"] .sv-treebox`), 6000, 'the tree\'s box');
     await t.click(r.cx, r.cy);
-    await t.until(() => t.g(`[...document.querySelectorAll('#pop .look .btn')].some((b) => b.offsetParent && /Another look/.test(b.textContent))`), 5000, 'Another look in the panel');
+    await t.until(() => t.g(`[...document.querySelectorAll('#pop .as-look .btn')].some((b) => b.offsetParent && /Another look/.test(b.textContent))`), 5000, 'Another look in the panel');
+    t.ok(/Oak/.test(await t.text('#pop .as-ban .cap b')) && (await t.text('#pop .as-ban .fx-ban-tag')) === 'picked', 'the panel is the picked tree\'s card (Beta 3.61)', await t.text('#pop .as-ban'));
+    t.eq(await t.count('#pop .living-tiles, #pop .as-tools'), 0, 'no tiles and no Stamp or Scatter while one is picked');
     t.eq(await t.count('[data-tip="Mirror"]'), 0, 'no Mirror for a tree');
-    t.ok(await t.g(`[...document.querySelectorAll('.look .ctl-label')].filter((x) => x.offsetParent && /^(Height|Shadow|Mirror)$/.test(x.textContent)).length === 0`), 'no Height, Shadow or Mirror in its look');
-    t.ok(await t.g(`['Hue', 'Darken', 'Turn'].every((k) => [...document.querySelectorAll('.look .ctl-label')].some((x) => x.offsetParent && x.textContent === k))`), 'Hue, Darken and Turn for it');
+    t.ok(await t.g(`[...document.querySelectorAll('.as-look .ctl-label')].filter((x) => x.offsetParent && /^(Height|Shadow|Mirror)$/.test(x.textContent)).length === 0`), 'no Height, Shadow or Mirror in its look');
+    t.ok(await t.g(`['Hue', 'Darken', 'Turn'].every((k) => [...document.querySelectorAll('.as-look .ctl-label')].some((x) => x.offsetParent && x.textContent === k))`), 'Hue, Darken and Turn for it');
     t.eq(await t.count('.sv-gizmo.no-sides'), 1, 'its frame: corners and the knob');
-    t.eq(await t.g(`document.querySelector('#pop .living-tiles .tile.on').dataset.v`), 'oak_dark_green', 'the tiles stay on what you place next');
-    await t.clickText('#pop .look .btn', 'Another look');
+    await t.clickText('#pop .as-look .btn', 'Another look');
     await t.until(() => trees(t).find((l) => l.id === id).tree.seed !== seed, 4000, 'another look');
     // a living tree from the hotbar: the Living tab picks it
     const b = t.lib('assets').find((x) => x.builtin && x.name === 'Palm medium');
     await t.g(`Play.hotRun({ kind: 'asset', ref: ${JSON.stringify({ path: b.path, rel: b.rel, name: b.name })}, label: ${JSON.stringify(b.name)} })`);
     await t.until(async () => (await t.g('Play.ui.assetTab + " " + Play.ui.living.v + " " + Play.ui.living.size')) === 'living palm medium', 5000, 'the palm, medium, picked');
+    await t.until(async () => (await t.g(`(document.querySelector('#pop .living-tiles .tile.on') || { dataset: {} }).dataset.v`)) === 'palm', 4000, 'the picked tree is let go: the tiles are back, on the palm');
     // the Library tab keeps its own pick
     await t.g(`document.getElementById('pop').scrollTop = 0`);
-    await t.clickSel('#pop .asset-tabs [data-v="library"]');
-    await t.until(() => t.count('#pop .brush-row'), 4000, 'the Library tab');
+    await t.g(`document.querySelector('#pop .as-groups [data-v="library"]').click()`);
+    await t.until(async () => (await t.count('#pop .as-ban')) && !(await t.count('#pop .living-tiles')), 4000, 'the Library group');
     t.eq(await t.count('#pop .living-tiles, #pop .wind-box'), 0, 'no trees and no wind there');
     await t.g('Play.closePop()'); await t.g(`Play.setTool('select')`);
   }, { ms: 120000 });

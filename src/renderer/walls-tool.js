@@ -410,43 +410,43 @@ const WallsTool = (() => {
     }
 
     // ---------- popover ----------
-    function buildPop() {
-      const { seg, toggle, slider, btn, row, hint, sep, bind } = c();
-      const out = [
-        seg({ cls: 'seg-4 wl-modes', options: MODES, get: () => W.mode, set: setMode }),
-      ];
+    // (Beta 3.61) the five tools stand at the panel's side; what a wall is, is three tiles; the rare things fold
+    // under More; the foot counts the walls and has Load and Remove all
+    let sides = null;
+    function buildPop(o = {}) {
+      const { tiles, toggle, slider, btn, row, bind, sideTabs, popFold, popFoot } = c();
+      sides = { els: [sideTabs(MODES, () => W.mode, setMode, { cls: 'side-tools wl-modes', again: o.again, label: 'Tool' })] };
+      const out = [];
       // Prototype 14: what the walls and rooms are: walls, windows (see through, no walking through), invisible (only feet stop)
-      if (W.mode === 'wall' || W.mode === 'room') out.push(seg({ label: 'Kind', options: [
-        { value: 'wall', label: 'Wall', icon: KIND_ICON.wall, tip: 'Stops sight, light and feet' },
-        { value: 'window', label: 'Window', icon: KIND_ICON.window, tip: 'Nobody walks through. Open, sight and light pass; closed, they stop. Its window icon opens and closes it' },
-        { value: 'invisible', label: 'Invisible', icon: KIND_ICON.invisible, tip: 'Only feet stop: cliffs, deep water, rubble, a magic barrier. Never on the table' }],
-        get: () => W.kind || 'wall', set: (v) => { W.kind = v; save(); } }));
-      if (W.mode === 'door') out.push(seg({ label: 'Kind', options: [{ value: 1, label: 'Door', icon: 'door' }, { value: 2, label: 'Secret door', icon: 'eye-off', tip: 'Marked for you in another colour (players never see walls or doors anyway)' }], get: () => W.door, set: (v) => { W.door = v; save(); ctx.refreshPop(); } }));
+      const kinds = (list, get, set) => { const t = tiles(list, get, set); t.classList.add('pop-tiles', `n${list.length}`, 'wl-kinds'); return h('div', { class: 'ctl' }, h('span', { class: 'ctl-label pop-sec' }, 'Kind'), t); };
+      if (W.mode === 'wall' || W.mode === 'room') out.push(kinds([
+        { id: 'wall', label: 'Wall', icon: KIND_ICON.wall, tip: 'Stops sight, light and feet' },
+        { id: 'window', label: 'Window', icon: KIND_ICON.window, tip: 'Nobody walks through. Open, sight and light pass; closed, they stop. Its window icon opens and closes it' },
+        { id: 'invisible', label: 'Invisible', icon: KIND_ICON.invisible, tip: 'Only feet stop: cliffs, deep water, rubble, a magic barrier. Never on the table' }],
+      () => W.kind || 'wall', (v) => { W.kind = v; save(); }));
+      if (W.mode === 'door') out.push(kinds([{ id: '1', label: 'Door', icon: 'door' }, { id: '2', label: 'Secret door', icon: 'eye-off', tip: 'Marked for you in another colour (players never see walls or doors anyway)' }],
+        () => String(W.door), (v) => { W.door = Number(v); save(); ctx.refreshPop(); }));
       out.push(toggle({ label: 'Snap to the grid', get: () => W.snap, set: (v) => { W.snap = v; save(); } }));
-      out.push(sep());
       // line of sight
       out.push(toggle({ label: 'Line of sight', get: () => map().vision.on, set: (v) => cmd('vision.update', { on: v }) }));
-      const status = h('p', { class: 'hint wl-status' });
+      out.push(popFold('wallsMore', 'More',
+        slider({ label: 'Explored, out of sight', min: 0, max: 0.9, step: 0.05, get: () => map().vision.dim, set: (v, k) => ctx.send(k, 'vision.update', { dim: v }), fmt: (v) => (v < 0.03 ? 'Clear' : `${Math.round(v * 100)}% darker`) }),
+        row(btn('Party marker', 'users-group', () => { ctx.setTool('party'); ctx.openPop('party'); }, { kind: 'small', tip: 'The party sees and explores from its marker: put it on the map, set its light and darkvision (U)' }))));
+      const status = h('span', { class: 'grow hint wl-status' });
+      const clear = btn('Remove all', 'trash', () => undoable('wall.clear', {}), { kind: 'small danger wl-clear', tip: 'Remove all walls and doors (Ctrl+Z brings them back)' });
       bind(() => {
         const mm = map();
-        const doors = mm.walls.filter((w) => w.door).length;
-        const eyes = Vision.eyes(mm).length;
-        status.textContent = !mm.walls.length ? 'No walls yet. Lights and the party see everything.'
-          : `${mm.walls.length - doors} walls, ${doors} door${doors === 1 ? '' : 's'}. ${mm.vision.on ? `Lights stop at walls${eyes ? `; the party sees from ${eyes === 1 ? 'its party light' : `${eyes} party lights`}` : ''}.` : 'Line of sight is off.'}`;
+        const doors = mm.walls.filter((w) => w.door).length; const walls = mm.walls.length - doors;
+        status.textContent = !mm.walls.length ? 'No walls yet' : `${walls} wall${walls === 1 ? '' : 's'}, ${doors} door${doors === 1 ? '' : 's'}`;
+        clear.disabled = !mm.walls.length;
       });
-      out.push(status);
-      out.push(h('div', { class: 'ctl-row' }, h('span', { class: 'hint grow' }, 'The party sees and explores from Play → Party marker (U).'),
-        btn('Party marker', 'users-group', () => { ctx.setTool('party'); ctx.openPop('party'); }, { kind: 'small', tip: 'Put the party on the map, its light and darkvision' })));
-      out.push(slider({ label: 'Explored, out of sight', min: 0, max: 0.9, step: 0.05, get: () => map().vision.dim, set: (v, k) => ctx.send(k, 'vision.update', { dim: v }), fmt: (v) => (v < 0.03 ? 'Clear' : `${Math.round(v * 100)}% darker`) }));
-      out.push(sep());
-      out.push(row(
-        btn('Load walls from a file', 'file-import', () => loadFile(), { kind: 'wl-load grow', tip: 'Dungeon Alchemist, Dungeondraft, Dungeon Fog, Arkenforge (Universal VTT: .dd2vtt, .uvtt) or Foundry VTT (.json, .db)' })));
-      // Third Builder (third-small-labels): C7, a labelled button of its own, so it doesn't read as part of Load
-      out.push(btn('Remove all walls', 'trash', () => undoable('wall.clear', {}), { kind: 'wide danger wl-clear', tip: 'Remove all walls and doors (Ctrl+Z brings them back)' }));
-      return h('div', { class: 'stack' }, ...out);
+      out.push(popFoot(status,
+        btn('Load', 'file-import', () => loadFile(), { kind: 'small wl-load', tip: 'Load walls from a file: Dungeon Alchemist, Dungeondraft, Dungeon Fog, Arkenforge (Universal VTT: .dd2vtt, .uvtt) or Foundry VTT (.json, .db)' }),
+        clear));
+      return h('div', { class: 'stack walls-pop' }, ...out);
     }
     return {
-      pointerDown, pointerMove, pointerUp, hover, leave, toolChanged, owns: (k) => OWN.has(k), buildPop, cycle, key, radial,
+      pointerDown, pointerMove, pointerUp, hover, leave, toolChanged, owns: (k) => OWN.has(k), buildPop, around: () => sides, cycle, key, radial,
       endChain, chainActive, toggleDoor, askDoor, closeAsk, loadFile, select, removeSelected, MODES,
     };
   }

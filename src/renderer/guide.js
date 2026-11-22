@@ -25,6 +25,16 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.61', [
+      'Eight more panels are built like Effects and Draw: tools and groups stand at the panel\'s side, a banner shows what is in hand, the rare settings fold away, and every panel fits the screen. Saved maps stay as they are',
+      'Spells: the six shapes by name at the side, a banner with the spell in hand, every look with its name. What you set once (the screen effect, the squares, counting rounds, the sounds) is on the card "When it is cast". Clear is in the foot',
+      'Assets: Library and Living at the side, Stamp and Scatter beside them. The look of the next one is the card "Look"; a picked asset turns the panel into its card. The wind box is gone from here: the wind is in Effects → Scene',
+      'Map: a banner with the map and its size on the table, the six colour looks as pictures of your own map. The colour sliders and the turning are folded; Original (hold) and Reset are in the foot',
+      'Walls and doors: Walls, Room, Door, Edit and Erase at the side, the kind as tiles, Load and Remove all in the foot. Fog of war: Brush, Box and Room at the side, Reveal and Cover as two tiles, Marked areas folded until there are some',
+      'Grid: Show, the kind and the cell size on top, with "Match the print" and "Squares 1 inch" side by side; tilt and shift are under "Nudge it", colour and opacity under "Look"',
+      'Ambience: one screen instead of three tabs. Chapter, This map and Fight are three cards; the one that sounds on the table says Playing. Mute all is in the foot, and "Start with Initiative" is a switch right there',
+      'Tokens: Ready, Party, Recent and Starred at the side; the panel opens on the first that has tokens. A banner shows the token in hand, the sizes have their names, and List … is called All tokens (your folders are there)',
+    ]],
     ['Beta 3.60', [
       'Effects is sorted anew, in three groups at its side (as in Draw): Scene, Lights, Elements',
       'Scene: the whole map on one screen: time of day, darkness, the weather mixes, Lightning, the wind. The rare settings are folded under More and Fine-tune the weather, where "Add a layer" replaces the single-layer tiles. Indoors is the Roof of before',

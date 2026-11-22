@@ -152,20 +152,21 @@ module.exports = (area) => {
     for (const l of ['+ Token', '+ Effect', 'Ambience …']) t.ok(lay.includes(l), `Layers has "${l}"`, lay);
     await pop('map', 'map');
     const mp = await btns();
-    t.ok(mp.includes('Make grid squares 1 inch') && !mp.includes('Grid squares = 1 inch'), 'the Map panel names 1 inch as the Grid panel does', mp);
+    t.ok(mp.includes('Squares 1 inch') && !mp.includes('Grid squares = 1 inch'), 'the Map panel names 1 inch as the Grid panel does', mp);
     await pop(null, 'grid');
-    t.eq((await btns()).slice(0, 2), ['Match the map\'s printed grid', 'Make grid squares 1 inch'], 'the Grid panel starts with its two set-up buttons');
+    t.eq((await btns()).slice(0, 2), ['Match the print', 'Squares 1 inch'], 'the Grid panel has its two set-up buttons side by side (Beta 3.61)');
     await pop('walls', 'walls');
-    t.ok((await btns()).includes('Remove all walls'), 'Walls: "Remove all walls" is a labelled button', await btns());
+    t.ok((await btns()).includes('Remove all'), 'Walls: "Remove all" is a labelled button in the foot (Beta 3.61)', await btns());
     await pop('token', 'token');
     const tagRow = await t.g(`(() => { const r = document.querySelector('#pop .tag-all'); return r && r.parentElement.querySelector('.ctl-label').textContent; })()`);
     t.eq(tagRow, 'Name tags', 'Tokens: the row for all tokens is called Name tags');
     await pop('spell', 'spell');
-    const look = () => t.g(`(document.querySelector('#pop .skin-name') || {}).textContent`);
+    const look = () => t.g(`(document.querySelector('#pop .skin-grid .skin.on em') || {}).textContent`); // (Beta 3.61: every look has its name on its tile)
     await t.g(`document.querySelector('#pop .skin-grid .skin[data-v="psychic"]').click()`);
-    await t.until(async () => (await look()) === 'Look: Psychic', 2000, 'Spells: the picked look by name');
+    await t.until(async () => (await look()) === 'Psychic', 2000, 'Spells: the picked look by name');
     await t.g(`document.querySelector('#pop .skin-grid .skin[data-v="fire"]').click()`);
-    await t.until(async () => (await look()) === 'Look: Fire', 2000, 'and again after another pick');
+    await t.until(async () => (await look()) === 'Fire', 2000, 'and again after another pick');
+    t.eq(await t.count('#pop .skin-grid .skin em'), 17, 'all 17 looks are named');
     await t.g(`Play.closePop()`);
     t.eq(await t.g(`(document.querySelector('.rail-btn[data-id="party"] .rail-label') || {}).textContent`), 'Party', 'the rail: Party marker is short for Party (third-marks-tool: no tool is called Marker any more)');
     const tb = await t.g(`(() => { Play.openPop('toolbox'); const b = document.querySelector('#pop [data-id="atlas"]'); const r = b && [b.textContent.trim(), b.dataset.tip || '']; Play.closePop(); return r; })()`);

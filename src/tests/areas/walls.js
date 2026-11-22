@@ -46,9 +46,9 @@ module.exports = (area) => {
     t.gm().webContents.focus();
     if ((await t.tool()) !== 'walls') await t.key('W');
     await t.until(() => t.popTitle(), 3000, 'the Walls panel');
-    const lit = () => t.g(`[...document.querySelectorAll('#pop .seg:not(.wl-modes) .seg-btn.on')].map((b) => b.dataset.v)`);
+    const lit = () => t.g(`[...document.querySelectorAll('#pop .wl-kinds .tile.on')].map((b) => b.dataset.v)`); // (Beta 3.61: three tiles)
     for (const kind of ['invisible', 'window', 'wall']) {
-      await t.g(`document.querySelector('#pop .seg:not(.wl-modes) .seg-btn[data-v="${kind}"]').click()`);
+      await t.g(`document.querySelector('#pop .wl-kinds .tile[data-v="${kind}"]').click()`);
       const on = await lit();
       t.ok(on.includes(kind), `${kind} is lit right after the click`, on);
       t.ok(!['invisible', 'window', 'wall'].filter((x) => x !== kind).some((x) => on.includes(x)), 'and only that kind', on);

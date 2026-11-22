@@ -661,7 +661,7 @@ const Play = (() => {
       'Doors open and shut on the table: the leaf swings when you open a door.',
       'Your own tiles go into the library\'s Tiles section; the first time you use one, you set its grid. Right-click any floor → Adjust grid: its joints are the squares. Drag a tile from the library onto a floor to give it that tile.'],
     map: ['Drag the map to move it; Alt + wheel scales it. Fog, grid, tokens and effects move with it.', 
-      'Colours change the picture and its assets only. Each map keeps its own.', 'Hold "original" to compare, here and on the table.',
+      'Colours change the picture and its assets only. Each map keeps its own. Fine-tune the colours has the four sliders.', 'Hold Original to compare, here and on the table.',
       'Right-drag or Space-drag moves your view; F fits it to the table, Shift + F shows everything.'],
     fx: () => [...({ // (Beta 3.60: by group)
       scene: ['Time of day and Darkness set the light of the whole map; lights, torches and campfires shine through the dark.', 'Weather covers the whole table and stays put when you move the map. With lightning in the mix, the Lightning button flashes it whenever you like.',
@@ -679,26 +679,27 @@ const Play = (() => {
       edit: 'Drag a corner dot or a whole wall to move it. Click a wall to select it; Delete removes it.',
       erase: 'Click a wall to remove it, or drag a box over several.',
     }[ui.walls && ui.walls.mode] || null), 'Players never see walls or door markers.', 'A click on a door opens or closes it; in the Play tools it asks first.',
-    'Universal VTT maps bring their walls along.', 'W again switches to the next mode.'],
+    'With no walls, lights and the party see everything. With Line of sight on, lights stop at walls and the party sees from its marker (Play → Party marker, U).',
+    'Universal VTT maps bring their walls along; Load reads walls from Dungeon Alchemist, Dungeondraft, Dungeon Fog, Arkenforge or Foundry VTT files.', 'W again switches to the next tool.'],
     party: () => ['Drag the party or click where it goes; arrow keys move it one square.',
       walled() ? 'Line of sight: they see what the walls allow.' : 'No walls (or line of sight off): they reveal a circle around them.',
       'What they revealed stays revealed, also when you remove the party.', 'A split group: Another party.'],
-    spell: ['Click the map to cast; drag to aim a cone, line or cube.', 'Ctrl + wheel turns the area before you place it (Shift: small steps).', '+ and − change the size in 5 ft steps.',
-      'Shift snaps the aim to 15°, Alt skips the grid.', 'Right-click a placed area for its options; H hides it from the players.', 'Drag a spell onto the hotbar to cast it with a number key.', 'Speakers and spell sounds: Settings → Sound.'],
-    asset: ['Click to stamp, drag to scatter.', 'Library: your own pictures and animations. Living: trees, bushes and mushrooms that move in the wind.',
+    spell: ['Pick a spell from the list, or set up your own: a shape at the side, its size, its look.', 'Click the map to cast; drag to aim a cone, line or cube.', 'Ctrl + wheel turns the area before you place it (Shift: small steps).', '+ and − change the size in 5 ft steps.',
+      'Shift snaps the aim to 15°, Alt skips the grid.', 'Right-click a placed area for its options; H hides it from the players.', 'Drag a spell onto the hotbar to cast it with a number key.', 'When it is cast: a screen effect, whether players see the squares, counting rounds, the sounds. Speakers: Settings → Sound.'],
+    asset: ['Stamp places one per click, Scatter paints many.', 'Library: your own pictures and animations. Living: trees, bushes and mushrooms that move in the wind.',
       'Every living tree looks a little different and is turned a little differently; Another look gives a selected one a new look. Mixed sizes and Scatter paint a forest.',
-      'The wind in the trees follows the weather. Switch "Follows the weather" off to set it yourself; Storm (also a hotbar button) blows until you click it again.',
+      'The wind in the trees is the map\'s wind: Effects → Scene.', 'Look is the look of the next one you place; a picked asset shows its own look in the panel.',
       'Click a placed asset to select it; Shift + click or Shift + drag selects several.', 'Drag to move, Ctrl + wheel to turn, [ and ] to resize.',
       'A picked asset has a frame: pull a side to make it flat or long, a corner to size it, the knob to turn it (Shift: steps of 15°).',
       'Assets lie under tokens and only react while this tool is on.'],
     layers: ['Click a row to select it on the map; H hides it from the players.', 'Delete removes what is selected; Ctrl + Z brings it back.'],
-    grid: ['First match the printed grid, then make the squares 1 inch so miniatures fit.', 'One cell is 5 ft.', 'G switches the grid on or off.'],
-    sound: () => [...({
-      chapter: ['It plays on every map of this chapter that has no sounds of its own.'],
-      map: ['A map with its own sounds replaces the chapter ambience while it is on the table.', 'A video map\'s own sound has its row here too.'],
-      combat: ['Fight music fades in over the ambience and out again when the fight ends.', 'Whether it starts and ends with Initiative: Settings → Sound.', 'Music from Audio/Music fits well; a Spotify mood works too (Toolbox → Spotify).'],
-    }[ui.soundTab] || []), 'Speakers and spell sounds: Settings → Sound. Mute is under the table preview.'],
-    token: ['Click the map to drop one, click again for more.', 'Drag a token to move it; right-click it for its options.', 'List … has every token: click to pick one up, tick to keep it ready here.',
+    grid: ['First match the printed grid (Match the print: drag across the grid printed on the map), then make the squares 1 inch so miniatures fit.', 'One cell is 5 ft.', 'G switches the grid on or off.',
+      'Nudge it tilts and shifts the grid; Look has its colour, its opacity and whether it lies over or under the assets.'],
+    sound: ['The chapter\'s ambience plays on every map of this chapter that has no sounds of its own.', 'A map with its own sounds replaces the chapter ambience while it is on the table. A video map\'s own sound has its row too.',
+      'Fight music fades in over the ambience and out again when the fight ends. With "Start with Initiative" a fight in Initiative starts and ends it.',
+      'The card that sounds on the table says Playing. Mute all fades everything out, for talk out of the game.',
+      'Music from Audio/Music fits well; a Spotify mood works too (Toolbox → Spotify).', 'Speakers and spell sounds: Settings → Sound.'],
+    token: ['Click the map to drop one, click again for more.', 'Drag a token to move it; right-click it for its options.', 'The groups at the side: Ready (ticked for this chapter), Party, Recent and Starred. All tokens has every token by folder: click to pick one up, tick to keep it ready.',
       'Ctrl + D duplicates the selected token; Alt while dragging places it without snapping.'],
     point: () => [...({
       ping: ['Click to ping a spot, drag for a laser pointer.', 'Double-click with the Select tool also pings.'],
@@ -729,7 +730,6 @@ const Play = (() => {
   const HELP_VARIANTS = {
     fx: [{ fxMode: 'place' }, { fxMode: 'light', lightTab: 'sources' }, { fxMode: 'weather' }],
     walls: ['wall', 'room', 'door', 'edit', 'erase'].map((m) => ({ 'walls.mode': m })),
-    sound: ['chapter', 'map', 'combat'].map((t) => ({ soundTab: t })),
     point: ['ping', 'laser', 'spot', 'measure'].map((m) => ({ 'point.mode': m })),
     draw: ['chalk', 'pen', 'erase'].map((m) => ({ 'draw.mode': m })),
     mark: [{ 'mark.mode': 'marker' }, { 'mark.mode': 'label' }, { 'mark.mode': 'counter', 'mark.auto': true }, { 'mark.mode': 'counter', 'mark.auto': false }],
@@ -797,18 +797,18 @@ const Play = (() => {
     hintT = setTimeout(() => el.classList.remove('on'), 7000);
   }
   const POPS = {
-    map: { title: 'Map', icon: 'map-2', build: buildMapPop, tips: TIPS.map },
-    fog: { title: 'Fog of war', icon: 'cloud-fog', build: buildFogPop, tips: FOG_TIPS },
+    map: { title: 'Map', icon: 'map-2', build: buildMapPop, around: () => ({ els: [] }), tips: TIPS.map }, // (Beta 3.61: the panel's frame, with a foot)
+    fog: { title: 'Fog of war', icon: 'cloud-fog', build: buildFogPop, around: () => fogSides, tips: FOG_TIPS }, // (Beta 3.61: Brush, Box, Room beside it)
     fx: { title: 'Effects', icon: 'flame', build: buildFxPop, around: () => fxSides, tips: TIPS.fx }, // (Beta 3.60: its groups and shape tools stand beside it, as Draw's)
-    walls: { title: 'Walls and doors', icon: 'wall', build: () => Walls.buildPop(), tips: TIPS.walls },
+    walls: { title: 'Walls and doors', icon: 'wall', build: (o) => Walls.buildPop(o), around: () => Walls.around(), tips: TIPS.walls }, // (Beta 3.61: its five tools beside it)
     oldschool: { title: 'Draw', icon: 'pencil', build: (o) => OS.buildPop(o), around: () => OS.around(), tips: TIPS.oldschool }, // (Beta 3.22; 3.37: its tools, sliders and Map settings stand around it)
     party: { title: 'Party marker', icon: 'users-group', build: () => Party.buildPop(), tips: TIPS.party },
-    spell: { title: 'Spells', icon: 'wand', build: buildSpellPop, tips: TIPS.spell },
-    asset: { title: 'Assets', icon: 'trees', build: buildAssetPop, tips: TIPS.asset },
+    spell: { title: 'Spells', icon: 'wand', build: buildSpellPop, around: () => spellSides, tips: TIPS.spell }, // (Beta 3.61: the shapes stand beside it)
+    asset: { title: 'Assets', icon: 'trees', build: buildAssetPop, around: () => assetSides, tips: TIPS.asset }, // (Beta 3.61: Library and Living, Stamp and Scatter beside it)
     layers: { title: 'Layers', icon: 'stack-2', build: buildLayersPop, tips: TIPS.layers },
     grid: { title: 'Grid', icon: 'grid-4x4', build: buildGridPop, tips: TIPS.grid },
-    sound: { title: 'Ambience', icon: 'volume', build: buildSoundPop, tips: TIPS.sound },
-    token: { title: 'Tokens', icon: 'user-plus', build: () => Tools.buildTokenPop(), tips: TIPS.token },
+    sound: { title: 'Ambience', icon: 'volume', build: buildSoundPop, around: () => ({ els: [] }), tips: TIPS.sound }, // (Beta 3.61: one screen)
+    token: { title: 'Tokens', icon: 'user-plus', build: (o) => Tools.buildTokenPop(o), around: () => Tools.tokenAround(), tips: TIPS.token }, // (Beta 3.61: Ready, Party, Recent, Starred beside it)
     point: { title: 'Point', icon: 'target', build: () => Tools.buildPointPop(), tips: TIPS.point },
     draw: { title: 'Sketch', icon: 'scribble', build: () => Tools.buildDrawPop(), tips: TIPS.draw }, // (Third Builder (third-marks-tool): Sketch, so only the Oldschool tool is called Draw)
     mark: { title: 'Marks', icon: 'map-pin', build: () => Tools.buildMarkPop(), tips: TIPS.mark }, // (Third Builder (third-marks-tool): Map notes are Only-me marks now)
@@ -985,12 +985,28 @@ const Play = (() => {
   const hint = (text) => h('p', { class: 'hint' }, text);
   const pct = (v) => `${Math.round(v * 100)}%`;
   const sep = () => h('div', { class: 'pop-sep' });
+  // (Beta 3.61) the frame of Effects and Draw for the other panels. Tools or groups stand on slide-out tabs at the
+  // panel's side (list: [{ value, label, icon, tip, key }]; o.groups: groups, o.second: the column beside the groups)
+  function sideTabs(list, get, set, o = {}) {
+    const wrap = h('div', { class: `os-tools os-tabs${o.groups ? ' os-groups' : ''}${o.second ? ' os-tabs2' : ''} ${o.cls || ''}${o.again ? '' : ' slide'}`, role: 'radiogroup', 'aria-label': o.label || '' });
+    list.forEach((t, i) => wrap.append(h('button', {
+      class: 'tile', role: 'radio', dataset: { v: String(t.value) }, 'data-tip': t.tip || null, 'data-key': t.key || null, 'aria-label': t.label, style: `--i:${i}`,
+      onclick: () => { set(t.value); paint(); },
+    }, iconEl(t.icon, t.iconCls), h('span', {}, t.label))));
+    const paint = () => { const v = String(get()); for (const b of wrap.children) { const on = b.dataset.v === v; b.classList.toggle(o.groups ? 'open' : 'on', on); b.setAttribute('aria-checked', on); } };
+    bind(paint);
+    return wrap;
+  }
+  // a fold that stays as it was left (ui[key]); a card of settings that stands beside the panel; the panel's foot
+  const popFold = (key, label, ...kids) => h('details', { class: 'sfx-details fx-fold', dataset: { v: key }, open: !!ui[key], ontoggle: (e) => { ui[key] = e.target.open; placePop(); } }, h('summary', { onclick: () => { ui[`${key}Set`] = true; } }, label), h('div', { class: 'stack' }, ...kids.filter(Boolean)));
+  const flyCard = (title, close, kids, past) => h('div', { class: `os-flywrap pop-flywrap${past ? ' past-parts' : ''}` }, h('div', { class: 'os-fly pop-fly stack' },
+    h('div', { class: 'os-fly-head' }, h('b', {}, title), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: close }, iconEl('x'))), ...kids.filter(Boolean)));
+  const popFoot = (text, ...btns) => h('div', { class: 'row os-status' }, typeof text === 'string' ? h('span', { class: 'grow hint' }, text) : text, ...btns.filter(Boolean));
+  const secLabel = (t) => h('span', { class: 'ctl-label pop-sec' }, t);
 
   // ---------- map popover ----------
   function buildMapPop() {
     if (!ui.turnMode) { try { ui.turnMode = localStorage.getItem('turnMode') === 'picture' ? 'picture' : 'all'; } catch { ui.turnMode = 'all'; } }
-    const name = h('span', { class: 'ellipsis grow' });
-    bind(() => { const bg = map() && map().bg; name.textContent = bg ? bg.name + (view.broken.has('bg') ? ' (file missing)' : '') : 'No background yet'; name.classList.toggle('danger-text', view.broken.has('bg')); });
     const videoBox = h('div', { class: 'stack' },
       slider({ label: 'Speed', min: 0.25, max: 2, step: 0.05, get: () => map().bg && map().bg.rate, set: (v, k) => send(k, 'bg.update', { rate: v }), fmt: (v) => `${round(v, 2)}×` }));
     bind(() => { videoBox.hidden = !(map().bg && map().bg.kind === 'video'); });
@@ -1017,20 +1033,36 @@ const Play = (() => {
       { value: 'all', label: 'Everything', tip: 'Everything on the map turns together' },
       { value: 'picture', label: 'Only the picture', tip: 'Only the picture turns; what you placed stays where it is' }],
     get: () => ui.turnMode, set: (v) => { ui.turnMode = v; try { localStorage.setItem('turnMode', v); } catch {} refreshPop(); } });
-    const turnBox = h('div', { class: 'stack' }, turn, quarter, straight, mode);
-    bind(() => { turnBox.hidden = !map().bg; });
-    return h('div', { class: 'stack map-pop' },
-      h('div', { class: 'row map-pop-head', dataset: { flash: 'bg' } }, iconEl('photo'), name,
-        btn('Replace', 'refresh', () => Drawer.open({ filter: 'maps', purpose: 'replace', back: { pop: 'map' } }), { kind: 'small', tip: 'Pick another picture for this map' })),
-      size,
-      row(
-        btn('Fit to table', 'maximize', () => { const f = fitView(); if (f) cmd('view.update', f); }, { tip: 'Show the whole map on the table' }),
-        btn('Make grid squares 1 inch', 'ruler-measure', oneInch, { tip: 'Scale the map so one grid cell is one inch on the table' })), // Third Builder (third-small-labels): C2, the Grid panel's name
-      sep(),
-      buildLookBox(),
-      sep(),
-      turnBox,
-      videoBox);
+    // (Beta 3.61) a banner with the map's picture, its name and its size on the table; the looks as pictures of this
+    // map; the colour sliders and the turning in folds; the foot compares with the original
+    const cap = h('div', { class: 'cap' });
+    const pic = h('img', { class: 'pop-ban-pic', alt: '', draggable: false });
+    const ban = h('div', { class: 'os-prev pop-ban map-ban', dataset: { flash: 'bg' } }, pic,
+      h('span', { class: 'pop-ban-btn' }, btn('Replace', 'refresh', () => Drawer.open({ filter: 'maps', purpose: 'replace', back: { pop: 'map' } }), { kind: 'small', tip: 'Pick another picture for this map' })), cap);
+    const L = buildLookBox();
+    let picSig = null;
+    bind(() => {
+      const bg = map() && map().bg; const broken = view.broken.has('bg');
+      const pl = bg ? view.bgPlacement() : null;
+      const text = !bg ? 'pick a picture or a video' : broken ? 'file missing' : pl ? `${round(pl.w * curView().zoom, 1)} × ${round(pl.h * curView().zoom, 1)}″ on the table` : '';
+      const sig = JSON.stringify([bg && bg.name, text]);
+      if (cap.dataset.sig !== sig) { cap.dataset.sig = sig; cap.replaceChildren(h('b', { class: `ellipsis${broken ? ' danger-text' : ''}` }, bg ? bg.name : 'No background yet'), text); }
+      // its picture: a drawn map's own (it changes as you draw), else the library's small one
+      const ps = bg && !broken ? `${bg.path}|${bg.os || ''}` : '';
+      if (ps === picSig) return;
+      picSig = ps;
+      const show = (url) => { if (picSig !== ps) return; for (const im of [pic, ...L.pics]) { if (url) im.src = url; else im.removeAttribute('src'); im.hidden = !url; } };
+      if (!ps) show(null); else if (bg.os && bg.url && bg.kind === 'image') show(bg.url); else { show(null); Thumbs.get(bg.path, bg.kind).then((u) => show(u || (bg.kind === 'image' ? bg.url : null))); }
+    });
+    const twoBtns = h('div', { class: 'pop-two' },
+      btn('Fit to table', 'maximize', () => { const f = fitView(); if (f) cmd('view.update', f); }, { tip: 'Show the whole map on the table' }),
+      btn('Squares 1 inch', 'ruler-measure', oneInch, { tip: 'Scale the map so one grid cell is one inch on the table' }));
+    const has = h('div', { class: 'stack map-has' }, size, twoBtns, videoBox,
+      h('div', { class: 'ctl' }, secLabel('Colours'), L.presets),
+      popFold('mapFine', 'Fine-tune the colours', ...L.sliders),
+      popFold('mapTurn', 'Turn the map', turn, quarter, straight, mode));
+    bind(() => { has.hidden = !map().bg; });
+    return h('div', { class: 'stack map-pop' }, ban, has, popFoot(L.now, L.peekBtn, L.reset));
   }
   // 4.5: the map's colours: presets, four sliders, hold to see the original (on this screen and the TV)
   const LOOK_PRESETS = [
@@ -1060,27 +1092,32 @@ const Play = (() => {
     lookSwatchDefs();
     const L = () => (map() && map().look) || {};
     const val = (k, d) => { const v = L()[k]; return Number.isFinite(v) ? v : d; };
-    const presets = h('div', { class: 'look-presets' }, ...LOOK_PRESETS.map((P) => h('button', { class: 'look-chip', dataset: { v: P.id }, 'data-tip': P.tip,
-      onclick: () => (P.v ? cmd('bg.look', { ...P.v, preset: P.id }) : cmd('bg.look', { reset: true })) },
-    h('i', { style: P.v ? `filter:url(#look-chip-${P.id})` : '' }), h('span', {}, P.label))));
-    bind(() => { const cur = map() && map().look ? map().look.preset || 'custom' : 'natural'; for (const b of presets.children) b.classList.toggle('on', b.dataset.v === cur); });
+    const pics = [];
+    const presets = h('div', { class: 'look-presets pics' }, ...LOOK_PRESETS.map((P) => {
+      const im = h('img', { alt: '', draggable: false, style: P.v ? `filter:url(#look-chip-${P.id})` : '' }); pics.push(im);
+      return h('button', { class: 'look-chip', dataset: { v: P.id }, 'data-tip': P.tip, onclick: () => (P.v ? cmd('bg.look', { ...P.v, preset: P.id }) : cmd('bg.look', { reset: true })) }, im, h('span', {}, P.label));
+    }));
+    const now = h('span', { class: 'grow hint look-now' });
+    bind(() => {
+      const cur = map() && map().look ? map().look.preset || 'custom' : 'natural';
+      for (const b of presets.children) b.classList.toggle('on', b.dataset.v === cur);
+      const P = LOOK_PRESETS.find((x) => x.id === cur);
+      const t = !(map() && map().bg) ? '' : `Colours: ${P ? P.label.toLowerCase() : 'your own'}`;
+      if (now.textContent !== t) now.textContent = t;
+    });
     const pct = (v) => `${Math.round(v * 100)}%`;
     const sl = (label, k, min, max, d, fmt, tip) => { const e = slider({ label, min, max, step: 0.01, get: () => val(k, d), set: (v, key) => send(key, 'bg.look', { [k]: v }), fmt }); if (tip) e.dataset.tip = tip; return e; };
     const peek = (on) => { view.setPeek(on); cmd('look.peek', { on }); peekBtn.classList.toggle('on', on); };
-    const peekBtn = btn('Hold: original', 'eye', () => {}, { tip: 'Hold the button to see the map without its colours, here and on the table' });
+    const peekBtn = btn('Original', 'eye', () => {}, { kind: 'small look-peek', tip: 'Hold the button to see the map without its colours, here and on the table' });
     peekBtn.addEventListener('pointerdown', (e) => { if (e.button === 0) { peekBtn.setPointerCapture(e.pointerId); peek(true); } });
     for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) peekBtn.addEventListener(t, () => { if (view.peek) peek(false); });
-    const reset = btn('Reset', 'arrow-back-up', () => cmd('bg.look', { reset: true }), { tip: 'The picture as it is' });
-    const box = h('div', { class: 'stack look-box' },
-      h('div', { class: 'ctl-label' }, 'Colours'),
-      presets,
+    const reset = btn('Reset', 'arrow-back-up', () => cmd('bg.look', { reset: true }), { kind: 'small look-reset', tip: 'The picture as it is' });
+    bind(() => { const none = !(map() && map().bg); const plain = !(map() && map().look); reset.disabled = plain; peekBtn.disabled = plain; reset.hidden = none; peekBtn.hidden = none; });
+    return { presets, pics, now, peekBtn, reset, sliders: [
       sl('Brightness', 'bright', 0.4, 1.6, 1, pct),
       sl('Contrast', 'contrast', 0.5, 1.6, 1, pct),
       sl('Saturation', 'sat', 0, 2, 1, (v) => (v < 0.01 ? 'Grey' : pct(v))),
-      sl('Warmth', 'warm', -1, 1, 0, (v) => (Math.abs(v) < 0.01 ? 'Neutral' : v > 0 ? `Warmer ${Math.round(v * 100)}` : `Cooler ${Math.round(-v * 100)}`), 'Left: cooler, bluer. Right: warmer, more golden'),
-      row(peekBtn, reset));
-    bind(() => { box.hidden = !(map() && map().bg); const plain = !(map() && map().look); reset.disabled = plain; peekBtn.disabled = plain; });
-    return box;
+      sl('Warmth', 'warm', -1, 1, 0, (v) => (Math.abs(v) < 0.01 ? 'Neutral' : v > 0 ? `Warmer ${Math.round(v * 100)}` : `Cooler ${Math.round(-v * 100)}`), 'Left: cooler, bluer. Right: warmer, more golden')] };
   }
   // Turn the map to an angle: everything around the middle of the table, or only the picture around its centre.
   function turnMap(to, key) {
@@ -1131,21 +1168,31 @@ const Play = (() => {
   }
 
   // ---------- fog popover ----------
-  function buildFogPop() {
-    return h('div', { class: 'stack' },
+  // (Beta 3.61) Brush, Box and Room stand at the side; Reveal and Cover are two tiles; the marked areas fold away
+  // until there are some
+  let fogSides = null;
+  function buildFogPop(o = {}) {
+    const shapes = sideTabs([
+      { value: 'brush', label: 'Brush', icon: 'brush', tip: 'Paint the fog away, or back ([ and ] size the brush)' },
+      { value: 'rect', label: 'Box', icon: 'square', tip: 'Drag a rectangle (or hold Shift while dragging with the brush)' },
+      { value: 'room', label: 'Room', icon: 'door', tip: 'Click inside a room: it opens up to its walls and closed doors (needs walls, W)' }],
+    () => (ui.fogShape === 'area' ? '' : ui.fogShape), (v) => { setTool('fog'); setFogShape(v); }, { cls: 'side-tools fog-shapes', again: o.again, label: 'Shape' });
+    hotTiles(shapes, fogHot);
+    fogSides = { els: [shapes] };
+    const modes = hotTiles(tiles([{ id: 'reveal', label: 'Reveal', icon: 'eye' }, { id: 'cover', label: 'Cover', icon: 'eye-off' }], () => ui.fogMode, (v) => { ui.fogMode = v; setTool('fog'); }), fogHot);
+    modes.classList.add('pop-tiles', 'n2', 'fog-modes');
+    modes.children[0].dataset.key = 'R'; modes.children[1].dataset.key = 'C';
+    const n = () => (map().areas || []).length;
+    if (!ui.fogAreasSet) ui.fogAreas = n() > 0;
+    const areas = popFold('fogAreas', 'Marked areas', areaSection());
+    const sum = areas.querySelector('summary');
+    bind(() => { const t = n() ? `Marked areas · ${n()}` : 'Marked areas'; if (sum.textContent !== t) sum.textContent = t; });
+    return h('div', { class: 'stack fog-pop' },
       Hotbar.offer(toggle({ label: 'Fog on this map', get: () => map().fog.enabled, set: (v) => cmd('fog.enabled', { enabled: v }) }), fogHot('toggle')),
-      hotTiles(seg({ options: [{ value: 'reveal', label: 'Reveal', icon: 'eye', key: 'R' }, { value: 'cover', label: 'Cover', icon: 'eye-off', key: 'C' }], get: () => ui.fogMode, set: (v) => { ui.fogMode = v; setTool('fog'); } }), fogHot),
-      (() => {
-        const shape = seg({ label: 'Shape', options: [{ value: 'brush', label: 'Brush', icon: 'brush' }, { value: 'rect', label: 'Rectangle', icon: 'square', tip: 'Or hold Shift while dragging' },
-          { value: 'room', label: 'Room', icon: 'door', tip: 'Click inside a room: it opens up to its walls and closed doors (needs walls, W)' }],
-        get: () => (ui.fogShape === 'area' ? 'room' : ui.fogShape), set: (v) => setFogShape(v) });
-        hotTiles(shape.querySelector('.seg'), fogHot);
-        return shape;
-      })(),
-      slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.brushIn, set: (v) => { ui.brushIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` }),
-      row(Hotbar.offer(btn('Cover all', 'eye-off', () => undoable('fog.base', { base: 'cover' })), fogHot('cover-all')), Hotbar.offer(btn('Reveal all', 'eye', () => undoable('fog.base', { base: 'clear' })), fogHot('reveal-all'))),
-      sep(),
-      areaSection());
+      modes,
+      shownIf(() => ui.fogShape === 'brush', slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.brushIn, set: (v) => { ui.brushIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` })),
+      h('div', { class: 'pop-two' }, Hotbar.offer(btn('Cover all', 'eye-off', () => undoable('fog.base', { base: 'cover' })), fogHot('cover-all')), Hotbar.offer(btn('Reveal all', 'eye', () => undoable('fog.base', { base: 'clear' })), fogHot('reveal-all'))),
+      areas);
   }
 
   function setFogShape(v) {
@@ -1219,7 +1266,8 @@ const Play = (() => {
       if (list.dataset.sig === sig) return;
       list.dataset.sig = sig;
       list.innerHTML = '';
-      if (!areas.length) { list.append(h('div', { class: 'hint' }, 'No marked areas yet.')); return; }
+      list.hidden = !areas.length;
+      if (!areas.length) return;
       for (const a of areas) {
         let x = 0; let y = 0; const r0 = a.rings[0];
         for (let i = 0; i < r0.length; i += 2) { x += r0[i]; y += r0[i + 1]; }
@@ -1234,7 +1282,7 @@ const Play = (() => {
     const drawBtn = btn('Mark an area', 'polygon', () => { setTool('fog'); setFogShape('area'); toast('Click the corners of the area; double-click or Enter to finish.', { ms: 4000 }); },
       { tip: 'Click its corners on the map, then double-click or press Enter' });
     bind(() => { drawBtn.classList.toggle('on', ui.fogShape === 'area'); });
-    return h('div', { class: 'stack' }, h('div', { class: 'ctl-label' }, 'Marked areas'), list, row(drawBtn));
+    return h('div', { class: 'stack' }, list, row(drawBtn));
   }
 
   // ---------- effects popover ----------
@@ -1461,7 +1509,7 @@ const Play = (() => {
     else if (g === 'lights') { ui.fxMode = 'light'; ui.lightTab = 'sources'; } else armElement(ui.fxEl);
     openPop('fx'); updateBrushCursor(); showToolHint();
   }
-  const fxFold = (key, label, ...kids) => h('details', { class: 'sfx-details fx-fold', dataset: { v: key }, open: !!ui[key], ontoggle: (e) => { ui[key] = e.target.open; placePop(); } }, h('summary', {}, label), h('div', { class: 'stack' }, ...kids.filter(Boolean)));
+  const fxFold = (key, label, ...kids) => popFold(key, label, ...kids);
   const SHAPE_TOOLS = [
     ['box', 'Box', 'square', 'Drag a box on the grid (Shift: a square · Alt: erase a box)'], ['round', 'Round', 'circle', 'Drag a round on the grid (Shift: a circle · Alt: erase a round)'],
     ['brush', 'Brush', 'brush', 'Paint it on freely ([ and ] size the brush)'], ['erase', 'Erase', 'eraser', 'Brush away any painted effect']];
@@ -1839,7 +1887,10 @@ const Play = (() => {
   const durText = (v) => (v == null ? 'Until removed' : v === 10 ? '1 minute' : v === 100 ? '10 minutes' : `${v} round${v === 1 ? '' : 's'}`);
   const WIDTHS = [1, 5, 10, 15, 20, 30];
   const stepIn = (list, v, d) => (d > 0 ? list.find((x) => x > v) ?? list[list.length - 1] : [...list].reverse().find((x) => x < v) ?? list[0]);
-  function buildSpellPop() {
+  // (Beta 3.61) the spell in hand on a banner, the shapes by name at the side, the looks by name, and what is set once
+  // (screen effect, squares, rounds, sounds) on the card "When it is cast"
+  let spellSides = null;
+  function buildSpellPop(o = {}) {
     const search = h('input', { class: 'spell-search', type: 'search', placeholder: 'Find a spell: fireball, cone, cold…', value: ui.spellQuery, spellcheck: 'false', 'aria-label': 'Find a spell' });
     const list = h('div', { class: 'spell-list', role: 'listbox', 'aria-label': 'Spells' });
     const matches = () => {
@@ -1851,7 +1902,7 @@ const Play = (() => {
       list.innerHTML = '';
       const items = matches();
       for (const sp of items) {
-        list.append(Hotbar.offer(h('button', { class: `spell-row ${ui.spell.name === sp.name ? 'on' : ''}`, role: 'option', onclick: () => { pickSpell(sp); renderList(); } },
+        list.append(Hotbar.offer(h('button', { class: `spell-row ${ui.spell.name === sp.name ? 'on' : ''}`, role: 'option', dataset: { n: sp.name }, onclick: () => { pickSpell(sp); renderList(); } },
           skinDot(sp.skin), h('span', { class: 'grow ellipsis' }, sp.name), h('span', { class: 'spell-meta' }, spellDesc(sp))), { kind: 'spell', ref: sp.name, label: sp.name, icon: 'flame' }));
       }
       if (!items.length) list.append(hint('No preset matches. Set up your own below.'));
@@ -1861,37 +1912,55 @@ const Play = (() => {
       if (e.key === 'Enter') { const m = matches()[0]; if (m) { pickSpell(m); renderList(); } search.blur(); }
     });
     renderList();
+    bind(() => { for (const r of list.children) if (r.dataset.n) r.classList.toggle('on', r.dataset.n === ui.spell.name); }); // (a shape of your own: no preset is lit)
+    // the picked row in view (the list shows four)
+    requestAnimationFrame(() => { const on = list.querySelector('.spell-row.on'); if (on && (on.offsetTop < list.scrollTop || on.offsetTop + on.offsetHeight > list.scrollTop + list.clientHeight)) list.scrollTop = Math.max(0, on.offsetTop - 4); });
 
-    const now = h('div', { class: 'spell-now' });
-    bind(() => { now.innerHTML = ''; now.append(skinDot(ui.spell.skin), h('b', { class: 'ellipsis' }, ui.spell.name), h('span', { class: 'spell-meta' }, spellDesc(ui.spell))); });
+    // the banner: the spell in hand, its shape in its colours
+    const art = h('span', { class: 'sp-art' }); const cap = h('div', { class: 'cap' });
+    const ban = h('div', { class: 'os-prev sp-ban' }, art, cap);
+    bind(() => {
+      const sp = ui.spell; const sk = SKINS[sp.skin] || SKINS.arcane;
+      const sig = JSON.stringify([sp.name, sp.shape, sp.size, sp.width, sp.skin, sp.color, sp.mode]);
+      if (ban.dataset.sig === sig) return;
+      ban.dataset.sig = sig;
+      art.dataset.shape = sp.shape;
+      art.style.cssText = `--c:${sp.color || sk.c};--l:${sp.color ? `color-mix(in srgb, ${sp.color} 45%, #fff)` : sk.l};--d:${sp.color ? `color-mix(in srgb, ${sp.color} 40%, #000)` : sk.d}`;
+      cap.replaceChildren(h('b', {}, sp.name), [spellDesc(sp), sk.label.toLowerCase(), sp.mode === 'stay' ? 'stays' : 'a burst'].join(' · '));
+    });
 
-    const skins = h('div', { class: 'skin-grid' }, ...Object.entries(SKINS).map(([id, sk]) => h('button', {
-      class: 'skin', style: `--c:${sk.c}`, dataset: { v: id }, 'data-tip': sk.label, 'aria-label': sk.label, onclick: () => setSpell({ skin: id }),
-    }, iconEl(sk.icon))));
-    bind(() => { for (const b of skins.children) b.classList.toggle('on', b.dataset.v === ui.spell.skin); });
-    // Third Builder (third-small-labels): D6, the picked look by name (Cold, Force and Psychic are hard to tell apart by icon)
-    const skinName = h('span', { class: 'ctl-label skin-name' });
-    bind(() => { skinName.textContent = `Look: ${(SKINS[ui.spell.skin] || SKINS.arcane).label}`; });
+    // the looks: a tile each, with its name
+    const skins = h('div', { class: 'skin-grid named', role: 'radiogroup', 'aria-label': 'Look' }, ...Object.entries(SKINS).map(([id, sk]) => h('button', {
+      class: 'skin', role: 'radio', style: `--c:${sk.c};--l:${sk.l};--d:${sk.d}`, dataset: { v: id }, 'aria-label': sk.label, onclick: () => setSpell({ skin: id }),
+    }, h('span', {}, iconEl(sk.icon)), h('em', {}, sk.label))));
+    bind(() => { for (const b of skins.children) { const on = b.dataset.v === ui.spell.skin; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); } });
 
     const widthBox = h('div', {}, stepper({ name: 'Width', label: 'Width', get: () => ui.spell.width, prev: (v) => stepIn(WIDTHS, v, -1), next: (v) => stepIn(WIDTHS, v, 1), set: (v) => setSpell({ width: v }), fmt: (v) => `${v} ft` }));
     bind(() => { widthBox.hidden = ui.spell.shape !== 'line'; });
 
-    return h('div', { class: 'stack' },
-      search, list, now,
-      seg({ cls: 'seg-icons', options: SHAPES.map((s) => ({ value: s.id, icon: s.icon, tip: s.label })), get: () => ui.spell.shape, set: (v) => setSpell({ shape: v }) }),
-      stepper({ name: 'Size', label: () => shapeInfo(ui.spell.shape).sizeLabel, get: () => ui.spell.size, prev: (v) => stepIn(SIZES, v, -1), next: (v) => stepIn(SIZES, v, 1), set: (v) => setSpell({ size: v }), fmt: (v) => `${v} ft`, minusKey: '−', plusKey: '+' }),
-      widthBox,
-      h('div', { class: 'ctl' }, skinName, skins),
-      colorSwatches(() => ui.spell.color, (v) => setSpell({ color: v })),
-      seg({ options: [{ value: 'burst', label: 'Burst', icon: 'bolt', tip: 'Plays, then fades after a few seconds' }, { value: 'stay', label: 'Stays', icon: 'hourglass', tip: 'Stays until you remove it' }], get: () => ui.spell.mode, set: (v) => setSpell({ mode: v }) }),
+    // at the side: the shapes, by name; and the card of what is set once
+    const shapes = sideTabs(SHAPES.map((x) => ({ value: x.id, label: x.label.replace(' on a token', ''), icon: x.icon, tip: x.id === 'aura' ? 'An aura on a token: click the token' : null })), () => ui.spell.shape, (v) => setSpell({ shape: v }), { cls: 'side-tools sp-shapes', again: o.again, label: 'Shape' });
+    const card = ui.spellFly ? flyCard('When it is cast', () => { ui.spellFly = false; openPop('spell'); }, [
       impactCtl(),
       toggle({ label: 'Players see the affected squares', get: () => ui.spell.squares, set: (v) => setSpell({ squares: v }) }),
       toggle({ label: 'Count rounds', get: () => ui.spell.count || !!ui.spell.duration, set: (v) => setSpell({ count: v, duration: v ? ui.spell.duration : null }) }),
       stepper({ name: 'Duration', label: 'Lasts', get: () => ui.spell.duration ?? null, prev: (v) => stepDur(v, -1), next: (v) => stepDur(v, 1), set: (v) => setSpell({ duration: v }), fmt: durText, minusTip: 'Shorter', plusTip: 'Longer' }),
       toggle({ label: 'Spell sounds', get: () => S.settings && S.settings.sfxOn, set: (v) => ts.settings({ sfxOn: v }) }),
       slider({ label: 'Bursts fade after', min: 2, max: 30, step: 1, get: () => S.settings && S.settings.burstSeconds, set: (v) => settingsLater({ burstSeconds: v }), fmt: (v) => `${v} s` }),
-      sep(),
-      row(btn('Clear all spell areas', 'trash', () => undoable('spell.clear', {}), { kind: 'danger', tip: 'Remove every spell area from this map' })));
+    ]) : null;
+    spellSides = { els: [shapes, card] };
+    const count = h('span', { class: 'grow hint' });
+    const clear = btn('Clear', 'trash', () => undoable('spell.clear', {}), { kind: 'small danger sp-clear', tip: 'Remove every spell area from this map' });
+    bind(() => { const n = map().spells.length; count.textContent = n ? `${n} spell area${n === 1 ? '' : 's'} on this map` : 'No spell areas on this map'; clear.disabled = !n; });
+    return h('div', { class: 'stack spell-pop' },
+      ban, search, list,
+      stepper({ name: 'Size', label: () => shapeInfo(ui.spell.shape).sizeLabel, get: () => ui.spell.size, prev: (v) => stepIn(SIZES, v, -1), next: (v) => stepIn(SIZES, v, 1), set: (v) => setSpell({ size: v }), fmt: (v) => `${v} ft`, minusKey: '−', plusKey: '+' }),
+      widthBox,
+      seg({ options: [{ value: 'burst', label: 'Burst', icon: 'bolt', tip: 'Plays, then fades after a few seconds' }, { value: 'stay', label: 'Stays', icon: 'hourglass', tip: 'Stays until you remove it' }], get: () => ui.spell.mode, set: (v) => setSpell({ mode: v }) }),
+      h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Look'), skins),
+      colorSwatches(() => ui.spell.color, (v) => setSpell({ color: v })),
+      btn('When it is cast', 'adjustments-horizontal', () => { ui.spellFly = !ui.spellFly; openPop('spell'); }, { kind: `wide os-fxset${ui.spellFly ? ' on' : ''}`, tip: 'A screen effect, the squares, counting rounds, sounds' }),
+      popFoot(count, clear));
   }
 
   // ---------- layers popover ----------
@@ -2123,7 +2192,7 @@ const Play = (() => {
       // Third Builder (third-small-labels): C9, they add or jump, they don't filter the list
       row(btn('+ Token', 'user', () => Drawer.open({ filter: 'tokens', purpose: 'addToken', back: { pop: 'layers' } }), { tip: 'Add a token' }),
         btn('+ Effect', 'flame', () => { setTool('fx'); openPop('fx'); }, { tip: 'Place torches, mist, lights or weather', key: 'E' }),
-        btn('Ambience …', 'volume', () => { ui.soundTab = 'map'; openPop('sound'); }, { tip: 'Ambience, the map\'s sounds, fight music: all in the Ambience panel' })));
+        btn('Ambience …', 'volume', () => openPop('sound'), { tip: 'Ambience, the map\'s sounds, fight music: all in the Ambience panel' })));
   }
 
   // ---------- grid popover ----------
@@ -2163,125 +2232,127 @@ const Play = (() => {
     const sw = h('div', { class: 'swatches' }, ...SW.map((c) => h('button', { class: 'swatch', style: { background: c }, 'aria-label': `Grid colour ${c}`, onclick: () => cmd('grid.update', { color: c }) })),
       h('input', { type: 'color', 'aria-label': 'Custom grid colour', oninput: (e) => send('grid-color', 'grid.update', { color: e.target.value }) }));
     bind(() => { for (const b of sw.querySelectorAll('.swatch')) b.classList.toggle('on', b.style.background && rgbToHex(b.style.background) === grid().color); const ci = sw.querySelector('input'); if (document.activeElement !== ci) ci.value = grid().color; });
-    return h('div', { class: 'stack' },
-      // Third Builder (third-small-labels): C3, the buttons that set up a map's grid come first, not last under six sliders
-      btn('Match the map\'s printed grid', 'ruler-2', () => startAlign(), { kind: 'wide', tip: 'Drag across the grid printed on the map; only the grid changes' }),
-      btn('Make grid squares 1 inch', 'ruler-measure', oneInch, { kind: 'wide', tip: 'Scale the map with everything on it so one cell is one inch on the table' }),
-      sep(),
+    // (Beta 3.61) what every map needs on top: Show, the kind, the cell size, the two buttons that set a grid up; the
+    // nudging and the look in folds
+    const kinds = tiles([
+      { id: 'square', label: 'Squares', icon: 'square' },
+      { id: 'hex-pointy', label: 'Hex rows', icon: 'hexagon', tip: 'Hexes with a point at the top' },
+      { id: 'hex-flat', label: 'Hex columns', icon: 'hexagon', tip: 'Hexes with a flat top' }],
+    () => grid().type, (v) => cmd('grid.update', { type: v }));
+    kinds.classList.add('pop-tiles', 'n3', 'grid-kinds');
+    const flat = kinds.querySelector('[data-v="hex-flat"] .i'); if (flat) flat.classList.add('rot90');
+    return h('div', { class: 'stack grid-pop' },
       toggle({ label: 'Show grid', get: () => grid().show, set: (v) => cmd('grid.update', { show: v }) }),
-      seg({ options: [
-        { value: 'square', label: 'Squares', icon: 'square' },
-        { value: 'hex-pointy', label: 'Hex rows', icon: 'hexagon', tip: 'Hexes with a point at the top' },
-        { value: 'hex-flat', label: 'Hex columns', icon: 'hexagon', iconCls: 'rot90', tip: 'Hexes with a flat top' }],
-      get: () => grid().type, set: (v) => cmd('grid.update', { type: v }) }),
+      kinds,
       slider({ label: 'Cell size on the table', min: 0.3, max: 3, step: 0.01, get: () => grid().size * zoom(), set: (v, k) => scaleGrid(v / zoom(), k), fmt: (v) => `${round(v, 2)}″` }),
-      tiltRow(),
-      slider({ label: 'Shift sideways', min: 0, max: 1, step: 0.005, get: () => shiftGet('u'), set: (v, k) => shiftSet('u', v, k), fmt: pct }),
-      slider({ label: 'Shift up / down', min: 0, max: 1, step: 0.005, get: () => shiftGet('v'), set: (v, k) => shiftSet('v', v, k), fmt: pct }),
-      h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Colour'), sw),
-      slider({ label: 'Opacity', min: 0, max: 1, step: 0.01, get: () => grid().opacity, set: (v, k) => send(k, 'grid.update', { opacity: v }), fmt: pct }),
-      seg({ label: 'Grid lies', options: [
-        { value: 'over', label: 'Over everything', icon: 'grid-4x4', tip: 'The grid is drawn over assets and effects' },
-        { value: 'under', label: 'Under assets', icon: 'trees', tip: 'Trees, furniture and painted effects cover the grid lines' }],
-      get: () => (grid().under ? 'under' : 'over'), set: (v) => cmd('grid.update', { under: v === 'under' }) }));
+      h('div', { class: 'pop-two' },
+        btn('Match the print', 'ruler-2', () => startAlign(), { kind: 'grid-match', tip: 'Match the map\'s printed grid: drag across the grid printed on the map; only the grid changes' }),
+        btn('Squares 1 inch', 'ruler-measure', oneInch, { kind: 'grid-inch', tip: 'Scale the map with everything on it so one cell is one inch on the table' })),
+      popFold('gridNudge', 'Nudge it',
+        tiltRow(),
+        slider({ label: 'Shift sideways', min: 0, max: 1, step: 0.005, get: () => shiftGet('u'), set: (v, k) => shiftSet('u', v, k), fmt: pct }),
+        slider({ label: 'Shift up / down', min: 0, max: 1, step: 0.005, get: () => shiftGet('v'), set: (v, k) => shiftSet('v', v, k), fmt: pct })),
+      popFold('gridLook', 'Look',
+        h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Colour'), sw),
+        slider({ label: 'Opacity', min: 0, max: 1, step: 0.01, get: () => grid().opacity, set: (v, k) => send(k, 'grid.update', { opacity: v }), fmt: pct }),
+        seg({ label: 'Grid lies', options: [
+          { value: 'over', label: 'Over everything', tip: 'The grid is drawn over assets and effects' },
+          { value: 'under', label: 'Under assets', tip: 'Trees, furniture and painted effects cover the grid lines' }],
+        get: () => (grid().under ? 'under' : 'over'), set: (v) => cmd('grid.update', { under: v === 'under' }) })));
   }
 
   // ---------- sound popover: everything the table hears ----------
+  // (Beta 3.61) one screen instead of three tabs: three cards of the same build, Chapter, This map, Fight. Every
+  // sound is the same two lines (its name and buttons, its volume); the card that sounds on the table says Playing; the
+  // foot names it and mutes everything
   function buildSoundPop() {
     const chNow = () => chapterOfMap(S.editMapId);
     const sound = () => S.sound || {};
+    const pick = (purpose, tab) => Drawer.open({ filter: 'sounds', purpose, back: { pop: 'sound', tab } });
+    const vol = (id, v, label, set) => {
+      const out = h('output');
+      const inp = h('input', { type: 'range', class: 'snd-vol', min: 0, max: 1, step: 0.01, value: v, dataset: { id }, 'aria-label': label });
+      inp.addEventListener('input', () => { out.textContent = pct(Number(inp.value)); set(Number(inp.value)); });
+      out.textContent = pct(v);
+      return h('label', { class: 'snd-vol2' }, iconEl('volume'), inp, out);
+    };
+    const item = (icon, name, o) => h('div', { class: `snd-item ${o.muted ? 'is-muted' : ''}`, dataset: { flash: o.flash || '' } },
+      h('div', { class: 'snd-row' }, iconEl(icon), h('span', { class: `ellipsis grow ${o.missing ? 'danger-text' : ''}`, 'data-tip': name }, name + (o.missing ? ' (missing)' : '')), ...(o.acts || [])),
+      o.vol);
+    const add = (label, icon, run, tip) => h('button', { class: 'snd-add', 'data-tip': tip || null, onclick: run }, iconEl(icon), label);
+    const card = (id, icon, title) => {
+      const sub = h('span', { class: 'sub ellipsis grow' }); const state = h('span', { class: 'snd-state' });
+      const body = h('div', { class: 'stack snd-body' });
+      const el = h('section', { class: 'snd-card', dataset: { v: id } }, h('header', {}, iconEl(icon), h('b', {}, title), sub, state), body);
+      return { el, sub, state, body };
+    };
+    const C = { chapter: card('chapter', 'music', 'Chapter'), map: card('map', 'photo', 'This map'), fight: card('fight', 'swords', 'Fight') };
     // a chapter's track: the ambience, or the fight music
-    function trackBox(kind) {
-      const box = h('div', { class: 'stack' });
-      const cmdName = kind === 'fight' ? 'chapter.fight' : 'chapter.ambience';
-      let sig = '';
-      bind(() => {
-        const ch = chNow();
-        const a = ch && ch[kind];
-        const spo = S.spotify || {};
-        const nsig = JSON.stringify([ch && ch.id, ch && ch.name, a && [a.name, a.missing], kind === 'fight' && [S.settings.fightAuto, sound().fightNow, sound().fighting, S.table.open, ch && ch.fightMood, spo.linked, (spo.moods || []).map((m) => [m.id, m.name])]]);
-        if (nsig === sig) { const inp = box.querySelector('input[type=range]'); if (inp && a && document.activeElement !== inp) { inp.value = a.volume; inp.nextSibling.textContent = pct(a.volume); } return; }
+    const track = (ch, kind) => {
+      const a = ch[kind]; const cmdName = kind === 'fight' ? 'chapter.fight' : 'chapter.ambience';
+      if (!a) return add(kind === 'fight' ? 'Choose fight music' : 'Choose ambience', kind === 'fight' ? 'swords' : 'music', () => pick(kind, kind === 'fight' ? 'combat' : 'chapter'));
+      return item(kind === 'fight' ? 'swords' : 'music', a.name, { flash: kind, missing: a.missing,
+        acts: [ib('refresh', 'Choose another', () => pick(kind, kind === 'fight' ? 'combat' : 'chapter')), ib('trash', kind === 'fight' ? 'Remove the fight music' : 'Remove the ambience', () => cmd(cmdName, { id: ch.id, path: null }))],
+        vol: vol(kind, a.volume, kind === 'fight' ? 'Fight music volume' : 'Ambience volume', (v) => send(kind, cmdName, { id: ch.id, volume: v })) });
+    };
+    const mapSounds = () => map().layers.filter((l) => l.role === 'audio');
+    let sig = '';
+    const foot = h('span', { class: 'grow hint snd-now' });
+    const mute = Hotbar.offer(btn('Mute all', 'volume-off', () => cmd('sound.quiet'), { kind: 'small snd-mute' }), doHot('quiet'));
+    bind(() => {
+      const ch = chNow(); const spo = S.spotify || {}; const sounds = mapSounds(); const bg = map().bg; const video = !!(bg && bg.kind === 'video');
+      const nsig = JSON.stringify([ch && [ch.id, ch.name, ch.ambience && [ch.ambience.name, ch.ambience.missing], ch.fight && [ch.fight.name, ch.fight.missing], ch.fightMood], map().id,
+        sounds.map((l) => [l.id, l.name, !!l.muted, !!l.missing]), video, sound().fightNow, spo.linked, (spo.moods || []).map((m) => [m.id, m.name])]);
+      if (nsig !== sig) {
         sig = nsig;
-        box.innerHTML = '';
-        if (!ch) return;
-        box.append(h('div', { class: 'ctl-label' }, kind === 'fight' ? `Fight music for ${ch.name}` : `Ambience for ${ch.name}`));
-        if (a) {
-          box.append(h('div', { class: 'snd-row', dataset: { flash: kind } }, iconEl(kind === 'fight' ? 'swords' : 'music'),
-            h('span', { class: `ellipsis grow ${a.missing ? 'danger-text' : ''}` }, a.name + (a.missing ? ' (missing)' : '')),
-            h('button', { class: 'icon-btn', 'aria-label': kind === 'fight' ? 'Remove the fight music' : 'Remove the ambience', 'data-tip': 'Remove', onclick: () => cmd(cmdName, { id: ch.id, path: null }) }, iconEl('trash'))));
-          const out = h('output');
-          const input = h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: a.volume, 'aria-label': kind === 'fight' ? 'Fight music volume' : 'Ambience volume' });
-          input.addEventListener('input', () => { out.textContent = pct(Number(input.value)); send(kind, cmdName, { id: ch.id, volume: Number(input.value) }); });
-          out.textContent = pct(a.volume);
-          box.append(h('label', { class: 'ctl ctl-slider' }, h('span', { class: 'ctl-label' }, 'Volume'), input, out));
-        }
-        if (kind === 'fight') {
+        C.chapter.el.hidden = C.fight.el.hidden = !ch;
+        if (ch) {
+          C.chapter.sub.textContent = ch.name;
+          C.chapter.body.replaceChildren(track(ch, 'ambience'));
           const fm = Spot.fightMoodCtl(ch, cmd);
-          if (fm) box.append(fm);
-          if (a || (ch.fightMood && spo.linked)) {
-            const on = !!sound().fightNow;
-            box.append(Hotbar.offer(btn(on ? 'Stop the fight music' : 'Play it now', on ? 'player-stop' : 'player-play', () => cmd('sound.fight', { on: !on }),
-              { kind: 'wide', tip: S.table.open ? 'Without starting a fight in Initiative' : 'Plays on the table: open the table first' }), doHot('fight')));
-          }
-          if (sound().fighting) box.append(hint('Playing now: the ambience waits quietly underneath.'));
-          box.append(h('button', { class: 'btn ghost small opt-link', onclick: () => App.openOptions('sound') }, iconEl('settings'), S.settings.fightAuto ? 'Settings: starts with Initiative' : 'Settings: does not start with Initiative'));
+          const on = !!sound().fightNow;
+          C.fight.body.replaceChildren(...[track(ch, 'fight'), fm,
+            ch.fight || (ch.fightMood && spo.linked) ? Hotbar.offer(btn(on ? 'Stop the fight music' : 'Play it now', on ? 'player-stop' : 'player-play', () => cmd('sound.fight', { on: !on }),
+              { kind: 'wide snd-fightnow', tip: S.table.open ? 'Without starting a fight in Initiative' : 'Plays on the table: open the table first' }), doHot('fight')) : null,
+            toggle({ label: 'Start with Initiative', get: () => S.settings.fightAuto !== false, set: (v) => ts.settings({ fightAuto: v }) })].filter(Boolean));
+          C.fight.body.lastChild.dataset.tip = 'The fight music starts and ends with a fight in Initiative';
         }
-        box.append(btn(a ? 'Choose another' : kind === 'fight' ? 'Choose fight music' : 'Choose ambience', kind === 'fight' ? 'swords' : 'music',
-          () => Drawer.open({ filter: 'sounds', purpose: kind, back: { pop: 'sound', tab: kind === 'fight' ? 'combat' : 'chapter' } }), { kind: 'wide' }));
-      });
-      return box;
-    }
-    // the map's own sounds: volume, mute and remove right here
-    function mapBox() {
-      const own = h('div', { class: 'stack' });
-      let ownSig = '';
-      bind(() => {
-        const sounds = map().layers.filter((l) => l.role === 'audio');
-        const bg = map().bg;
-        const nsig = JSON.stringify([map().id, sounds.map((l) => [l.id, l.name, !!l.muted, !!l.missing]), bg && bg.kind === 'video']);
-        if (nsig === ownSig) {
-          for (const inp of own.querySelectorAll('input.snd-vol')) {
-            const l = sounds.find((x) => x.id === inp.dataset.id);
-            const v = inp.dataset.id === 'bg' ? (bg && bg.volume) || 0 : l ? l.volume ?? 0.6 : null;
-            if (v != null && document.activeElement !== inp) inp.value = v;
-          }
-          return;
+        C.map.body.replaceChildren(...[
+          ...sounds.map((l) => item('music', l.name, { flash: l.id, muted: l.muted, missing: l.missing,
+            acts: [ib(l.muted ? 'volume-off' : 'volume', l.muted ? `Unmute ${l.name}` : `Mute ${l.name}`, () => cmd('layer.update', { id: l.id, muted: !l.muted })), ib('trash', `Remove ${l.name}`, () => undoable('layer.remove', { id: l.id }, `${l.name} removed`))],
+            vol: vol(l.id, l.volume ?? 0.6, `Volume of ${l.name}`, (v) => send(`snd-${l.id}`, 'layer.update', { id: l.id, volume: v })) })),
+          video ? item('movie', 'Video sound', { flash: 'bgsound', vol: vol('bg', bg.volume || 0, 'Volume of the video map', (v) => send('bg-vol', 'bg.update', { volume: v })) }) : null,
+          add('Add a sound', 'plus', () => pick('mapSound', 'map'), 'A sound that plays while this map is on the table')].filter(Boolean));
+      } else {
+        // the same sounds: only their volumes follow (not the one being dragged)
+        for (const inp of els.pop.querySelectorAll('input.snd-vol')) {
+          const id = inp.dataset.id; const l = sounds.find((x) => x.id === id);
+          const v = id === 'bg' ? (bg && bg.volume) || 0 : id === 'ambience' ? ch && ch.ambience && ch.ambience.volume : id === 'fight' ? ch && ch.fight && ch.fight.volume : l ? l.volume ?? 0.6 : null;
+          if (v != null && document.activeElement !== inp) { inp.value = v; inp.nextSibling.textContent = pct(Number(v)); }
         }
-        ownSig = nsig;
-        own.innerHTML = '';
-        own.append(h('div', { class: 'ctl-label' }, 'Sounds on this map'));
-        const vol = (id, v, label, set) => {
-          const inp = h('input', { type: 'range', class: 'snd-vol', min: 0, max: 1, step: 0.01, value: v, dataset: { id }, 'aria-label': `Volume of ${label}`, 'data-tip': 'Volume' });
-          inp.addEventListener('input', () => set(Number(inp.value)));
-          return inp;
-        };
-        for (const l of sounds) {
-          own.append(h('div', { class: `snd-row ${l.muted ? 'is-muted' : ''}`, dataset: { flash: l.id } },
-            iconEl('music'), h('span', { class: 'ellipsis grow', 'data-tip': l.name }, l.name),
-            vol(l.id, l.volume ?? 0.6, l.name, (v) => send(`snd-${l.id}`, 'layer.update', { id: l.id, volume: v })),
-            h('button', { class: 'icon-btn', 'aria-label': l.muted ? `Unmute ${l.name}` : `Mute ${l.name}`, 'data-tip': l.muted ? 'Muted. Click to hear it again' : 'Mute', onclick: () => cmd('layer.update', { id: l.id, muted: !l.muted }) }, iconEl(l.muted ? 'volume-off' : 'volume')),
-            h('button', { class: 'icon-btn', 'aria-label': `Remove ${l.name}`, 'data-tip': 'Remove', onclick: () => undoable('layer.remove', { id: l.id }, `${l.name} removed`) }, iconEl('trash'))));
-        }
-        if (bg && bg.kind === 'video') {
-          own.append(h('div', { class: 'snd-row', dataset: { flash: 'bgsound' } }, iconEl('movie'), h('span', { class: 'ellipsis grow', 'data-tip': 'The sound in the video map itself' }, 'Video sound'),
-            vol('bg', bg.volume || 0, 'the video map', (v) => send('bg-vol', 'bg.update', { volume: v }))));
-        }
-        if (!sounds.length) own.append(hint('None. The chapter ambience plays while this map is on the table.'));
-        else own.append(hint('This map\'s own sounds replace the chapter ambience.'));
-        own.append(btn('Add a sound to this map', 'plus', () => Drawer.open({ filter: 'sounds', purpose: 'mapSound', back: { pop: 'sound', tab: 'map' } }), { kind: 'wide' }));
-      });
-      return own;
-    }
-    // three tabs: the chapter's ambience, this map's sounds, fight music (the speakers and spell sounds: Options → Sound)
-    ui.soundTab = ui.soundTab || 'chapter';
-    const tabs = seg({ cls: 'seg-3 sound-tabs', options: [
-      { value: 'chapter', label: 'Chapter', icon: 'music', tip: 'The ambience of this chapter' },
-      { value: 'map', label: 'Map', icon: 'photo', tip: 'Sounds of this map' },
-      { value: 'combat', label: 'Combat', icon: 'swords', tip: 'Fight music' }],
-    get: () => ui.soundTab, set: (v) => { ui.soundTab = v; openPop('sound'); } });
-    if (ui.soundTab === 'spotify' || ui.soundTab === 'settings') ui.soundTab = 'chapter'; // (Spotify lives in the Toolbox, the settings in Options)
-    const body = { chapter: () => trackBox('ambience'), map: mapBox, combat: () => trackBox('fight') }[ui.soundTab] || (() => trackBox('ambience'));
-    return h('div', { class: 'stack' }, tabs, body());
+      }
+      // what sounds on the table right now
+      const open = !!S.table.open; const quiet = !!sound().quiet; const here = isLive();
+      const fighting = open && !!sound().fighting;
+      const own = sounds.filter((l) => !l.hidden);
+      const mapOn = open && here && (own.some((l) => !l.muted && !l.missing) || (video && (bg.volume || 0) > 0));
+      const chOn = open && here && !own.length && !!(ch && ch.ambience && !ch.ambience.missing);
+      const st = { fight: fighting ? 'on' : '', map: mapOn ? 'on' : '', chapter: chOn ? (fighting ? 'wait' : 'on') : '' };
+      for (const k of ['chapter', 'map', 'fight']) {
+        const v = st[k] ? (quiet ? 'muted' : st[k]) : '';
+        if (C[k].state.dataset.s === v) continue;
+        C[k].state.dataset.s = v;
+        C[k].el.classList.toggle('live', v === 'on');
+        C[k].state.replaceChildren(...(v === 'on' ? [h('i', { class: 'dot' }), 'Playing'] : v === 'wait' ? ['Waits'] : v === 'muted' ? ['Muted'] : []));
+      }
+      const name = fighting ? (ch && ch.fight && !(ch.fightMood && spo.linked) ? ch.fight.name : 'Fight music') : mapOn ? (own.find((l) => !l.muted) || { name: 'Video sound' }).name : chOn ? ch.ambience.name : '';
+      const t = !open ? 'The table is closed' : quiet ? 'Everything is muted' : name || (here ? 'Nothing is playing' : 'Another map is on the table');
+      if (foot.textContent !== t) foot.textContent = t;
+      foot.classList.toggle('on', open && !quiet && !!name);
+      mute.hidden = !open;
+      if (mute.dataset.q !== String(quiet)) { mute.dataset.q = String(quiet); mute.classList.toggle('on', quiet); mute.replaceChildren(iconEl(quiet ? 'volume' : 'volume-off'), quiet ? 'Unmute' : 'Mute all'); mute.dataset.tip = quiet ? 'Bring the table\'s sound back' : 'Fade all table sound out, for talk out of the game'; }
+    });
+    return h('div', { class: 'stack sound-pop' }, C.chapter.el, C.map.el, C.fight.el, popFoot(foot, mute));
   }
 
   function rgbToHex(rgb) {
@@ -3912,7 +3983,6 @@ const Play = (() => {
     if (back && back.options) { App.openOptions(back.options, key); return; } // 4.3: picked for Options → Sound
     if (!back || !S || !S.map) return;
     if (back.tool && ui.tool !== back.tool) setTool(back.tool);
-    if (back.tab) ui.soundTab = back.tab;
     ui.flashed = key ? String(key) : null; // the panel may need it while building (an open list)
     if (back.panel) TB.openPanel(back.panel);
     else if (popId !== back.pop) openPop(back.pop); else refreshPop();
@@ -3943,7 +4013,7 @@ const Play = (() => {
     doHot, toolHot, // Prototype 24: actions and tools on the hotbar
     ui, cmd, send, undoable, pending, ready: Ready,
     state: () => S, view: () => view, popId: () => popId,
-    ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib, cardSep },
+    ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib, cardSep, sideTabs, popFold, popFoot, flyCard },
     setTool: (t) => setTool(t), openPop: (id) => openPop(id), refreshPop: () => { refreshPop(); renderRail(); }, placeCard: () => placeCard(),
     openPanel: (id) => TB.openPanel(id), renderCtl: () => { if (S) renderTableCtl(); }, // (Beta 3.15: the rows under the preview open the Handout table, and follow the spotlight)
     get Drawer() { return Drawer; }, get Radial() { return Radial; },
@@ -4102,7 +4172,7 @@ const Play = (() => {
   });
   const Walls = WallsTool.create({
     ui, cmd, undoable, send, pending, state: () => S, view: () => view, popId: () => popId,
-    ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
+    ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib, sideTabs, popFold, popFoot },
     refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), setTool: (t) => setTool(t),
     get Radial() { return Radial; }, viewCenter: () => viewCenter(),
   });
@@ -4603,6 +4673,7 @@ const Play = (() => {
   // ---------- assets: stamp, scatter, select ----------
   function setBrush(it) {
     const tr = Trees.ofPath(it.path); // (Beta 3.21: a living tree, from the hotbar: the Living tab picks it)
+    if (ui.selAssets && ui.selAssets.length) setAssetSelection([]); // (Beta 3.61: a picked asset is let go: the panel shows what is in hand)
     if (tr) { pickLiving({ v: tr.v, size: tr.size }); if (ui.tool !== 'asset') setTool('asset'); openPop('asset'); return; }
     if (ui.assetTab !== 'library') setAssetTab('library');
     const url = it.url || UI.pathToUrl(it.path);
@@ -4936,9 +5007,9 @@ const Play = (() => {
     ].filter(Boolean);
   }
   // the look of the selected assets, or of the next one you stamp
-  function assetLookSection() {
+  function assetLookSection(o = {}) {
     const sel = () => ui.selAssets.map(layer).filter(Boolean);
-    const head = h('div', { class: 'look-head' });
+    const head = h('div', { class: 'look-head', hidden: o.head === false });
     bind(() => {
       const list = sel();
       const sig = list.map((a) => a.id).join();
@@ -4974,7 +5045,7 @@ const Play = (() => {
     // Beta 3.21: a selected living tree: another look right here; the next one placed turns at random (no Turn for it)
     const another = row(btn('Another look', 'arrows-shuffle', () => { const ids = sel().filter((a) => a.tree).map((a) => a.id); if (ids.length) cmd('layer.reroll', { ids }); }, { tip: 'A different tree of the same kind' }));
     bind(() => { another.hidden = !sel().some((a) => a.tree); });
-    return h('div', { class: 'stack look' }, head, another,
+    return h('div', { class: `stack ${o.head === false ? 'as-look' : 'look'}` }, head, another,
       slider({ label: 'Opacity', min: 0.1, max: 1, step: 0.05, get: () => get('opacity', 1), set: (v, k) => set('opacity', v, k), fmt: pct }),
       slider({ label: 'Darken', min: 0, max: 0.8, step: 0.05, get: () => get('dark', 0), set: (v, k) => set('dark', v, k), fmt: (v) => (v < 0.01 ? 'Off' : pct(v)) }),
       // Beta 3.10: its colours turned round the colour wheel (a red banner made blue, green leaves made autumn)
@@ -5002,34 +5073,31 @@ const Play = (() => {
       a.kind === 'video' ? { icon: 'movie', label: a.asVideo ? 'Prepared frames' : 'Sharp video', run: () => setAsVideo(a, !a.asVideo) } : null, // 4.8
     ].filter(Boolean), a.name);
   }
-  function buildAssetPop() {
-    const brushRow = h('div', { class: 'brush-row', dataset: { flash: 'brush' } });
-    bind(() => {
-      const b = ui.brush;
-      if (brushRow.dataset.path === (b ? b.path : '')) return;
-      brushRow.dataset.path = b ? b.path : '';
-      brushRow.innerHTML = '';
-      brushRow.append(h('span', { class: 'brush-thumb' }, b ? Thumbs.img(b.path, b.kind) : iconEl('trees')),
-        b ? UI.wrapName(b.name, 'grow') : h('span', { class: 'grow' }, 'No asset picked yet'),
-        btn(b ? 'Change' : 'Pick one', 'photo', () => Drawer.open({ cat: 'assets', purpose: 'brush', back: { pop: 'asset', tool: 'asset' } }), { kind: b ? '' : 'primary' }));
-    });
-    const recent = h('div', { class: 'brush-recent' });
-    bind(() => {
-      const list = (ui.recentBrushes || []).slice(0, 8);
-      const sig = list.map((b) => b.path).join('|') + (ui.brush ? ui.brush.path : '');
-      if (recent.dataset.sig === sig) return;
-      recent.dataset.sig = sig;
-      recent.innerHTML = '';
-      recent.hidden = list.length < 2;
-      for (const b of list) recent.append(h('button', { class: `brush-pick ${ui.brush && ui.brush.path === b.path ? 'on' : ''}`, 'data-tip': b.name, 'aria-label': b.name, onclick: () => setBrush(b) }, Thumbs.img(b.path, b.kind)));
-    });
+  // (Beta 3.61) Library and Living stand at the side as groups, Stamp and Scatter beside them. A banner shows the asset
+  // in hand; the look of the next one is a card beside the panel. A picked asset turns the panel into its card.
+  let assetSides = null;
+  function buildAssetPop(o = {}) {
+    const sel = () => ui.selAssets.map(layer).filter(Boolean);
+    const picked = sel().length > 0;
     const live = ui.assetTab === 'living';
-    const scatterBox = h('div', { class: 'stack' },
-      slider({ label: 'Brush size', min: 1, max: 12, step: 0.5, get: () => ui.scatterIn, set: (v) => { ui.scatterIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` }),
-      slider({ label: 'Spacing', min: 0.4, max: 3, step: 0.05, get: () => ui.scatterGap, set: (v) => { ui.scatterGap = v; }, fmt: (v) => (v < 0.8 ? 'Dense' : v > 1.8 ? 'Sparse' : 'Normal') }),
-      slider({ label: 'Size varies', min: 0, max: 0.6, step: 0.05, get: () => ui.scatterVary, set: (v) => { ui.scatterVary = v; }, fmt: (v) => `±${Math.round(v * 100)}%` }),
-      live ? null : toggle({ label: 'Random turn', get: () => ui.scatterTurn, set: (v) => { ui.scatterTurn = v; } })); // (living ones always turn at random)
-    bind(() => { scatterBox.hidden = ui.assetMode !== 'scatter'; });
+    const sq = (v) => `${v} ${v === 1 ? 'square' : 'squares'}`;
+    // (picked or let go while the panel stands: made again)
+    bind(() => { if ((sel().length > 0) !== picked && popId === 'asset') setTimeout(() => { if (popId === 'asset' && (sel().length > 0) !== picked) openPop('asset'); }, 0); });
+    const groups = sideTabs([
+      { value: 'library', label: 'Library', icon: 'photo', tip: 'Your own pictures and animations' },
+      { value: 'living', label: 'Living', icon: 'plant', tip: 'Trees, bushes and mushrooms that move in the wind' }],
+    () => (picked ? '' : ui.assetTab), (v) => { if (picked) setAssetSelection([]); setAssetTab(v); if (v === 'living') rollLiving(); openPop('asset'); updateBrushCursor(); updateAssetGhost(); }, { groups: true, cls: 'pop-groups as-groups', again: o.again, label: 'Assets' });
+    const tools = picked ? null : sideTabs([
+      { value: 'stamp', label: 'Stamp', icon: 'pointer', tip: 'One per click' },
+      { value: 'scatter', label: 'Scatter', icon: 'spray', tip: 'Drag to paint many, turned and sized at random' }],
+    () => ui.assetMode, (v) => { ui.assetMode = v; refreshPop(); updateBrushCursor(); updateAssetGhost(); }, { second: true, cls: 'pop-tools2 as-tools', again: o.again, label: 'How' });
+    const fly = !picked && ui.assetFly ? flyCard('Look', () => { ui.assetFly = false; openPop('asset'); }, [assetLookSection({ head: false })], true) : null;
+    assetSides = { els: [groups, tools, fly] };
+    const count = h('span', { class: 'grow hint' });
+    bind(() => { const n = map().layers.filter((l) => l.role === 'asset').length; count.textContent = n ? `${n} asset${n === 1 ? '' : 's'} on this map` : 'No assets on this map yet'; });
+    const foot = popFoot(count, btn('List', 'stack-2', () => openPop('layers'), { kind: 'small', tip: 'All assets in Layers' }));
+    const cap = h('div', { class: 'cap' });
+    const ban = h('div', { class: 'os-prev pop-ban fit as-ban', dataset: { flash: 'brush' } });
     const unlock = h('div', { class: 'ctl-row' });
     bind(() => {
       const locked = map().layers.filter((l) => l.role === 'asset' && l.locked);
@@ -5039,16 +5107,39 @@ const Play = (() => {
       unlock.hidden = !locked.length;
       if (locked.length) unlock.append(h('span', { class: 'grow hint' }, `${locked.length} locked`), btn('Unlock all', 'lock-open', () => { const ls = map().layers.filter((l) => l.role === 'asset' && l.locked); cmd('layer.many', { patches: ls.map((l) => ({ id: l.id, locked: false })) }); }));
     });
-    // Beta 3.21: two tabs: your library's pictures and animations, and the living trees, bushes and mushrooms
-    const tabs = seg({ cls: 'asset-tabs', options: [
-      { value: 'library', label: 'Library', icon: 'photo', tip: 'Your own pictures and animations' },
-      { value: 'living', label: 'Living', icon: 'plant', tip: 'Trees, bushes and mushrooms that move in the wind' }],
-    get: () => ui.assetTab, set: (v) => { setAssetTab(v); if (v === 'living') rollLiving(); openPop('asset'); updateBrushCursor(); updateAssetGhost(); } });
-    const mode = seg({ options: [{ value: 'stamp', label: 'Stamp', icon: 'pointer', tip: 'One per click' }, { value: 'scatter', label: 'Scatter', icon: 'spray', tip: 'Drag to paint many, turned and sized at random' }],
-      get: () => ui.assetMode, set: (v) => { ui.assetMode = v; refreshPop(); updateBrushCursor(); updateAssetGhost(); } });
-    const sq = (v) => `${v} ${v === 1 ? 'square' : 'squares'}`;
+    // a picked asset (or several): the panel is its card
+    if (picked) {
+      bind(() => {
+        const list = sel(); if (!list.length) return;
+        const sig = list.map((a) => a.id).join();
+        if (ban.dataset.sig === sig) return;
+        ban.dataset.sig = sig;
+        cap.replaceChildren(h('b', { class: 'ellipsis' }, list.length === 1 ? list[0].name : `${list.length} assets`), 'on the map · drag to move');
+        ban.replaceChildren(Thumbs.img(list[0].path, list[0].kind), h('span', { class: 'fx-ban-tag' }, 'picked'), cap);
+      });
+      return h('div', { class: 'stack asset-pop' }, ban, assetLookSection({ head: false }),
+        row(btn('All assets', 'arrow-left', () => setAssetSelection([]), { kind: 'small ghost fx-back', tip: 'Let go of it (also Esc, or a click on the empty map)' })), unlock, foot);
+    }
+    const how = () => (ui.assetMode === 'scatter' ? 'scatter' : 'a stamp');
+    const scatterBox = h('div', { class: 'stack' },
+      slider({ label: 'Brush size', min: 1, max: 12, step: 0.5, get: () => ui.scatterIn, set: (v) => { ui.scatterIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` }),
+      slider({ label: 'Spacing', min: 0.4, max: 3, step: 0.05, get: () => ui.scatterGap, set: (v) => { ui.scatterGap = v; }, fmt: (v) => (v < 0.8 ? 'Dense' : v > 1.8 ? 'Sparse' : 'Normal') }),
+      slider({ label: 'Size varies', min: 0, max: 0.6, step: 0.05, get: () => ui.scatterVary, set: (v) => { ui.scatterVary = v; }, fmt: (v) => `±${Math.round(v * 100)}%` }),
+      live ? null : toggle({ label: 'Random turn', get: () => ui.scatterTurn, set: (v) => { ui.scatterTurn = v; } })); // (living ones always turn at random)
+    bind(() => { scatterBox.hidden = ui.assetMode !== 'scatter'; });
+    const lookBtn = btn('Look', 'adjustments-horizontal', () => { ui.assetFly = !ui.assetFly; openPop('asset'); }, { kind: `wide os-fxset${ui.assetFly ? ' on' : ''}`, tip: 'The look of the next one you place: opacity, darken, hue and more' });
     if (live) {
       livingPick();
+      bind(() => {
+        const L = livingPick(); const v = Trees.variant(L.v); if (!v) return;
+        const has = Trees.sizesOf(L.v); const size = L.size === 'mixed' ? (has.includes('medium') ? 'medium' : has[0]) : L.size;
+        const text = [how(), L.size === 'mixed' ? 'mixed sizes' : L.size, sq(round(livingCells() * 4, 0) / 4)].join(' · ');
+        const sig = JSON.stringify([L.v, size, text]);
+        if (ban.dataset.sig === sig) return;
+        ban.dataset.sig = sig;
+        cap.replaceChildren(h('b', { class: 'ellipsis' }, v.label), text);
+        ban.replaceChildren(h('img', { class: 'pop-ban-pic', src: Trees.stillUrl(L.v, size), alt: '', draggable: false }), cap);
+      });
       // the size: Small, Medium, Large (each kind's own squares) or a mix; the slider fine-tunes it
       const sizes = seg({ cls: 'seg-4 living-sizes', options: [
         { value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }, { value: 'mixed', label: 'Mixed', tip: 'Each one small, medium or large, at random' }],
@@ -5060,18 +5151,36 @@ const Play = (() => {
         if (fine.dataset.m === String(mixed) && fine.firstChild) return;
         fine.dataset.m = String(mixed);
         fine.replaceChildren(mixed
-          ? slider({ label: 'Size', min: 0.5, max: 2, step: 0.05, get: () => ui.living.scale, set: (v) => { ui.living.scale = v; updateAssetGhost(); }, fmt: pct })
+          ? slider({ label: 'Size', min: 0.5, max: 2, step: 0.05, get: () => ui.living.scale, set: (v) => { ui.living.scale = v; updateAssetGhost(); refreshPop(); }, fmt: pct })
           : slider({ label: 'Size', min: 0.25, max: 8, step: 0.25, get: () => round(livingCells() * 4, 0) / 4,
-            set: (v) => { const L = livingPick(); ui.living.scale = v / Trees.squares(L.v, L.size); updateAssetGhost(); }, fmt: sq }));
+            set: (v) => { const L = livingPick(); ui.living.scale = v / Trees.squares(L.v, L.size); updateAssetGhost(); refreshPop(); }, fmt: sq }));
       });
-      return h('div', { class: 'stack' }, tabs, livingPicker(), sizes, mode, fine, scatterBox, assetLookSection(), sep(), windSection(), unlock);
+      return h('div', { class: 'stack asset-pop' }, ban, livingPicker(), sizes, fine, scatterBox, lookBtn, unlock, foot);
     }
-    return h('div', { class: 'stack' },
-      tabs, brushRow, recent, mode,
-      slider({ label: 'Size', min: 0.25, max: 8, step: 0.25, get: () => ui.assetCells, set: (v) => { ui.assetCells = v; updateAssetGhost(); }, fmt: sq }),
-      scatterBox,
-      assetLookSection(),
-      unlock);
+    bind(() => {
+      const b = ui.brush;
+      const text = b ? [how(), sq(ui.assetCells)].join(' · ') : 'pick one from your library';
+      const sig = JSON.stringify([b && b.path, text]);
+      if (ban.dataset.sig === sig) return;
+      ban.dataset.sig = sig; ban.dataset.path = b ? b.path : '';
+      cap.replaceChildren(h('b', { class: 'ellipsis' }, b ? b.name : 'No asset picked yet'), text);
+      ban.replaceChildren(b ? Thumbs.img(b.path, b.kind) : h('span', { class: 'pop-ban-none' }, iconEl('trees')),
+        h('span', { class: 'pop-ban-btn' }, btn(b ? 'Change' : 'Pick one', 'photo', () => Drawer.open({ cat: 'assets', purpose: 'brush', back: { pop: 'asset', tool: 'asset' } }), { kind: b ? 'small' : 'small primary', tip: 'Pick an asset from your library' })), cap);
+    });
+    const recent = h('div', { class: 'brush-recent' });
+    bind(() => {
+      const list = (ui.recentBrushes || []).slice(0, 8);
+      const sig = list.map((b) => b.path).join('|') + (ui.brush ? ui.brush.path : '');
+      if (recent.dataset.sig === sig) return;
+      recent.dataset.sig = sig;
+      recent.innerHTML = '';
+      recent.hidden = list.length < 2;
+      for (const b of list) recent.append(h('button', { class: `brush-pick ${ui.brush && ui.brush.path === b.path ? 'on' : ''}`, 'data-tip': b.name, 'aria-label': b.name, onclick: () => setBrush(b) }, Thumbs.img(b.path, b.kind)));
+    });
+    return h('div', { class: 'stack asset-pop' },
+      ban, recent,
+      slider({ label: 'Size', min: 0.25, max: 8, step: 0.25, get: () => ui.assetCells, set: (v) => { ui.assetCells = v; updateAssetGhost(); refreshPop(); }, fmt: sq }),
+      scatterBox, lookBtn, unlock, foot);
   }
   // Beta 3.21: the kinds as picture tiles, by group (Trees, Bushes, Mushrooms); two rows show, the rest scroll
   function livingPicker() {
