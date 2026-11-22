@@ -233,6 +233,7 @@ body[data-tool="draw"] #viewport, body[data-tool="mark"] #viewport, body[data-to
 body[data-tool="draw"][data-draw-mode="text"] #viewport { cursor: text; }
 body[data-tool="draw"][data-draw-mode="erase"] #viewport { cursor: cell; }
 body[data-tool="fx"] #viewport, body[data-tool="spell"] #viewport, body[data-tool="asset"] #viewport { cursor: crosshair; }
+body.fx-pick[data-tool="fx"] #viewport { cursor: pointer; } /* (Beta 3.64: a click here picks the painted area) */
 body.aligning #viewport, body.aiming #viewport { cursor: crosshair; }
 body.panning #viewport { cursor: grabbing !important; }
 
@@ -4384,3 +4385,9 @@ body.gm[data-tool="mark"] .sv-text { pointer-events: auto; cursor: move; }
 .seg-sizes.named .seg-btn { padding: 7px 1px; font-size: 11.5px; font-weight: 500; }
 .seg-sizes.named .seg-btn.on { font-weight: 600; }
 .tok-all.on { color: var(--torch); border-color: var(--torch); }
+
+/* ---------- Beta 3.64: Effects step 2 ---------- */
+/* Lights: four kinds of light in one row (Daylight is the fourth) */
+.lt-groups.lt-four .seg-btn { padding-left: 3px; padding-right: 3px; font-size: 12px; white-space: nowrap; }
+.tiles.os-lights.lt-day .tile .fx-pic { width: 100%; height: 44px; border-radius: 7px; object-fit: cover; background: #2a2622; visibility: visible; }
+.sv-edge { pointer-events: none; }

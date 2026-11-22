@@ -25,6 +25,11 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.64', [
+      'Effects → Elements: painted areas show a thin outline, and with Box or Round in hand a click inside an area picks it (a drag still draws). Where areas overlap, a second click takes the one under it',
+      'The picture on top of Elements plays the effect in hand, or the one under the pointer',
+      'Lights has a fourth kind, Daylight: Window light and Light shaft moved there from Elements',
+    ]],
     ['Beta 3.63', [
       'Animals: a Birds weather layer (small birds, crows, gulls, doves, geese or bats cross now and then), Circling birds (vultures, an eagle, gulls, crows) and the moment Birds take flight. They fly above the trees, under the fog',
       'Animals: Bats (fluttering, or a stream pouring out of a cave now and then), Insects (butterflies, bees, dragonflies, moths, flies), the moment Bat swarm, and Scene → Time of day → More → Moths round the lights',

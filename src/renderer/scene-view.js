@@ -119,6 +119,7 @@ class SceneView {
       atmo: layerCanvas('sv-atmo', 1280),
       crit: layerCanvas('sv-crit', 2560), // Second Builder (second-ground-life): critters, sharper than the effects layer, under the grid
       fly: layerCanvas('sv-fly', 2560), // Second Builder (second-birds): birds, bats, insects: above the tree tops, under the light and the fog
+      edge: layerCanvas('sv-edge', 1920), // (Beta 3.64) the GM's outlines of the painted areas, while Effects → Elements is open
       grid: layerCanvas('sv-gridc', 3840),
       veil: layerCanvas('sv-veil', 1280), // magical darkness: above the grid, under the tokens
       light: layerCanvas('sv-light', 960),
@@ -171,7 +172,7 @@ class SceneView {
     this.tcv = {}; this.treeN = 0; this.treeAt = 0; this.treeWindNow = null; this.treeShadows = true;
     this.unTrees = typeof Trees === 'object' ? Trees.onChange(() => { if (this.map && !this.dead) { this.renderLayers(); this.redrawSoon(); this.updateAnimation(); } }) : null;
     this.world.append(this.mapA, this.cv.sway.el, this.mapA2, this.cv.atmo.el, this.cv.crit.el, this.cv.grid.el, this.mapA3, this.cv.veil.el, this.cv.dv.el, this.mapB, this.mapA4, this.cv.fly.el, this.cv.light.el, this.cv.glow.el, this.cv.spell.el,
-      this.mapC, this.mapT, this.annoEl, this.glassEl, this.labelsEl, this.fogEl, this.offEl, this.wallsEl, this.areasEl, this.tableOv, this.cv.weather.el, this.cv.moment.el, this.inkEl, this.handlesEl, this.gizmoEl, this.marks);
+      this.mapC, this.mapT, this.annoEl, this.glassEl, this.labelsEl, this.fogEl, this.offEl, this.wallsEl, this.areasEl, this.tableOv, this.cv.weather.el, this.cv.moment.el, this.inkEl, this.cv.edge.el, this.handlesEl, this.gizmoEl, this.marks);
     this.root.appendChild(this.world);
     host.appendChild(this.root);
 
@@ -1656,6 +1657,31 @@ class SceneView {
   }
   selectSpell(id) { this.selectedSpell = id; this.labelSig = ''; this.renderLabels(); this.drawSpells(Date.now()); }
   selectFx(id) { this.selectedFx = id; this.handleSig = ''; this.renderHandles(); }
+  // Beta 3.64: the GM sees where every painted area ends while Effects → Elements is open. which: null (none), or a
+  // test for the areas to outline; hover: the area a click would pick
+  setAreas(which) { this.areasOf = which || null; this.edgeSig = ''; this.drawEdges(); }
+  hoverFx(id) { if ((this.hoverArea || null) === (id || null)) return; this.hoverArea = id || null; this.drawEdges(); }
+  // the painted areas under a point (map units), the smallest first
+  areasAt(x, y, test) {
+    if (!this.map) return [];
+    return this.map.fx.filter((f) => f.kind === 'region' && (!test || test(f)) && FX.hits(f, x, y)).map((f) => [f, FX.areaOf(f, 'pick')]).sort((a, b) => a[1] - b[1]).map((e) => e[0]);
+  }
+  drawEdges() {
+    const c = this.cv.edge;
+    const list = this.gm && this.map && this.areasOf ? this.map.fx.filter((f) => f.kind === 'region' && (f.strokes || []).length && this.areasOf(f)) : [];
+    if (!list.length) { if (!c.empty) clearCanvas(c); showLayer(c, false); this.edgeSig = ''; return; }
+    const sig = JSON.stringify([list.map((f) => [f.id, f.preset, FX.strokeSig(f), !!f.hidden]), this.v, this.ppi, c.el.width, c.el.height, this.R, this.selectedFx, this.hoverArea]);
+    if (sig === this.edgeSig) return;
+    this.edgeSig = sig;
+    showLayer(c, true);
+    const ctx = startCanvas(c);
+    this.mapXform(ctx, c.res);
+    const fam = (f) => { const e = FXDATA.ELEMENTS.find((x) => x.kind === 'region' && x.id === f.preset); const m = e && FXDATA.FAMILIES.find((x) => x.id === e.family); return m ? m.color : '#96beff'; };
+    for (const f of list) {
+      const on = f.id === this.selectedFx; const hov = f.id === this.hoverArea;
+      FX.edge(ctx, f, { color: on ? '#ffd27a' : fam(f), w: on || hov ? 2.5 : 1.5, alpha: on || hov ? 1 : f.hidden ? 0.4 : 0.75, fill: on ? 0.1 : hov ? 0.14 : 0 });
+    }
+  }
   // 'all' (Effects tool), 'party' (only party lights, for the select tool) or false
   setHandles(on) {
     if (this.showHandles === on) return;
@@ -2696,6 +2722,7 @@ class SceneView {
   // ---------- GM handles for effects and lights ----------
   renderHandles() {
     if (!this.gm) return;
+    this.drawEdges(); // (Beta 3.64: the outlines follow the map, the view and the pick as the markers do)
     if (!this.map || !this.showHandles) { if (this.handlesEl.firstChild) this.handlesEl.innerHTML = ''; this.handleSig = ''; return; }
     const g = this.map.grid;
     const list = this.showHandles === 'party' ? this.map.fx.filter((f) => f.kind === 'light' && f.preset === 'party') : this.map.fx;

@@ -16,7 +16,21 @@ const FxThumbs = (() => {
   const E_BOOST = { circling: [0.55, 1, 1], bats: [0.9, 1, 1], insects: [0.75, 1, 1], smoke: [1.6, 2.2, 1.5], steam: [1.3, 1.6, 1.3], fireflies: [0.7, 2, 3], sparkles: [1, 1.6, 2], glow: [1.2, 1.5, 1], vent: [1.2, 1.4, 1.4] };
   const R_BOOST = { bubbling: [1.5, 1.4, null], dust: [2, 3, '#e8d9b0'], grass: [2, 1, '#8fbf4a'], lava: [1.5, 2, null], swamp: [1.6, 2, null], mist: [1.2, 1, null] };
   // draw one effect on g (w × h dots, ppi dots a square) at time t; look: { color, variant }
+  // (Beta 3.64: look.play: seconds the playing picture has run; an effect that only shows now and then (a geyser, a
+  // dust devil, a stream of bats) plays that moment over and over)
   function draw(g, w, h, ppi, kind, id, t, look = {}, bg = null) {
+    FX.scratchSet('thumb'); // (canvases of its own: the map's layers keep theirs at their size)
+    try { drawOn(g, w, h, ppi, kind, id, t, look, bg); } finally { FX.scratchSet(''); }
+  }
+  // the moment such an effect shows (looked up once in a while, not at every frame)
+  const whens = new Map();
+  function when(fn, id, since) {
+    const key = `${fn}|${id}|${since}`; const e = whens.get(key); const now = performance.now();
+    if (e && now - e.at < 5000) return e.v;
+    const v = Creatures[fn]({ id: `th-${id}` }, since); whens.set(key, { v, at: now }); return v;
+  }
+  function drawOn(g, w, h, ppi, kind, id, t, look, bg) {
+    const play = look.play;
     g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.filter = 'none';
     g.fillStyle = '#2a2622'; g.fillRect(0, 0, w, h);
     if (bg) { const k = (ppi / 34) * 0.55; g.save(); g.scale(k, k); g.fillStyle = g.createPattern(bg, 'repeat'); g.fillRect(0, 0, w / k, h / k); g.restore(); }
@@ -34,7 +48,7 @@ const FxThumbs = (() => {
         FX.emitter(g, { id: `th-${id}`, kind: 'emitter', preset: id, r: d.r * B[0], intensity: B[1], density: B[2], speed: 1, color: look.color || d.color || null, flicker: true,
           ...(d.turn ? { angle: id === 'shaft' ? 35 : id === 'window' ? 60 : 0 } : {}), ...(d.kinds ? { variant: look.variant || d.kinds[0][0] } : {}),
           ...(id === 'window' ? { shape: 'arched', grid: 'cross', stretch: 1.5, dust: 1 } : {}), ...(id === 'shaft' ? { dust: 1 } : {}) }, stream ? W * 0.12 : W / 2, H / 2 + 0.3,
-          id === 'geyser' && typeof Creatures === 'object' ? Creatures.eruptionAt({ id: `th-${id}` }) : id === 'devil' && typeof Creatures === 'object' ? Creatures.devilAt({ id: `th-${id}` }) : stream ? Creatures.streamAt({ id: `th-${id}` }, 1.3) : t); // (second-water-works: a geyser is shown erupting; second-bats-insects: a stream pouring out)
+          id === 'geyser' && typeof Creatures === 'object' ? when('eruptionAt', id, play == null ? 1.2 : 0.1) + (play == null ? 0 : (play % 7) - 1) : id === 'devil' && typeof Creatures === 'object' ? when('devilAt', id, play == null ? 6 : 0.5) + (play == null ? 0 : play % 11) : stream ? when('streamAt', id, play == null ? 1.3 : 0.2) + (play == null ? 0 : play % 6) : t); // (second-water-works: a geyser is shown erupting; second-bats-insects: a stream pouring out)
         } finally { if (big) Creatures.scene(null); }
       } else {
         const B = R_BOOST[id] || [1, 1, null];
@@ -69,5 +83,23 @@ const FxThumbs = (() => {
     url(kind, id, o).then((u) => { if (u) { el.src = u; el.classList.remove('blank'); } });
     return el;
   }
-  return { url, img, draw };
+  // Beta 3.64: the same picture playing: a canvas that draws the effect as time goes by, about 24 times a second,
+  // while it is on the page (it stops by itself once it is taken off). o as for img()
+  function play(kind, id, o = {}) {
+    const w = Math.round((o.w || 284) * 2); const h = Math.round((o.h || 86) * 2);
+    const el = document.createElement('canvas'); el.width = w; el.height = h; el.className = 'fx-pic fx-play blank';
+    const g = el.getContext('2d'); let bg = null; let ready = false; let seen = false; let last = 0; const t0 = performance.now();
+    const pics = typeof Creatures === 'object' && Creatures.ready ? Creatures.ready() : Promise.resolve();
+    Promise.all([ground(FLOOR[`${kind}|${id}`]), pics]).then(([im]) => { bg = im; ready = true; });
+    const tick = (ms) => {
+      if (el.isConnected) seen = true; else if (seen || ms - t0 > 3000) return; // (taken off the page: over)
+      requestAnimationFrame(tick);
+      if (!ready || !el.isConnected || ms - last < 40 || document.hidden) return;
+      last = ms; const sec = (ms - t0) / 1000;
+      try { draw(g, w, h, (w / 208) * 34 * (o.zoom || 1), kind, id, 7.3 + sec, { ...o, play: sec }, bg); el.classList.remove('blank'); } catch (err) { /* (drawn again at the next frame) */ }
+    };
+    requestAnimationFrame(tick);
+    return el;
+  }
+  return { url, img, draw, play };
 })();

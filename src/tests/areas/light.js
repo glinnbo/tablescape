@@ -16,7 +16,7 @@ module.exports = (area) => {
     return M(t);
   };
   // (Beta 3.60) Effects → Elements: pick an effect by its tile ('r:mist', 'e:smoke'), a shape tool at the side
-  const element = async (t, key) => { await t.g(`(() => { Play.setTool('fx'); if (Play.ui.fxMode !== 'place' && Play.ui.fxMode !== 'paint') Play.ui.fxMode = 'paint'; if (Play.ui.region === 'roof') Play.ui.region = 'mist'; Play.ui.fxFam = 'all'; Play.openPop('fx'); document.querySelector('#pop .fx-gal .fx-t[data-v="${key}"]').click(); })()`); await t.sleep(250); };
+  const element = async (t, key) => { await t.g(`(() => { Play.setTool('fx'); if (Play.ui.fxMode !== 'place' && Play.ui.fxMode !== 'paint') Play.ui.fxMode = 'paint'; if (Play.ui.region === 'roof') Play.ui.region = 'mist'; if (Play.ui.emitter === 'window' || Play.ui.emitter === 'shaft') Play.ui.emitter = 'smoke'; Play.ui.fxFam = 'all'; Play.openPop('fx'); document.querySelector('#pop .fx-gal .fx-t[data-v="${key}"]').click(); })()`); await t.sleep(250); }; // (Beta 3.64: a daylight in hand is Lights)
   const shape = async (t, v) => { await t.g(`document.querySelector('#pop .os-tabs2 .tile[data-v="fxt-${v}"]').click()`); await t.sleep(250); };
   // how dark the TV is at a point of the map: 0 (lit) to 255 (black)
   const dark = async (t, x, y) => { const p = await t.t(`window.__table.probeMap('light', ${x}, ${y})`); return p ? p[3] : null; };
@@ -259,7 +259,7 @@ module.exports = (area) => {
     // Light sources: Holder, Flame, Just light
     await t.g(`Object.assign(Play.ui.lt, { group: 'holder', holder: 'cooking_fire', color: '', lit: true, reach: null, sat: null, intensity: 1, size: 1 }); Play.ui.fxMode = 'light'; Play.ui.lightTab = 'sources'; Play.openPop('fx')`);
     const tilesNow = () => t.g(`[...document.querySelectorAll('#pop .lt-kinds .tile')].map((b) => b.textContent.trim())`);
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .lt-groups .seg-btn')].map((b) => b.textContent.trim())`), ['Holder', 'Flame', 'Just light'], 'three kinds of light');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .lt-groups .seg-btn')].map((b) => b.textContent.trim())`), ['Holder', 'Flame', 'Just light', 'Daylight'], 'four kinds of light (Beta 3.64: Daylight)');
     await t.clickText('#pop .lt-groups .seg-btn', 'Flame');
     t.eq(await tilesNow(), ['Torch', 'Campfire', 'Candles'], 'Flame');
     await t.clickText('#pop .lt-groups .seg-btn', 'Just light');
@@ -447,7 +447,7 @@ module.exports = (area) => {
     t.eq([await groups(), await t.count('#pop .lt-groups'), await t.count('#pop .lt-kinds .tile') > 0], [['Scene', 'Lights*', 'Elements'], 1, true], 'Lights: the Light panel');
     // Elements: every effect a tile with a picture, sorted by family; a chip narrows them
     await group('elements');
-    t.eq(await t.count('#pop .fx-gal .fx-t'), 41, 'every element on one screen'); // (Beta 3.63: 42 less Sun through leaves, held back for the one engine) // (second-water-works: 29 and Rapids, Whirlpool, Bubbling pool, Geyser; second-birds: Circling birds; second-bats-insects: Bats, Insects; second-ground-life: Fish, Critters; second-sun-sand-gears: Turning parts, Sun through leaves, Drifting sand, Dust devil)
+    t.eq(await t.count('#pop .fx-gal .fx-t'), 39, 'every element on one screen'); // (Beta 3.64: 41 less Light shaft and Window light, now Lights → Daylight) // (Beta 3.63: 42 less Sun through leaves, held back for the one engine) // (second-water-works: 29 and Rapids, Whirlpool, Bubbling pool, Geyser; second-birds: Circling birds; second-bats-insects: Bats, Insects; second-ground-life: Fish, Critters; second-sun-sand-gears: Turning parts, Sun through leaves, Drifting sand, Dust devil)
     await t.until(() => t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t img')].filter((i) => /^data:image/.test(i.src)).length >= 20`), 15000, 'their pictures, drawn by the effects themselves');
     const gal = await t.g(`(() => { const g = document.querySelector('#pop .fx-gal'); const t0 = g.querySelector('.fx-t'); return { rows: Math.round(g.clientHeight / (t0.offsetHeight + 5)), scrolls: g.scrollHeight > g.clientHeight + 10, cols: getComputedStyle(g).gridTemplateColumns.split(' ').length }; })()`);
     t.eq(gal, { rows: 4, scrolls: true, cols: 5 }, 'five in a row, four rows show, the rest scrolls');
@@ -830,6 +830,81 @@ module.exports = (area) => {
     const chips = await t.g(`(() => { const b = document.querySelector('#pop .pop-body').getBoundingClientRect(); return [...document.querySelectorAll('#pop .fx-chips .cs-chip')].map((c) => { const r = c.getBoundingClientRect(); return [c.textContent, r.right <= b.right + 0.5 && c.scrollWidth <= c.clientWidth]; }); })()`);
     t.ok(chips.length === 7 && chips.every((c) => c[1]), 'All and six families: every chip inside the panel, none cut off', chips);
     await t.g(`Play.closePop(); Play.setTool('select')`);
+  }, { ms: 120000 });
+
+  // Beta 3.64 (Effects step 2, open point C11)
+  area.deep('Beta 3.64: painted areas show an outline in Elements; a click inside one picks it (Box or Round in hand), a second click the one under it; the brush still paints and a click effect is still placed; the banner plays; Daylight is in Lights', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    t.gm().webContents.focus();
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.looks = {}; Play.ui.fxFly = false; Play.ui.ltDay = false`);
+    t.handle('fx.shape', { mapId: own, id: 'p-water', preset: 'water', sid: 'a', shape: 'round', x: 11 * k, y: 3 * k, w: 6 * k, h: 5 * k });
+    t.handle('fx.shape', { mapId: own, id: 'p-mist', preset: 'mist', sid: 'a', shape: 'rect', x: 18 * k, y: 2 * k, w: 7 * k, h: 7 * k });
+    t.handle('fx.stroke', { mapId: own, id: 'p-blood', preset: 'blood', sid: 's1', r: 0.6 * k, pts: [20 * k, 5 * k, 21 * k, 5.6 * k, 21.6 * k, 5 * k] });
+    t.handle('fx.shape', { mapId: own, id: 'p-lava', preset: 'lava', sid: 'a', shape: 'rect', x: 12 * k, y: 10 * k, w: 5 * k, h: 3 * k });
+    t.handle('fx.cut', { mapId: own, sid: 'c1', shape: 'round', x: 13.5 * k, y: 10.5 * k, w: 2 * k, h: 2 * k });
+    await t.settle();
+    const edge = () => t.g(`(() => { const c = document.querySelector('.sv-edge'); if (!c || getComputedStyle(c).display === 'none') return 0; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 60) n++; return n; })()`);
+    t.eq(await edge(), 0, 'no outlines outside Effects');
+    await element(t, 'r:mist'); await shape(t, 'box');
+    const lines = await t.until(async () => { const n = await edge(); return n > 300 ? n : 0; }, 4000, 'the outlines in Elements');
+    t.ok(lines > 300, 'Elements open: the painted areas are outlined', lines);
+    // the point is in the area (and not where it was erased)
+    const hit = await t.g(`(() => { const fx = Play.state().map.fx; const F = (id) => fx.find((f) => f.id === id); const k = ${k}; return [FX.hits(F('p-water'), 14 * k, 5.5 * k), FX.hits(F('p-water'), 11.3 * k, 3.3 * k), FX.hits(F('p-lava'), 12.5 * k, 10.5 * k), FX.hits(F('p-lava'), 14.5 * k, 11.5 * k), FX.hits(F('p-blood'), 21 * k, 5.5 * k)]; })()`);
+    t.eq(hit, [true, false, true, false, true], 'in a Round, outside its corner, in a Box, in its erased hole, on a brush line');
+    // hover and click
+    const pw = await t.scr(14 * k, 5.5 * k); await t.mouse('mouseMove', pw.x, pw.y);
+    const hov = await t.until(() => t.g(`Play.view().hoverArea === 'p-water' && document.body.classList.contains('fx-pick')`), 3000, 'the water lights up under the pointer');
+    t.ok(hov, 'the area a click would pick lights up, the pointer is a hand');
+    await t.click(pw.x, pw.y);
+    await t.until(() => t.g(`Play.ui.selFx === 'p-water'`), 3000, 'the click picks the water');
+    t.ok(await t.until(() => t.g(`!!document.querySelector('#pop .fx-ban-tag') && !document.querySelector('#pop .fx-gal')`), 3000, 'its card'), 'a click inside the water picks it: the panel is its card');
+    const pb = await t.scr(21 * k, 5.5 * k); await t.click(pb.x, pb.y);
+    await t.until(() => t.g(`Play.ui.selFx === 'p-blood'`), 3000, 'the blood, the smaller of the two there');
+    await t.click(pb.x, pb.y);
+    await t.until(() => t.g(`Play.ui.selFx === 'p-mist'`), 3000, 'a second click takes the mist under it');
+    const ph = await t.scr(14.5 * k, 11.5 * k); await t.click(ph.x, ph.y);
+    await t.until(() => t.g(`Play.ui.selFx == null`), 3000, 'a click in the erased hole lets go');
+    t.ok(await t.until(() => t.g(`!!document.querySelector('#pop .fx-gal')`), 3000, 'the tiles again'), 'the smallest area first, then the one under it; a click on no area lets go');
+    // a drag still draws; nothing is picked
+    const strokes = () => M(t).fx.reduce((n, f) => n + (f.strokes ? f.strokes.length : 0), 0);
+    let n0 = strokes();
+    await t.drag(await t.scr(26 * k, 11 * k), await t.scr(28 * k, 13 * k));
+    await t.until(() => strokes() > n0, 4000, 'the box is drawn');
+    t.eq(await t.g(`Play.ui.selFx`), null, 'a drag draws and picks nothing');
+    // the brush paints inside an area; a click effect is placed inside an area
+    await shape(t, 'brush'); n0 = strokes();
+    await t.click(pw.x, pw.y);
+    await t.until(() => strokes() > n0, 4000, 'a dab of the brush');
+    t.eq(await t.g(`Play.ui.selFx`), null, 'the brush paints inside an area (it picks nothing)');
+    await element(t, 'e:smoke'); const e0 = M(t).fx.length;
+    await t.click(pw.x, pw.y);
+    await t.until(() => M(t).fx.length === e0 + 1, 4000, 'the smoke is placed');
+    t.eq(await t.g(`Play.ui.selFx`), null, 'a click effect is placed inside an area');
+    // the banner plays, with canvases of its own
+    const ban = await t.until(() => t.g(`(() => { const c = document.querySelector('#pop .fx-ban canvas.fx-play:not(.blank)'); return c ? c.toDataURL().length : 0; })()`), 5000, 'the playing banner');
+    await t.sleep(600);
+    const ban2 = await t.g(`document.querySelector('#pop .fx-ban canvas.fx-play').toDataURL().length`);
+    t.ok(ban > 2000 && ban !== ban2, 'the banner is a playing picture', [ban, ban2]);
+    // Lights → Daylight
+    t.eq(await t.g(`FXDATA.ELEMENTS.filter((e) => e.id === 'shaft' || e.id === 'window').length`), 0, 'Light shaft and Window light are no Elements tiles');
+    await t.g(`document.querySelector('[data-v="fxg-lights"]').click()`);
+    await t.until(() => t.g(`!!document.querySelector('#pop .lt-groups')`), 3000, 'the Light panel');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .lt-groups .seg-btn')].map((b) => b.textContent)`), ['Holder', 'Flame', 'Just light', 'Daylight'], 'four kinds of light');
+    t.eq(await edge(), 0, 'no outlines in Lights');
+    await t.g(`[...document.querySelectorAll('#pop .lt-groups .seg-btn')].find((b) => b.textContent === 'Daylight').click()`);
+    await t.until(() => t.g(`document.querySelectorAll('#pop .lt-day .tile').length === 2`), 3000, 'the two daylights');
+    t.eq(await t.g(`[[...document.querySelectorAll('#pop .lt-day .tile')].map((b) => b.textContent + (b.classList.contains('on') ? '*' : '')), document.querySelector('[data-v="fxg-lights"]').classList.contains('open'), [...document.querySelectorAll('#pop .win-picks')].length]`), [['Window light*', 'Light shaft'], true, 2], 'Daylight: Window light in hand, in Lights, with its window and bars');
+    const pd = await t.scr(20 * k, 12 * k); await t.click(pd.x, pd.y);
+    const win = await t.until(() => M(t).fx.find((f) => f.preset === 'window'), 4000, 'a window light on the map');
+    t.ok(win.shape === 'arched' && win.grid === 'cross', 'a click places it', win);
+    await t.g(`Play.selectFx(${JSON.stringify(win.id)})`);
+    t.ok(await t.until(() => t.g(`document.querySelector('[data-v="fxg-lights"]').classList.contains('open') && !!document.querySelector('#pop .fx-back') && !document.querySelector('#pop .lt-day')`), 3000, 'the picked window light'), 'picked: its card, in Lights');
+    await t.g(`Play.selectFx(null)`);
+    t.ok(await t.until(() => t.g(`document.querySelector('[data-v="fxg-lights"]').classList.contains('open') && document.querySelectorAll('#pop .lt-day .tile').length === 2`), 3000, 'Daylight again'), 'let go: Daylight again');
+    await t.g(`[...document.querySelectorAll('#pop .lt-groups .seg-btn')].find((b) => b.textContent === 'Holder').click()`);
+    t.ok(await t.until(() => t.g(`!!document.querySelector('#pop .light-card') && Play.ui.fxMode === 'light'`), 3000, 'the holders'), 'Holder brings the Light panel back');
+    await t.g(`Play.closePop(); Play.setTool('select')`);
+    t.eq(await edge(), 0, 'outlines gone with the tool');
   }, { ms: 120000 });
 
   area.deep('on the TV the effects lie under the fog, the weather above it', async (t) => {

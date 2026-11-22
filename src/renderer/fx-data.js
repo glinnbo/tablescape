@@ -290,7 +290,7 @@ const FXDATA = (() => {
   const ELEMENTS = [
     ['region', 'water', 'water'], ['region', 'current', 'water'], ['region', 'surf', 'water'], ['region', 'swamp', 'water'], ['region', 'ice', 'water'], ['emitter', 'falls', 'water'], ['region', 'rapids', 'water'], ['emitter', 'whirl', 'water'], ['region', 'bubbling', 'water'], ['emitter', 'geyser', 'water'], // (second-water-works)
     ['region', 'lava', 'fire'], ['region', 'burning', 'fire'], ['emitter', 'vent', 'fire'], ['emitter', 'smoke', 'fire'], ['emitter', 'steam', 'fire'],
-    ['region', 'mist', 'nature'], ['region', 'dust', 'nature'], ['region', 'grass', 'nature'], ['region', 'sway', 'nature'], ['region', 'turn', 'nature'], ['emitter', 'fireflies', 'nature'], ['emitter', 'shaft', 'nature'], ['emitter', 'window', 'nature'], ['region', 'drift', 'nature'], ['emitter', 'devil', 'nature'], // (Beta 3.63, Glinn: Sun through leaves ('dapple') has no tile yet: as white laid over the map it read as mist. It comes back with the one engine, where it can brighten the map itself; its drawing stays in creatures.js)
+    ['region', 'mist', 'nature'], ['region', 'dust', 'nature'], ['region', 'grass', 'nature'], ['region', 'sway', 'nature'], ['region', 'turn', 'nature'], ['emitter', 'fireflies', 'nature'], ['region', 'drift', 'nature'], ['emitter', 'devil', 'nature'], // (Beta 3.63, Glinn: Sun through leaves ('dapple') has no tile yet: as white laid over the map it read as mist. It comes back with the one engine, where it can brighten the map itself; its drawing stays in creatures.js)
     // (second-sun-sand-gears: Turning parts after Sway; Sun through leaves, Drifting sand, Dust devil)
     ['region', 'fish', 'animals'], // (second-ground-life)
     ['emitter', 'circling', 'animals'], // (second-birds)

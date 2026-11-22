@@ -545,7 +545,11 @@ const FX = (() => {
   }
   // scratch canvases the size of the layer
   // Only the part of the layer the area covers is worked on (B: a box in device pixels), which keeps this cheap.
-  const scratches = [];
+  // (Beta 3.64: one set of them for each place that draws at a size of its own: the map's layers, and the small
+  // playing picture in the Effects panel, which would else resize the layers' canvases at every frame)
+  let scratches = [];
+  const scratchSets = new Map([['', scratches]]);
+  function scratchSet(name = '') { let e = scratchSets.get(name); if (!e) { e = []; scratchSets.set(name, e); } scratches = e; }
   function scratch(i, W, H, B) {
     let c = scratches[i];
     if (!c) { c = document.createElement('canvas'); scratches[i] = c; }
@@ -574,6 +578,43 @@ const FX = (() => {
     const ax = Math.max(0, Math.floor(m.a * x0 + m.e)); const ay = Math.max(0, Math.floor(m.d * y0 + m.f));
     const bx = Math.min(W, Math.ceil(m.a * x1 + m.e)); const by = Math.min(H, Math.ceil(m.d * y1 + m.f));
     return bx > ax && by > ay ? { x: ax, y: ay, w: bx - ax, h: by - ay } : null;
+  }
+  // Beta 3.64: is this point (map units, as the strokes) in the painted area? In a stroke, and not in what was erased
+  // after that stroke
+  function hits(fx, x, y) {
+    const S = fx.strokes || []; if (!S.length) return false;
+    const later = cutsAfter(S);
+    for (let i = 0; i < S.length; i++) { const st = S[i]; if (st.cut || st.nm || !st.pts || !st.pts.length) continue; if (inCut([st], x, y) && !inCut(later[i], x, y)) return true; }
+    return false;
+  }
+  // Beta 3.64: the outline of a painted area, for the GM (o.w: its width in the layer's pixels; o.fill: a faint fill).
+  // The area's shape less the same shape worn down by w: right for any mix of boxes, rounds, brush lines and erasing
+  function edge(ctx, fx, o) {
+    const B = regionBox(ctx, fx, 0.05); if (!B) return;
+    const W = ctx.canvas.width; const H = ctx.canvas.height;
+    // (its shape, drawn fresh into a scratch canvas: outlines are drawn only when something changes, and a kept mask
+    // for every area would cost a layer's worth of memory each)
+    const m0 = scratch(20, W, H, B); m0.g.setTransform(ctx.getTransform());
+    m0.g.fillStyle = '#fff'; m0.g.strokeStyle = '#fff'; m0.g.lineCap = 'round'; m0.g.lineJoin = 'round';
+    drawStrokes(m0.g, fx.strokes || [], 0);
+    const mask = m0.c;
+    const ring = (w, color, alpha) => {
+      const a = scratch(21, W, H, B); a.g.drawImage(mask, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h);
+      a.g.globalCompositeOperation = 'destination-in';
+      for (let k = 0; k < 8; k++) { const an = (k / 8) * TAU; a.g.drawImage(mask, B.x, B.y, B.w, B.h, B.x + Math.cos(an) * w, B.y + Math.sin(an) * w, B.w, B.h); }
+      const b = scratch(22, W, H, B); b.g.drawImage(mask, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h);
+      b.g.globalCompositeOperation = 'destination-out'; b.g.drawImage(a.c, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h);
+      b.g.globalCompositeOperation = 'source-in'; b.g.fillStyle = color; b.g.fillRect(B.x, B.y, B.w, B.h);
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = alpha;
+      ctx.drawImage(b.c, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h); ctx.restore();
+    };
+    if (o.fill > 0) {
+      const f = scratch(22, W, H, B); f.g.drawImage(mask, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h);
+      f.g.globalCompositeOperation = 'source-in'; f.g.fillStyle = o.color; f.g.fillRect(B.x, B.y, B.w, B.h);
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = o.fill; ctx.drawImage(f.c, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h); ctx.restore();
+    }
+    ring(o.w + 1.5, '#0b0907', 0.5 * (o.alpha ?? 1)); // (a dark line under it: seen on a light map too)
+    ring(o.w, o.color, o.alpha ?? 1);
   }
   // put a finished scratch canvas onto the layer, cut to the painted area
   function stamp(ctx, sc, mask, op = 'source-over', alpha = 1) {
@@ -3001,6 +3042,7 @@ const FX = (() => {
     // Second Builder (second-water-works): the helpers creatures.js draws with
     samples, flowLines, along, heading, regionMask, regionBox, scratch, stamp, patternAt, noiseTile, causticTile, tinted, flowDir, h, count, dot, smoke, centreOf,
     areaOf, // (Beta 3.63: how big a painted area really is)
+    hits, edge, scratchSet, // (Beta 3.64: a click in an area picks it; its outline; the playing picture's own scratch canvases)
     layerAlpha, // (second-birds: the Birds layer fades in and out like the others)
     setQuality, emitter, waveOf, ventLevel, region, regionLights, anchor, sway, roof, lightMask, windowIcon, darkness, glow, weather, flashes, strike, weatherOn, spell, ghost, envelope, seedOf, sprite, rgba, mix, skinOf, flowTurn };
 })();
