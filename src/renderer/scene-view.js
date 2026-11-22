@@ -2276,16 +2276,20 @@ class SceneView {
   drawSway(t) {
     const c = this.cv.sway;
     const items = this.map.fx.filter((f) => f.kind === 'region' && f.preset === 'sway' && this.shown(f));
-    this.stats.sway = items.length;
-    const p = items.length ? this.bgPlacement() : null;
+    // Second Builder (second-water-works): a whirlpool turns the map's own water under it, on this sharp layer too
+    const swirls = typeof Creatures === 'object' ? this.map.fx.filter((f) => f.kind === 'emitter' && f.preset === 'whirl' && f.swirl !== false && !f.hidden && this.shown(f)) : [];
+    this.stats.sway = items.length + swirls.length;
+    const p = items.length || swirls.length ? this.bgPlacement() : null;
     if (!p || !this.bgNode) { clearCanvas(c); return; }
     const ctx = startCanvas(c);
     this.mapXform(ctx, c.res);
     const bg = { el: this.bgNode.el, x: p.x, y: p.y, w: p.w, h: p.h, turn: this.bgTurn(), key: this.bgNode.url };
     for (const f of items) FX.sway(ctx, f.hidden ? { ...f, intensity: (f.intensity ?? 1) * 0.35 } : f, t, this.cellK(), bg);
+    for (const f of swirls) { const q = this.fxPos(f); Creatures.swirl(ctx, f, q.x, q.y, t, bg); } // (second-water-works)
   }
   drawAtmo(t) {
     this._lo = this.myMoments(Date.now()).find((m) => m.id === 'lightsout') || null;
+    if (typeof Creatures === 'object') Creatures.wind(Trees.windOf(this.map)); // Second Builder (second-water-works): steam and gas drift with the map's wind
     const blades = this.bladesOn(); // (Beta 3.58: painted grass grows blades on the living layer instead)
     const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f) && !(blades && f.kind === 'region' && f.preset === 'grass')); // (Sway has a layer of its own; Roof only cuts the weather; Beta 3.54: a light put out has no flame)
     this.stats.emitters = all.filter((f) => f.kind === 'emitter').length;

@@ -400,6 +400,8 @@ const FX = (() => {
         break;
       }
       default:
+        // Second Builder (second-water-works): the living effects of creatures.js (Rapids, Whirlpool, Geyser, ...)
+        if (typeof Creatures === 'object' && Creatures.emitter(ctx, fx, x, y, t, r, I, C)) break;
         dot(ctx, sprite(C || '#ffffff'), x, y, r, 0.3 * I);
     }
     ctx.globalAlpha = 1;
@@ -1783,6 +1785,8 @@ const FX = (() => {
         break;
       }
       default:
+        // Second Builder (second-water-works): the painted effects of creatures.js
+        if (typeof Creatures === 'object') Creatures.region(ctx, fx, t, { pts, n, at, s, I, C });
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
@@ -2969,5 +2973,7 @@ const FX = (() => {
   }
 
   return { drawStrokes, strokeSig, // (Beta 3.58: painted grass's blades, living.js)
+    // Second Builder (second-water-works): the helpers creatures.js draws with
+    samples, flowLines, along, heading, regionMask, regionBox, scratch, stamp, patternAt, noiseTile, causticTile, tinted, flowDir, h, count, dot, smoke, centreOf,
     setQuality, emitter, waveOf, ventLevel, region, regionLights, anchor, sway, roof, lightMask, windowIcon, darkness, glow, weather, flashes, strike, weatherOn, spell, ghost, envelope, seedOf, sprite, rgba, mix, skinOf, flowTurn };
 })();

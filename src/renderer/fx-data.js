@@ -105,6 +105,9 @@ const FXDATA = (() => {
     { id: 'arcs', label: 'Crackling arcs', icon: 'waves-electricity', r: 1.5, turn: true, color: '#9fc8ff', tip: 'Electricity jumping between two ends: traps, machines. Size sets how far apart' },
     { id: 'vent', label: 'Vent', icon: 'cloud-up', r: 0.9, kinds: [['steam', 'Steam'], ['gas', 'Gas'], ['fire', 'Fire']], tip: 'Bursts every few seconds: a steam vent, a gas vent, a fire trap' },
     { id: 'falls', label: 'Falling water', icon: 'fountain', r: 1.1, tip: 'Where water lands: splash rings, spray and mist (the foot of a waterfall, a fountain, a dripping ceiling)' },
+    // Second Builder (second-water-works): drawn by creatures.js. spin: which way it turns; swirl: the map's own water turns too
+    { id: 'whirl', label: 'Whirlpool', icon: 'spiral', r: 1.5, kinds: [['whirlpool', 'Whirlpool'], ['maelstrom', 'Maelstrom']], kindsLabel: 'Kind', spin: true, tip: 'Foam spiralling into a dark middle; the map\'s own water turns with it' },
+    { id: 'geyser', label: 'Geyser', icon: 'ripple-up', r: 1, tip: 'A pool that bubbles, builds up and erupts now and then (Speed: how often)' },
     // 4.9: sunlight through a window: the bright patch on the floor with the shadows of its bars, dust in the air above it
     { id: 'window', label: 'Window light', icon: 'sun-low', r: 1, turn: true, tip: 'Sunlight through a window falling on the floor: the shadows of its bars, dust in the beam. Pick the window\'s shape and its bars; it lights a dark map' },
   ];
@@ -130,6 +133,9 @@ const FXDATA = (() => {
   const REGIONS = [
     { id: 'water', label: 'Water', icon: 'ripple', tip: 'Shallow water: light rippling over the bottom, glints' },
     { id: 'current', label: 'River current', icon: 'wave-sine', tip: 'Flowing water: it runs the way you paint the stroke' },
+    // Second Builder (second-water-works): drawn by creatures.js
+    { id: 'rapids', label: 'Rapids', icon: 'wave-saw-tool', tip: 'Whitewater: paint it the way the river flows. Amount: how many rocks break it' },
+    { id: 'bubbling', label: 'Bubbling pool', icon: 'bubble', kinds: [['mud', 'Mud'], ['bog', 'Bog'], ['spring', 'Hot spring'], ['tar', 'Tar']], kindsLabel: 'Kind', tip: 'Bubbles that swell and pop on the map\'s own mud or pool. Over 100 % Strength it brings its own colour' },
     { id: 'surf', label: 'Surf', icon: 'beach', tip: 'Paint the sea: waves of foam roll in to the edge of what you painted' },
     { id: 'blood', label: 'Blood', icon: 'droplet', tip: 'Pools and splatter; a fresh stroke spreads out for a moment' },
     { id: 'acid', label: 'Acid', icon: 'flask', tip: 'A green pool that bubbles and fumes' },
@@ -264,7 +270,7 @@ const FXDATA = (() => {
     { id: 'battle', label: 'Battle', color: '#e2525a' },
   ];
   const ELEMENTS = [
-    ['region', 'water', 'water'], ['region', 'current', 'water'], ['region', 'surf', 'water'], ['region', 'swamp', 'water'], ['region', 'ice', 'water'], ['emitter', 'falls', 'water'],
+    ['region', 'water', 'water'], ['region', 'current', 'water'], ['region', 'surf', 'water'], ['region', 'swamp', 'water'], ['region', 'ice', 'water'], ['emitter', 'falls', 'water'], ['region', 'rapids', 'water'], ['emitter', 'whirl', 'water'], ['region', 'bubbling', 'water'], ['emitter', 'geyser', 'water'], // (second-water-works)
     ['region', 'lava', 'fire'], ['region', 'burning', 'fire'], ['emitter', 'vent', 'fire'], ['emitter', 'smoke', 'fire'], ['emitter', 'steam', 'fire'],
     ['region', 'mist', 'nature'], ['region', 'dust', 'nature'], ['region', 'grass', 'nature'], ['region', 'sway', 'nature'], ['emitter', 'fireflies', 'nature'], ['emitter', 'shaft', 'nature'], ['emitter', 'window', 'nature'],
     ['region', 'glow', 'magic'], ['region', 'darkness', 'magic'], ['emitter', 'glow', 'magic'], ['emitter', 'sparkles', 'magic'], ['emitter', 'runes', 'magic'], ['emitter', 'portal', 'magic'], ['emitter', 'arcs', 'magic'],

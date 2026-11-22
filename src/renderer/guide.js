@@ -25,6 +25,9 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.62', [
+      'Water: Rapids, a Whirlpool (Whirlpool or Maelstrom, either way round; it can swirl the map\'s own water), a Bubbling pool (mud, bog, hot spring, tar) and a Geyser that erupts now and then',
+    ]],
     ['Beta 3.61', [
       'Eight more panels are built like Effects and Draw: tools and groups stand at the panel\'s side, a banner shows what is in hand, the rare settings fold away, and every panel fits the screen. Saved maps stay as they are',
       'Spells: the six shapes by name at the side, a banner with the spell in hand, every look with its name. What you set once (the screen effect, the squares, counting rounds, the sounds) is on the card "When it is cast". Clear is in the foot',

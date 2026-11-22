@@ -1325,7 +1325,11 @@ const Play = (() => {
   // the options edit the selected effect, or the next one you place
   const lookGroup = (f) => (Fixtures.isLight(f) ? 'light' : LOOK_GROUP[f.kind]); // (Beta 3.54: a flame that gives light is a light)
   const lookTarget = () => { const f = fxOf(ui.selFx); return f && lookGroup(f) === ui.fxMode ? f : null; };
-  const LOOK_DEFAULT = { color: null, intensity: 1, density: 1, speed: 1, flicker: true, sat: null, angle: null, variant: null, wave: null, dust: 1, shape: 'arched', grid: 'cross', stretch: 1.5 };
+  const LOOK_DEFAULT = { color: null, intensity: 1, density: 1, speed: 1, flicker: true, sat: null, angle: null, variant: null, wave: null, dust: 1, shape: 'arched', grid: 'cross', stretch: 1.5, spin: 1, swirl: true };
+  // Second Builder (second-water-works): the kind in hand, when it is one of this effect's kinds (ui.look is shared:
+  // a Vent's "steam" must not reach a Bubbling pool); else the effect's first kind
+  const kindOf = (d, v = lookGet('variant')) => (d && d.kinds ? (d.kinds.some((x) => x[0] === v) ? v : d.kinds[0][0]) : null);
+  const kindNext = (preset) => kindOf(REGIONS.find((x) => x.id === preset), ui.look.variant);
   // Beta 2: what the effect being edited (or the next one) is: its definition in EMITTERS / LIGHTS
   const lookDef = () => {
     const f = lookTarget();
@@ -1379,6 +1383,9 @@ const Play = (() => {
       shownIf(() => { const d = lookDef(); return !!(d && (d.turn || d.cone)); }, slider({ label: 'Facing (Ctrl + wheel turns it too)', min: 0, max: 355, step: 5, get: () => { const d = lookDef(); const v = lookGet('angle'); return ((v ?? defaultAngle(d)) % 360 + 360) % 360; }, set: (v, k) => lookSet('angle', v, k), fmt: (v) => `${Math.round(v)}°` })),
       // 4.9: a window light: which window, its bars, how far the light reaches into the room
       shownIf(() => { const d = lookDef(); return !!(d && d.id === 'window'); }, windowPicks()),
+      // Second Builder (second-water-works): a whirlpool's direction, and whether the map's own water turns with it
+      shownIf(() => { const d = lookDef(); return !!(d && d.spin); }, seg({ label: 'Turns', options: [{ value: 1, label: 'Clockwise' }, { value: -1, label: 'Anticlockwise' }], get: () => (lookGet('spin') === -1 ? -1 : 1), set: (v) => lookSet('spin', v) })),
+      shownIf(() => { const d = lookDef(); return !!(d && d.spin); }, toggle({ label: 'Swirl the water', get: () => lookGet('swirl') !== false, set: (v) => lookSet('swirl', v) })),
       // 4.3.2: the dust in a light shaft (4.9: and a window light), up to ten times as big
       shownIf(() => { const d = lookDef(); return !!(d && (d.id === 'shaft' || d.id === 'window')); }, slider({ label: 'Dust size', min: 0.1, max: 10, step: 0.05, get: () => lookGet('dust') ?? 1, set: (v, k) => lookSet('dust', v, k), fmt: (v) => `${round(v, 2)}×` })),
     ];
@@ -1585,7 +1592,7 @@ const Play = (() => {
     const ban = h('div', { class: 'os-prev fx-ban' }); const cap = h('div', { class: 'cap' }); let banSig = '';
     const how = () => {
       if (f) return f.kind === 'region' ? 'on the map' : 'on the map · drag it to move';
-      if (kind === 'emitter') { const v = def && def.kinds ? (def.kinds.find((x) => x[0] === (lookGet('variant') || def.kinds[0][0])) || def.kinds[0])[1].toLowerCase() : null; return ['a click', v].filter(Boolean).join(' · '); }
+      if (kind === 'emitter') { const v = def && def.kinds ? def.kinds.find((x) => x[0] === kindOf(def))[1].toLowerCase() : null; return ['a click', v].filter(Boolean).join(' · '); }
       const shape = { box: 'a box', round: 'a round', brush: 'the brush', erase: 'erase' }[ui.paintShape] || 'a box';
       return erase ? 'rubs out any painted effect' : [shape, def && def.noColor ? null : lookGet('color') ? 'your colour' : 'its own colour'].filter(Boolean).join(' · ');
     };
@@ -1609,7 +1616,7 @@ const Play = (() => {
     }
     // its rows: only what fits it
     const rows = [];
-    if (def && def.kinds && !erase) rows.push(seg({ label: 'What comes out', options: def.kinds.map(([v, label]) => ({ value: v, label })), get: () => lookGet('variant') || def.kinds[0][0], set: (v) => lookSet('variant', v) }));
+    if (def && def.kinds && !erase) rows.push(seg({ label: def.kindsLabel || 'What comes out', options: def.kinds.map(([v, label]) => ({ value: v, label })), get: () => kindOf(def), set: (v) => lookSet('variant', v) })); // (second-water-works: kindsLabel, kindOf)
     if (def && !def.noColor && !erase) rows.push(colorSwatches(() => lookGet('color'), (v) => lookSet('color', v)));
     if (def && kind === 'emitter') {
       const base = () => def.r * cellK();
@@ -3485,7 +3492,8 @@ const Play = (() => {
       intensity: L.intensity, density: L.density, speed: L.speed, flicker: L.flicker,
       bright: d.light ? d.light.bright : 0, dim: d.light ? d.light.dim : 0,
       sat: L.sat ?? (L.color ? 0.7 : 0.25),
-      ...(d.turn ? { angle: L.angle ?? defaultAngle(d) } : {}), ...(d.kinds ? { variant: L.variant || d.kinds[0][0] } : {}), ...(d.light && L.wave ? { wave: L.wave } : {}),
+      ...(d.turn ? { angle: L.angle ?? defaultAngle(d) } : {}), ...(d.kinds ? { variant: kindOf(d, L.variant) } : {}), ...(d.light && L.wave ? { wave: L.wave } : {}),
+      ...(d.spin ? { spin: L.spin === -1 ? -1 : 1, swirl: L.swirl !== false } : {}), // Second Builder (second-water-works)
       ...(d.id === 'shaft' || d.id === 'window' ? { dust: L.dust ?? 1 } : {}),
       ...(d.id === 'window' ? { shape: L.shape || LOOK_DEFAULT.shape, grid: L.grid || LOOK_DEFAULT.grid, stretch: L.stretch ?? LOOK_DEFAULT.stretch } : {}),
     });
@@ -4488,7 +4496,7 @@ const Play = (() => {
         if (r.w > 0 && r.h > 0) {
           const L = ui.look;
           if (d.erase) cmd('fx.cut', { sid: d.sid, shape: d.round ? 'round' : 'rect', x: r.x, y: r.y, w: r.w, h: r.h });
-          else cmd('fx.shape', { id: d.id, preset: d.preset, sid: d.sid, shape: d.round ? 'round' : 'rect', ...r, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed });
+          else cmd('fx.shape', { id: d.id, preset: d.preset, sid: d.sid, shape: d.round ? 'round' : 'rect', ...r, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset) }); // (second-water-works)
         }
       } else if (d.kind === 'paint') {
         flushPaint(d);
@@ -4612,7 +4620,7 @@ const Play = (() => {
   // it still fits). Another colour, strength, amount or speed starts a new area by itself ("Start a new area" is gone).
   function areaFor(preset, lastId) {
     const L = ui.look; const near = (a, b) => Math.abs((a ?? 1) - (b ?? 1)) < 0.005;
-    const fits = (f) => !!f && f.kind === 'region' && f.preset === preset && !f.os && !f.hidden && (f.color || null) === (L.color || null) && near(f.intensity, L.intensity) && near(f.density, L.density) && near(f.speed, L.speed);
+    const fits = (f) => !!f && f.kind === 'region' && f.preset === preset && !f.os && !f.hidden && (f.color || null) === (L.color || null) && near(f.intensity, L.intensity) && near(f.density, L.density) && near(f.speed, L.speed) && (f.variant || null) === kindNext(preset); // (second-water-works: and of the same kind)
     const last = fxOf(lastId);
     if (fits(last)) return last.id;
     const other = map().fx.slice().reverse().find(fits);
@@ -5221,7 +5229,7 @@ const Play = (() => {
       d.tail = pts.slice(-2);
       return;
     }
-    cmd('fx.stroke', { id: d.id, preset: d.preset, sid: d.sid, r: d.r, pts, coalesce: d.sid, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed });
+    cmd('fx.stroke', { id: d.id, preset: d.preset, sid: d.sid, r: d.r, pts, coalesce: d.sid, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset) }); // (second-water-works: its kind)
   }
   // Beta 3.41: a box or a round of a painted effect snaps to the grid's lines and half squares (a grid that is not
   // turned); Shift makes it a square or a circle. Returns the box in map units

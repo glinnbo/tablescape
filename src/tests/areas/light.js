@@ -447,7 +447,7 @@ module.exports = (area) => {
     t.eq([await groups(), await t.count('#pop .lt-groups'), await t.count('#pop .lt-kinds .tile') > 0], [['Scene', 'Lights*', 'Elements'], 1, true], 'Lights: the Light panel');
     // Elements: every effect a tile with a picture, sorted by family; a chip narrows them
     await group('elements');
-    t.eq(await t.count('#pop .fx-gal .fx-t'), 29, 'every element on one screen');
+    t.eq(await t.count('#pop .fx-gal .fx-t'), 33, 'every element on one screen'); // (second-water-works: 29 and Rapids, Whirlpool, Bubbling pool, Geyser)
     await t.until(() => t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t img')].filter((i) => /^data:image/.test(i.src)).length >= 20`), 15000, 'their pictures, drawn by the effects themselves');
     const gal = await t.g(`(() => { const g = document.querySelector('#pop .fx-gal'); const t0 = g.querySelector('.fx-t'); return { rows: Math.round(g.clientHeight / (t0.offsetHeight + 5)), scrolls: g.scrollHeight > g.clientHeight + 10, cols: getComputedStyle(g).gridTemplateColumns.split(' ').length }; })()`);
     t.eq(gal, { rows: 4, scrolls: true, cols: 5 }, 'five in a row, four rows show, the rest scrolls');
@@ -493,6 +493,67 @@ module.exports = (area) => {
     t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-fly .ctl-label')].filter((e) => e.offsetParent).map((e) => e.textContent)`), ['Strength', 'Amount', 'Speed'], 'Mist settings');
     await t.g(`Play.ui.fxFly = false; Play.ui.looks = {}; Play.closePop(); Play.setTool('select')`);
   }, { ms: 120000 });
+
+  // Second Builder (second-water-works)
+  area.deep('Water: Rapids, Whirlpool (its direction, Swirl the water), Bubbling pool (a kind per area) and a Geyser; they draw the same moment the same way', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    t.gm().webContents.focus();
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.looks = {}; Play.ui.fxFly = false; Play.ui.paintShape = 'box'; Play.ui.look = { ...Play.ui.look, variant: 'steam' }`);
+    await t.key('E');
+    await t.g(`document.querySelector('#pop .fx-groups .tile[data-g="elements"]').click()`); await t.sleep(300);
+    await t.g(`[...document.querySelectorAll('#pop .fx-chips .cs-chip')].find((b) => b.textContent === 'Water').click()`); await t.sleep(250);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t')].map((b) => b.textContent)`), ['Water', 'River current', 'Surf', 'Swamp', 'Ice', 'Falling water', 'Rapids', 'Whirlpool', 'Bubbling pool', 'Geyser'], 'the chip Water');
+    // Bubbling pool: its kinds (a Vent's "steam" in hand does not reach it); each kind an area of its own
+    await element(t, 'r:bubbling');
+    const kinds = () => t.g(`(() => { const l = [...document.querySelectorAll('#pop .ctl-label')].find((e) => e.textContent === 'Kind'); const c = l && l.closest('.ctl'); return c ? [...c.querySelectorAll('.seg-btn')].map((b) => b.textContent + (b.classList.contains('on') ? '*' : '')) : null; })()`);
+    t.eq(await kinds(), ['Mud*', 'Bog', 'Hot spring', 'Tar'], 'Kind: Mud first');
+    const pools = () => M(t).fx.filter((f) => f.kind === 'region' && f.preset === 'bubbling');
+    await t.drag(await t.scr(16 * k, 4 * k), await t.scr(19 * k, 6 * k), 6);
+    await t.until(() => pools().length === 1 && pools()[0].variant === 'mud', 3000, 'a mud pool');
+    await t.g(`(() => { const l = [...document.querySelectorAll('#pop .ctl-label')].find((e) => e.textContent === 'Kind'); [...l.closest('.ctl').querySelectorAll('.seg-btn')].find((b) => b.textContent === 'Tar').click(); })()`); await t.sleep(150);
+    await t.drag(await t.scr(21 * k, 4 * k), await t.scr(24 * k, 6 * k), 6);
+    await t.until(() => pools().length === 2, 3000, 'tar is an area of its own');
+    t.eq(pools().map((f) => f.variant), ['mud', 'tar'], 'each with its kind');
+    // Rapids: painted like River current
+    await element(t, 'r:rapids');
+    await t.drag(await t.scr(16 * k, 8 * k), await t.scr(26 * k, 10 * k), 6);
+    await t.until(() => M(t).fx.some((f) => f.preset === 'rapids'), 3000, 'rapids');
+    // Whirlpool: a click; Turns and Swirl the water on its card
+    await element(t, 'e:whirl');
+    t.eq(await kinds(), ['Whirlpool*', 'Maelstrom'], 'Kind: Whirlpool or Maelstrom');
+    await t.g(`document.querySelector('#pop .os-fxset').click()`); await t.sleep(300);
+    const labels = await t.g(`[...document.querySelectorAll('#pop .fx-fly .ctl-label')].filter((e) => e.offsetParent).map((e) => e.textContent)`);
+    t.ok(labels.includes('Turns') && labels.includes('Swirl the water'), 'its card: which way it turns, whether the water turns', labels);
+    await t.g(`(() => { const l = [...document.querySelectorAll('#pop .fx-fly .ctl-label')].find((e) => e.textContent === 'Turns'); [...l.closest('.ctl').querySelectorAll('.seg-btn')].find((b) => b.textContent === 'Anticlockwise').click(); })()`); await t.sleep(150);
+    const at = await t.scr(22 * k, 13 * k); await t.click(at.x, at.y);
+    const w = await t.until(() => M(t).fx.find((f) => f.preset === 'whirl'), 3000, 'a whirlpool');
+    t.eq([w.variant, w.spin, w.swirl], ['whirlpool', -1, undefined], 'anticlockwise, the water turning with it');
+    await t.g(`Play.ui.fxFly = false; Play.ui.look.spin = 1; Play.ui.looks = {}; Play.closePop(); Play.setTool('select')`);
+    t.handle('fx.update', { mapId: own, id: w.id, swirl: false }); await t.settle();
+    t.eq(M(t).fx.find((f) => f.id === w.id).swirl, false, 'Swirl the water off');
+    // drawn: the same moment the same way (both screens), something on the canvas, a geyser erupting is a moment to see
+    const r = await t.g(`(() => {
+      const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d');
+      const draw = (fx, t, kind) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 400, 300); g.setTransform(40, 0, 0, 40, 0, 0); if (kind === 'r') FX.region(g, fx, t, 1); else FX.emitter(g, fx, 5, 3.75, t); return c.toDataURL(); };
+      const ink = () => { const d = g.getImageData(0, 0, 400, 300).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; };
+      const st = [{ sid: 'a', r: 1.2, pts: [1, 3.75, 4, 3.5, 7, 4, 9, 3.75], t0: 0 }];
+      const out = {};
+      for (const [name, fx, kind] of [['rapids', { id: 'tr', kind: 'region', preset: 'rapids', strokes: st }, 'r'], ['mud', { id: 'tb', kind: 'region', preset: 'bubbling', variant: 'mud', strokes: st }, 'r'], ['spring', { id: 'ts', kind: 'region', preset: 'bubbling', variant: 'spring', strokes: st }, 'r'], ['whirl', { id: 'tw', kind: 'emitter', preset: 'whirl', r: 2 }, 'e'], ['maelstrom', { id: 'tm', kind: 'emitter', preset: 'whirl', variant: 'maelstrom', r: 2, spin: -1 }, 'e']]) {
+        const a = draw(fx, 12.3, kind); const n = ink(); const b = draw(fx, 12.3, kind);
+        out[name] = [a === b, n > 500];
+      }
+      // foam on the whirlpool: light pixels over dark water
+      g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#063040'; g.fillRect(0, 0, 400, 300); g.setTransform(40, 0, 0, 40, 0, 0);
+      FX.emitter(g, { id: 'tw', kind: 'emitter', preset: 'whirl', r: 3 }, 5, 3.75, 95342390);
+      { const d = g.getImageData(0, 0, 400, 300).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 90) n++; out.foam = n > 1500; }
+      const gy = { id: 'tg', kind: 'emitter', preset: 'geyser', r: 1.5 };
+      const te = Creatures.eruptionAt(gy, 1.2);
+      const a1 = draw(gy, te, 'e'); const erupt = ink();
+      out.geyser = [erupt > 2000 && a1 === draw(gy, te, 'e'), Creatures.erupting(gy, te), Creatures.erupting(gy, te - 15)];
+      return out;
+    })()`);
+    t.eq(r, { rapids: [true, true], mud: [true, true], spring: [true, true], whirl: [true, true], maelstrom: [true, true], foam: true, geyser: [true, 1, 0] }, 'each draws, the same moment the same way; the geyser erupts now and then');
+  }, { ms: 90000 });
 
   area.deep('on the TV the effects lie under the fog, the weather above it', async (t) => {
     await clean(t);

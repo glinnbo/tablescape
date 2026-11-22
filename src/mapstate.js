@@ -963,6 +963,8 @@ function applyRaw(map, type, p, media) {
       // Beta 2: which way it faces (light shaft, arcs, a bullseye lantern), what kind (a vent), how its light lives
       if (p.angle != null) fx.angle = normDeg(p.angle);
       if (p.variant) fx.variant = String(p.variant).slice(0, 20);
+      if (p.spin === -1) fx.spin = -1; // Second Builder (second-water-works): a whirlpool turning anticlockwise
+      if (p.swirl === false) fx.swirl = false; // (second-water-works) the map's own water stays still under it
       if (p.wave) fx.wave = ['pulse', 'sputter'].includes(p.wave) ? p.wave : null;
       if (p.cone) fx.cone = Math.min(180, Math.max(10, Number(p.cone) || 53));
       if (p.dust != null) fx.dust = Math.min(12, Math.max(0.05, Number(p.dust) || 1)); // 4.3.2: the dust in a light shaft
@@ -991,6 +993,8 @@ function applyRaw(map, type, p, media) {
       if (fx.holder && 'wall' in p) { if (p.wall) fx.wall = String(p.wall); else delete fx.wall; }
       if (fx.holder && 'hs' in p) fx.hs = Math.min(4, Math.max(0.25, Number(p.hs) || 1));
       if ('wave' in p) fx.wave = ['pulse', 'sputter'].includes(p.wave) ? p.wave : null;
+      if ('spin' in p) { if (p.spin === -1) fx.spin = -1; else delete fx.spin; } // Second Builder (second-water-works)
+      if ('swirl' in p) { if (p.swirl === false) fx.swirl = false; else delete fx.swirl; } // (second-water-works)
       if ('dust' in p) fx.dust = Math.min(12, Math.max(0.05, Number(p.dust) || 1));
       if (p.shape) fx.shape = String(p.shape).slice(0, 20);
       if (p.grid) fx.grid = String(p.grid).slice(0, 20);
@@ -1002,6 +1006,7 @@ function applyRaw(map, type, p, media) {
       let fx = map.fx.find((x) => x.id === p.id);
       if (!fx) {
         fx = { id: p.id, kind: 'region', preset: String(p.preset || 'mist'), strokes: [], intensity: p.intensity ?? 1, hidden: false, color: p.color || null, density: p.density ?? 1, speed: p.speed ?? 1 };
+        if (p.variant) fx.variant = String(p.variant).slice(0, 20); // Second Builder (second-water-works): a painted kind (Bubbling pool)
         map.fx.push(fx);
       }
       let s = fx.strokes.find((x) => x.sid === p.sid);
@@ -1015,6 +1020,7 @@ function applyRaw(map, type, p, media) {
       let fx = map.fx.find((f) => f.id === p.id);
       if (!fx) {
         fx = { id: p.id, kind: 'region', preset: String(p.preset || 'mist'), strokes: [], intensity: p.intensity ?? 1, hidden: false, color: p.color || null, density: p.density ?? 1, speed: p.speed ?? 1 };
+        if (p.variant) fx.variant = String(p.variant).slice(0, 20); // (second-water-works)
         map.fx.push(fx);
       }
       if (fx.kind !== 'region') return { changed: null };
