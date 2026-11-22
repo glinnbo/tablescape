@@ -713,7 +713,7 @@ module.exports = (area) => {
     await t.g(`Play.setTool('oldschool'), Play.openPop('oldschool')`); await tool(t, 'floor'); await tabsOut(t);
     t.ok(!(await t.count('#pop .os-fxkinds')) && (await t.count('#pop .os-floors')) === 1, 'Texture has its tiles and no effects');
     await group(t, 'style');
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fxkinds .os-pick')].map((b) => b.textContent)`), ['Grass', 'Water', 'Lava', 'Shimmer', 'Pulse', 'Ripple'], 'Style (Beta 3.49): the six effects, picked in the panel');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-fxkinds .os-pick')].map((b) => b.textContent)`), ['Grass', 'Water', 'Ember glow', 'Shimmer', 'Pulse', 'Ripple'], 'Style (Beta 3.49): the six effects, picked in the panel');
     await fxPick(t, 'grass');
     t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.textContent)`), ['Box', 'Round', 'Shape', 'Brush', 'Fill', 'Erase'], 'Grass: six ways to draw it, as the tabs');
     t.ok(!(await t.count('#pop .os-level')) && !(await t.count('#pop .os-edges')) && !(await t.count('#pop .os-blend')) && !(await t.count('#pop .os-floors')), 'no height, no edge, no blending, no tiles');

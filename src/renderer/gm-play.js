@@ -688,6 +688,7 @@ const Play = (() => {
       lights: ['Holder: a light with what holds it (a wall light sits on the wall near the click). Flame: a flame and its light. Just light: light only; click a token so it carries it. Daylight: sunlight through a window, or a beam through a hole; Ctrl + wheel turns it.', 'Click a light to pick it: the same rows change it, drag moves it, Delete removes it.', 'The same panel is in Draw → Structure → Light.', 'The party\'s own light is set in Play → Party marker (U).', 'Lights show once the map is dark: Scene → Time of day or Darkness.'],
       elements: ['Pick an effect: a click on the map places it, or a drag paints it. The effect knows which.', 'For painted effects Box, Round, Brush and Erase come out at the side. Alt erases with the shape in hand; [ and ] size the brush.',
         'Painted areas show a thin outline. With Box or Round in hand, a click inside an area picks it (a drag still draws); a second click takes the one under it. Any effect can be picked by its marker: drag it to move it, right-click it for more. A click beside a picked effect lets go and places nothing.', 'Each effect remembers its own colour and size. Painting in another colour starts a new area by itself.',
+        'Water moves the map itself: a pond in the picture ripples, a floor becomes a pool. Ember glow, Shimmer, Pulse and Ripple light up what is in the map picture (lava, crystals, runes); on a plain floor they show nothing. Their settings are for all of that effect on the map.',
         'The chips narrow the tiles to one family.'],
     }[fxGroup()] || [])],
     walls: () => [({
@@ -1374,7 +1375,25 @@ const Play = (() => {
   const satNow = () => { const v = lookGet('sat'); if (v != null) return v; const f = lookTarget(); return f ? lightSat(f) : (lookGet('color') ? 0.7 : 0.25); };
   // Beta 3.58 (Glinn): painted grass grows the living blades of Oldschool maps (with a graphics card). How they grow is
   // the map's grass, as on Draw's Grass card: one for all the grass of the map; the colour stays the area's own
-  const bladesHere = () => { const d = lookDef(); return ui.fxMode === 'paint' && !!(d && d.id === 'grass') && typeof Living === 'object' && Living.supported(); };
+  // Beta 3.65: the engine (living.js) also draws Water over a still map picture, and Ember glow, Shimmer, Pulse and
+  // Ripple. engineFx(): the engine's name for the effect being edited (or the next one) when the engine draws it
+  const liveSupported = () => typeof Living === 'object' && Living.supported();
+  const stillMap = () => { const b = map() && map().bg; return !!(b && (b.os || b.kind === 'image')); };
+  const engineFx = () => {
+    const d = lookDef(); if (ui.fxMode !== 'paint' || !d) return null;
+    if (d.live) return d.live;
+    if (!liveSupported()) return null;
+    return d.id === 'grass' ? 'grass' : d.id === 'water' && stillMap() ? 'water' : null;
+  };
+  const bladesHere = () => engineFx() === 'grass';
+  // the map's settings for one of the engine's effects (one for all of it on this map, as Draw's cards)
+  function liveCard(fx) {
+    const now = () => (map() && map().live && map().live[fx]) || {};
+    const sl = (label, f, min, max, tip) => { const el = slider({ label, min, max, step: 0.05, get: () => (now()[f] != null ? now()[f] : null), set: (v, k) => send(k || `live-${fx}-${f}`, 'live.set', { fx, set: { [f]: v } }), fmt: pct }); if (tip) el.dataset.tip = tip; return el; };
+    if (fx === 'water') return [sl('Transparency', 'clear', 0, 1), sl('Speed', 'speed', 0.3, 2.5)];
+    if (fx === 'lava') return [sl('Glow', 'glow', 0, 2), sl('Embers', 'embers', 0, 2), sl('Heat shimmer', 'heat', 0, 1), sl('Speed', 'speed', 0.3, 2.5), sl('Pick-up range', 'range', 0, 1, 'How much of the map counts as red-hot')];
+    return [sl('Intensity', 'power', 0, 2), sl('Speed', 'speed', 0.3, 2.5), sl('Pick-up range', 'range', 0, 1, 'How bright and strong a colour must be to shine: further right picks up more')];
+  }
   function grassCard() {
     const now = () => (map() && map().live && map().live.grass) || {};
     const sl = (label, f, min, max, tip) => { const el = slider({ label, min, max, step: 0.05, get: () => (now()[f] != null ? now()[f] : 1), set: (v, k) => send(k || `live-grass-${f}`, 'live.set', { fx: 'grass', set: { [f]: v } }), fmt: pct }); if (tip) el.dataset.tip = tip; return el; };
@@ -1403,7 +1422,9 @@ const Play = (() => {
     dust: () => shownIf(() => { const d = lookDef(); return !!(d && (d.id === 'shaft' || d.id === 'window')); }, slider({ label: 'Dust size', min: 0.1, max: 10, step: 0.05, get: () => lookGet('dust') ?? 1, set: (v, k) => lookSet('dust', v, k), fmt: (v) => `${round(v, 2)}×` })),
   };
   function fxSettings() {
-    if (bladesHere()) return [grassCard()];
+    const eng = engineFx();
+    if (eng === 'grass') return [grassCard()];
+    if (eng) return liveCard(eng); // (Beta 3.65)
     return [
       fxRow.strength(), fxRow.amount(), fxRow.speed(), fxRow.facing(), fxRow.window(),
       // Second Builder (second-water-works): a whirlpool's direction, and whether the map's own water turns with it
@@ -1644,7 +1665,7 @@ const Play = (() => {
       if (f) return f.kind === 'region' ? 'on the map' : 'on the map · drag it to move';
       if (kind === 'emitter') { const v = def && def.kinds ? def.kinds.find((x) => x[0] === kindOf(def))[1].toLowerCase() : null; return ['a click', v].filter(Boolean).join(' · '); }
       const shape = { box: 'a box', round: 'a round', brush: 'the brush', erase: 'erase' }[ui.paintShape] || 'a box';
-      return erase ? 'rubs out any painted effect' : [shape, def && def.noColor ? null : lookGet('color') ? 'your colour' : 'its own colour'].filter(Boolean).join(' · ');
+      return erase ? 'rubs out any painted effect' : [shape, def && def.live ? (stillMap() ? 'lights up the map picture' : 'needs a still map picture') : null, def && def.noColor ? null : lookGet('color') ? 'your colour' : 'its own colour'].filter(Boolean).join(' · ');
     };
     const picture = (k, d, look, play) => (k === 'region' && (d.id === 'sway' || d.id === 'roof' || d.id === 'turn') ? h('span', { class: 'fx-pic noimg' }, iconEl(d.icon)) : (play ? FxThumbs.play : FxThumbs.img)(k, d.id, { w: 284, h: 86, zoom: 0.56, ...look })); // (Beta 3.64: the banner's picture plays)
     const acts = f ? h('div', { class: 'fx-ban-acts' }) : null;
@@ -1678,7 +1699,7 @@ const Play = (() => {
     if (f && f.kind === 'region' && f.preset === 'oil') rows.push(row(btn('Set it alight', 'flame', () => { const x = lookTarget(); if (x) undoable('fx.update', { id: x.id, preset: 'burning' }, `${fxLabel(x)} is burning`); }, { kind: 'primary', tip: 'The oil becomes burning ground (Undo puts it out)' })));
     let fly = null;
     if (def && !erase && !o.day) {
-      rows.push(btn(`${def.label} settings`, 'adjustments-horizontal', () => { ui.fxFly = !ui.fxFly; openPop('fx'); }, { kind: `wide os-fxset${ui.fxFly ? ' on' : ''}`, tip: 'How strong, how much, how fast' }));
+      rows.push(btn(`${def.label} settings`, 'adjustments-horizontal', () => { ui.fxFly = !ui.fxFly; openPop('fx'); }, { kind: `wide os-fxset${ui.fxFly ? ' on' : ''}`, tip: engineFx() ? 'For all of it on this map' : 'How strong, how much, how fast' }));
       if (ui.fxFly) fly = h('div', { class: 'os-fly os-fly-fx fx-fly stack' }, h('div', { class: 'os-fly-head' }, h('b', {}, def.label), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => { ui.fxFly = false; openPop('fx'); } }, iconEl('x'))), ...fxSettings().filter(Boolean));
     }
     // (the effect was removed or another one picked while the panel stood: made again)
@@ -1710,6 +1731,7 @@ const Play = (() => {
     const gal = h('div', { class: 'fx-gal', role: 'radiogroup', 'aria-label': 'Elements' });
     for (const e of FXDATA.ELEMENTS) {
       if (fam !== 'all' && e.family !== fam) continue;
+      if (e.live && !liveSupported()) continue; // (Beta 3.65: the map's own light needs a graphics card)
       const on = !erase && e.kind === kind && def && e.id === def.id;
       const d = (e.kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === e.id);
       gal.append(h('button', {

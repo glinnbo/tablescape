@@ -5,7 +5,8 @@
  * side: a = red water, green lava, blue grass; b = red glow; c = the glow's rhythm and a ripple's rings; d = the colour
  * picked for the grass). One see-through WebGL 2 canvas right above the map picture draws
  *   water  the bed (the map picture itself) seen through moving water: it wobbles, gets darker and bluer away from the
- *          bank, light ripples run over it, a faint line lies at the bank. The shadows baked into the picture stay
+ *          bank, light ripples run over it, a faint line lies at the bank. The shadows baked into the picture stay.
+ *          (Beta 3.65) A whirlpool that swirls the water turns the bed about its middle
  *   lava   only light: what is red-hot in the picture pulses and flickers, and its glow spills on what is near. The
  *          floor itself is not drawn again, so it stays as sharp as the tiles around it
  *   glow   only light as well: bright, saturated colours of any hue shine and bloom. Three rhythms: each spot on its
@@ -50,6 +51,10 @@ uniform vec2 uWater;     // how clear (0 dyed … 1 almost clear), its own time
 uniform vec4 uLava;      // glow, embers, heat, pick-up range
 uniform float uLavaT;
 uniform vec3 uGPow, uGTime, uGRange; // shimmer, pulse, ripple: intensity, its own time, pick-up range
+// (Beta 3.65) whirlpools that swirl the water: where (map units), how wide, how far the middle turns (radians, signed);
+// and where each is in its turn (0..1). The bed is read turned about the middle, twice half a turn apart and faded
+// one into the other, so it never jumps back (as creatures.js swirls the map picture itself)
+uniform vec4 uWh[4]; uniform float uWhP[4]; uniform int uWhN;
 in vec2 vUV; in vec2 vQ; out vec4 o;
 ${NOISE}
 float lum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
@@ -102,7 +107,22 @@ void main() {
     vec2 wob = vec2(fbm(q * 2.2 + vec2(t * 0.33, t * 0.26)) - 0.5, fbm(q * 2.2 + vec2(-t * 0.29, t * 0.38) + 7.3) - 0.5);
     vec2 off = wob * (0.05 + 0.08 * depth) * uP;
     float there = texture(uA, (px + off) / uPicSize).r;
-    vec3 bed = mix(col, texture(uPic, (px + off) / uPicSize).rgb, there);
+    vec3 bedPic = texture(uPic, (px + off) / uPicSize).rgb;
+    vec2 pm = uRect.xy + vUV * uRect.zw;
+    for (int i = 0; i < 4; i++) {
+      if (i >= uWhN) break;
+      vec2 d = pm - uWh[i].xy; float qq = length(d) / max(uWh[i].z, 0.0001);
+      if (qq < 1.0) {
+        float kk = uWh[i].w * pow(1.0 - qq, 1.6) / (qq + 0.25) * 0.25;
+        float ph = uWhP[i]; float a1 = -kk * (ph - 0.5) * 2.0; float a2 = -kk * (fract(ph + 0.5) - 0.5) * 2.0;
+        vec2 p1 = uWh[i].xy + vec2(d.x * cos(a1) - d.y * sin(a1), d.x * sin(a1) + d.y * cos(a1));
+        vec2 p2 = uWh[i].xy + vec2(d.x * cos(a2) - d.y * sin(a2), d.x * sin(a2) + d.y * cos(a2));
+        vec3 b1 = texture(uPic, (p1 - uRect.xy) / uRect.zw + off / uPicSize).rgb;
+        vec3 b2 = texture(uPic, (p2 - uRect.xy) / uRect.zw + off / uPicSize).rgb;
+        bedPic = mix(bedPic, mix(b2, b1, 1.0 - abs(2.0 * ph - 1.0)), 1.0 - smoothstep(0.7, 1.0, qq));
+      }
+    }
+    vec3 bed = mix(col, bedPic, there);
     // its colour: the one picked for this water, or the usual teal; the picked one mostly as a hue (a dark colour
     // gives a darker water, but not a black one)
     vec3 C = texture(uD, vUV).rgb;
@@ -204,6 +224,10 @@ void main() {
   const ATTRS = { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' };
   const supported = () => typeof Trees === 'object' && Trees.supported();
   const image = (url) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(`picture ${url}`)); i.src = url; });
+  // (Beta 3.65: the map picture is asked for again at every stroke painted: the one last loaded is kept, so the layer
+  // can tell that it is the same picture and need not send it to the graphics card again)
+  let lastPic = null;
+  const picture = (url) => { if (lastPic && lastPic.url === url) return lastPic.p; const p = image(url); lastPic = { url, p }; p.catch(() => { if (lastPic && lastPic.url === url) lastPic = null; }); return p; };
   const sizeOf = (x) => [x.naturalWidth || x.videoWidth || x.width || 0, x.naturalHeight || x.videoHeight || x.height || 0]; // (a picture, a video or a canvas)
   // a picture or video on the page, once it can be drawn
   const ready = (el) => new Promise((res, rej) => {
@@ -226,31 +250,60 @@ void main() {
     if (!(typeof FX === 'object' && FX.drawStrokes)) throw new Error('no painted strokes');
     let pic; let P = o.P; let W; let H; let base = null;
     if (o.baked) {
-      [pic, base] = await Promise.all([typeof o.pic === 'string' ? image(o.pic) : ready(o.pic), image(o.baked)]);
+      [pic, base] = await Promise.all([typeof o.pic === 'string' ? picture(o.pic) : ready(o.pic), image(o.baked)]);
       W = base.naturalWidth >> 1; H = base.naturalHeight >> 1;
     } else {
-      const src = typeof o.pic === 'string' ? await image(o.pic) : await ready(o.pic);
+      const src = typeof o.pic === 'string' ? await picture(o.pic) : await ready(o.pic);
       const sqx = o.w / o.g; const sqy = o.h / o.g;
       const Pm = Math.max(4, Math.min(24, 2048 / Math.max(1, sqx), 2048 / Math.max(1, sqy))); // (dots a square: enough for blades, at most 2048 across)
       W = Math.max(8, Math.round(sqx * Pm)); H = Math.max(8, Math.round(sqy * Pm));
-      const small = plane(W, H); small.g.drawImage(src, 0, 0, W, H); pic = small.c; P = W / sqx;
+      // (Beta 3.65: water draws the map picture again, moving, so it needs the picture as sharp as it is (at most
+      // 4096 dots across); the blades only read its colours and do with the small one)
+      const sharp = (o.regions || []).some((f) => f.fx && f.fx !== 'grass');
+      const [sw, sh] = sizeOf(src);
+      if (sharp && sw > 0 && sh > 0) {
+        const fit = Math.min(1, 4096 / Math.max(sw, sh));
+        const vid = src.tagName === 'VIDEO';
+        if (!vid && fit >= 1) pic = src;
+        else if (!vid && lastPic && lastPic.of === src && lastPic.big) pic = lastPic.big; // (made smaller once)
+        else { const big = plane(Math.round(sw * fit), Math.round(sh * fit)); big.g.drawImage(src, 0, 0, big.c.width, big.c.height); pic = big.c; if (!vid && lastPic && typeof o.pic === 'string' && lastPic.url === o.pic) { lastPic.of = src; lastPic.big = big.c; } }
+        P = sizeOf(pic)[0] / sqx;
+      } else { const small = plane(W, H); small.g.drawImage(src, 0, 0, W, H); pic = small.c; P = W / sqx; }
     }
     if (W < 1 || H < 1) throw new Error('the living map is empty');
     const M = plane(W * 2, H * 2); M.g.fillStyle = '#000'; M.g.fillRect(0, 0, W * 2, H * 2);
     if (base) M.g.drawImage(base, 0, 0);
     const k = W / o.w; const soft = 0.35 * o.g; const one = plane(W, H);
-    const draw = (f, col, blur) => {
+    // one area in one colour: blur: with a soft edge; grow: how far beyond its strokes (map units)
+    const draw = (f, col, blur, grow = blur ? -soft * 0.5 : 0) => {
       const g = one.g;
       g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.filter = 'none'; g.clearRect(0, 0, W, H);
       g.filter = blur ? `blur(${Math.max(0.5, soft * k).toFixed(1)}px)` : 'none';
       g.setTransform(k, 0, 0, k, -o.x * k, -o.y * k);
       g.fillStyle = col; g.strokeStyle = col; g.lineCap = 'round'; g.lineJoin = 'round';
-      FX.drawStrokes(g, f.strokes || [], blur ? -soft * 0.5 : 0);
-      g.filter = 'none'; g.setTransform(1, 0, 0, 1, 0, 0);
+      FX.drawStrokes(g, f.strokes || [], grow);
+      g.filter = 'none'; g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over';
     };
+    const tint = (f) => (/^#[0-9a-f]{6}$/i.test(String(f.color || '')) ? f.color : '#000000');
+    const put = (x, y, op) => { M.g.globalCompositeOperation = op; M.g.drawImage(one.c, x, y); };
+    // (Beta 3.65: every surface the engine draws can be painted: f.fx 'grass' (as before), 'water', 'lava' (Ember
+    // glow), 'shimmer', 'pulse', 'ripple'; the four parts as oldschool.js bakes them)
     for (const f of o.regions || []) {
-      draw(f, '#0000ff', true); M.g.globalCompositeOperation = 'lighter'; M.g.drawImage(one.c, 0, 0);
-      draw(f, /^#[0-9a-f]{6}$/i.test(String(f.color || '')) ? f.color : '#000000', false); M.g.globalCompositeOperation = 'source-over'; M.g.drawImage(one.c, W, H);
+      const fx = f.fx || 'grass';
+      if (fx === 'grass') { draw(f, '#0000ff', true); put(0, 0, 'lighter'); draw(f, tint(f), false); put(W, H, 'source-over'); }
+      else if (fx === 'water') { draw(f, '#ff0000', true); put(0, 0, 'lighter'); draw(f, tint(f), false, soft * 0.5); put(W, H, 'source-over'); }
+      else if (fx === 'lava') { draw(f, '#00ff00', true); put(0, 0, 'lighter'); }
+      else if (fx === 'shimmer' || fx === 'pulse' || fx === 'ripple') {
+        draw(f, '#ff0000', true); put(W, 0, 'lighter');
+        let style = fx === 'pulse' ? 'rgb(0,170,0)' : 'rgb(0,85,0)';
+        if (fx === 'ripple') { // rings from the middle of what was painted
+          let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+          for (const st of f.strokes || []) { if (st.cut || st.nm) continue; for (let i = 0; i + 1 < st.pts.length; i += 2) { x0 = Math.min(x0, st.pts[i]); x1 = Math.max(x1, st.pts[i]); y0 = Math.min(y0, st.pts[i + 1]); y1 = Math.max(y1, st.pts[i + 1]); } }
+          const mx = (x0 + x1) / 2; const my = (y0 + y1) / 2;
+          style = one.g.createRadialGradient(mx, my, 0, mx, my, 16 * o.g); style.addColorStop(0, 'rgb(0,255,0)'); style.addColorStop(1, 'rgb(0,255,255)');
+        }
+        draw(f, style, false, soft * 0.5); put(0, H, 'source-over');
+      }
     }
     M.g.globalCompositeOperation = 'source-over';
     one.c.width = one.c.height = 0;
@@ -277,7 +330,7 @@ void main() {
       const qb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, qb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
       gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
       gl.bindVertexArray(null);
-      this.tex = [null, null, null, null, null]; this.blades = null; this.ok = true; this.growKey = '';
+      this.tex = [null, null, null, null, null]; this.picOf = null; this.blades = null; this.ok = true; this.growKey = '';
     }
     // what to show: { key, pic, mask (urls), x, y, w, h (where the picture lies, map units), g (a square, map units), P (the picture's dots a square) }
     // (Beta 3.58) or { key, make, x, y, w, h, g, P }: make() gives a promise of { pic, mask, P } (paint(): painted grass)
@@ -314,7 +367,9 @@ void main() {
       if (W < 1 || H < 1) throw new Error('the living map is empty');
       const part = (n) => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(mask, (n % 2) * W, Math.floor(n / 2) * H, W, H, 0, 0, W, H); return { c, g }; };
       const A = part(0); const B = part(1); const C = part(2); const D = part(3);
-      this.tex = [up(0, pic, this.tex[0], true), up(1, A.c, this.tex[1], true), up(2, B.c, this.tex[2], true), up(3, C.c, this.tex[3], false), up(4, D.c, this.tex[4], false)];
+      const same = pic === this.picOf && this.tex[0] && pic.tagName !== 'VIDEO'; // (the same picture as before: it is on the graphics card already)
+      this.tex = [same ? this.tex[0] : up(0, pic, this.tex[0], true), up(1, A.c, this.tex[1], true), up(2, B.c, this.tex[2], true), up(3, C.c, this.tex[3], false), up(4, D.c, this.tex[4], false)];
+      this.picOf = pic;
       // read once: what kinds there are; kept for the blades (they are grown again when the grass's rule changes)
       const md = A.g.getImageData(0, 0, W, H).data; const bd = B.g.getImageData(0, 0, W, H).data; const td = D.g.getImageData(0, 0, W, H).data;
       A.g.clearRect(0, 0, W, H); A.g.drawImage(pic, 0, 0, W, H); const pd = A.g.getImageData(0, 0, W, H).data;
@@ -415,7 +470,7 @@ void main() {
     // one frame. wind: { dir (degrees, where it blows to), strength }; matrix [k, e, f]: map units → canvas dots;
     // set: the map's settings for what moves (map.live: grass, water, lava, shimmer, pulse, ripple); few: fewer
     // blades (Effects quality Low)
-    frame({ dt, wind, matrix, set, few }) {
+    frame({ dt, wind, matrix, set, few, whirls }) {
       const gl = this.gl; const s = this.src;
       if (!this.ok || gl.isContextLost()) return false;
       const S = set || {}; const num = (o, k, d, a, b) => { const v = o && Number(o[k]); return Number.isFinite(v) && o[k] != null ? Math.min(b, Math.max(a, v)) : d; };
@@ -440,6 +495,10 @@ void main() {
         gl.uniform1f(P.u('uP'), s.P); gl.uniform1f(P.u('uPm'), s.Pm); gl.uniform1f(P.u('uT'), this.time); gl.uniform1f(P.u('uRipMax'), s.ripMax || 16);
         const ws = Math.min(1.6, (wind.strength || 0) * 0.6); gl.uniform2f(P.u('uWind'), Math.cos(a) * ws, Math.sin(a) * ws);
         gl.uniform2f(P.u('uWater'), num(Wt, 'clear', 0.25, 0, 1), this.clock.water);
+        // (Beta 3.65) whirlpools: [{ x, y, r, turn, ph }], four at the most
+        const wh = (whirls || []).slice(0, 4); const w4 = new Float32Array(16); const wp = new Float32Array(4);
+        wh.forEach((q, i) => { w4.set([q.x, q.y, q.r, q.turn], i * 4); wp[i] = q.ph; });
+        gl.uniform4fv(P.u('uWh'), w4); gl.uniform1fv(P.u('uWhP'), wp); gl.uniform1i(P.u('uWhN'), wh.length);
         gl.uniform4f(P.u('uLava'), num(Lv, 'glow', 1, 0, 2), num(Lv, 'embers', 1, 0, 2), num(Lv, 'heat', 0.5, 0, 1), num(Lv, 'range', 0.5, 0, 1)); gl.uniform1f(P.u('uLavaT'), this.clock.lava);
         gl.uniform3f(P.u('uGPow'), num(S.shimmer, 'power', 1, 0, 2), num(S.pulse, 'power', 1, 0, 2), num(S.ripple, 'power', 1, 0, 2));
         gl.uniform3f(P.u('uGTime'), this.clock.shimmer, this.clock.pulse, this.clock.ripple);

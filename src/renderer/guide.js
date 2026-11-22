@@ -25,6 +25,12 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.65', [
+      'Effects → Elements → Water is now drawn by the graphics card and moves the map itself: a pond in the map picture ripples, a plain floor becomes a dark pool with a bright shore. Painted water on your maps changes its look. It lies under placed assets. Video maps, and PCs without a graphics card, keep the water as it was',
+      'Its settings are Transparency and Speed, for all the water of a map; each area keeps its own colour. A whirlpool with Swirl the water turns this water too',
+      'New in Elements: Ember glow (Fire) makes lava and fire in the map picture glow and throw embers; Shimmer, Pulse and Ripple (Magic) make crystals, runes and other bright colours shine. They light up what is in the picture and show nothing on a plain floor',
+      'Draw → Style shows the same pictures for these effects, and Lava is called Ember glow there too',
+    ]],
     ['Beta 3.64', [
       'Effects → Elements: painted areas show a thin outline, and with Box or Round in hand a click inside an area picks it (a drag still draws). Where areas overlap, a second click takes the one under it',
       'The picture on top of Elements plays the effect in hand, or the one under the pointer',

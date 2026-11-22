@@ -4391,3 +4391,7 @@ body.gm[data-tool="mark"] .sv-text { pointer-events: auto; cursor: move; }
 .lt-groups.lt-four .seg-btn { padding-left: 3px; padding-right: 3px; font-size: 12px; white-space: nowrap; }
 .tiles.os-lights.lt-day .tile .fx-pic { width: 100%; height: 44px; border-radius: 7px; object-fit: cover; background: #2a2622; visibility: visible; }
 .sv-edge { pointer-events: none; }
+
+/* ---------- Beta 3.65: the one engine ---------- */
+/* Draw → Style: the effects' pictures, as in Effects → Elements */
+.os-picks.os-fxkinds .os-pick .os-fxart.pic .fx-pic { width: 100%; height: 100%; object-fit: cover; display: block; visibility: visible; background: #2a2622; }

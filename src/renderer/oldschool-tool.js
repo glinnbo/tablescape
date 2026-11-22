@@ -1075,7 +1075,8 @@ const OldschoolTool = (() => {
       if (fx) { // (Beta 3.46) an effect: how it is drawn, its colour, its edge; its sliders on a card of its own
         const shapeNow = () => (FX_SHAPES.some((x) => x.id === O.fxShape) ? O.fxShape : 'box');
         // (Beta 3.49: what gets painted is picked here, a tile each; how it is painted are the tabs)
-        const chip = (f) => { const a2 = h('span', { class: 'os-art os-fxart' }, iconEl(f.icon)); a2.style.background = f.color; return a2; };
+        // (Beta 3.65: the pictures of Effects → Elements, so that one effect looks the same in both menus)
+        const chip = (f) => { const pic = typeof FxThumbs === 'object' ? FxThumbs.img('region', f.pic || f.id, { w: 72, h: 72, zoom: 0.8 }) : null; const a2 = h('span', { class: `os-art os-fxart${pic ? ' pic' : ''}` }, pic || iconEl(f.icon)); if (!pic) a2.style.background = f.color; return a2; };
         const kinds = picks({ cls: 'os-fx os-fxkinds', options: () => Oldschool.LIVE_FX.map((f) => ({ value: `fx-${f.id}`, label: f.label, art: chip(f) })), get: () => `fx-${fx}`,
           set: (v) => { O.fx = v.slice(3); O.lastFx = O.fx; save(); ctx.openPop('oldschool'); drawPreview(); } }); // (an open card shows the newly picked effect's sliders)
         for (const b2 of kinds.children) { const f = fxInfo(String(b2.dataset.v || '').slice(3)); if (f) b2.dataset.tip = f.tip; }

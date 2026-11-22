@@ -148,7 +148,7 @@ const Oldschool = (() => {
   const LIVE_FX = [
     { id: 'grass', label: 'Grass', icon: 'plant', color: 'rgba(96,160,60,0.5)', tip: 'Blades that wave in the map\'s wind, in the colour of the floor under them or one you pick' },
     { id: 'water', label: 'Water', icon: 'droplet', color: 'rgba(50,140,170,0.5)', tip: 'The floor becomes the bed of moving water' },
-    { id: 'lava', label: 'Lava', icon: 'flame', color: 'rgba(230,90,20,0.5)', tip: 'What is red-hot in the floor glows, pulses and throws embers' },
+    { id: 'lava', label: 'Ember glow', icon: 'flame', color: 'rgba(230,90,20,0.5)', pic: 'ember', tip: 'What is red-hot in the floor glows, pulses and throws embers' }, // (Beta 3.65: one name with Effects → Elements; pic: its picture there, where it differs from the id)
     { id: 'shimmer', label: 'Shimmer', icon: 'sparkles', color: 'rgba(120,220,255,0.45)', tip: 'Bright colours in the floor shine, each spot in its own rhythm' },
     { id: 'pulse', label: 'Pulse', icon: 'activity-heartbeat', color: 'rgba(200,120,255,0.45)', tip: 'Bright colours shine and breathe together, all over the map' },
     { id: 'ripple', label: 'Ripple', icon: 'target', color: 'rgba(255,220,120,0.45)', tip: 'Bright colours light up in rings that run outward from the middle of what you draw' },

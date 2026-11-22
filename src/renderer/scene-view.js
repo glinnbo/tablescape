@@ -2011,7 +2011,8 @@ class SceneView {
     if (FX.weatherOn(m.weather)) return true;
     if (this.strikeAt && Date.now() - this.strikeAt < 1200) return true;
     if (m.spells.some((s) => this.shown(s)) || this.ghost) return true;
-    if (m.fx.some((f) => f.kind !== 'light' && f.preset !== 'roof' && this.shown(f) && !(f.kind === 'region' && f.preset === 'grass' && this.bladesOn()))) return true; // (Beta 3.1: a Roof alone doesn't move; Beta 3.58: blades move in the trees' loop)
+    const eng = this.engineTest();
+    if (m.fx.some((f) => f.kind !== 'light' && f.preset !== 'roof' && this.shown(f) && !eng(f))) return true; // (Beta 3.1: a Roof alone doesn't move; Beta 3.58: blades move in the trees' loop)
     if (m.light.from && Date.now() - m.light.from.t0 < m.light.from.s * 1000 + 400) return true; // the light is changing
     return m.light.darkness > 0 && m.fx.some((f) => f.kind === 'light' && f.lit !== false && (f.flicker || f.wave));
   }
@@ -2085,25 +2086,40 @@ class SceneView {
     const m = this.map; const b = m && m.bg;
     if (!b || this.peek || this.livingDead || (m.live && m.live.on === false) || typeof Living !== 'object' || !Living.supported() || this.bgTurn()) return false;
     if (b.os && b.live && b.live.url) return true;
-    return (b.os || b.kind === 'image' || b.kind === 'video') && this.grassAreas().length > 0; // (Beta 3.58: grass painted in Effects → Paint, on any map)
+    return (b.os || b.kind === 'image' || b.kind === 'video') && this.livingAreas().length > 0; // (Beta 3.58: grass painted in Effects → Paint, on any map; Beta 3.65: every painted surface of the engine)
   }
   // Beta 3.58 (Glinn): the grass areas painted in Effects → Paint; with a graphics card they grow living blades (the
   // ones of Oldschool maps) instead of the waves of light FX draws for them
   grassAreas() { const m = this.map; return m ? m.fx.filter((f) => f.kind === 'region' && f.preset === 'grass' && f.strokes && f.strokes.length && this.shown(f)) : []; }
   bladesOn() { return this.livingOn() && this.grassAreas().length > 0; }
+  // Beta 3.65: every painted area the engine draws: grass, and the surfaces that move the map's own picture (water,
+  // ember glow, shimmer, pulse, ripple). Those need a still picture under them: not on a video map
+  livingAreas() {
+    const m = this.map; if (!m) return [];
+    const still = this.stillBg();
+    return m.fx.filter((f) => f.kind === 'region' && f.strokes && f.strokes.length && this.shown(f) && (f.preset === 'grass' || (still && LIVE_FX[f.preset])));
+  }
+  stillBg() { const b = this.map && this.map.bg; return !!(b && (b.os || b.kind === 'image')); }
+  // which painted areas the engine draws right now (so fx.js leaves them alone): the map's own light effects always;
+  // grass and Water where the living layer runs (Water: over a still picture; else it is drawn as before)
+  engineTest() {
+    const failed = !!(this.lcv && /^failed/.test(String(this.lcv.L.state || ''))); // (the layer could not show this map: drawn as before)
+    const on = this.livingOn() && !failed; const still = this.stillBg();
+    return (f) => f.kind === 'region' && (LIVE_ONLY.has(f.preset) || (on && (f.preset === 'grass' || (f.preset === 'water' && still))));
+  }
   // what the living layer shows: the baked living map of an Oldschool map, and the painted grass drawn over it (or alone)
   livingSource(c, m, p, g) {
     const P = g / (m.bg.scale || 1); const baked = m.bg.os && m.bg.live && m.bg.live.url ? m.bg.live.url : null;
-    const areas = this.grassAreas();
+    const areas = this.livingAreas();
     if (!areas.length) return { key: `${m.bg.url}|${baked}`, pic: m.bg.url, mask: baked, x: p.x, y: p.y, w: p.w, h: p.h, g, P };
-    const key = `${m.bg.url}|${baked || ''}|${areas.map((f) => `${f.id}:${FX.strokeSig(f)}:${f.color || ''}`).join(';')}|${[p.x, p.y, p.w, p.h, g].map((n) => Math.round(n * 1000)).join(',')}`;
+    const key = `${m.bg.url}|${baked || ''}|${areas.map((f) => `${f.id}:${f.preset}:${FX.strokeSig(f)}:${f.color || ''}`).join(';')}|${[p.x, p.y, p.w, p.h, g].map((n) => Math.round(n * 1000)).join(',')}`;
     if (c.src && c.src.key === key) return c.src;
     // (while a stroke is being painted: grown again at most every 300 ms)
     if (c.src && c.src.make && performance.now() - (c.srcAt || 0) < 300) return c.src;
     const el = this.bgNode && this.bgNode.url === m.bg.url ? this.bgNode.el : null;
     const pic = m.bg.kind === 'video' ? el : m.bg.url;
     if (!pic) return null;
-    const regions = areas.map((f) => ({ strokes: f.strokes, color: f.color || null }));
+    const regions = areas.map((f) => ({ strokes: f.strokes, color: f.color || null, fx: LIVE_FX[f.preset] || 'grass' }));
     c.srcAt = performance.now();
     return { key, x: p.x, y: p.y, w: p.w, h: p.h, g, P, make: () => Living.paint({ pic, baked, regions, x: p.x, y: p.y, w: p.w, h: p.h, g, P }) };
   }
@@ -2126,7 +2142,16 @@ class SceneView {
     if (!src) { c.L.clear(); return; }
     c.src = src; c.L.source(src);
     const k = this.ppi * v.zoom * c.res; const R = c.rect;
-    const ok = c.L.frame({ dt, wind: this.treeWindNow || { dir: 30, strength: 1 }, matrix: [k, (v.x * this.ppi - R.x) * c.res, (v.y * this.ppi - R.y) * c.res], set: m.live || {}, few: (this.qres || 1) < 0.75 });
+    // (Beta 3.65) whirlpools that swirl the water: under the engine's water the map picture turned on the Sway layer is
+    // covered, so the water itself is drawn turned there (the same turn at the same moment, see Creatures.swirl)
+    const tNow = (this.freezeAt || Date.now()) / 1000 - T0;
+    const frac = (x) => x - Math.floor(x);
+    const whirls = c.L.kinds && c.L.kinds.water ? m.fx.filter((f) => f.kind === 'emitter' && f.preset === 'whirl' && f.swirl !== false && !f.hidden && this.shown(f)).slice(0, 4).map((f) => {
+      const q = this.fxPos(f); const mael = f.variant === 'maelstrom';
+      return { x: q.x, y: q.y, r: f.r || 1, turn: (f.spin === -1 ? -1 : 1) * (mael ? 0.5 : 0.32) * Math.min(1.5, f.intensity ?? 1), ph: frac(tNow * (f.speed ?? 1) / (mael ? 6 : 9) + FX.h(FX.seedOf(f.id || 's'))) };
+    }) : [];
+    const ok = c.L.frame({ dt, wind: this.treeWindNow || { dir: 30, strength: 1 }, matrix: [k, (v.x * this.ppi - R.x) * c.res, (v.y * this.ppi - R.y) * c.res], set: m.live || {}, few: (this.qres || 1) < 0.75, whirls });
+    st.whirls = whirls.length;
     st.on = !!ok; st.state = c.L.state || ''; st.blades = c.L.shown || 0; st.kinds = ok ? { ...c.L.kinds } : null; st.time = c.L.time;
     if (ok && this.livingProbe) st.px = [].concat(this.livingProbe).map((q) => c.L.read(q.x * k + (v.x * this.ppi - R.x) * c.res, q.y * k + (v.y * this.ppi - R.y) * c.res)); // (the self-test: the layer's colour at some spots)
   }
@@ -2375,8 +2400,8 @@ class SceneView {
   drawAtmo(t) {
     this._lo = this.myMoments(Date.now()).find((m) => m.id === 'lightsout') || null;
     if (typeof Creatures === 'object') Creatures.wind(Trees.windOf(this.map)); // Second Builder (second-water-works): steam and gas drift with the map's wind
-    const blades = this.bladesOn(); // (Beta 3.58: painted grass grows blades on the living layer instead)
-    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f) && !(blades && f.kind === 'region' && f.preset === 'grass') && !(f.kind === 'emitter' && FLY.has(f.preset)) && !(f.kind === 'region' && f.preset === 'critters')); // (second-birds: what flies has the fly layer; second-ground-life: critters their own)
+    const eng = this.engineTest(); // (Beta 3.58: painted grass grows blades on the living layer instead; Beta 3.65: Water and the map's light effects are drawn there too)
+    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f) && !eng(f) && !(f.kind === 'emitter' && FLY.has(f.preset)) && !(f.kind === 'region' && f.preset === 'critters')); // (second-birds: what flies has the fly layer; second-ground-life: critters their own; Beta 3.65: the engine's surfaces theirs)
     all.sort((a, b) => (b.preset === 'fish') - (a.preset === 'fish')); // (second-ground-life: fish first, under any water painted here today. Fish look submerged by themselves; once Water is on the living layer this has no effect) // (Sway has a layer of its own; Roof only cuts the weather; Beta 3.54: a light put out has no flame)
     this.stats.emitters = all.filter((f) => f.kind === 'emitter').length;
     this.stats.regions = all.filter((f) => f.kind === 'region').length;
@@ -3412,6 +3437,9 @@ const X_SVG = '<svg viewBox="0 0 24 24" class="xmark"><path d="M5 5l14 14M19 5L5
 function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 // Second Builder (second-birds): the effects that fly (fx-data.js fly: true): drawn on the fly layer, not the effects layer
 const FLY = new Set(FXDATA.EMITTERS.filter((d) => d.fly).map((d) => d.id));
+// Beta 3.65: painted areas the engine draws (living.js), and as what. They have no drawing in fx.js
+const LIVE_FX = { water: 'water', ember: 'lava', shimmer: 'shimmer', pulse: 'pulse', ripple: 'ripple' };
+const LIVE_ONLY = new Set(['ember', 'shimmer', 'pulse', 'ripple']); // (these light up the map picture itself: without the engine there is nothing to draw)
 function layerCanvas(cls, maxW) {
   const el = document.createElement('canvas');
   el.className = `sv-canvas ${cls}`;

@@ -137,7 +137,7 @@ const FXDATA = (() => {
   ];
 
   const REGIONS = [
-    { id: 'water', label: 'Water', icon: 'ripple', tip: 'Shallow water: light rippling over the bottom, glints' },
+    { id: 'water', label: 'Water', icon: 'ripple', tip: 'The map under it becomes the bed of moving water: a pond in the picture ripples, a floor becomes a pool' }, // (Beta 3.65: drawn by the engine (living.js) over a still map picture with a graphics card: `engine`; else the net of light fx.js draws)
     { id: 'current', label: 'River current', icon: 'wave-sine', tip: 'Flowing water: it runs the way you paint the stroke' },
     // Second Builder (second-water-works): drawn by creatures.js
     { id: 'rapids', label: 'Rapids', icon: 'wave-saw-tool', tip: 'Whitewater: paint it the way the river flows. Amount: how many rocks break it' },
@@ -151,6 +151,12 @@ const FXDATA = (() => {
     { id: 'darkness', label: 'Magical darkness', icon: 'spiral', tip: 'Inky, slowly turning, almost opaque' },
     { id: 'mist', label: 'Mist', icon: 'cloud-fog' },
     { id: 'lava', label: 'Lava', icon: 'volcano', tip: 'Molten rock that glows; it lights a dark map' },
+    // Beta 3.65: drawn by the engine only (living.js): they light up the map picture itself, so they have no colour of
+    // their own and show nothing without a graphics card. live: the engine's name for it
+    { id: 'ember', label: 'Ember glow', icon: 'flare', live: 'lava', noColor: true, tip: 'What is red-hot in the map picture glows, pulses and throws embers: for lava and fire that are painted in the map' },
+    { id: 'shimmer', label: 'Shimmer', icon: 'sparkles', live: 'shimmer', noColor: true, tip: 'Bright colours in the map picture shine, each spot in its own rhythm: crystals, runes, glowing moss' },
+    { id: 'pulse', label: 'Pulse', icon: 'activity-heartbeat', live: 'pulse', noColor: true, tip: 'Bright colours in the map picture shine and breathe together' },
+    { id: 'ripple', label: 'Ripple', icon: 'target', live: 'ripple', noColor: true, tip: 'Bright colours in the map picture light up in rings that run outward from the middle of what you paint' },
     { id: 'swamp', label: 'Swamp', icon: 'plant' },
     { id: 'dust', label: 'Dust', icon: 'grain' },
     // Beta 2
@@ -289,15 +295,15 @@ const FXDATA = (() => {
   ];
   const ELEMENTS = [
     ['region', 'water', 'water'], ['region', 'current', 'water'], ['region', 'surf', 'water'], ['region', 'swamp', 'water'], ['region', 'ice', 'water'], ['emitter', 'falls', 'water'], ['region', 'rapids', 'water'], ['emitter', 'whirl', 'water'], ['region', 'bubbling', 'water'], ['emitter', 'geyser', 'water'], // (second-water-works)
-    ['region', 'lava', 'fire'], ['region', 'burning', 'fire'], ['emitter', 'vent', 'fire'], ['emitter', 'smoke', 'fire'], ['emitter', 'steam', 'fire'],
+    ['region', 'lava', 'fire'], ['region', 'ember', 'fire'], ['region', 'burning', 'fire'], ['emitter', 'vent', 'fire'], ['emitter', 'smoke', 'fire'], ['emitter', 'steam', 'fire'],
     ['region', 'mist', 'nature'], ['region', 'dust', 'nature'], ['region', 'grass', 'nature'], ['region', 'sway', 'nature'], ['region', 'turn', 'nature'], ['emitter', 'fireflies', 'nature'], ['region', 'drift', 'nature'], ['emitter', 'devil', 'nature'], // (Beta 3.63, Glinn: Sun through leaves ('dapple') has no tile yet: as white laid over the map it read as mist. It comes back with the one engine, where it can brighten the map itself; its drawing stays in creatures.js)
     // (second-sun-sand-gears: Turning parts after Sway; Sun through leaves, Drifting sand, Dust devil)
     ['region', 'fish', 'animals'], // (second-ground-life)
     ['emitter', 'circling', 'animals'], // (second-birds)
     ['emitter', 'bats', 'animals'], ['region', 'critters', 'animals'], ['emitter', 'insects', 'animals'], // (second-bats-insects; second-ground-life: Critters)
-    ['region', 'glow', 'magic'], ['region', 'darkness', 'magic'], ['emitter', 'glow', 'magic'], ['emitter', 'sparkles', 'magic'], ['emitter', 'runes', 'magic'], ['emitter', 'portal', 'magic'], ['emitter', 'arcs', 'magic'],
+    ['region', 'glow', 'magic'], ['region', 'darkness', 'magic'], ['emitter', 'glow', 'magic'], ['emitter', 'sparkles', 'magic'], ['emitter', 'runes', 'magic'], ['emitter', 'portal', 'magic'], ['emitter', 'arcs', 'magic'], ['region', 'shimmer', 'magic'], ['region', 'pulse', 'magic'], ['region', 'ripple', 'magic'], // (Beta 3.65: the map's own light, drawn by the engine)
     ['region', 'blood', 'battle'], ['region', 'acid', 'battle'], ['region', 'oil', 'battle'], ['region', 'web', 'battle'],
-  ].map(([kind, id, family]) => { const d = (kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === id); return { key: `${kind === 'region' ? 'r' : 'e'}:${id}`, kind, id, family, label: d.label, icon: d.icon, tip: d.tip || null }; });
+  ].map(([kind, id, family]) => { const d = (kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === id); return { key: `${kind === 'region' ? 'r' : 'e'}:${id}`, kind, id, family, label: d.label, icon: d.icon, tip: d.tip || null, live: d.live || null }; });
   return { SKINS, SPELLS, SHAPES, EMITTERS, FLAMES, isLight, givesLight, WINDOW_SHAPES, WINDOW_GRIDS, REGIONS, WEATHER, WEATHER_TYPES, LIGHTS, COLORS, TINTS, MOODS, TBASE, SPEED_MAX, wxTravel, FAMILIES, ELEMENTS };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = FXDATA;
