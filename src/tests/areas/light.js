@@ -17,6 +17,7 @@ module.exports = (area) => {
   };
   // (Beta 3.60) Effects → Elements: pick an effect by its tile ('r:mist', 'e:smoke'), a shape tool at the side
   const element = async (t, key) => { await t.g(`(() => { Play.setTool('fx'); if (Play.ui.fxMode !== 'place' && Play.ui.fxMode !== 'paint') Play.ui.fxMode = 'paint'; if (Play.ui.region === 'roof') Play.ui.region = 'mist'; if (Play.ui.emitter === 'window' || Play.ui.emitter === 'shaft') Play.ui.emitter = 'smoke'; Play.ui.fxFam = 'all'; Play.openPop('fx'); document.querySelector('#pop .fx-gal .fx-t[data-v="${key}"]').click(); })()`); await t.sleep(250); }; // (Beta 3.64: a daylight in hand is Lights)
+  const select = async (t) => { await t.g(`(() => { if (!document.querySelector('#pop .os-tabs2')) { Play.setTool('fx'); Play.ui.fxMode = 'light'; Play.ui.lightTab = 'sources'; Play.openPop('fx'); } const b = document.querySelector('#pop .os-tabs2 .tile[data-v="fxt-select"]'); if (b && !b.classList.contains('on')) b.click(); })()`); await t.sleep(250); }; // (Beta 3.66: markers and outlines show with the Select tool, and only it picks)
   const shape = async (t, v) => { await t.g(`document.querySelector('#pop .os-tabs2 .tile[data-v="fxt-${v}"]').click()`); await t.sleep(250); };
   // how dark the TV is at a point of the map: 0 (lit) to 255 (black)
   const dark = async (t, x, y) => { const p = await t.t(`window.__table.probeMap('light', ${x}, ${y})`); return p ? p[3] : null; };
@@ -43,6 +44,8 @@ module.exports = (area) => {
     t.gm().webContents.focus();
     await t.key('E');
     const id = M(t).fx[0].id;
+    t.eq(await t.count(`.sv-handle[data-id="${id}"]`), 0, 'no marker without the Select tool (Beta 3.66)');
+    await select(t);
     const h = await t.until(() => t.rect(`.sv-handle[data-id="${id}"]`), 3000, 'the marker');
     const a = { ...M(t).fx[0] };
     await t.drag({ x: h.cx, y: h.cy }, { x: h.cx + 60, y: h.cy + 30 }, 6);
@@ -269,6 +272,7 @@ module.exports = (area) => {
     let at = await t.scr(10 * k, 8 * k); await t.click(at.x, at.y);
     const fire = await t.until(() => M(t).fx.find((f) => f.holder === 'cooking_fire'), 4000, 'a cooking fire');
     // its marker picks it: the same rows now change it
+    await select(t);
     const hm = await t.until(() => t.rect(`.sv-handle[data-id="${fire.id}"]`), 3000, 'its marker');
     await t.click(hm.cx, hm.cy);
     await t.until(() => t.g('Play.ui.selFx').then((v) => v === fire.id), 3000, 'picked');
@@ -300,6 +304,7 @@ module.exports = (area) => {
     await t.until(() => fxNow(fire.id).lit !== false, 3000, 'and lights it');
     // Delete in Effects takes the whole light (in 3.53 it left the holder behind)
     await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'light'; Play.ui.lightTab = 'sources'; Play.openPop('fx')`);
+    await select(t);
     const hm2 = await t.until(() => t.rect(`.sv-handle[data-id="${fire.id}"]`), 3000, 'its marker');
     await t.click(hm2.cx, hm2.cy);
     await t.until(() => t.g('Play.ui.selFx').then((v) => v === fire.id), 3000, 'picked again');
@@ -363,7 +368,7 @@ module.exports = (area) => {
     const ox = m.grid.ox || 0; const oy = m.grid.oy || 0; const X = (n) => ox + n * k; const Y = (n) => oy + n * k;
     const sq = (pts) => pts.map((v, i) => Math.round(((v - (i % 2 ? oy : ox)) / k) * 100) / 100);
     await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'paint'; Play.ui.paintShape = 'brush'; Play.openPop('fx')`);
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.textContent)`), ['Box', 'Round', 'Brush', 'Erase'], 'four ways, at the side (Beta 3.60)');
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.textContent)`), ['Select', 'Box', 'Round', 'Brush', 'Erase'], 'Select and four ways to paint, at the side (Beta 3.60; 3.66: Select)');
     t.ok(await t.findText('#pop .ctl-label', 'Brush size'), 'the brush has a size');
     await element(t, 'r:acid');
     await shape(t, 'box');
@@ -425,7 +430,7 @@ module.exports = (area) => {
     await t.g(`document.querySelector('#pop .fx-moods .tile[data-v="night"]').click()`);
     await t.clickText('#pop .wx-presets .tile', 'Rain');
     await t.until(() => M(t).light.mood === 'night' && M(t).weather.layers.length === 2, 4000, 'night and rain: two clicks on one screen');
-    t.ok(await t.count('#pop .fx-wind .wind-now') && await t.findText('#pop .fx-wind button', 'Storm'), 'the wind now, and Storm');
+    t.eq([await t.count('#pop .fx-wind'), await t.count('#pop .fx-wind input[type="range"]'), await t.count('#pop .fx-fold[data-v="fxMoreWind"]'), !!(await t.findText('#pop .fx-fold[data-v="fxMoreWind"] button', 'Storm'))], [1, 1, 1, true], 'one Wind slider; Storm and the rest under Advanced wind (Beta 3.66)');
     t.ok(await t.g(`[...document.querySelectorAll('#pop .fx-fold')].every((d) => !d.open)`), 'the rest is folded');
     await t.g(`document.querySelector('#pop .fx-fold[data-v="fxMoreWx"] summary').click()`);
     await t.until(async () => (await t.count('#pop .fx-fold[data-v="fxMoreWx"] .wx-list .layer-row')) === 2, 3000, 'Fine-tune the weather: this mix\'s layers');
@@ -437,7 +442,7 @@ module.exports = (area) => {
     await t.g(`document.querySelector('#pop .fx-fold[data-v="fxMoreWx"] summary').click()`);
     // Indoors: the Roof of before; the shape tools come out, the group stays Scene
     await t.g(`document.querySelector('#pop .fx-indoors').click()`); await t.sleep(300);
-    t.eq([await t.g('[Play.ui.fxMode, Play.ui.region].join()'), await t.count('#pop .os-tabs2 .tile'), (await groups())[0]], ['paint,roof', 4, 'Scene*'], 'Indoors paints roofs, in Scene');
+    t.eq([await t.g('[Play.ui.fxMode, Play.ui.region].join()'), await t.count('#pop .os-tabs2 .tile'), (await groups())[0]], ['paint,roof', 5, 'Scene*'], 'Indoors paints roofs, in Scene (Beta 3.66: Select and the four ways to paint)');
     await t.drag(await t.scr(16 * k, 9 * k), await t.scr(19 * k, 11 * k), 6);
     await t.until(() => M(t).fx.some((f) => f.kind === 'region' && f.preset === 'roof'), 3000, 'a roof');
     await t.g(`document.querySelector('#pop .fx-indoors').click()`); await t.sleep(300);
@@ -447,7 +452,7 @@ module.exports = (area) => {
     t.eq([await groups(), await t.count('#pop .lt-groups'), await t.count('#pop .lt-kinds .tile') > 0], [['Scene', 'Lights*', 'Elements'], 1, true], 'Lights: the Light panel');
     // Elements: every effect a tile with a picture, sorted by family; a chip narrows them
     await group('elements');
-    t.eq(await t.count('#pop .fx-gal .fx-t'), 39, 'every element on one screen'); // (Beta 3.64: 41 less Light shaft and Window light, now Lights → Daylight) // (Beta 3.63: 42 less Sun through leaves, held back for the one engine) // (second-water-works: 29 and Rapids, Whirlpool, Bubbling pool, Geyser; second-birds: Circling birds; second-bats-insects: Bats, Insects; second-ground-life: Fish, Critters; second-sun-sand-gears: Turning parts, Sun through leaves, Drifting sand, Dust devil)
+    t.eq(await t.count('#pop .fx-gal .fx-t'), 40, 'every element on one screen'); // (Beta 3.66: and Bats, painted) // (Beta 3.64: 41 less Light shaft and Window light, now Lights → Daylight) // (Beta 3.63: 42 less Sun through leaves, held back for the one engine) // (second-water-works: 29 and Rapids, Whirlpool, Bubbling pool, Geyser; second-birds: Circling birds; second-bats-insects: Bats, Insects; second-ground-life: Fish, Critters; second-sun-sand-gears: Turning parts, Sun through leaves, Drifting sand, Dust devil)
     await t.until(() => t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t img')].filter((i) => /^data:image/.test(i.src)).length >= 20`), 15000, 'their pictures, drawn by the effects themselves');
     const gal = await t.g(`(() => { const g = document.querySelector('#pop .fx-gal'); const t0 = g.querySelector('.fx-t'); return { rows: Math.round(g.clientHeight / (t0.offsetHeight + 5)), scrolls: g.scrollHeight > g.clientHeight + 10, cols: getComputedStyle(g).gridTemplateColumns.split(' ').length }; })()`);
     t.eq(gal, { rows: 4, scrolls: true, cols: 5 }, 'five in a row, four rows show, the rest scrolls');
@@ -455,7 +460,7 @@ module.exports = (area) => {
     t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t')].map((b) => b.textContent)`), ['Lava', 'Burning ground', 'Vent', 'Smoke', 'Steam'], 'the chip Fire');
     // the effect knows how it goes down: Smoke with a click (no shape tools), Mist with a box
     await element(t, 'e:smoke');
-    t.eq([await t.count('#pop .os-tabs2'), await t.text('#pop .fx-ban .cap b'), await t.findText('#pop .ctl-label', 'Size') !== null], [0, 'Smoke', true], 'Smoke: a click, its size');
+    t.eq([await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.textContent + (b.classList.contains('on') ? '*' : '')).join()`), await t.text('#pop .fx-ban .cap b'), await t.findText('#pop .ctl-label', 'Size') !== null], ['Select,Place*', 'Smoke', true], 'Smoke: a click (Beta 3.66: Select and Place at the side), its size');
     t.ok(!(await t.findText('#pop .ctl-label', 'Flames flicker')), 'no flame switch on effects without one');
     // each effect its own look: red smoke does not make the portal red
     await t.g(`document.querySelector('#pop .fx-panel .swatch[data-v="#ff3344"]').click()`); await t.sleep(150);
@@ -470,6 +475,7 @@ module.exports = (area) => {
     await element(t, 'e:smoke');
     t.ok(await t.g(`document.querySelector('#pop .fx-panel .swatch[data-v="#ff3344"]').classList.contains('on')`), 'Smoke remembers its red');
     // picked: the panel is its card; a click on the empty map lets go and places nothing
+    await select(t);
     const mk = await t.rect(`.sv-handle[data-id="${portal.id}"]`); await t.click(mk.cx, mk.cy); await t.sleep(400);
     t.eq([await t.text('#pop .fx-ban-tag'), await t.text('#pop .fx-ban .cap b'), await t.count('#pop .fx-gal'), await t.count('#pop .fx-ban-acts .icon-btn')], ['picked', 'Portal', 0, 3], 'the portal picked: its card, with eye, copy and bin');
     const n0 = M(t).fx.length;
@@ -477,7 +483,7 @@ module.exports = (area) => {
     t.eq([M(t).fx.length, await t.g('Play.ui.selFx'), await t.count('#pop .fx-gal'), await t.text('#pop .fx-gal .fx-t.on')], [n0, null, 1, 'Smoke'], 'a click beside it lets go: nothing placed, the tiles back, Smoke in hand again');
     // painted: strokes of one look join; another colour starts a new area by itself
     await element(t, 'r:mist');
-    t.eq([await t.count('#pop .os-tabs2 .tile'), await t.count('#pop .os-tabs2 .tile.on[data-v="fxt-box"]'), await t.findText('#pop .btn', 'Start a new area')], [4, 1, null], 'Mist: the shape tools, a box first; no "Start a new area"');
+    t.eq([await t.count('#pop .os-tabs2 .tile'), await t.count('#pop .os-tabs2 .tile.on[data-v="fxt-box"]'), await t.findText('#pop .btn', 'Start a new area')], [5, 1, null], 'Mist: Select and the shape tools, a box in hand; no "Start a new area"');
     const mists = () => M(t).fx.filter((f) => f.kind === 'region' && f.preset === 'mist');
     await t.drag(await t.scr(16 * k, 4 * k), await t.scr(18 * k, 6 * k), 6);
     await t.until(() => mists().length === 1, 3000, 'mist');
@@ -587,7 +593,7 @@ module.exports = (area) => {
     await t.g(`Play.ui.look = { ...Play.ui.look, variant: 'steam' }`);
     await element(t, 'e:circling');
     await t.g(`[...document.querySelectorAll('#pop .fx-chips .cs-chip')].find((b) => b.textContent === 'Animals').click()`); await t.sleep(200);
-    t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t')].map((b) => b.textContent)`), ['Fish', 'Circling birds', 'Bats', 'Critters', 'Insects'], 'the chip Animals'); // (second-bats-insects: and Bats, Insects; second-ground-life: Fish, Critters)
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t')].map((b) => b.textContent)`), ['Fish', 'Circling birds', 'Bats', 'Bat stream', 'Critters', 'Insects'], 'the chip Animals'); // (Beta 3.66: Bats is painted, the old one is Bat stream) // (second-bats-insects: and Bats, Insects; second-ground-life: Fish, Critters)
     const at = await t.scr(20 * k, 8 * k); await t.click(at.x, at.y);
     const c = await t.until(() => M(t).fx.find((f) => f.preset === 'circling'), 3000, 'circling birds');
     t.eq(c.variant, 'vultures', 'Vultures first (a Vent\'s steam in hand does not reach it)');
@@ -623,11 +629,11 @@ module.exports = (area) => {
     const at = await t.scr(20 * k, 8 * k); await t.click(at.x, at.y);
     const ins = await t.until(() => M(t).fx.find((f) => f.preset === 'insects'), 3000, 'insects placed');
     t.eq(ins.variant, 'bees', 'placed as bees');
-    // Bats: Flutter first; a Stream the way it faces
+    // Bat stream (Beta 3.66: a Stream first, the way it faces; Flutter second)
     await element(t, 'e:bats');
     const at2 = await t.scr(22 * k, 10 * k); await t.click(at2.x, at2.y);
     const bat = await t.until(() => M(t).fx.find((f) => f.preset === 'bats'), 3000, 'bats placed');
-    t.eq([bat.variant, bat.angle], ['flutter', 0], 'Flutter first, facing right');
+    t.eq([bat.variant, bat.angle], ['stream', 0], 'a Stream first, facing right');
     await t.g(`Play.closePop(); Play.setTool('select')`);
     const st = await t.until(() => t.g(`(() => { const v = Play.view(); v.drawFrame(); return v.stats.fly >= 2 ? { fly: v.stats.fly, emitters: v.stats.emitters } : null; })()`), 4000, 'the fly layer draws them');
     t.eq(st, { fly: 2, emitters: 0 }, 'both on the fly layer, not the effects layer');
@@ -737,7 +743,7 @@ module.exports = (area) => {
     await t.g(`Play.ui.paintShape = 'brush'`);
     await element(t, 'r:turn');
     const tools = await t.g(`[Play.ui.paintShape, [...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.dataset.v)]`);
-    t.eq(tools, ['round', ['fxt-box', 'fxt-round', 'fxt-erase']], 'no brush for Turning parts: the brush in hand becomes a Round');
+    t.eq(tools, ['round', ['fxt-select', 'fxt-box', 'fxt-round', 'fxt-erase']], 'no brush for Turning parts: the brush in hand becomes a Round');
     t.eq(await t.g(`(() => { const s = [...document.querySelectorAll('#pop .seg')].find((x) => x.getAttribute('aria-label') === 'Kind'); return s ? [...s.querySelectorAll('.seg-btn')].map((b) => b.textContent) : null; })()`), ['Steady', 'Windmill', 'Ticking'], 'three kinds');
     await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.paintShape = 'box'`);
     // a windmill: the GM stores its anchor, and a new one when the wind changes
@@ -810,12 +816,12 @@ module.exports = (area) => {
       // the Big shadow: one soft shape, nowhere darker than its own shade (overlapping strips showed as bars)
       let shTop = 0; let shN = 0; const sea = { ...F('p-box'), id: 'p-sea', variant: 'shadow' };
       for (let tt = 0; tt < 200; tt += 4) { const r = ink(() => FX.region(g, sea, tt, 1), 20); if (r.n > shN) { shN = r.n; shTop = r.top; } }
-      // circling vultures: no two closer than a wing's length, at any moment
+      // circling vultures (Beta 3.66: each at its own height, so they may pass over one another): three of them, and at the real time of day they glide (no jumps)
       const pos = (tt) => { const out = []; const q = document.createElement('canvas').getContext('2d'); const seen = new Set(); q.drawImage = function () { const m = this.getTransform(); const key = m.e.toFixed(2) + '|' + m.f.toFixed(2); if (!seen.has(key)) { seen.add(key); out.push([m.e, m.f]); } }; // (a bird is three pieces at one place)
         Creatures.scene({ dark: 0.7, cell: 1 }); q.setTransform(1, 0, 0, 1, 0, 0); FX.emitter(q, { id: 'tc-vult', kind: 'emitter', preset: 'circling', variant: 'vultures', r: 2, intensity: 1, density: 1, speed: 1 }, 10, 7, tt); Creatures.scene(null); return out; };
-      let near = 1e9; let birds = 0;
-      for (let tt = 0; tt < 600; tt += 3.7) { const P = pos(tt); birds = Math.max(birds, P.length); for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) near = Math.min(near, Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1])); }
-      return { area, koi: { n: koiN, out: koiOut, w: bx1 - bx0, h: by1 - by0 }, small, rats: { n: ratN, far: ratFar, w: rx1 - rx0 }, ways, sh: { n: shN, top: shTop }, near, birds };
+      let near = 0; let birds = 1e9; let apart = 1e9; const NOW = Date.now() / 1000 - 1.7e9;
+      for (let tt = NOW; tt < NOW + 900; tt += 3.7) { const P = pos(tt); const Q = pos(tt + 1 / 30); birds = Math.min(birds, P.length); for (const p of P) near = Math.max(near, Math.min(...Q.map((q) => Math.hypot(p[0] - q[0], p[1] - q[1])))); for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) apart = Math.min(apart, Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1])); } // (near: the furthest any bird moves in a frame; apart: the closest two come)
+      return { area, koi: { n: koiN, out: koiOut, w: bx1 - bx0, h: by1 - by0 }, small, rats: { n: ratN, far: ratFar, w: rx1 - rx0 }, ways, sh: { n: shN, top: shTop }, near, birds, apart };
     })()`);
     t.ok(Math.abs(res.area.box - 15) < 0.4 && Math.abs(res.area.round - 11.8) < 0.5 && res.area.brush > 12 && res.area.brush < 18, 'a Box of 5 × 3 counts 15 squares, the Round its ellipse, the scrubbed pond what it covers (not each pass again)', res.area);
     t.ok(res.koi.n > 30 && res.koi.out === 0 && res.koi.w > 3.5 && res.koi.h > 1.8, 'koi in a Box swim all through it and never leave it', res.koi);
@@ -823,7 +829,7 @@ module.exports = (area) => {
     t.ok(res.rats.n > 35 && res.rats.far === 0 && res.rats.w > 3.5, 'rats in a Box are there, wander through it and stay with it', res.rats);
     t.ok(new Set(res.ways).size === 3, 'three ways round an area, so they do not all take one path', res.ways);
     t.ok(res.sh.n > 100 && res.sh.top < 110, 'the Big shadow is one faint shape (no darker bars where its strips overlap)', res.sh);
-    t.ok(res.birds === 3 && res.near > 1.2, 'three vultures circle and none flies through another', [res.birds, res.near]);
+    t.ok(res.birds === 3 && res.near < 0.15 && res.apart > 1.2, 'three vultures circle: none jumps from one frame to the next, and they keep apart round the circle', [res.birds, res.near, res.apart]);
     // the family chips
     await t.g(`(() => { Play.setTool('fx'); Play.ui.fxMode = 'place'; Play.ui.fxFam = 'all'; Play.openPop('fx'); })()`);
     await t.until(async () => (await t.count('#pop .fx-chips .cs-chip')) >= 7, 4000, 'the family chips');
@@ -833,7 +839,7 @@ module.exports = (area) => {
   }, { ms: 120000 });
 
   // Beta 3.64 (Effects step 2, open point C11)
-  area.deep('Beta 3.64: painted areas show an outline in Elements; a click inside one picks it (Box or Round in hand), a second click the one under it; the brush still paints and a click effect is still placed; the banner plays; Daylight is in Lights', async (t) => {
+  area.deep('Beta 3.64 and 3.66: painted areas show an outline with the Select tool only; a click inside one picks it, a second click the one under it; with any other tool a click or a drag paints or places; the outlines follow a zoom; the banner plays; Daylight is in Lights', async (t) => {
     const m = await clean(t); const k = m.grid.size;
     t.gm().webContents.focus();
     await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.looks = {}; Play.ui.fxFly = false; Play.ui.ltDay = false`);
@@ -846,8 +852,23 @@ module.exports = (area) => {
     const edge = () => t.g(`(() => { const c = document.querySelector('.sv-edge'); if (!c || getComputedStyle(c).display === 'none') return 0; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 60) n++; return n; })()`);
     t.eq(await edge(), 0, 'no outlines outside Effects');
     await element(t, 'r:mist'); await shape(t, 'box');
-    const lines = await t.until(async () => { const n = await edge(); return n > 300 ? n : 0; }, 4000, 'the outlines in Elements');
-    t.ok(lines > 300, 'Elements open: the painted areas are outlined', lines);
+    await t.sleep(400);
+    t.eq([await edge(), await t.g(`Play.ui.fxSel`), await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.dataset.v + (b.classList.contains('on') ? '*' : ''))`)], [0, false, ['fxt-select', 'fxt-box*', 'fxt-round', 'fxt-brush', 'fxt-erase']], 'Elements with the Box in hand: no outlines (Beta 3.66), Select is the first tool');
+    // a click inside an area with the Box in hand picks nothing
+    const pw0 = await t.scr(14 * k, 5.5 * k); await t.mouse('mouseMove', pw0.x, pw0.y); await t.click(pw0.x, pw0.y); await t.sleep(300);
+    t.eq([await t.g(`Play.ui.selFx`), await t.g(`document.body.classList.contains('fx-pick')`)], [null, false], 'the Box in hand: a click inside an area picks nothing, no hand');
+    await select(t);
+    const lines = await t.until(async () => { const n = await edge(); return n > 300 ? n : 0; }, 4000, 'the outlines with Select');
+    t.ok(lines > 300 && await t.g(`Play.ui.fxSel === true && document.body.classList.contains('fx-select')`), 'Select: the painted areas are outlined', lines);
+    // the outlines follow a zoom (in 3.64 they stayed where they were until something else redrew them)
+    const box = async () => { const b = await t.g(`(() => { const c = document.querySelector('.sv-edge'); const r = c.getBoundingClientRect(); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let x0 = 1e9; let x1 = -1; let y0 = 1e9; let y1 = -1; for (let i = 3; i < d.length; i += 4) if (d[i] > 60) { const x = ((i - 3) / 4) % c.width; const y = Math.floor((i - 3) / 4 / c.width); if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } const kx = r.width / c.width; const ky = r.height / c.height; return [r.left + x0 * kx, r.top + y0 * ky, r.left + x1 * kx, r.top + y1 * ky]; })()`); const a = await t.scr(11 * k, 2 * k); const z = await t.scr(25 * k, 13 * k); return [b, [a.x, a.y, z.x, z.y]]; };
+    const off = ([b, w]) => Math.max(...b.map((v, i) => Math.abs(v - w[i])));
+    const fit0 = await box();
+    const v0 = { ...M(t).view };
+    await t.cmd('view.update', { mapId: own, ...v0, zoom: v0.zoom * 0.8 }); await t.sleep(500);
+    const fit1 = await box();
+    await t.cmd('view.update', { mapId: own, ...v0 }); await t.sleep(500);
+    t.ok(off(fit0) < 8 && off(fit1) < 8 && Math.abs(fit1[1][0] - fit0[1][0]) + Math.abs(fit1[1][2] - fit0[1][2]) > 20, 'the outlines lie on their areas, also after a zoom', [fit0, fit1]);
     // the point is in the area (and not where it was erased)
     const hit = await t.g(`(() => { const fx = Play.state().map.fx; const F = (id) => fx.find((f) => f.id === id); const k = ${k}; return [FX.hits(F('p-water'), 14 * k, 5.5 * k), FX.hits(F('p-water'), 11.3 * k, 3.3 * k), FX.hits(F('p-lava'), 12.5 * k, 10.5 * k), FX.hits(F('p-lava'), 14.5 * k, 11.5 * k), FX.hits(F('p-blood'), 21 * k, 5.5 * k)]; })()`);
     t.eq(hit, [true, false, true, false, true], 'in a Round, outside its corner, in a Box, in its erased hole, on a brush line');
@@ -865,9 +886,13 @@ module.exports = (area) => {
     const ph = await t.scr(14.5 * k, 11.5 * k); await t.click(ph.x, ph.y);
     await t.until(() => t.g(`Play.ui.selFx == null`), 3000, 'a click in the erased hole lets go');
     t.ok(await t.until(() => t.g(`!!document.querySelector('#pop .fx-gal')`), 3000, 'the tiles again'), 'the smallest area first, then the one under it; a click on no area lets go');
-    // a drag still draws; nothing is picked
+    // Select draws nothing; the Box draws again and picks nothing
     const strokes = () => M(t).fx.reduce((n, f) => n + (f.strokes ? f.strokes.length : 0), 0);
     let n0 = strokes();
+    await t.drag(await t.scr(26 * k, 11 * k), await t.scr(28 * k, 13 * k)); await t.sleep(400);
+    t.eq(strokes(), n0, 'a drag with Select draws nothing');
+    await shape(t, 'box');
+    t.eq([await t.g(`Play.ui.fxSel`), await edge()], [false, 0], 'the Box in hand again: no outlines');
     await t.drag(await t.scr(26 * k, 11 * k), await t.scr(28 * k, 13 * k));
     await t.until(() => strokes() > n0, 4000, 'the box is drawn');
     t.eq(await t.g(`Play.ui.selFx`), null, 'a drag draws and picks nothing');
@@ -890,7 +915,7 @@ module.exports = (area) => {
     await t.g(`document.querySelector('[data-v="fxg-lights"]').click()`);
     await t.until(() => t.g(`!!document.querySelector('#pop .lt-groups')`), 3000, 'the Light panel');
     t.eq(await t.g(`[...document.querySelectorAll('#pop .lt-groups .seg-btn')].map((b) => b.textContent)`), ['Holder', 'Flame', 'Just light', 'Daylight'], 'four kinds of light');
-    t.eq(await edge(), 0, 'no outlines in Lights');
+    t.eq([await edge(), await t.g(`[...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.dataset.v + (b.classList.contains('on') ? '*' : ''))`)], [0, ['fxt-select', 'fxt-place*']], 'no outlines in Lights; its tools are Select and Place');
     await t.g(`[...document.querySelectorAll('#pop .lt-groups .seg-btn')].find((b) => b.textContent === 'Daylight').click()`);
     await t.until(() => t.g(`document.querySelectorAll('#pop .lt-day .tile').length === 2`), 3000, 'the two daylights');
     t.eq(await t.g(`[[...document.querySelectorAll('#pop .lt-day .tile')].map((b) => b.textContent + (b.classList.contains('on') ? '*' : '')), document.querySelector('[data-v="fxg-lights"]').classList.contains('open'), [...document.querySelectorAll('#pop .win-picks')].length]`), [['Window light*', 'Light shaft'], true, 2], 'Daylight: Window light in hand, in Lights, with its window and bars');
@@ -914,5 +939,61 @@ module.exports = (area) => {
     t.ok(at('atmo') >= 0 && at('fog') >= 0 && at('weather') >= 0, 'the TV has its layers', order);
     t.ok(at('atmo') < at('fog'), 'effects under the fog', order);
     t.ok(at('fog') < at('weather'), 'weather above the fog', order);
+  });
+  // Beta 3.66 (Glinn's nine points on Effects)
+  area.deep('Beta 3.66: one Wind slider makes the wind the map\'s own; Bats painted over an area fly on the fly layer and glide at the real time; a tour is a round trip with no about-turn; the whirlpool\'s twist is steady; a canvas turns smoothly at the real time', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    t.gm().webContents.focus();
+    t.handle('wind.set', { mapId: own, auto: true, storm: false }); await t.settle();
+    // Scene: the one slider
+    await t.g(`(() => { Play.closePop(); Play.setTool('fx'); Play.openPop('fx'); document.querySelector('[data-v="fxg-scene"]').click(); })()`);
+    await t.until(() => t.count('#pop .fx-wind input'), 3000, 'the Wind slider');
+    t.eq(await t.g(`[document.querySelector('#pop .fx-wind .ctl-label').textContent, [...document.querySelectorAll('#pop .fx-fold > summary')].map((x) => x.textContent.trim()).filter((x) => /wind/i.test(x)), document.querySelector('#pop .fx-fold[data-v="fxMoreWind"]').open]`), ['Wind', ['Advanced wind'], false], 'Wind, and Advanced wind folded');
+    await t.g(`(() => { const i = document.querySelector('#pop .fx-wind input'); i.value = 2; i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    const w = await t.until(() => { const x = M(t).wind; return x && x.auto === false && Math.abs(x.strength - 2) < 0.01 ? x : null; }, 3000, 'the wind is the map\'s own');
+    t.ok(w.lean > 0 && w.branches > 0 && w.rustle > 0 && !w.storm, 'the slider sets the strength, and lean, branches and leaves with it', w);
+    t.eq(await t.g(`document.querySelector('#pop .fx-wind output').textContent`), 'A gale', 'said in a word');
+    await t.g(`document.querySelector('#pop .fx-fold[data-v="fxMoreWind"] summary').click()`);
+    t.eq(await t.g(`(() => { const f = document.querySelector('#pop .fx-fold[data-v="fxMoreWind"]'); return [[...f.querySelectorAll('.ctl-slider .ctl-label')].map((x) => x.textContent), !!f.querySelector('.compass, .wind-compass, [class*="compass"]'), [...f.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Storm')]; })()`), [['Lean', 'Branches', 'Leaves'], true, true], 'Advanced wind: follow the weather, Storm, the direction, Lean, Branches, Leaves');
+    t.handle('wind.set', { mapId: own, auto: true, storm: false }); await t.settle();
+    // Bats, painted: a tile of its own, on the fly layer
+    await element(t, 'r:batflight'); await shape(t, 'box');
+    t.eq(await t.g(`[document.querySelector('#pop .fx-gal .fx-t[data-v="r:batflight"]').textContent, document.querySelector('#pop .fx-gal .fx-t[data-v="e:bats"]').textContent]`), ['Bats', 'Bat stream'], 'Bats is painted; the old one is Bat stream');
+    await t.drag(await t.scr(12 * k, 3 * k), await t.scr(20 * k, 8 * k));
+    const bats = await t.until(() => M(t).fx.find((f) => f.preset === 'batflight'), 4000, 'the bats\' area');
+    await t.g(`Play.closePop(); Play.setTool('select')`);
+    const st = await t.until(() => t.g(`(() => { const v = Play.view(); v.drawFrame(); return v.stats.fly >= 1 ? { fly: v.stats.fly, layer: getComputedStyle(v.cv.fly.el).display !== 'none' } : null; })()`), 4000, 'the fly layer draws them');
+    t.ok(st.fly >= 1 && st.layer, 'painted bats fly on the fly layer (over the trees)', st);
+    const fxs = M(t).fx.map((f) => ({ ...f, strokes: f.strokes && f.strokes.map((q) => ({ ...q, r: q.r / k, pts: q.pts.map((v) => v / k), ...(q.line ? { line: q.line.map((v) => v / k), lr: q.lr / k } : {}) })) }));
+    const res = await t.g(`(async () => {
+      await Creatures.ready();
+      const F = ${JSON.stringify(fxs)}.find((f) => f.preset === 'batflight');
+      const NOW = Date.now() / 1000 - 1.7e9;
+      // where the pictures are drawn (a bat is a few pieces at one place)
+      const pos = (tt) => { const out = []; const q = document.createElement('canvas').getContext('2d'); const seen = new Set(); q.drawImage = function () { const m = this.getTransform(); const key = m.e.toFixed(2) + '|' + m.f.toFixed(2); if (!seen.has(key)) { seen.add(key); out.push([m.e, m.f]); } };
+        Creatures.scene({ dark: 0, cell: 1 }); q.setTransform(1, 0, 0, 1, 0, 0); FX.region(q, F, tt, 1); Creatures.scene(null); return out; };
+      let step = 0; let n = 1e9; let x0 = 1e9; let x1 = -1e9;
+      for (let tt = NOW; tt < NOW + 40; tt += 1.3) { const P = pos(tt); const Q = pos(tt + 1 / 30); n = Math.min(n, P.length); for (const p of P) { step = Math.max(step, Math.min(...Q.map((q) => Math.hypot(p[0] - q[0], p[1] - q[1])))); x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); } }
+      // a tour: a round trip, and no two steps in a row turn about
+      // (the way itself has short kinks where its lanes meet; what a walker does on it, rounded off, is what shows)
+      const tours = [0, 1, 2].map((v) => Creatures.tourOf(F, 'all', () => true, v)).filter(Boolean).map((T) => { const P = T.P; let worst = 0; let prev = null;
+        for (let u = 0; u < T.L; u += 0.02) { const a = Creatures.walker(T, u, 0, 0.6).ang; if (prev != null) { let d = Math.abs(a - prev) % (2 * Math.PI); if (d > Math.PI) d = 2 * Math.PI - d; worst = Math.max(worst, d); } prev = a; }
+        return { n: P.length, closed: Math.hypot(P[0][0] - P[P.length - 1][0], P[0][1] - P[P.length - 1][1]) < 1e-6, worst }; });
+      // the whirlpool's twist: steady from one frame to the next, and never more than it may be
+      const wh = { id: 'tw', spin: 1, variant: 'maelstrom', intensity: 1, speed: 1 }; let dT = 0; let top = 0;
+      for (let i = 0; i < 300; i++) { const a = Creatures.twistOf(wh, NOW + i / 30); const b = Creatures.twistOf(wh, NOW + (i + 1) / 30); dT = Math.max(dT, Math.abs(b - a)); top = Math.max(top, Math.abs(a)); }
+      // a canvas turned by a very large angle (the time of day times a rate) lands where the same angle within one turn
+      // lands: the browser's own rotate() stood still there for most of a turn, then jumped (boot.js)
+      const rc = document.createElement('canvas'); rc.width = rc.height = 200; const rg = rc.getContext('2d', { willReadFrequently: true });
+      const mark = (a) => { rg.setTransform(1, 0, 0, 1, 0, 0); rg.clearRect(0, 0, 200, 200); rg.translate(100, 100); rg.rotate(a); rg.fillStyle = '#fff'; rg.fillRect(78, -2, 4, 4);
+        const d = rg.getImageData(0, 0, 200, 200).data; let sx = 0; let sy = 0; let m = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 100) { const p = (i - 3) / 4; sx += p % 200; sy += Math.floor(p / 200); m++; } return m ? Math.atan2(sy / m - 100, sx / m - 100) : 9; };
+      let turnOff = 0; for (let j = 0; j < 12; j++) { const a = NOW * 0.52 + j * 0.2; let d = Math.abs(mark(a) - mark(a % (2 * Math.PI))); if (d > Math.PI) d = 2 * Math.PI - d; turnOff = Math.max(turnOff, d); }
+      let turnStep = 0; for (let j = 0; j < 12; j++) { let d = Math.abs(mark(NOW * 0.52 + (j + 1) * 0.2) - mark(NOW * 0.52 + j * 0.2)); if (d > Math.PI) d = 2 * Math.PI - d; turnStep = Math.max(turnStep, Math.abs(d - 0.2)); }
+      return { n, step, w: x1 - x0, tours, dT, top, back: Creatures.twistOf({ ...wh, spin: -1 }, NOW) < 0, turnOff, turnStep };
+    })()`);
+    t.ok(res.n >= 2 && res.step < 0.3 && res.w > 3, 'bats over the whole area, and none jumps from one frame to the next (at the real time of day)', [res.n, res.step, res.w]);
+    t.ok(res.tours.length === 3 && res.tours.every((T) => T.closed && T.n > 8 && T.worst < 0.2), 'a way round an area is a round trip, and a walker on it never turns about in one step (fish and critters flipped at every dead end)', res.tours);
+    t.ok(res.dT < 0.01 && res.top <= 1.5 && res.top > 0.5 && res.back, 'the whirlpool twists the water steadily, the other way when turned about', [res.dT, res.top]);
+    t.ok(res.turnOff < 0.02 && res.turnStep < 0.03, 'a canvas turns smoothly at the real time of day: by 0.2 for every 0.2 (a whirlpool, a dust devil and a gear stood still, then jumped)', [res.turnOff, res.turnStep]);
   });
 };

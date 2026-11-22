@@ -4395,3 +4395,8 @@ body.gm[data-tool="mark"] .sv-text { pointer-events: auto; cursor: move; }
 /* ---------- Beta 3.65: the one engine ---------- */
 /* Draw → Style: the effects' pictures, as in Effects → Elements */
 .os-picks.os-fxkinds .os-pick .os-fxart.pic .fx-pic { width: 100%; height: 100%; object-fit: cover; display: block; visibility: visible; background: #2a2622; }
+
+/* ---------- Beta 3.66 ---------- */
+/* Effects: the Select tool picks, so no crosshair */
+body.fx-select[data-tool="fx"] #viewport { cursor: default; }
+body.fx-select.fx-pick[data-tool="fx"] #viewport { cursor: pointer; }

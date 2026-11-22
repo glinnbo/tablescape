@@ -25,6 +25,14 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.66', [
+      'Effects has a Select tool, first among the side tools of Elements and Lights. Only with it do painted areas show their outline and placed effects their marker, and a click picks one. With any other tool a click or a drag always places or paints. Outlines also stay in place when the map is zoomed',
+      'Scene: one Wind slider. Follow the weather, the direction, Storm, Lean, Branches and Leaves are under Advanced wind',
+      'New in Animals: Bats, painted over an area, fly in calm wide bends. The old Bats is called Bat stream (a stream first, Flutter round a spot second)',
+      'Circling birds fly high and wide now, each at its own height, gliding, with a soft shadow far below',
+      'What turns, turns smoothly now: a whirlpool, a dust devil, Turning parts and a windmill stood still for some seconds and then jumped most of a turn. The whirlpool is one steady spiral, the dust devil soft',
+      'Fish, eels and critters slow down and come round in a bend instead of flipping at the end of their way; an eel is one body again',
+    ]],
     ['Beta 3.65', [
       'Effects → Elements → Water is now drawn by the graphics card and moves the map itself: a pond in the map picture ripples, a plain floor becomes a dark pool with a bright shore. Painted water on your maps changes its look. It lies under placed assets. Video maps, and PCs without a graphics card, keep the water as it was',
       'Its settings are Transparency and Speed, for all the water of a map; each area keeps its own colour. A whirlpool with Swirl the water turns this water too',
@@ -296,7 +304,7 @@ const Guide = (() => {
     ['Beta 3.20', [
       'Living trees: trees that move in the wind. Library → Assets → Living trees has seven kinds in three sizes; stamp them like any asset, or paint a forest with Scatter. Every tree looks a little different, and the shuffle button on its card gives it another look',
       'They start above the tokens: on the table a crown opens where a token stands under it',
-      'Their wind follows the weather (a thunderstorm bends them, snow barely moves them). Effects → Weather → Wind in the trees sets your own, and Storm, also a hotbar button, blows until you click it again',
+      'Their wind follows the weather (a thunderstorm bends them, snow barely moves them). Effects → Scene → Wind sets your own, and Storm (under Advanced wind, also a hotbar button) blows until you click it again',
       'They are drawn by the graphics card. A PC without one shows them as still pictures; Effects quality Medium and Low make them lighter',
     ]],
     ['Beta 3.19', [

@@ -683,11 +683,11 @@ const Play = (() => {
       'Right-drag or Space-drag moves your view; F fits it to the table, Shift + F shows everything.'],
     fx: () => [...({ // (Beta 3.60: by group)
       scene: ['Time of day and Darkness set the light of the whole map; lights, torches and campfires shine through the dark.', 'Weather covers the whole table and stays put when you move the map. With lightning in the mix, the Lightning button flashes it whenever you like.',
-        'Fine-tune the weather: change a layer, add one or take one out, save the mix for other maps. The living trees and the grass take their wind from the weather unless you set it by hand.',
+        'Wind: the living trees, the grass and what drifts take it from the weather until you move the slider. Advanced wind: where it blows from, how the trees take it, Storm, and back to the weather\'s wind.', 'Fine-tune the weather: change a layer, add one or take one out, save the mix for other maps.',
         'Indoors: paint over houses and caves; the weather stays off there.', 'Day, Dusk, Night, Cave and the mixes work on the hotbar and the button deck too.'],
-      lights: ['Holder: a light with what holds it (a wall light sits on the wall near the click). Flame: a flame and its light. Just light: light only; click a token so it carries it. Daylight: sunlight through a window, or a beam through a hole; Ctrl + wheel turns it.', 'Click a light to pick it: the same rows change it, drag moves it, Delete removes it.', 'The same panel is in Draw → Structure → Light.', 'The party\'s own light is set in Play → Party marker (U).', 'Lights show once the map is dark: Scene → Time of day or Darkness.'],
+      lights: ['Holder: a light with what holds it (a wall light sits on the wall near the click). Flame: a flame and its light. Just light: light only; click a token so it carries it. Daylight: sunlight through a window, or a beam through a hole; Ctrl + wheel turns it. Select (beside the panel) picks a light to change or move it.', 'With Select, click a light to pick it: the same rows change it, drag moves it, Delete removes it.', 'The same panel is in Draw → Structure → Light.', 'The party\'s own light is set in Play → Party marker (U).', 'Lights show once the map is dark: Scene → Time of day or Darkness.'],
       elements: ['Pick an effect: a click on the map places it, or a drag paints it. The effect knows which.', 'For painted effects Box, Round, Brush and Erase come out at the side. Alt erases with the shape in hand; [ and ] size the brush.',
-        'Painted areas show a thin outline. With Box or Round in hand, a click inside an area picks it (a drag still draws); a second click takes the one under it. Any effect can be picked by its marker: drag it to move it, right-click it for more. A click beside a picked effect lets go and places nothing.', 'Each effect remembers its own colour and size. Painting in another colour starts a new area by itself.',
+        'Select (on top of the tools beside the panel) shows what is on the map: a marker on every click effect, a thin outline round every painted area. Click a marker, or inside an area, to change it (a second click takes the area under it); drag a marker to move it, right-click it for more; a click beside lets go. With any other tool the map is clean and a click or drag makes the effect.', 'Each effect remembers its own colour and size. Painting in another colour starts a new area by itself.',
         'Water moves the map itself: a pond in the picture ripples, a floor becomes a pool. Ember glow, Shimmer, Pulse and Ripple light up what is in the map picture (lava, crystals, runes); on a plain floor they show nothing. Their settings are for all of that effect on the map.',
         'The chips narrow the tiles to one family.'],
     }[fxGroup()] || [])],
@@ -786,9 +786,10 @@ const Play = (() => {
   const TOOL_HINTS = {
     oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a wall · drag: a longer one · again: the door goes', window: 'Click a wall · drag: a longer one · again: the window goes', light: 'Click: a light (a wall light on the wall) · click a light: pick it, drag it · Delete: it goes' }[ui.os && ui.os.tool] || ''),
     map: 'Drag moves the map · Alt + wheel scales it · Space-drag moves your view',
-    fx: () => (ui.fxMode === 'place' ? 'Click places it · drag its marker to move it · right-click for more'
-      : ui.fxMode === 'paint' ? ({ box: 'Drag a box · click an area: pick it · Shift: square · Alt: erase', round: 'Drag a round · click an area: pick it · Shift: circle · Alt: erase', erase: 'Drag over what should go · [ and ] change the size' }[ui.paintShape] || '[ and ] change the brush size · Alt: erase')
-        : ui.fxMode === 'light' && ui.lightTab === 'sources' ? 'Click: a light · click a light: pick it, drag it · Just light on a token: it carries it' : ''),
+    fx: () => (ui.fxSel && ui.fxMode !== 'weather' ? 'Click an effect: pick it · drag its marker: move it · right-click for more · Esc lets go'
+      : ui.fxMode === 'place' ? 'Click places it · Select picks and moves what is on the map'
+      : ui.fxMode === 'paint' ? ({ box: 'Drag a box · Shift: square · Alt: erase', round: 'Drag a round · Shift: circle · Alt: erase', erase: 'Drag over what should go · [ and ] change the size' }[ui.paintShape] || '[ and ] change the brush size · Alt: erase')
+        : ui.fxMode === 'light' && ui.lightTab === 'sources' ? 'Click: a light · Just light on a token: it carries it · Select picks and moves a light' : ''),
     asset: 'Click stamps · drag scatters · Ctrl + wheel turns · [ and ] resize · Shift + click selects several',
     walls: () => ({ wall: 'Click corner to corner · double-click ends · Alt places freely', room: 'Drag from corner to corner', door: 'Click a wall for a door', edit: 'Drag a corner or a wall · Delete removes', erase: 'Click a wall, or drag a box' }[ui.walls && ui.walls.mode] || ''),
     token: 'Click drops one · Alt places freely · Ctrl + D duplicates',
@@ -1482,12 +1483,16 @@ const Play = (() => {
   const ltGroups = (get, set, day) => seg({ cls: `lt-groups${day ? ' lt-four' : ''}`, options: day ? LT_GROUPS : LT_GROUPS.slice(0, 3), get, set });
   const DAY = ['window', 'shaft'];
   const dayNow = () => { if (ui.fxMode !== 'place') return false; const f = lookTarget(); return DAY.includes(f ? f.preset : ui.emitter); };
-  function armDaylight(id) { ui.ltDay = true; if (DAY.includes(id)) ui.dayKind = id; ui.fxMode = 'place'; ui.emitter = ui.dayKind || 'window'; }
+  function armDaylight(id) { ui.fxSel = false; ui.ltDay = true; if (DAY.includes(id)) ui.dayKind = id; ui.fxMode = 'place'; ui.emitter = ui.dayKind || 'window'; }
   function lightPanel(o = {}) {
     const P = () => { const f = o.picked ? o.picked() : null; return f && Fixtures.isLight(f) ? fxOf(f.id) : null; };
     const f0 = P();
     const out = [];
-    const next = (patch, rebuild) => { Object.assign(ui.lt, patch); saveLt(); if (rebuild && o.rebuild) o.rebuild(); else refreshPop(); if (o.changed) o.changed(); };
+    const next = (patch, rebuild) => {
+      Object.assign(ui.lt, patch); saveLt();
+      if (ui.tool === 'fx' && ui.fxSel && o.head) { setFxSel(false); if (o.changed) o.changed(); return; } // (Beta 3.66: choosing a light to place puts Place in hand)
+      if (rebuild && o.rebuild) o.rebuild(); else refreshPop(); if (o.changed) o.changed();
+    };
     const upd = (patch, key) => { const f = P(); if (!f) return; if (key) send(key, 'fx.update', { id: f.id, ...patch }); else cmd('fx.update', { id: f.id, ...patch }); };
     if (f0 && o.head) {
       out.push(h('div', { class: 'look-head' }, h('span', { class: 'grow' }, h('b', {}, Fixtures.labelOf(f0, map()))), h('button', { class: 'btn ghost small', onclick: () => { selectFx(null); } }, iconEl('x'), 'Done')));
@@ -1556,16 +1561,24 @@ const Play = (() => {
   const elOf = (kind, id) => FXDATA.ELEMENTS.find((x) => x.kind === kind && x.id === id) || null;
   // Beta 3.64: painted areas show a thin outline while Elements is open (Indoors: the roofs), and a click inside one
   // picks it. Which areas: every painted effect in Elements, the roofs while Indoors is in hand
-  const areaTest = () => { if (ui.tool !== 'fx' || !S || !S.map) return null; const g = fxGroup(); return indoors() ? (f) => f.preset === 'roof' : g === 'elements' ? (f) => f.preset !== 'roof' : null; };
-  function syncAreas() { view.setAreas(areaTest()); if (!areaTest()) setAreaHover(null); }
+  // Beta 3.66 (Glinn): only with the **Select** tool (ui.fxSel). With an effect in hand the map is clean: no outlines,
+  // no markers, and a click or drag always makes the effect
+  const areaTest = () => { if (ui.tool !== 'fx' || !ui.fxSel || !S || !S.map) return null; const g = fxGroup(); return indoors() ? (f) => f.preset === 'roof' : g === 'elements' ? (f) => f.preset !== 'roof' : null; };
+  function syncAreas() {
+    view.setAreas(areaTest()); if (!areaTest()) setAreaHover(null);
+    if (ui.tool === 'fx') view.setHandles(ui.fxSel ? 'all' : 'party'); // (the markers too; the party's stays, as in every tool)
+    document.body.classList.toggle('fx-select', ui.tool === 'fx' && !!ui.fxSel);
+  }
+  function setFxSel(on) {
+    ui.fxSel = !!on;
+    if (!on && ui.selFx) { ui.selFx = null; view.selectFx(null); placeCard(); }
+    openPop('fx'); updateBrushCursor(); showToolHint();
+  }
   function setAreaHover(id) { view.hoverFx(id); document.body.classList.toggle('fx-pick', !!id); }
-  // would a click here pick an area, and which? With an effect picked: any area under the pointer (a click beside it
-  // lets go). With a Box or a Round in hand: a click makes nothing, so it picks (a drag still draws). The brush paints
-  // and a click effect is placed, also inside an area. Smallest first; a click on the picked one takes the next
+  // would a click here pick an area, and which? Only with the Select tool: any area under the pointer (a click beside
+  // lets go). Smallest first; a click on the picked one takes the next
   function fxAreaAt(pt, e) {
     const test = areaTest(); if (!test || !pt) return null;
-    const free = !!ui.selFx || (ui.fxMode === 'paint' && (ui.paintShape === 'box' || ui.paintShape === 'round') && !(e && e.altKey));
-    if (!free) return null;
     const list = view.areasAt(pt.x, pt.y, test); if (!list.length) return null;
     const i = list.findIndex((f) => f.id === ui.selFx);
     return i < 0 ? list[0] : list.length > 1 ? list[(i + 1) % list.length] : list[0];
@@ -1598,16 +1611,21 @@ const Play = (() => {
     else if (group === 'lights' && dayNow()) ({ body, fly } = elementRows({ day: true }));
     else if (group === 'lights') body = [h('div', { class: 'light-card' }, ...lightPanel({ picked: () => lookTarget(), rebuild: () => openPop('fx'), head: true, remove: true, day: () => { armDaylight(); openPop('fx'); updateBrushCursor(); showToolHint(); } }))];
     else ({ body, fly } = elementRows());
-    const picked = group === 'elements' && !!lookTarget();
-    const tools = (group === 'elements' && ui.fxMode === 'paint' && !picked) || indoors();
-    const slide = o.again && fxShown === `${group}|${tools}` ? '' : ' slide';
-    fxShown = `${group}|${tools}`;
+    // (Beta 3.66: the tools beside the panel: Select first, then how the effect in hand goes down: Box, Round, Brush,
+    // Erase for a painted one, Place for a click effect or a light)
+    const paints = (group === 'elements' && ui.fxMode === 'paint') || indoors();
+    const tools = group === 'elements' || group === 'lights' || indoors();
+    const toolList = [['select', 'Select', 'pointer', 'Pick what is on the map: click an effect\'s marker or inside a painted area to change it, drag a marker to move it'],
+      ...(paints ? SHAPE_TOOLS.filter(([v]) => !(v === 'brush' && noBrush())) : [['place', 'Place', 'map-pin', 'Click the map to place it']])];
+    const toolOn = (v) => (v === 'select' ? !!ui.fxSel : !ui.fxSel && (v === 'place' || ui.paintShape === v));
+    const slide = o.again && fxShown === `${group}|${tools}|${paints}` ? '' : ' slide';
+    fxShown = `${group}|${tools}|${paints}`;
     const groups = h('div', { class: `os-tools os-tabs os-groups fx-groups${o.again ? '' : ' slide'}` }, ...FX_GROUPS.map((g, i) => h('button', {
       class: `tile ${g.id === group ? 'open' : ''}`, dataset: { v: `fxg-${g.id}`, g: g.id }, 'data-tip': g.tip, 'aria-label': g.label, style: `--i:${i}`, onclick: () => setFxGroup(g.id),
     }, iconEl(g.icon), h('span', {}, g.label))));
-    const shapes = tools ? h('div', { class: `os-tools os-tabs os-tabs2 g-${group}${slide}` }, ...SHAPE_TOOLS.filter(([v]) => !(v === 'brush' && noBrush())).map(([v, label, icon, tip], i) => h('button', {
-      class: `tile ${ui.paintShape === v ? 'on' : ''}`, dataset: { v: `fxt-${v}` }, 'data-tip': tip, 'aria-label': label, style: `--i:${i}`,
-      onclick: () => { ui.paintShape = v; openPop('fx'); updateBrushCursor(); showToolHint(); },
+    const shapes = tools ? h('div', { class: `os-tools os-tabs os-tabs2 g-${group}${slide}` }, ...toolList.map(([v, label, icon, tip], i) => h('button', {
+      class: `tile ${toolOn(v) ? 'on' : ''}`, dataset: { v: `fxt-${v}` }, 'data-tip': tip, 'aria-label': label, style: `--i:${i}`,
+      onclick: () => { if (v !== 'select' && v !== 'place') ui.paintShape = v; setFxSel(v === 'select'); },
     }, iconEl(icon), h('span', {}, label)))) : null;
     const wrap = fly ? h('div', { class: `os-flywrap fx-flywrap${shapes ? ' past-parts' : ''}` }, fly) : null;
     fxSides = { els: [groups, shapes, wrap] };
@@ -1625,7 +1643,7 @@ const Play = (() => {
     const moods = hotTiles(tiles(FXDATA.MOODS.map((m) => ({ id: m.id, label: m.label, icon: m.icon, tip: m.tip })), () => map().light.mood || null, (v) => setMood(v)), (id) => { const m = FXDATA.MOODS.find((x) => x.id === id); return m && { kind: 'light', ref: m.id, label: m.label, icon: m.icon }; });
     moods.classList.add('fx-moods');
     const W = weatherPanel({ parts: true });
-    const wind = windSection(true);
+    const wind = windSection();
     const roof = btn('Indoors', 'umbrella', () => {
       if (indoors()) ui.fxMode = 'weather'; else { ui.fxMode = 'paint'; ui.region = 'roof'; if (ui.paintShape === 'erase') ui.paintShape = 'box'; }
       openPop('fx'); updateBrushCursor(); showToolHint();
@@ -1646,8 +1664,9 @@ const Play = (() => {
       h('div', { class: 'ctl' }, h('div', { class: 'row fx-sec-row' }, h('span', { class: 'ctl-label fx-sec grow' }, 'Weather'), roof), W.presets),
       indoors() ? shownIf(() => ui.paintShape === 'brush' || ui.paintShape === 'erase', slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` })) : null,
       W.strike,
-      h('div', { class: 'ctl-row fx-wind' }, iconEl('wind'), wind.line, wind.storm),
-      fxFold('fxMoreWx', 'Fine-tune the weather', W.list, row(addLayer, h('span', { class: 'grow' }), W.save), W.fade, wind.follow, wind.own, wind.fine),
+      wind.main,
+      fxFold('fxMoreWind', 'Advanced wind', ...wind.adv), // (Beta 3.66)
+      fxFold('fxMoreWx', 'Fine-tune the weather', W.list, row(addLayer, h('span', { class: 'grow' }), W.save), W.fade),
     ];
   }
   // Elements. Nothing picked: the banner shows the effect in hand, the tiles pick another, the rows are its look.
@@ -1736,7 +1755,7 @@ const Play = (() => {
       const d = (e.kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === e.id);
       gal.append(h('button', {
         class: `fx-t ${on ? 'on' : ''}`, role: 'radio', 'aria-checked': String(on), dataset: { v: e.key }, 'aria-label': e.label, 'data-tip': e.tip, style: `--fc:${famOf(e).color}`,
-        onclick: () => { armElement(e); if (ui.paintShape === 'erase') ui.paintShape = 'box'; if (ui.selFx) { ui.selFx = null; view.selectFx(null); placeCard(); } openPop('fx'); updateBrushCursor(); showToolHint(); },
+        onclick: () => { armElement(e); ui.fxSel = false; if (ui.paintShape === 'erase') ui.paintShape = 'box'; if (ui.selFx) { ui.selFx = null; view.selectFx(null); placeCard(); } openPop('fx'); updateBrushCursor(); showToolHint(); }, // (Beta 3.66: a tile takes the effect in hand: out of Select)
         onmouseenter: () => { banSig = ''; showBan(e.kind, d, {}, e.label, e.kind === 'region' ? 'drag or paint it' : 'a click', null); },
         onmouseleave: () => paintBan(true),
       }, picture(e.kind, d, { w: 104, h: 72, zoom: 1 }), h('i', { class: 'fam' }), h('span', {}, e.label)));
@@ -1878,28 +1897,29 @@ const Play = (() => {
   }
   // Beta 3.20: the wind in the living trees (Beta 3.21: at the bottom of Assets → Living). It follows the weather unless
   // you set your own: where it blows and how hard; the rest (how far they lean, branches, leaves) comes from that, or by hand.
-  function windSection(parts = false) {
+  // Beta 3.66 (Glinn: "Just 'Wind' + slider and Advanced wind setting"): one slider, Still to A storm. It shows the wind
+  // as it is (from the weather until it is moved); moving it makes the wind the map's own. Advanced: back to the
+  // weather's wind, where it blows from, how the trees take it, and the Storm button (also a hotbar button)
+  function windSection() {
     const W = () => map().wind || { auto: true };
     const now = () => Trees.windOf(map());
     const set = (patch, key) => (key ? send(key, 'wind.set', patch) : cmd('wind.set', patch));
     const word = (s) => (s < 0.5 ? 'Still' : s < 1.3 ? 'A breeze' : s < 1.9 ? 'Windy' : s < 2.35 ? 'A gale' : 'A storm');
-    const line = h('span', { class: 'grow hint wind-now' });
-    bind(() => { const w = now(); const t = w.from === 'storm' ? 'A storm' : `${word(w.strength)}${w.from === 'weather' ? ', from the weather' : ''}`; if (line.textContent !== t) line.textContent = t; });
-    const storm = Hotbar.offer(btn('Storm', 'tornado', () => cmd('wind.storm', {}), { tip: 'A storm in the trees until you click again, whatever the weather' }), doHot('storm'));
+    // a change by hand: the wind is the map's own from now on, starting from the wind as it is
+    const mine = (patch, key) => { const w = now(); set({ auto: false, storm: false, dir: Math.round(w.dir), strength: round(w.strength, 2), lean: round(w.lean, 2), branches: round(w.branches, 2), rustle: round(w.rustle, 2), ...patch }, key); };
+    const main = slider({ label: 'Wind', min: 0, max: 3, step: 0.05, get: () => now().strength, fmt: word,
+      set: (v, k) => { const f = Trees.fromStrength(0, v); mine({ strength: v, lean: round(f.lean, 2), branches: round(f.branches, 2), rustle: round(f.rustle, 2) }, k || 'wind-strength'); } });
+    main.classList.add('fx-wind'); main.dataset.flash = 'wind';
+    const follow = toggle({ label: 'Follows the weather', get: () => W().auto !== false, set: (v) => { if (v) cmd('wind.set', { auto: true }); else mine({}); } });
+    const storm = Hotbar.offer(btn('Storm', 'tornado', () => cmd('wind.storm', {}), { kind: 'small', tip: 'A storm until you click again, whatever the weather' }), doHot('storm'));
     bind(() => storm.classList.toggle('primary', !!W().storm));
-    const own = h('div', { class: 'stack' },
-      compass(() => W().dir ?? 30, (v) => set({ dir: v }, 'wind-dir')),
-      slider({ label: 'Strength', min: 0, max: 3, step: 0.05, get: () => W().strength ?? 1, fmt: word,
-        set: (v, k) => { const f = Trees.fromStrength(0, v); set(ui.windFine ? { strength: v } : { strength: v, lean: round(f.lean, 2), branches: round(f.branches, 2), rustle: round(f.rustle, 2) }, k); } }),
-      toggle({ label: 'Fine tuning', get: () => !!ui.windFine, set: (v) => { ui.windFine = v; refreshPop(); } }));
-    const fine = h('div', { class: 'stack' },
-      slider({ label: 'Lean', min: 0, max: 1, step: 0.05, get: () => W().lean ?? 0, set: (v, k) => set({ lean: v }, k), fmt: pct }),
-      slider({ label: 'Branches', min: 0, max: 3, step: 0.05, get: () => W().branches ?? 1, set: (v, k) => set({ branches: v }, k), fmt: pct }),
-      slider({ label: 'Leaves', min: 0, max: 3, step: 0.05, get: () => W().rustle ?? 1, set: (v, k) => set({ rustle: v }, k), fmt: pct }));
-    bind(() => { own.hidden = W().auto !== false; fine.hidden = W().auto !== false || !ui.windFine; });
-    const follow = toggle({ label: 'Follows the weather', get: () => W().auto !== false, set: (v) => { const w = now(); cmd('wind.set', v ? { auto: true } : { auto: false, dir: Math.round(w.dir), ...(W().storm ? {} : { strength: round(w.strength, 2), lean: round(w.lean, 2), branches: round(w.branches, 2), rustle: round(w.rustle, 2) }) }); } });
-    if (parts) return { line, storm, follow, own, fine };
-    return h('div', { class: 'stack wind-box', dataset: { flash: 'wind' } }, h('div', { class: 'ctl-label' }, 'Wind in the trees'), row(line, storm), follow, own, fine);
+    const adv = [
+      row(follow, storm),
+      compass(() => now().dir ?? 30, (v) => mine({ dir: v }, 'wind-dir')),
+      slider({ label: 'Lean', min: 0, max: 1, step: 0.05, get: () => now().lean ?? 0, set: (v, k) => mine({ lean: v }, k || 'wind-lean'), fmt: pct }),
+      slider({ label: 'Branches', min: 0, max: 3, step: 0.05, get: () => now().branches ?? 1, set: (v, k) => mine({ branches: v }, k || 'wind-branches'), fmt: pct }),
+      slider({ label: 'Leaves', min: 0, max: 3, step: 0.05, get: () => now().rustle ?? 1, set: (v, k) => mine({ rustle: v }, k || 'wind-rustle'), fmt: pct })];
+    return { main, adv };
   }
   function wxDetail(L, def, local, o = {}) {
     const wmap = o.map || map; const cmd = o.cmd || ((type, payload) => ts.cmd(type, payload)); const wsend = o.send || send; // (this map's own commands)
@@ -3422,6 +3442,7 @@ const Play = (() => {
   }
   function selectFx(id) {
     const was = fxOf(ui.selFx);
+    if (id && ui.tool === 'fx' && !ui.fxSel) { ui.fxSel = true; syncAreas(); } // (Beta 3.66: whatever picks an effect in Effects (Layers, a right-click) is the Select tool)
     ui.selFx = id;
     view.selectFx(id);
     placeCard();
@@ -4303,7 +4324,7 @@ const Play = (() => {
   function updateBrushCursor() {
     if (!brushCursor) { brushCursor = h('div', { class: 'brush-cursor' }); view.marks.appendChild(brushCursor); }
     const fog = ui.tool === 'fog' && ui.fogShape === 'brush' && !(drag && drag.kind === 'rect');
-    const fxPaint = ui.tool === 'fx' && ui.fxMode === 'paint';
+    const fxPaint = ui.tool === 'fx' && ui.fxMode === 'paint' && !ui.fxSel; // (Beta 3.66: no brush with the Select tool)
     const paint = (fxPaint && (ui.paintShape === 'brush' || ui.paintShape === 'erase') && !(drag && drag.kind === 'fxrect')) || (ui.tool === 'asset' && ui.assetMode === 'scatter' && !!activeBrush());
     const show = (fog || paint) && lastPointer && !ui.align && S && S.map;
     brushCursor.style.display = show ? '' : 'none';
@@ -4592,8 +4613,6 @@ const Play = (() => {
           const L = ui.look;
           if (d.erase) cmd('fx.cut', { sid: d.sid, shape: d.round ? 'round' : 'rect', x: r.x, y: r.y, w: r.w, h: r.h });
           else cmd('fx.shape', { id: d.id, preset: d.preset, sid: d.sid, shape: d.round ? 'round' : 'rect', ...r, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset), ...(L.spin === -1 && (FXDATA.REGIONS.find((x) => x.id === d.preset) || {}).spin ? { spin: -1 } : {}) }); // (second-water-works)
-        } else if (!d.erase && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 5) { // (Beta 3.64: a click, nothing drawn: it picks the area under it)
-          const a = fxAreaAt(pt, e); if (a) selectFx(a.id);
         }
       } else if (d.kind === 'paint') {
         flushPaint(d);
@@ -4735,12 +4754,11 @@ const Play = (() => {
     }
     // Beta 3.54: Light sources: a click on a light (its holder, its flame) picks it, as in Draw; a click beside a
     // picked light lets go of it and places nothing
-    if (ui.fxMode === 'light' && ui.lightTab === 'sources') {
+    // Beta 3.66 (Glinn): picking is the Select tool's alone. There a click on a light's holder or flame picks it (and a
+    // drag moves it), a click inside a painted area picks that (3.64), a click beside lets go; nothing is ever made
+    if (ui.fxSel) {
       const hit = Fixtures.under(map(), pt);
       if (hit) { selectFx(hit.id); const p = view.fxPos(hit); drag = { kind: 'fxmove', id: hit.id, dx: p.x - pt.x, dy: p.y - pt.y, attached: false, sx: e.clientX, sy: e.clientY, moved: false, key: `fx-${hit.id}-${Date.now()}` }; return; }
-      if (ui.selFx && Fixtures.isLight(fxOf(ui.selFx))) { selectFx(null); return; }
-    }
-    if (ui.selFx) { // (Beta 3.60: a click beside a picked effect lets go of it and places nothing, as with lights. Beta 3.64: a click inside a painted area picks that one)
       const a = fxAreaAt(pt, e);
       if (a && a.id !== ui.selFx) selectFx(a.id); else if (!a) selectFx(null);
       setAreaHover(null);

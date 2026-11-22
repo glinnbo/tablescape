@@ -453,19 +453,16 @@ const Creatures = (() => {
     g0.fillStyle = gr; g0.fillRect(0, 0, S, S);
     ring(g0, 0.06, 0.16, 0.42, 0.78);
     blit(A * (mael ? 0.85 : 0.6));
-    // 3. foam: one spiral picture in three soft rings, the inner ones turning faster
+    // 3. foam: one spiral picture, turned as a whole. A log spiral turned as a whole seems to run into the eye, without
+    // a seam and without a moment where it starts over. (Beta 3.66, Glinn: "weird stutters, not a clean loop": it was
+    // cut into three rings turning at three rates, so the arms broke and met again where the rings overlap. What is
+    // further in still goes round faster: the flecks and the debris do)
     const pic = foamPic(mael, spin, foam);
-    const bands = mael ? [[0, 0.1, 0.3, 0.45, 2.4], [0.28, 0.42, 0.6, 0.75, 1.55], [0.55, 0.7, 1, 1, 1]] : [[0, 0.1, 0.3, 0.45, 2.2], [0.28, 0.42, 0.6, 0.75, 1.45], [0.55, 0.7, 1, 1, 1]];
-    const w = (mael ? 0.62 : 0.4); // radians a second at the rim
-    bands.forEach(([a0, a1, a2, a3, k], i) => {
-      g0.setTransform(1, 0, 0, 1, 0, 0); g0.clearRect(0, 0, S, S);
-      g0.translate(o, o); g0.rotate(spin * w * k * t + h(s + i) * TAU); g0.drawImage(pic, -Rd, -Rd, Rd * 2, Rd * 2); // (each ring starts turned its own way)
-      g0.setTransform(1, 0, 0, 1, 0, 0);
-      ring(g0, a0, a1, a2, a3);
-      blit(A * (mael ? 0.9 : 0.72));
-    });
+    const w = (mael ? 0.62 : 0.4) * 1.3; // radians a second
+    ctx.save(); ctx.translate(x, y); ctx.rotate(spin * w * t + h(s) * TAU); ctx.globalAlpha = Math.min(1, A * (mael ? 1 : 0.85));
+    ctx.drawImage(pic, -r, -r, r * 2, r * 2); ctx.restore();
     // loose flecks of foam circling in
-    const nf = F().count(mael ? 40 : 28, fx);
+    const nf = F().count(mael ? 56 : 44, fx);
     for (let i = 0; i < nf; i++) {
       const u = fract(t / (life * 1.2) + h(s + i * 3.3));
       const [rho, th] = spiralAt(r, u, h(s + i * 5.1) * TAU, spin, rot);
@@ -501,9 +498,10 @@ const Creatures = (() => {
       const ns = F().count(46, fx);
       for (let i = 0; i < ns; i++) {
         const a = (i / ns) * TAU + spin * rot * 0.6 + h(s + i) * 0.2;
-        const k = Math.floor(t * 3 + h(s + i * 3) * 5);
-        const rr = r * (0.9 + 0.2 * h(s + i * 7 + k));
-        dot(ctx, sprite('#ffffff', 0.3), x + Math.cos(a) * rr, y + Math.sin(a) * rr, r * (0.03 + 0.05 * h(s + i * 5 + k)), A * 0.55 * (0.5 + 0.5 * Math.sin(t * 5 + i * 2.1)));
+        // (Beta 3.66: each bit of spray swells and falls back smoothly; it took a new place three times a second)
+        const q = 0.5 + 0.5 * Math.sin(t * (1.6 + 1.2 * h(s + i * 3)) + h(s + i * 7) * TAU);
+        const rr = r * (0.9 + 0.2 * q);
+        dot(ctx, sprite('#ffffff', 0.3), x + Math.cos(a) * rr, y + Math.sin(a) * rr, r * (0.03 + 0.05 * q), A * 0.55 * (0.35 + 0.65 * q));
       }
       for (let i = 0; i < 10; i++) {
         const ph = fract(t * 0.35 + i / 10); const a = h(s + i * 13) * TAU + spin * rot * 0.6;
@@ -517,6 +515,8 @@ const Creatures = (() => {
   // Two copies, each turning for a while from rest, fade into each other (as flow maps do), so the water keeps
   // turning one way and never winds up into a smear.
   const swirlSrc = new Map();
+  // how far the water is twisted at the eye right now (it breathes slowly; also for the engine's water, living.js)
+  const twistOf = (fx, t) => (fx.spin === -1 ? -1 : 1) * (fx.variant === 'maelstrom' ? 1.2 : 0.8) * Math.min(1.5, fx.intensity ?? 1) * (0.85 + 0.15 * Math.sin(t * (fx.speed ?? 1) * 0.5 + F().seedOf(fx.id || 's'))); // radians at the eye
   function swirl(ctx, fx, x, y, t, bg) {
     const el = bg && bg.el;
     if (!el || fx.swirl === false) return;
@@ -545,29 +545,25 @@ const Creatures = (() => {
     }
     const spin = fx.spin === -1 ? -1 : 1;
     const mael = fx.variant === 'maelstrom';
-    const T = t * (fx.speed ?? 1);
-    const per = mael ? 6 : 9; // seconds one copy turns before it has faded out
-    const turnMax = (mael ? 0.5 : 0.32) * Math.min(1.5, fx.intensity ?? 1); // small, so the two copies never show double // radians at the middle over one copy's life
+    // (Beta 3.66, Glinn: "weird stutters": two copies, each turning from rest and fading into the other, pulsed between
+    // sharp and doubled every few seconds. Now the picture is drawn once, twisted toward the eye and held there, the
+    // twist breathing a little; the foam and what floats on it do the turning)
+    const twist = twistOf(fx, t);
     const N = Math.max(8, Math.round(Math.min(18, R / 14)));
     const sc = scratch(12, W, H, P); const g = sc.g;
     const lcx = cx; const lcy = cy;
-    for (const [off, top] of [[0.5, false], [0, true]]) {
-      const ph = fract(T / per + off + h(F().seedOf(fx.id || 's')));
-      const w = 1 - Math.abs(2 * ph - 1); // 0 at either end of its life, 1 halfway
-      g.globalAlpha = top ? w : 1;
-      for (let i = N - 1; i >= 0; i--) {
-        const r0 = (i / N) * R; const r1 = ((i + 1) / N) * R + 1;
-        const q = (i + 0.5) / N; // 0 in the middle, 1 at the rim
-        const ang = spin * turnMax * (ph - 0.5) * 2 * Math.pow(1 - q, 1.6) / (q + 0.25) * 0.25;
-        g.save();
-        g.beginPath(); g.arc(lcx, lcy, r1, 0, TAU); if (r0 > 0) g.arc(lcx, lcy, r0, 0, TAU, true); g.clip('evenodd');
-        g.translate(lcx, lcy); g.rotate(ang); g.translate(-lcx, -lcy);
-        // only the square round this ring (turned, it still covers the ring), not the whole picture
-        const e2 = r1 * 1.42 + 2; const sx = Math.max(0, Math.floor(lcx - e2 - P.x)); const sy = Math.max(0, Math.floor(lcy - e2 - P.y));
-        const sw = Math.min(P.w, Math.ceil(lcx + e2 - P.x)) - sx; const sh = Math.min(P.h, Math.ceil(lcy + e2 - P.y)) - sy;
-        if (sw > 0 && sh > 0) g.drawImage(src, sx, sy, sw, sh, P.x + sx, P.y + sy, sw, sh);
-        g.restore();
-      }
+    for (let i = N - 1; i >= 0; i--) {
+      const r0 = (i / N) * R; const r1 = ((i + 1) / N) * R + 1;
+      const q = (i + 0.5) / N; // 0 in the middle, 1 at the rim
+      const ang = twist * Math.pow(1 - q, 1.6) / (q + 0.25) * 0.25;
+      g.save();
+      g.beginPath(); g.arc(lcx, lcy, r1, 0, TAU); if (r0 > 0) g.arc(lcx, lcy, r0, 0, TAU, true); g.clip('evenodd');
+      g.translate(lcx, lcy); g.rotate(ang); g.translate(-lcx, -lcy);
+      // only the square round this ring (turned, it still covers the ring), not the whole picture
+      const e2 = r1 * 1.42 + 2; const sx = Math.max(0, Math.floor(lcx - e2 - P.x)); const sy = Math.max(0, Math.floor(lcy - e2 - P.y));
+      const sw = Math.min(P.w, Math.ceil(lcx + e2 - P.x)) - sx; const sh = Math.min(P.h, Math.ceil(lcy + e2 - P.y)) - sy;
+      if (sw > 0 && sh > 0) g.drawImage(src, sx, sy, sw, sh, P.x + sx, P.y + sy, sw, sh);
+      g.restore();
     }
     // a soft round edge, so the turning water melts into the still water round it
     g.globalAlpha = 1; g.globalCompositeOperation = 'destination-in';
@@ -824,11 +820,12 @@ const Creatures = (() => {
     rims.set(n, c); return c;
   }
   function flyerShadow(g, n, x, y, ang, open, o) {
-    const sh = (o.alpha ?? 1) * 0.36 * (1 - sm(0.3, 0.6, o.dark || 0)); // no shadows in the dark
+    const sh = (o.alpha ?? 1) * 0.36 * (o.shade ?? 1) * (1 - sm(0.3, 0.6, o.dark || 0)); // no shadows in the dark
     if (sh <= 0.01 || !o.height) return;
     const K = SPR[n]; let im = shadowOf(n); if (!K || !im) return;
     const span = K.size * (o.size || 1) * o.sq;
-    im = mip(`${n}|shadow`, im, span * devK(g)); // (second-bats-insects)
+    // (Beta 3.66: o.soft: the shadow of something high up is blurred: its picture is taken a quarter as sharp and drawn large)
+    im = o.soft ? mip(`${n}|shadow|soft`, im, Math.max(6, span * devK(g) * 0.22)) : mip(`${n}|shadow`, im, span * devK(g)); // (second-bats-insects)
     g.save(); g.translate(x + o.height * 0.22 * o.sq, y + o.height * 0.32 * o.sq); g.rotate(ang); g.globalAlpha = sh; // (the sun high in the top left)
     flapBody(g, im, K, open, span, o.bank || 0);
     g.restore();
@@ -904,27 +901,33 @@ const Creatures = (() => {
   }
 
   // ---------- Circling birds (a click): 1–6 birds circle a spot ----------
-  const CIRCLERS = { vultures: { pic: 'vulture', n: 3, v: 0.9 }, eagle: { pic: 'eagle', n: 1, v: 1 }, gulls: { pic: 'gull', n: 4, v: 1.3 }, crows: { pic: 'crow', n: 4, v: 1.4 } };
+  // k: how big the picture is drawn of its size in SPR. (Beta 3.66, Glinn: "look terrible and way too close to the
+  // ground": they were 1.6 squares wide on a circle of 2.5, the shadow right under them, all on one circle at one rate.
+  // Now they are high up: smaller, on a wide slow circle, gliding with the wings held out, the shadow soft, faint and
+  // far off to the side; each at its own height, width and rate, so one passes over another)
+  const CIRCLERS = { vultures: { pic: 'vulture', n: 3, v: 0.75, k: 0.6 }, eagle: { pic: 'eagle', n: 1, v: 0.85, k: 0.62 }, gulls: { pic: 'gull', n: 4, v: 1.05, k: 0.6, flap: true }, crows: { pic: 'crow', n: 4, v: 1.15, k: 0.62, flap: true } };
   function circling(ctx, fx, x, y, t, r, I) {
     const K = CIRCLERS[fx.variant] || CIRCLERS.vultures; const S = SPR[K.pic];
     const s = F().seedOf(fx.id || 'c'); const cell = SCENE.cell;
     const n = Math.max(1, Math.min(6, Math.round(K.n * (fx.density ?? 1))));
     const dir = h(s + 0.3) < 0.5 ? 1 : -1; // which way round this spot's birds go
     const cx = x + Math.sin(t * 0.05 + s) * r * 0.15; const cy = y + Math.cos(t * 0.04 + s * 2) * r * 0.15; // the circle drifts
-    const birds = [];
+    const birds = []; const w0 = ((K.v * cell) / Math.max(0.5 * cell, r * 0.83)) * (fx.speed ?? 1); // radians a second
     for (let i = 0; i < n; i++) {
-      const R = r * (0.65 + 0.45 * h(s + i * 3.1)) * (1 + 0.12 * Math.sin(t * 0.13 + i * 2));
-      // (Beta 3.63, main Builder: all go round at one rate and keep their places, each drifting a little in its own;
-      // at a rate of its own every bird flew through the others)
-      const w = (K.v * cell) / (r * 0.87); // radians a second
-      const gap = TAU / n;
-      const a = dir * w * t + i * gap + ((h(s + i) - 0.5) * 0.3 + 0.1 * Math.sin(t * 0.07 + i * 1.9 + s)) * (n > 1 ? gap : 1);
-      const bx = cx + Math.cos(a) * R; const by = cy + Math.sin(a) * R * (0.92 + 0.08 * Math.sin(t * 0.07 + i));
-      birds.push({ x: bx, y: by, ang: a + dir * (Math.PI / 2), open: wingOpen(S, t, s + i * 1.7), bank: dir * 0.6 });
+      const up = n > 1 ? (i + h(s + i * 3.1) * 0.6) / n : 0.5; // how high this one flies, 0 to 1: each at a height of its own
+      const R = r * (0.62 + 0.42 * h(s + i * 5.7)) * (1 + 0.08 * Math.sin(t * 0.09 + i * 2));
+      // (they share one turn, a steady rate since it is multiplied by the time, and keep apart round the circle: each a
+      // share of it, drifting a little ahead and behind. Rates of their own brought them together for minutes on end)
+      const a = dir * (w0 * t + (i / n) * TAU + Math.min(0.5, (0.3 * TAU) / n) * Math.sin(t * 0.031 + i * 2.1 + s)) + h(s) * TAU;
+      const bx = cx + Math.cos(a) * R; const by = cy + Math.sin(a) * R * (0.94 + 0.06 * Math.sin(t * 0.07 + i));
+      // a glide: the wings held out, tipping a little; gulls and crows beat now and then
+      const open = K.flap ? wingOpen(S, t, s + i * 1.7) : 1 - 0.04 * (0.5 + 0.5 * Math.sin(t * 0.6 + i * 2.3));
+      birds.push({ x: bx, y: by, ang: a + dir * (Math.PI / 2) + Math.sin(t * 0.21 + i * 1.3) * 0.06, open, bank: dir * 0.2, up });
     }
-    const op = { sq: cell, size: 1, height: 4, dark: SCENE.dark, alpha: Math.min(1, I) };
-    for (const b of birds) flyerShadow(ctx, K.pic, b.x, b.y, b.ang, b.open, { ...op, bank: b.bank });
-    for (const b of birds) flyer(ctx, K.pic, b.x, b.y, b.ang, b.open, { ...op, bank: b.bank });
+    birds.sort((p, q) => p.up - q.up); // the higher ones over the lower
+    const op = (b) => ({ sq: cell, size: K.k * (0.88 + 0.26 * b.up), dark: SCENE.dark, alpha: Math.min(1, I), bank: b.bank });
+    for (const b of birds) flyerShadow(ctx, K.pic, b.x, b.y, b.ang, b.open, { ...op(b), height: 7 + 5 * b.up, soft: true, shade: 0.8 });
+    for (const b of birds) flyer(ctx, K.pic, b.x, b.y, b.ang, b.open, op(b));
   }
 
   // ---------- Birds take flight (a moment, moments.js): a flock bursts up from a spot and flies off ----------
@@ -1080,6 +1083,68 @@ const Creatures = (() => {
     const S = SPR.bat;
     return { x: a.x, y: a.y, ang: dirOf(b, a) + Math.sin(t * 6 + i) * 0.35, open: S.lo + (1 - S.lo) * (0.5 + 0.5 * Math.cos((t * (8.5 + 3 * h(sd + 1)) + h(sd)) * TAU)), height: 2.5 };
   }
+  // Beta 3.66 (Glinn: "the bats need an option to fly in larger areas and be less nervous"): Bats as a painted effect:
+  // they fly calm, wide bends all over what was painted, each on a round of its own and at a pace of its own. In
+  // squares, on the fly layer.
+  // A round: one dot of the area in each of seven directions from its middle (rather a far one), joined by a smooth
+  // closed curve. It goes round once and never back on itself, so a bat on it never turns about on the spot (the
+  // area's tour does, at every dead end: fine for a rat, not for a flyer)
+  const LOOPS = new Map();
+  function loopOf(fx, i) {
+    const key = `${fx.id}|${i}`; const sig = `${F().strokeSig(fx)}|${fx.strokes && fx.strokes.length}`;
+    const e = LOOPS.get(key); if (e && e.sig === sig) return e.T;
+    const S = samplesOf(fx); let T = null;
+    if (S.length) {
+      let cx = 0; let cy = 0; for (const q of S) { cx += q[0]; cy += q[1]; } cx /= S.length; cy /= S.length;
+      const sd = F().seedOf(fx.id || 'b') + i * 3.17; const K = 7; const rot = h(sd) * TAU; let pick = [];
+      for (let k = 0; k < K; k++) {
+        let best = null; let bw = -1;
+        for (let j = 0; j < S.length; j++) {
+          const a = (((Math.atan2(S[j][1] - cy, S[j][0] - cx) - rot) % TAU) + TAU) % TAU; if (Math.min(K - 1, Math.floor((a / TAU) * K)) !== k) continue;
+          const wgt = h(sd + j * 1.37 + k) * (0.35 + Math.hypot(S[j][0] - cx, S[j][1] - cy)); if (wgt > bw) { bw = wgt; best = S[j]; }
+        }
+        if (best) pick.push(best);
+      }
+      if (pick.length < 3) { const r = Math.max(0.5, S[0][2] || 0.5); pick = [0, 1, 2, 3, 4, 5].map((k) => [cx + Math.cos((k / 6) * TAU) * r, cy + Math.sin((k / 6) * TAU) * r]); }
+      const M = pick.length; const P = [];
+      for (let k = 0; k < M; k++) {
+        const p0 = pick[(k - 1 + M) % M]; const p1 = pick[k]; const p2 = pick[(k + 1) % M]; const p3 = pick[(k + 2) % M];
+        for (let u = 0; u < 10; u++) {
+          const q = u / 10; const q2 = q * q; const q3 = q2 * q;
+          const cr = (d) => 0.5 * (2 * p1[d] + (p2[d] - p0[d]) * q + (2 * p0[d] - 5 * p1[d] + 4 * p2[d] - p3[d]) * q2 + (3 * p1[d] - p0[d] - 3 * p2[d] + p3[d]) * q3);
+          P.push([cr(0), cr(1), 1]);
+        }
+      }
+      P.push(P[0].slice());
+      const cum = [0]; for (let k = 1; k < P.length; k++) cum.push(cum[k - 1] + Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]));
+      T = { P, cum, L: Math.max(1e-3, cum[cum.length - 1]), area: F().areaOf(fx, 'all', null) };
+    }
+    if (LOOPS.size > 200) LOOPS.clear();
+    LOOPS.set(key, { sig, T }); return T;
+  }
+  function batsOver(ctx, fx, t, o) {
+    const T0 = loopOf(fx, 0); if (!T0) return 0;
+    const s = o.s; const S = SPR.bat; const A = Math.min(1, o.I);
+    const n = Math.max(2, Math.min(16, F().count(Math.max(1, Math.round(T0.area / 6)), fx)));
+    const list = [];
+    for (let i = 0; i < n; i++) {
+      const sd = s + i * 7.9;
+      const T = loopOf(fx, i % 5) || T0; const dir = h(sd + 6) < 0.5 ? 1 : -1;
+      const v = 2.1 * (0.8 + 0.4 * h(sd + 1)); // squares a second (a steady pace: it is multiplied by the time)
+      const u = dir * (v * t + 0.9 * Math.sin(t * 0.21 + sd)) + h(sd + 2) * T.L;
+      const p = tourSmooth(T, u, 0.5); const a = tourSmooth(T, u - dir * 0.12, 0.5); const b = tourSmooth(T, u + dir * 0.12, 0.5);
+      const ang = Math.atan2(b[1] - a[1], b[0] - a[0]) || 0;
+      // off its round a little, slowly, whatever way it heads (a drift, not a weave across the heading: that jumped in a bend)
+      list.push({ x: p[0] + 0.4 * Math.sin(t * 0.37 + sd * 2), y: p[1] + 0.4 * Math.cos(t * 0.29 + sd * 5), ang: ang + 0.12 * Math.sin(t * 0.8 + sd * 2) + 0.05 * Math.sin(t * 2.3 + sd),
+        open: S.lo + (1 - S.lo) * (0.5 + 0.5 * Math.cos((t * (5 + 1.5 * h(sd + 3)) + h(sd)) * TAU)), height: 2 + 1.5 * h(sd + 4), size: 0.95 + 0.25 * h(sd + 5) });
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    const op = { sq: 1, dark: SCENE.dark, alpha: A };
+    for (const b of list) flyerShadow(ctx, 'bat', b.x, b.y, b.ang, b.open, { ...op, size: b.size, height: b.height });
+    for (const b of list) flyer(ctx, 'bat', b.x, b.y, b.ang, b.open, { ...op, size: b.size });
+    ctx.globalAlpha = 1;
+    return list.length;
+  }
   function streamState(fx, t) { return cycle(t, STREAM_PER, F().seedOf(fx.id || 'b') + 0.77, 0.5); }
   function bats(ctx, fx, x, y, t, r, I) {
     const s = F().seedOf(fx.id || 'b'); const cell = SCENE.cell; const S = SPR.bat;
@@ -1146,7 +1211,21 @@ const Creatures = (() => {
     const im = mip(key, pic, H * devK(g));
     const iw = im.naturalWidth || im.width; const ih = im.naturalHeight || im.height;
     g.save(); g.translate(x, y); g.rotate(ang); g.globalAlpha = alpha;
-    const N = bend ? Math.min(10, Math.round((len * devK(g)) / 9)) : 1; // strips of about 9 px: fewer on a small one (thin strips comb)
+    // strips of about 9 px: fewer on a small one (thin strips comb). (Beta 3.66, Glinn: "the eels are chopped up into
+    // segments": a long thin body gets finer strips, and every strip is turned the way the body runs there; shifted
+    // sideways only, a strong bend showed as steps)
+    const long = len / Math.max(1e-6, H) > 5;
+    const N = bend ? Math.min(long ? 28 : 10, Math.round((len * devK(g)) / (long ? 5 : 9))) : 1;
+    const strips = (q, x0) => {
+      for (let i = 0; i < N; i++) {
+        const u0 = i / N; const uc = u0 + 0.5 / N; const sx = Math.floor(u0 * iw); const sw = Math.min(iw - sx, Math.ceil(iw / N) + 1);
+        const wd = len / N; const tilt = Math.atan2(bend(uc + 0.5 / N) - bend(uc - 0.5 / N), wd);
+        const over = 1.08 + Math.min(0.6, Math.abs(tilt) * 0.5 * (H / wd) * 0.5); // (a turned strip opens a wedge on the outside of the bend: wider)
+        q.save(); q.translate(x0 + uc * len, bend(uc)); q.rotate(tilt);
+        q.drawImage(im, sx, 0, sw, ih, (-wd * over) / 2, -H / 2, wd * over, H);
+        q.restore();
+      }
+    };
     if (N < 3) g.drawImage(im, -len / 2, -H / 2 + (bend ? bend(0.5) : 0), len, H);
     else if (alpha < 0.97) {
       // (Beta 3.63, main Builder: the strips overlap a little, and a faint one showed that as dark bars (the Big shadow,
@@ -1155,18 +1234,10 @@ const Creatures = (() => {
       const tw = Math.max(2, Math.ceil(len * 1.1 * k) + 2); const th = Math.max(2, Math.ceil((H + 2 * pad) * k) + 2);
       const c = bodyTmp; if (c.width < tw) c.width = tw; if (c.height < th) c.height = th;
       const q = c.getContext('2d'); q.setTransform(1, 0, 0, 1, 0, 0); q.globalAlpha = 1; q.globalCompositeOperation = 'source-over'; q.clearRect(0, 0, tw, th);
-      q.setTransform(k, 0, 0, k, 1, 1 + (pad + H / 2) * k);
-      for (let i = 0; i < N; i++) {
-        const u0 = i / N; const sx = Math.floor(u0 * iw); const sw = Math.min(iw - sx, Math.ceil(iw / N) + 1);
-        q.drawImage(im, sx, 0, sw, ih, u0 * len, -H / 2 + bend(u0 + 0.5 / N), (len / N) * 1.08, H);
-      }
-      g.drawImage(c, 0, 0, tw, th, -len / 2 - 1 / k, -H / 2 - pad - 1 / k, tw / k, th / k);
-    } else {
-      for (let i = 0; i < N; i++) {
-        const u0 = i / N; const sx = Math.floor(u0 * iw); const sw = Math.min(iw - sx, Math.ceil(iw / N) + 1);
-        g.drawImage(im, sx, 0, sw, ih, -len / 2 + u0 * len, -H / 2 + bend(u0 + 0.5 / N), (len / N) * 1.08, H);
-      }
-    }
+      q.setTransform(k, 0, 0, k, 1 + len * 0.05 * k, 1 + (pad + H / 2) * k);
+      strips(q, 0);
+      g.drawImage(c, 0, 0, tw, th, -len / 2 - len * 0.05 - 1 / k, -H / 2 - pad - 1 / k, tw / k, th / k);
+    } else strips(g, -len / 2);
     g.restore();
   }
   // ---------- the tour of an area ----------
@@ -1193,30 +1264,106 @@ const Creatures = (() => {
       // and off the grid a little, so that nothing walks on rails)
       let P = path.map((i) => (S[i][3] ? [S[i][0] + (h(sd + i * 3.7) - 0.5) * 0.5 * S[i][2], S[i][1] + (h(sd + i * 5.9) - 0.5) * 0.5 * S[i][2], S[i][2] * 1.6] : S[i]));
       if (P.length < 3) { const c = S[root]; P = []; for (let k = 0; k <= 12; k++) { const a = (k / 12) * TAU; P.push([c[0] + Math.cos(a) * c[2] * 0.5, c[1] + Math.sin(a) * c[2] * 0.5, c[2]]); } }
-      const cum = [0]; for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+      else P = lanes(P);
+      // (Beta 3.66: a walker's way counts its bends too: at every corner it waits 0.22 squares' worth for every radian
+      // and turns from the way it came to the way it goes. So it slows down in a bend, as an animal does, and its
+      // heading comes round over a few frames wherever the way bends, however sharply; with the heading taken from the
+      // line of the way, a koi swung a third of a turn in four frames, and at a dead end everything flipped)
+      const n1 = P.length - 1; const ang = new Array(P.length).fill(0); const turn = new Array(P.length).fill(0); const dw = new Array(P.length).fill(0);
+      for (let i = 1; i <= n1; i++) ang[i] = Math.atan2(P[i][1] - P[i - 1][1], P[i][0] - P[i - 1][0]);
+      for (let i = 1; i <= n1; i++) {
+        const j = i > 1 ? i - 1 : n1; // (a round trip: the first stretch follows the last)
+        const moves = (k) => P[k][0] !== P[k - 1][0] || P[k][1] !== P[k - 1][1];
+        if (!moves(i)) ang[i] = ang[j];
+        let d = moves(i) && moves(j) ? ang[i] - ang[j] : 0; d = ((d + Math.PI) % TAU + TAU) % TAU - Math.PI;
+        turn[i] = d; dw[i] = 0.22 * Math.abs(d);
+      }
+      const cum = [0]; for (let i = 1; i <= n1; i++) cum.push(cum[i - 1] + dw[i] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
       // (Beta 3.63, main Builder: the real area, however it was painted; it was the sum of the samples' discs, which
       // counted a Box as 0.4 of its squares and a brush line as twice its area)
-      T = { P, cum, L: Math.max(1e-3, cum[cum.length - 1]), area: F().areaOf(fx, tag, tag === 'wide' ? (st) => st.poly || st.r > THIN : null) };
+      T = { P, cum, ang, turn, dw, L: Math.max(1e-3, cum[cum.length - 1]), area: F().areaOf(fx, tag, tag === 'wide' ? (st) => st.poly || st.r > THIN : null) };
     }
     if (tours.size > 360) tours.clear();
     tours.set(key, { sig, T }); return T;
   }
+  // Beta 3.66 (Glinn: "all fish change direction without turning"): the tour runs out along every branch and back the
+  // same way, so at a branch's end a walker turned round on the spot, in one frame. Now it keeps to one side of the way
+  // (as on a road): out on one side, back on the other, round the end in a bend. P: the tour as it was walked
+  // ([x, y, room]); returns the same way round, a lane's width to the side, closed
+  function lanes(P) {
+    const pts = []; for (const q of P) { const l = pts[pts.length - 1]; if (!l || Math.hypot(q[0] - l[0], q[1] - l[1]) > 1e-6) pts.push(q); }
+    if (pts.length > 1 && Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < 1e-6) pts.pop();
+    const M = pts.length; if (M < 2) return P;
+    const out = [];
+    for (let i = 0; i < M; i++) {
+      const a = pts[(i - 1 + M) % M]; const c = pts[i]; const b = pts[(i + 1) % M];
+      let e1x = c[0] - a[0]; let e1y = c[1] - a[1]; let e2x = b[0] - c[0]; let e2y = b[1] - c[1];
+      const d1 = Math.hypot(e1x, e1y) || 1; const d2 = Math.hypot(e2x, e2y) || 1; e1x /= d1; e1y /= d1; e2x /= d2; e2y /= d2;
+      const la = clamp(c[2] * 0.4, 0.1, 0.36); const room = Math.max(0.08, c[2] - la);
+      // (a turn towards the lane's own side: the lane is the inside one. Its corner lies where the two lanes meet, well
+      // before the dot (at a sharp turn a long way before it); a plain step to the side made the lanes cross there, and
+      // a walker went up to the dot and back the same line, turning about on the spot)
+      const turn = e1x * e2y - e1y * e2x; const cs = Math.hypot(-e1y - e2y, e1x + e2x) / 2;
+      if (turn > 0.05 && cs < 0.98) {
+        let mx = -e1y - e2y; let my = e1x + e2x; const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml;
+        const far = Math.min(la / Math.max(cs, 0.05), (0.45 * Math.min(d1, d2)) / Math.max(1e-3, Math.sqrt(1 - cs * cs)));
+        out.push([c[0] + mx * far, c[1] + my * far, room]);
+      } else if (e1x * e2x + e1y * e2y < -0.8) { // the end of a branch: round it
+        out.push([c[0] - e1y * la, c[1] + e1x * la, room], [c[0] + (e1x - e1y) * la * 0.7, c[1] + (e1y + e1x) * la * 0.7, room], [c[0] + e1x * la, c[1] + e1y * la, room],
+          [c[0] + (e1x + e1y) * la * 0.7, c[1] + (e1y - e1x) * la * 0.7, room], [c[0] + e1y * la, c[1] - e1x * la, room]);
+      } else { let mx = -e1y - e2y; let my = e1x + e2x; const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml; out.push([c[0] + mx * la, c[1] + my * la, room]); }
+    }
+    // (what is left of a way that goes somewhere and straight back, where two lanes cross near a sharp turn: a spike.
+    // A walker would turn about on its tip, so the tip is cut off and the walker crosses over; a branch's rounded end
+    // turns an eighth at a time and stays)
+    let R = out;
+    for (let pass = 0; pass < 8 && R.length > 5; pass++) {
+      const N = R.length; const keep = new Array(N).fill(true); let cut = false;
+      for (let i = 0; i < N; i++) {
+        if (!keep[(i - 1 + N) % N]) continue;
+        const a = R[(i - 1 + N) % N]; const c = R[i]; const b = R[(i + 1) % N];
+        const ax = c[0] - a[0]; const ay = c[1] - a[1]; const bx = b[0] - c[0]; const by = b[1] - c[1]; const la = Math.hypot(ax, ay); const lb = Math.hypot(bx, by);
+        if (la < 1e-4 || lb < 1e-4 || (ax * bx + ay * by) / (la * lb) < -0.5) { keep[i] = false; cut = true; }
+      }
+      if (!cut) break;
+      R = R.filter((_, i) => keep[i]);
+    }
+    // (and its corners cut twice (Chaikin): a way of soft bends. A walker rounds it off only a little more (walker():
+    // rounding a hairpin off a long way made it stop and turn about on the spot))
+    for (let pass = 0; pass < 2 && R.length > 2; pass++) {
+      const N = R.length; const Q = [];
+      for (let i = 0; i < N; i++) { const a = R[i]; const b = R[(i + 1) % N]; Q.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25, a[2] * 0.75 + b[2] * 0.25], [a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75, a[2] * 0.25 + b[2] * 0.75]); }
+      R = Q;
+    }
+    R.push(R[0].slice());
+    return R;
+  }
+  // where the way is at s, and which way it heads there: [x, y, room, heading]. A way with bends counted (tourOf) waits
+  // at each corner while its heading comes round
   function tourAt(T, s) {
     s = ((s % T.L) + T.L) % T.L; const c = T.cum; let lo = 0; let hi = c.length - 1;
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c[m] <= s) lo = m; else hi = m; }
-    const a = T.P[lo]; const b = T.P[hi]; const k = c[hi] > c[lo] ? (s - c[lo]) / (c[hi] - c[lo]) : 0;
-    return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+    const a = T.P[lo]; const b = T.P[hi];
+    if (!T.dw) { const k = c[hi] > c[lo] ? (s - c[lo]) / (c[hi] - c[lo]) : 0; return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k, 0]; }
+    const at = s - c[lo]; const D = T.dw[hi];
+    if (at < D) return [a[0], a[1], a[2], T.ang[hi] - T.turn[hi] * (1 - at / D)];
+    const len = c[hi] - c[lo] - D; const k = len > 0 ? (at - D) / len : 0;
+    return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k, T.ang[hi]];
   }
+  const SMOOTH9 = [1, 8, 28, 56, 70, 56, 28, 8, 1];
   // smoothed: the corners of the tour rounded off (a U-turn at a branch's end becomes a loop)
   function tourSmooth(T, s, w) {
-    let x = 0; let y = 0; let r = 0; const W = [1, 4, 6, 4, 1];
-    for (let k = -2; k <= 2; k++) { const p = tourAt(T, s + k * w * 0.5); const q = W[k + 2] / 16; x += p[0] * q; y += p[1] * q; r += p[2] * q; }
-    return [x, y, r];
+    // (Beta 3.66: nine points for five, as wide as before: with five a heading still swung by a third of a turn in one
+    // step where a point crossed a tight bend)
+    let x = 0; let y = 0; let r = 0; let hx = 0; let hy = 0;
+    for (let k = -4; k <= 4; k++) { const p = tourAt(T, s + k * w * 0.354); const q = SMOOTH9[k + 4] / 256; x += p[0] * q; y += p[1] * q; r += p[2] * q; hx += Math.cos(p[3]) * q; hy += Math.sin(p[3]) * q; }
+    return [x, y, r, Math.atan2(hy, hx)];
   }
   // where a walker is: s along the tour, side (−1…1 of the local half width), heading the way it moves
   function walker(T, s, side, w = 0.6) {
-    const p = tourSmooth(T, s, w); const a = tourSmooth(T, s - 0.06, w); const b = tourSmooth(T, s + 0.06, w);
-    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]) || 0; const off = side * p[2] * 0.45;
+    w = Math.min(w, 0.32); // (Beta 3.66: the way has soft bends of its own now, lanes(); more rounding stalls in a hairpin)
+    const p = tourSmooth(T, s, w);
+    const ang = p[3]; const off = side * p[2] * 0.45; // (the heading is the way's own, tourAt(): it comes round in every bend)
     return { x: p[0] - Math.sin(ang) * off, y: p[1] + Math.cos(ang) * off, ang, r: p[2] };
   }
   // run and rest: how far a walker has gone after t seconds (runs of `run` s at v, rests of `rest` s)
@@ -1536,7 +1683,7 @@ const Creatures = (() => {
     const { rgba } = F();
     const leaves = fx.variant === 'leaves';
     const A = Math.min(1, I) * k; if (A <= 0.004) return;
-    const R = r * (0.35 + 0.65 * k); const spin = t * 3.6;
+    const R = r * (0.35 + 0.65 * k); const spin = t * 2; // (Beta 3.66, Glinn: "too fast?": it was 3.6; and until 3.66 the cloud did not turn at all on a real table, it stood and jumped (see boot.js))
     const top = (z) => [fx0 + Math.cos(wr) * lean * z * r * 1.3, fy0 + Math.sin(wr) * lean * z * r * 1.3 - z * r * 0.2];
     const pic = whirlPic(DEVIL[fx.variant] ? fx.variant : 'dust', cols);
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
@@ -1555,20 +1702,24 @@ const Creatures = (() => {
     };
     turn(0, 1.5, 0.55, 0, leaves ? 0.6 : 0.8);
     turn(0.5, 1.05, 1, 1.3, leaves ? 0.6 : 0.85);
-    // what it carries: specks riding round, lifted from the foot toward the top
-    const n = Math.min(90, F().count(Math.round((leaves ? 46 : 26) * (fx.density ?? 1)), { density: 1 }));
-    ctx.lineCap = 'round';
+    // what it carries: specks riding round, lifted from the foot toward the top. (Beta 3.66: dots, and a leaf a small
+    // leaf: they were short arcs, which read as cut rings; and a speck's angle is counted from its own start: it was
+    // the whole time times a rate that changes along its way, so every speck jumped at every frame)
+    const n = Math.min(90, F().count(Math.round((leaves ? 40 : 30) * (fx.density ?? 1)), { density: 1 }));
     for (let i = 0; i < n; i++) {
-      const u = fract(h(s + i * 1.7) + t * (0.12 + 0.08 * h(s + i))); // from the middle (0) out to the rim (1), rising
+      const rate = 0.1 + 0.07 * h(s + i); // of its way a second
+      const u = fract(h(s + i * 1.7) + t * rate); // from the middle (0) out to the rim (1), rising
       const rad = R * (0.15 + 1.05 * Math.pow(u, 0.8)) * (0.85 + 0.3 * h(s + i * 5.3));
-      const a = spin * (1.5 - 0.9 * u) + h(s + i * 2.9) * TAU;
-      const al = A * (leaves ? 0.95 : 0.5) * sm(0, 0.12, u) * (1 - sm(0.6, 1, u));
+      const a = h(s + i * 2.9) * TAU + 2.6 * (u / rate) * (1.5 - 0.45 * u); // faster near the middle
+      const al = A * (leaves ? 0.95 : 0.55) * sm(0, 0.12, u) * (1 - sm(0.6, 1, u));
       if (al < 0.02) continue;
       const [ox, oy] = top(0.7 * (1 - u));
-      ctx.globalAlpha = al; ctx.strokeStyle = cols[leaves ? i % 3 : i % 2];
-      ctx.lineWidth = (leaves ? 0.05 : 0.024) * cell * (0.7 + 0.6 * h(s + i * 4.1));
-      const arc = (leaves ? 0.05 : 0.07) / (0.35 + u);
-      ctx.beginPath(); ctx.ellipse(ox, oy, rad, rad * 0.92, 0, a - arc, a); ctx.stroke();
+      const px = ox + Math.cos(a) * rad; const py = oy + Math.sin(a) * rad * 0.92;
+      const sz = (leaves ? 0.05 : 0.022) * cell * (0.7 + 0.6 * h(s + i * 4.1));
+      ctx.globalAlpha = al; ctx.fillStyle = cols[leaves ? i % 3 : i % 2];
+      ctx.beginPath();
+      if (leaves) ctx.ellipse(px, py, sz, sz * 0.45, (a * 1.7 + t * (1 + h(s + i))) % TAU, 0, TAU); else ctx.arc(px, py, sz, 0, TAU);
+      ctx.fill();
     }
     turn(1, 0.62, 1.7, 2.9, leaves ? 0.7 : 0.95);
     ctx.globalAlpha = 1;
@@ -1766,6 +1917,7 @@ const Creatures = (() => {
       case 'bubbling': bubbling(ctx, fx, t, o); return true;
       case 'fish': fish(ctx, fx, t, o); return true; // (second-ground-life)
       case 'critters': critters(ctx, fx, t, o); return true; // (second-ground-life)
+      case 'batflight': batsOver(ctx, fx, t, o); return true; // (Beta 3.66)
       case 'dapple': dapple(ctx, fx, t, o); return true; // (second-sun-sand-gears)
       case 'drift': drift(ctx, fx, t, o); return true; // (second-sun-sand-gears)
       default: return false;
@@ -1776,6 +1928,6 @@ const Creatures = (() => {
   // a moment (seconds, at speed 1) when this geyser is `since` seconds into an eruption (for still pictures)
   function eruptionAt(fx, since = 1.2) { for (let t = 0; t < GEYSER_PER * 3; t += 0.05) if (Math.abs(geyserState(fx, t).since - since) < 0.03) return t; return 0; }
 
-  return { emitter, region, swirl, wind, cycle, erupting, eruptionAt, GEYSER_PER, scene, sky, burst, ready, SPR, FLOCKS, CIRCLERS, SWARMS, moths, streamAt, STREAM_PER, GROUND, FISH, CRITS, tumble, turnPart, turnsOf, millAnchor, millRate, devilAt, tourOf }; // (second-ground-life: GROUND, FISH, CRITS; second-sun-sand-gears: tumble … millRate) // (second-birds: scene … CIRCLERS; second-bats-insects: SWARMS … STREAM_PER)
+  return { emitter, region, swirl, wind, cycle, erupting, eruptionAt, GEYSER_PER, scene, sky, burst, ready, SPR, FLOCKS, CIRCLERS, SWARMS, moths, streamAt, STREAM_PER, GROUND, FISH, CRITS, tumble, turnPart, turnsOf, millAnchor, millRate, devilAt, tourOf, twistOf, walker }; // (second-ground-life: GROUND, FISH, CRITS; second-sun-sand-gears: tumble … millRate) // (second-birds: scene … CIRCLERS; second-bats-insects: SWARMS … STREAM_PER)
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = Creatures;

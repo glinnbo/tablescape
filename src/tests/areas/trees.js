@@ -180,7 +180,7 @@ module.exports = (area) => {
     await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'weather'; Play.openPop('fx')`);
     await t.until(() => t.count('#pop .wx-presets'), 4000, 'the Scene group');
     t.eq(await t.count('#pop .wind-box'), 0, 'no Wind box in Scene');
-    t.ok(await t.count('#pop .fx-wind .wind-now') && await t.findText('#pop .fx-wind button', 'Storm'), 'Scene: the wind now, and Storm');
+    t.ok(await t.count('#pop .fx-wind input') === 1 && await t.findText('#pop .fx-fold[data-v="fxMoreWind"] button', 'Storm'), 'Scene: one Wind slider; Storm under Advanced wind (Beta 3.66)');
     // the library: no Living trees folder (the Cartographer still finds them there)
     await t.g(`Play.Drawer.open({ cat: 'assets' })`);
     await t.until(() => t.findText('#drawer span', 'Nature'), 6000, 'the library\'s Assets');
@@ -368,7 +368,7 @@ module.exports = (area) => {
     t.eq(M().live.water.clear, 0.8, 'Transparency 80 %');
     // the tiles
     const tiles = await t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t')].map((b) => b.dataset.v)`);
-    t.ok(tiles.length === 43 && tiles.indexOf('r:ember') === tiles.indexOf('r:lava') + 1 && ['r:shimmer', 'r:pulse', 'r:ripple'].every((x) => tiles.includes(x)), 'Ember glow beside Lava; Shimmer, Pulse, Ripple in Magic: 43 tiles', tiles.length);
+    t.ok(tiles.length === 44 && tiles.indexOf('r:ember') === tiles.indexOf('r:lava') + 1 && ['r:shimmer', 'r:pulse', 'r:ripple'].every((x) => tiles.includes(x)), 'Ember glow beside Lava; Shimmer, Pulse, Ripple in Magic: 44 tiles (Beta 3.66: and Bats, painted)', tiles.length);
     await t.g(`document.querySelector('#pop .fx-gal .fx-t[data-v="r:ember"]').click()`); await t.sleep(400);
     t.eq(await t.g(`[[...document.querySelectorAll('.fx-fly .ctl-label')].map((e) => e.textContent.trim()), !!document.querySelector('#pop .swatches'), document.querySelector('#pop .fx-ban .cap').textContent]`), [['Glow', 'Embers', 'Heat shimmer', 'Speed', 'Pick-up range'], false, 'Ember glowa box · lights up the map picture'], 'Ember glow: its card, no colour of its own, what it does on the banner');
     await t.g(`Play.ui.fxFly = false; Play.closePop(); Play.setTool('select')`);
@@ -382,17 +382,18 @@ module.exports = (area) => {
     t.eq(await t.g('Play.view().stats.regions'), 0, 'none of them is drawn by the effects layer');
     await t.until(async () => { const d = (await t.tvDebug()).living; return d && d.on && d.kinds && d.kinds.water && d.kinds.glow; }, 30000, 'the same on the TV');
     // a whirlpool that swirls the water turns the engine's water (the map picture turned under it would be covered)
-    t.handle('fx.add', { mapId: own, id: 'wh1', kind: 'emitter', preset: 'whirl', x: 7 * k, y: 6 * k, r: 1.5 * k, spin: 1, swirl: true, variant: 'whirlpool' });
+    t.handle('fx.add', { mapId: own, kind: 'emitter', preset: 'whirl', x: 7 * k, y: 6 * k, r: 1.5 * k, spin: 1, swirl: true, variant: 'whirlpool' });
+    const wh = M().fx.find((f) => f.preset === 'whirl'); // (fx.add gives it an id of its own)
     await t.until(async () => { const x = await t.g('Play.view().stats.living'); return x && x.on && x.whirls === 1; }, 8000, 'the whirlpool turns the water');
-    t.handle('fx.update', { mapId: own, id: 'wh1', swirl: false });
+    t.handle('fx.update', { mapId: own, id: wh.id, swirl: false });
     await t.until(async () => { const x = await t.g('Play.view().stats.living'); return x && x.on && x.whirls === 0; }, 8000, 'not with Swirl the water off');
-    t.handle('fx.remove', { mapId: own, id: 'wh1' });
+    t.handle('fx.remove', { mapId: own, id: wh.id });
     // without a graphics card: Water as before (the net of light), the map's own light effects not at all, their tiles gone
     await soft(t, false); await t.settle();
     await t.until(async () => (await t.g('Play.view().stats.regions')) === 1, 6000, 'the net of light without a graphics card');
     await t.g(`(() => { Play.setTool('fx'); Play.ui.fxFam = 'all'; Play.ui.fxMode = 'paint'; Play.ui.region = 'water'; Play.ui.fxFly = true; Play.openPop('fx'); })()`); await t.sleep(500);
     const plain = await t.g(`[document.querySelectorAll('#pop .fx-gal .fx-t').length, [...document.querySelectorAll('.fx-fly .ctl-label')].map((e) => e.textContent.trim())]`);
-    t.ok(plain[0] === 39 && plain[1].includes('Strength') && !plain[1].includes('Transparency'), 'no graphics card: 39 tiles, Water has Strength, Amount and Speed again', plain);
+    t.ok(plain[0] === 40 && plain[1].includes('Strength') && !plain[1].includes('Transparency'), 'no graphics card: 40 tiles, Water has Strength, Amount and Speed again', plain);
     await t.g(`Play.ui.fxFly = false; Play.closePop(); Play.setTool('select')`);
     await soft(t, true);
     for (const id of ['w1', 'e1', 'g1', 'g2', 'g3']) t.handle('fx.remove', { mapId: own, id });

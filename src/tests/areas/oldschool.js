@@ -909,6 +909,7 @@ module.exports = (area) => {
     await t.until(() => lights().length === 3, 3000, 'Undo brings it back');
     // Beta 3.54: its marker in Effects is the same light: Delete there takes the holder too (3.53 left it behind)
     await t.g(`Play.setTool('fx'); Play.ui.fxMode = 'light'; Play.ui.lightTab = 'sources'; Play.openPop('fx')`);
+    await t.g(`document.querySelector('#pop .os-tabs2 .tile[data-v="fxt-select"]').click()`); // (Beta 3.66: markers show with the Select tool)
     const hm = await t.until(() => t.rect(`.sv-handle[data-id="${left.id}"]`), 3000, 'its marker in Effects');
     await t.click(hm.cx, hm.cy);
     await t.until(() => t.g('Play.ui.selFx').then((v) => v === left.id), 3000, 'picked in Effects');

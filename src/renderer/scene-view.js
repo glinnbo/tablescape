@@ -290,6 +290,7 @@ class SceneView {
       c.el.style.left = `${r.x}px`; c.el.style.top = `${r.y}px`;
     }
     for (const c of Object.values(this.tcv)) this.sizeTrees(c);
+    this.edgeSig = ''; if (this.gm && this.areasOf) this.drawEdges(); // (Beta 3.66: the outlines lie on a layer too: drawn again where the layers now lie; they stayed where they were when the GM zoomed)
     if (this.lcv) this.sizeTrees(this.lcv);
     this.gridSig = ''; this._seen = null;
     if (this.map) { this.renderGrid(true); this.redrawSoon(); }
@@ -2145,10 +2146,8 @@ class SceneView {
     // (Beta 3.65) whirlpools that swirl the water: under the engine's water the map picture turned on the Sway layer is
     // covered, so the water itself is drawn turned there (the same turn at the same moment, see Creatures.swirl)
     const tNow = (this.freezeAt || Date.now()) / 1000 - T0;
-    const frac = (x) => x - Math.floor(x);
-    const whirls = c.L.kinds && c.L.kinds.water ? m.fx.filter((f) => f.kind === 'emitter' && f.preset === 'whirl' && f.swirl !== false && !f.hidden && this.shown(f)).slice(0, 4).map((f) => {
-      const q = this.fxPos(f); const mael = f.variant === 'maelstrom';
-      return { x: q.x, y: q.y, r: f.r || 1, turn: (f.spin === -1 ? -1 : 1) * (mael ? 0.5 : 0.32) * Math.min(1.5, f.intensity ?? 1), ph: frac(tNow * (f.speed ?? 1) / (mael ? 6 : 9) + FX.h(FX.seedOf(f.id || 's'))) };
+    const whirls = c.L.kinds && c.L.kinds.water && typeof Creatures === 'object' ? m.fx.filter((f) => f.kind === 'emitter' && f.preset === 'whirl' && f.swirl !== false && !f.hidden && this.shown(f)).slice(0, 4).map((f) => {
+      const q = this.fxPos(f); return { x: q.x, y: q.y, r: f.r || 1, twist: Creatures.twistOf(f, tNow) };
     }) : [];
     const ok = c.L.frame({ dt, wind: this.treeWindNow || { dir: 30, strength: 1 }, matrix: [k, (v.x * this.ppi - R.x) * c.res, (v.y * this.ppi - R.y) * c.res], set: m.live || {}, few: (this.qres || 1) < 0.75, whirls });
     st.whirls = whirls.length;
@@ -2357,10 +2356,11 @@ class SceneView {
     const w = this.map.weather;
     const sky = ((w && w.layers) || []).some((l) => (l.type === 'birds' || l.type === 'tumble') && !l.hidden); // (one being removed still fades out; second-sun-sand-gears: and Tumbleweeds)
     const items = this.map.fx.filter((f) => f.kind === 'emitter' && FLY.has(f.preset) && this.shown(f));
+    const over = this.map.fx.filter((f) => f.kind === 'region' && FLY_AREAS.has(f.preset) && f.strokes && f.strokes.length && this.shown(f)); // (Beta 3.66: Bats painted over an area)
     const dark = Vision.lightNow(this.map.light).darkness;
     // Second Builder (second-bats-insects): Moths round the lights, as dark as Dusk or darker, round every lit light
     const lamps = this.map.light.moths && dark >= 0.4 ? this.mothLights() : [];
-    if (!sky && !items.length && !lamps.length) { if (!c.empty) clearCanvas(c); showLayer(c, false); this.stats.fly = 0; this.stats.moths = 0; return; }
+    if (!sky && !items.length && !lamps.length && !over.length) { if (!c.empty) clearCanvas(c); showLayer(c, false); this.stats.fly = 0; this.stats.moths = 0; return; }
     showLayer(c, true);
     const ctx = startCanvas(c);
     let n = 0;
@@ -2375,6 +2375,12 @@ class SceneView {
       Creatures.scene({ dark, cell: this.cellK() });
       this.mapXform(ctx, c.res);
       for (const f of items) { const p = this.fxPos(f); FX.emitter(ctx, f.hidden ? { ...f, intensity: (f.intensity ?? 1) * 0.35 } : f, p.x, p.y, t); n++; }
+      Creatures.scene(null);
+    }
+    if (over.length) { // (painted areas, in squares as the effects)
+      Creatures.scene({ dark, cell: 1 });
+      this.mapXform(ctx, c.res);
+      for (const f of over) { FX.region(ctx, f.hidden ? { ...f, intensity: (f.intensity ?? 1) * 0.35 } : f, t, this.cellK()); n++; }
       Creatures.scene(null);
     }
     this.stats.moths = 0;
@@ -2401,7 +2407,7 @@ class SceneView {
     this._lo = this.myMoments(Date.now()).find((m) => m.id === 'lightsout') || null;
     if (typeof Creatures === 'object') Creatures.wind(Trees.windOf(this.map)); // Second Builder (second-water-works): steam and gas drift with the map's wind
     const eng = this.engineTest(); // (Beta 3.58: painted grass grows blades on the living layer instead; Beta 3.65: Water and the map's light effects are drawn there too)
-    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f) && !eng(f) && !(f.kind === 'emitter' && FLY.has(f.preset)) && !(f.kind === 'region' && f.preset === 'critters')); // (second-birds: what flies has the fly layer; second-ground-life: critters their own; Beta 3.65: the engine's surfaces theirs)
+    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f) && !eng(f) && !(f.kind === 'emitter' && FLY.has(f.preset)) && !(f.kind === 'region' && (f.preset === 'critters' || FLY_AREAS.has(f.preset)))); // (second-birds: what flies has the fly layer; second-ground-life: critters their own; Beta 3.65: the engine's surfaces theirs)
     all.sort((a, b) => (b.preset === 'fish') - (a.preset === 'fish')); // (second-ground-life: fish first, under any water painted here today. Fish look submerged by themselves; once Water is on the living layer this has no effect) // (Sway has a layer of its own; Roof only cuts the weather; Beta 3.54: a light put out has no flame)
     this.stats.emitters = all.filter((f) => f.kind === 'emitter').length;
     this.stats.regions = all.filter((f) => f.kind === 'region').length;
@@ -3439,6 +3445,7 @@ function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 const FLY = new Set(FXDATA.EMITTERS.filter((d) => d.fly).map((d) => d.id));
 // Beta 3.65: painted areas the engine draws (living.js), and as what. They have no drawing in fx.js
 const LIVE_FX = { water: 'water', ember: 'lava', shimmer: 'shimmer', pulse: 'pulse', ripple: 'ripple' };
+const FLY_AREAS = new Set(['batflight']); // (Beta 3.66) painted areas drawn on the fly layer
 const LIVE_ONLY = new Set(['ember', 'shimmer', 'pulse', 'ripple']); // (these light up the map picture itself: without the engine there is nothing to draw)
 function layerCanvas(cls, maxW) {
   const el = document.createElement('canvas');

@@ -10,12 +10,13 @@ const FxThumbs = (() => {
     return floors[file];
   };
   // Second Builder (second-water-works): effects that belong on water are shown on water
-  const FLOOR = { 'region|rapids': 'clear_water-small.webp', 'region|bubbling': 'old_cobblestone-small.webp', 'emitter|whirl': 'deep_water-small.webp', 'emitter|geyser': 'old_cobblestone-small.webp', 'emitter|circling': 'meadow-small.webp', 'emitter|insects': 'meadow-small.webp', 'region|fish': 'clear_water-small.webp', 'region|dapple': 'tall_grass-small.webp', 'region|drift': 'dune_sand-small.webp', 'emitter|devil': 'desert_sand-small.webp', 'region|critters': 'old_cobblestone-small.webp', 'emitter|bats': 'old_cobblestone-small.webp',
+  const FLOOR = { 'region|rapids': 'clear_water-small.webp', 'region|bubbling': 'old_cobblestone-small.webp', 'emitter|whirl': 'deep_water-small.webp', 'emitter|geyser': 'old_cobblestone-small.webp', 'emitter|circling': 'meadow-small.webp', 'emitter|insects': 'meadow-small.webp', 'region|fish': 'clear_water-small.webp', 'region|dapple': 'tall_grass-small.webp', 'region|drift': 'dune_sand-small.webp', 'emitter|devil': 'desert_sand-small.webp', 'region|critters': 'old_cobblestone-small.webp', 'emitter|bats': 'sandstone_tiles-small.webp', 'region|batflight': 'sandstone_tiles-small.webp',
     'region|water': 'clear_water-small.webp', 'region|ember': 'lava_flow-small.webp', 'region|shimmer': 'glowing_cave-small.webp', 'region|pulse': 'lava_runes-small.webp', 'region|ripple': 'glowing_blue-small.webp' }; // (Beta 3.65: what moves the map's own picture is shown on a picture that has it) // (second-birds: and animals on grass)
   // what makes a faint effect read at this size: [size or strength, strength or amount, amount or colour]
-  const E_CELL = { insects: 3.2, bats: 1.8 }; // (second-bats-insects)
-  const E_BOOST = { circling: [0.55, 1, 1], bats: [0.9, 1, 1], insects: [0.75, 1, 1], smoke: [1.6, 2.2, 1.5], steam: [1.3, 1.6, 1.3], fireflies: [0.7, 2, 3], sparkles: [1, 1.6, 2], glow: [1.2, 1.5, 1], vent: [1.2, 1.4, 1.4] };
-  const R_BOOST = { bubbling: [1.5, 1.4, null], dust: [2, 3, '#e8d9b0'], grass: [2, 1, '#8fbf4a'], lava: [1.5, 2, null], swamp: [1.6, 2, null], mist: [1.2, 1, null] };
+  const E_CELL = { insects: 3.2, bats: 1.8, circling: 1.5 }; // (second-bats-insects) // (Beta 3.66: circling birds too; on a tile they circle close in and slowly, E_BOOST)
+  const R_ZOOM = { batflight: 2.2, critters: 1.8, fish: 1.5 }; // (Beta 3.66: animals that live in a painted area are a few pixels long on a tile: a closer look)
+  const E_BOOST = { circling: [0.36, 1, 1], bats: [0.9, 1, 1], insects: [0.75, 1, 1], smoke: [1.6, 2.2, 1.5], steam: [1.3, 1.6, 1.3], fireflies: [0.7, 2, 3], sparkles: [1, 1.6, 2], glow: [1.2, 1.5, 1], vent: [1.2, 1.4, 1.4] };
+  const R_BOOST = { batflight: [1, 2.5, null], bubbling: [1.5, 1.4, null], dust: [2, 3, '#e8d9b0'], grass: [2, 1, '#8fbf4a'], lava: [1.5, 2, null], swamp: [1.6, 2, null], mist: [1.2, 1, null] };
   // draw one effect on g (w × h dots, ppi dots a square) at time t; look: { color, variant }
   // (Beta 3.64: look.play: seconds the playing picture has run; an effect that only shows now and then (a geyser, a
   // dust devil, a stream of bats) plays that moment over and over)
@@ -66,6 +67,7 @@ const FxThumbs = (() => {
   }
   function drawOn(g, w, h, ppi, kind, id, t, look, bg) {
     const play = look.play;
+    if (kind === 'region' && R_ZOOM[id]) ppi *= R_ZOOM[id];
     g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.filter = 'none';
     g.fillStyle = '#2a2622'; g.fillRect(0, 0, w, h);
     if (bg) { const k = (ppi / 34) * 0.55; g.save(); g.scale(k, k); g.fillStyle = g.createPattern(bg, 'repeat'); g.fillRect(0, 0, w / k, h / k); g.restore(); }
@@ -77,10 +79,10 @@ const FxThumbs = (() => {
         const d = FXDATA.EMITTERS.find((x) => x.id === id); if (!d) return;
         const B = E_BOOST[id] || [1.1, 1, 1];
         const big = E_CELL[id] && typeof Creatures === 'object'; // (second-bats-insects: small creatures drawn larger on their tile)
-        const stream = id === 'bats' && look.variant === 'stream';
+        const stream = id === 'bats' && (look.variant || d.kinds[0][0]) === 'stream'; // (Beta 3.66: the stream is its first kind)
         if (big) Creatures.scene({ cell: E_CELL[id] });
         try {
-        FX.emitter(g, { id: `th-${id}`, kind: 'emitter', preset: id, r: d.r * B[0], intensity: B[1], density: B[2], speed: 1, color: look.color || d.color || null, flicker: true,
+        FX.emitter(g, { id: `th-${id}`, kind: 'emitter', preset: id, r: d.r * B[0], intensity: B[1], density: B[2], speed: id === 'circling' ? 0.3 : 1, color: look.color || d.color || null, flicker: true,
           ...(d.turn ? { angle: id === 'shaft' ? 35 : id === 'window' ? 60 : 0 } : {}), ...(d.kinds ? { variant: look.variant || d.kinds[0][0] } : {}),
           ...(id === 'window' ? { shape: 'arched', grid: 'cross', stretch: 1.5, dust: 1 } : {}), ...(id === 'shaft' ? { dust: 1 } : {}) }, stream ? W * 0.12 : W / 2, H / 2 + 0.3,
           id === 'geyser' && typeof Creatures === 'object' ? when('eruptionAt', id, play == null ? 1.2 : 0.1) + (play == null ? 0 : (play % 7) - 1) : id === 'devil' && typeof Creatures === 'object' ? when('devilAt', id, play == null ? 6 : 0.5) + (play == null ? 0 : play % 11) : stream ? when('streamAt', id, play == null ? 1.3 : 0.2) + (play == null ? 0 : play % 6) : t); // (second-water-works: a geyser is shown erupting; second-bats-insects: a stream pouring out)
@@ -88,8 +90,9 @@ const FxThumbs = (() => {
       } else if (LIGHTS[id]) mapLight(g, w, h, ppi, id, t, bg);
       else {
         const B = R_BOOST[id] || [1, 1, null];
-        const pts = []; const n = Math.max(10, Math.round(W * 2)); for (let i = 0; i <= n; i++) pts.push(0.9 + (W - 1.8) * (i / n), H / 2 + Math.sin(i * 0.9 * (10 / n)) * 0.35);
-        FX.region(g, { id: `th-${id}-${Math.round(w)}`, kind: 'region', preset: id, intensity: B[0], density: B[1], speed: 1, color: look.color || B[2], ...(look.variant ? { variant: look.variant } : {}), strokes: [{ sid: 'a', r: Math.min(1.25, H * 0.3), pts, t0: 0 }] }, t + 2, 1);
+        const wide = id === 'batflight'; const m = wide ? 0.5 : 0.9; // (bats fly all over the tile)
+        const pts = []; const n = Math.max(10, Math.round(W * 2)); for (let i = 0; i <= n; i++) pts.push(m + (W - 2 * m) * (i / n), H / 2 + Math.sin(i * 0.9 * (10 / n)) * 0.35);
+        FX.region(g, { id: `th-${id}-${Math.round(w)}`, kind: 'region', preset: id, intensity: B[0], density: B[1], speed: 1, color: look.color || B[2], ...(look.variant ? { variant: look.variant } : {}), strokes: [{ sid: 'a', r: wide ? H * 0.42 : Math.min(1.25, H * 0.3), pts, t0: 0 }] }, t + 2, 1);
       }
     } catch (err) { console.warn(`effect picture ${kind} ${id}: ${err && err.message}`); } finally { g.restore(); }
   }

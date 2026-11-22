@@ -51,10 +51,10 @@ uniform vec2 uWater;     // how clear (0 dyed … 1 almost clear), its own time
 uniform vec4 uLava;      // glow, embers, heat, pick-up range
 uniform float uLavaT;
 uniform vec3 uGPow, uGTime, uGRange; // shimmer, pulse, ripple: intensity, its own time, pick-up range
-// (Beta 3.65) whirlpools that swirl the water: where (map units), how wide, how far the middle turns (radians, signed);
-// and where each is in its turn (0..1). The bed is read turned about the middle, twice half a turn apart and faded
-// one into the other, so it never jumps back (as creatures.js swirls the map picture itself)
-uniform vec4 uWh[4]; uniform float uWhP[4]; uniform int uWhN;
+// (Beta 3.65) whirlpools that swirl the water: where (map units), how wide, how far the bed is twisted at the eye
+// (radians, signed). The bed is read twisted about the middle, as creatures.js twists the map picture itself
+// (Beta 3.66: one steady twist; two turning copies faded into each other pulsed)
+uniform vec4 uWh[4]; uniform int uWhN;
 in vec2 vUV; in vec2 vQ; out vec4 o;
 ${NOISE}
 float lum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
@@ -113,13 +113,10 @@ void main() {
       if (i >= uWhN) break;
       vec2 d = pm - uWh[i].xy; float qq = length(d) / max(uWh[i].z, 0.0001);
       if (qq < 1.0) {
-        float kk = uWh[i].w * pow(1.0 - qq, 1.6) / (qq + 0.25) * 0.25;
-        float ph = uWhP[i]; float a1 = -kk * (ph - 0.5) * 2.0; float a2 = -kk * (fract(ph + 0.5) - 0.5) * 2.0;
+        float a1 = -uWh[i].w * pow(1.0 - qq, 1.6) / (qq + 0.25) * 0.25;
         vec2 p1 = uWh[i].xy + vec2(d.x * cos(a1) - d.y * sin(a1), d.x * sin(a1) + d.y * cos(a1));
-        vec2 p2 = uWh[i].xy + vec2(d.x * cos(a2) - d.y * sin(a2), d.x * sin(a2) + d.y * cos(a2));
         vec3 b1 = texture(uPic, (p1 - uRect.xy) / uRect.zw + off / uPicSize).rgb;
-        vec3 b2 = texture(uPic, (p2 - uRect.xy) / uRect.zw + off / uPicSize).rgb;
-        bedPic = mix(bedPic, mix(b2, b1, 1.0 - abs(2.0 * ph - 1.0)), 1.0 - smoothstep(0.7, 1.0, qq));
+        bedPic = mix(bedPic, b1, 1.0 - smoothstep(0.7, 1.0, qq));
       }
     }
     vec3 bed = mix(col, bedPic, there);
@@ -495,10 +492,10 @@ void main() {
         gl.uniform1f(P.u('uP'), s.P); gl.uniform1f(P.u('uPm'), s.Pm); gl.uniform1f(P.u('uT'), this.time); gl.uniform1f(P.u('uRipMax'), s.ripMax || 16);
         const ws = Math.min(1.6, (wind.strength || 0) * 0.6); gl.uniform2f(P.u('uWind'), Math.cos(a) * ws, Math.sin(a) * ws);
         gl.uniform2f(P.u('uWater'), num(Wt, 'clear', 0.25, 0, 1), this.clock.water);
-        // (Beta 3.65) whirlpools: [{ x, y, r, turn, ph }], four at the most
-        const wh = (whirls || []).slice(0, 4); const w4 = new Float32Array(16); const wp = new Float32Array(4);
-        wh.forEach((q, i) => { w4.set([q.x, q.y, q.r, q.turn], i * 4); wp[i] = q.ph; });
-        gl.uniform4fv(P.u('uWh'), w4); gl.uniform1fv(P.u('uWhP'), wp); gl.uniform1i(P.u('uWhN'), wh.length);
+        // (Beta 3.65) whirlpools: [{ x, y, r, twist }], four at the most
+        const wh = (whirls || []).slice(0, 4); const w4 = new Float32Array(16);
+        wh.forEach((q, i) => { w4.set([q.x, q.y, q.r, q.twist], i * 4); });
+        gl.uniform4fv(P.u('uWh'), w4); gl.uniform1i(P.u('uWhN'), wh.length);
         gl.uniform4f(P.u('uLava'), num(Lv, 'glow', 1, 0, 2), num(Lv, 'embers', 1, 0, 2), num(Lv, 'heat', 0.5, 0, 1), num(Lv, 'range', 0.5, 0, 1)); gl.uniform1f(P.u('uLavaT'), this.clock.lava);
         gl.uniform3f(P.u('uGPow'), num(S.shimmer, 'power', 1, 0, 2), num(S.pulse, 'power', 1, 0, 2), num(S.ripple, 'power', 1, 0, 2));
         gl.uniform3f(P.u('uGTime'), this.clock.shimmer, this.clock.pulse, this.clock.ripple);
