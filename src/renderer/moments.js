@@ -43,6 +43,9 @@
     { id: 'lightsout', label: 'Lights out', icon: 'bulb-off', dur: null, spot: false, tip: 'Every light and flame gutters and dies, one by one; they catch again when you stop it', words: ['gust', 'wind', 'extinguish', 'lights out'] },
     { id: 'rockfall', label: 'Rockfall', icon: 'meteor', dur: 3200, spot: true, tip: 'Stones fall, dust bursts up, the ground jolts', words: ['rockfall', 'cave-in', 'collapse', 'rubble', 'rocks'] },
     { id: 'flood', label: 'Flood', icon: 'ripple-up', dur: 7500, spot: false, tip: 'A wave sweeps across the table and drains away', words: ['flood', 'wave', 'water', 'rush', 'tide'] },
+    // Second Builder (second-birds): drawn by creatures.js
+    { id: 'birds', label: 'Birds take flight', icon: 'feather', dur: 4200, spot: true, tip: 'A flock bursts up and flies off', words: ['birds', 'flock', 'wings', 'flap'] },
+    { id: 'bats', label: 'Bat swarm', icon: 'bat', dur: 6500, spot: true, tip: 'Bats pour out and scatter', words: ['bats', 'bat', 'screech', 'flap'] }, // (second-bats-insects)
   ];
   const BY = Object.fromEntries(LIST.map((m) => [m.id, m]));
   const ROCK_HIT = 0.75; // seconds until the stones of a rockfall land
@@ -115,7 +118,7 @@
   }
 
   // ctx: transformed to table inches; W, H: the table in inches; at(m): where a spot moment is (table inches)
-  function draw(ctx, W, H, list, now, at, { gm = false } = {}) {
+  function draw(ctx, W, H, list, now, at, { gm = false, sq = 1 } = {}) { // (second-birds: sq, table units in a grid square)
     for (const m of list) {
       if (!alive(m, now)) continue;
       const fn = DRAW[m.id];
@@ -124,7 +127,7 @@
       if (k <= 0.003) continue;
       const p = m.x != null && at ? at(m) : null;
       ctx.save();
-      fn(ctx, { W, H, age: (now - m.t0) / 1000, k, s: m.seed || 1, p, cx: p ? p.x : W / 2, cy: p ? p.y : H / 2, min: Math.min(W, H) });
+      fn(ctx, { W, H, age: (now - m.t0) / 1000, k, s: m.seed || 1, p, cx: p ? p.x : W / 2, cy: p ? p.y : H / 2, min: Math.min(W, H), sq });
       ctx.restore();
     }
     ctx.globalAlpha = 1;
@@ -145,6 +148,8 @@
   }
 
   const DRAW = {
+    birds(ctx, P) { if (typeof Creatures === 'object') Creatures.burst(ctx, P, 'birds'); }, // (second-birds)
+    bats(ctx, P) { if (typeof Creatures === 'object') Creatures.burst(ctx, P, 'bats'); }, // (second-bats-insects)
     // dust puffs where the ceiling cracks, small stones, the light trembling
     earthquake(ctx, P) {
       const { W, H, age, k, s } = P;

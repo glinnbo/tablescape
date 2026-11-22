@@ -10,9 +10,10 @@ const FxThumbs = (() => {
     return floors[file];
   };
   // Second Builder (second-water-works): effects that belong on water are shown on water
-  const FLOOR = { 'region|rapids': 'clear_water-small.webp', 'region|bubbling': 'old_cobblestone-small.webp', 'emitter|whirl': 'deep_water-small.webp', 'emitter|geyser': 'old_cobblestone-small.webp' };
+  const FLOOR = { 'region|rapids': 'clear_water-small.webp', 'region|bubbling': 'old_cobblestone-small.webp', 'emitter|whirl': 'deep_water-small.webp', 'emitter|geyser': 'old_cobblestone-small.webp', 'emitter|circling': 'meadow-small.webp', 'emitter|insects': 'meadow-small.webp', 'region|fish': 'clear_water-small.webp', 'region|dapple': 'tall_grass-small.webp', 'region|drift': 'dune_sand-small.webp', 'emitter|devil': 'desert_sand-small.webp', 'region|critters': 'old_cobblestone-small.webp', 'emitter|bats': 'old_cobblestone-small.webp' }; // (second-birds: and animals on grass)
   // what makes a faint effect read at this size: [size or strength, strength or amount, amount or colour]
-  const E_BOOST = { smoke: [1.6, 2.2, 1.5], steam: [1.3, 1.6, 1.3], fireflies: [0.7, 2, 3], sparkles: [1, 1.6, 2], glow: [1.2, 1.5, 1], vent: [1.2, 1.4, 1.4] };
+  const E_CELL = { insects: 3.2, bats: 1.8 }; // (second-bats-insects)
+  const E_BOOST = { circling: [0.55, 1, 1], bats: [0.9, 1, 1], insects: [0.75, 1, 1], smoke: [1.6, 2.2, 1.5], steam: [1.3, 1.6, 1.3], fireflies: [0.7, 2, 3], sparkles: [1, 1.6, 2], glow: [1.2, 1.5, 1], vent: [1.2, 1.4, 1.4] };
   const R_BOOST = { bubbling: [1.5, 1.4, null], dust: [2, 3, '#e8d9b0'], grass: [2, 1, '#8fbf4a'], lava: [1.5, 2, null], swamp: [1.6, 2, null], mist: [1.2, 1, null] };
   // draw one effect on g (w × h dots, ppi dots a square) at time t; look: { color, variant }
   function draw(g, w, h, ppi, kind, id, t, look = {}, bg = null) {
@@ -26,10 +27,15 @@ const FxThumbs = (() => {
       if (kind === 'emitter') {
         const d = FXDATA.EMITTERS.find((x) => x.id === id); if (!d) return;
         const B = E_BOOST[id] || [1.1, 1, 1];
+        const big = E_CELL[id] && typeof Creatures === 'object'; // (second-bats-insects: small creatures drawn larger on their tile)
+        const stream = id === 'bats' && look.variant === 'stream';
+        if (big) Creatures.scene({ cell: E_CELL[id] });
+        try {
         FX.emitter(g, { id: `th-${id}`, kind: 'emitter', preset: id, r: d.r * B[0], intensity: B[1], density: B[2], speed: 1, color: look.color || d.color || null, flicker: true,
           ...(d.turn ? { angle: id === 'shaft' ? 35 : id === 'window' ? 60 : 0 } : {}), ...(d.kinds ? { variant: look.variant || d.kinds[0][0] } : {}),
-          ...(id === 'window' ? { shape: 'arched', grid: 'cross', stretch: 1.5, dust: 1 } : {}), ...(id === 'shaft' ? { dust: 1 } : {}) }, W / 2, H / 2 + 0.3,
-          id === 'geyser' && typeof Creatures === 'object' ? Creatures.eruptionAt({ id: `th-${id}` }) : t); // (second-water-works: a geyser is shown erupting)
+          ...(id === 'window' ? { shape: 'arched', grid: 'cross', stretch: 1.5, dust: 1 } : {}), ...(id === 'shaft' ? { dust: 1 } : {}) }, stream ? W * 0.12 : W / 2, H / 2 + 0.3,
+          id === 'geyser' && typeof Creatures === 'object' ? Creatures.eruptionAt({ id: `th-${id}` }) : id === 'devil' && typeof Creatures === 'object' ? Creatures.devilAt({ id: `th-${id}` }) : stream ? Creatures.streamAt({ id: `th-${id}` }, 1.3) : t); // (second-water-works: a geyser is shown erupting; second-bats-insects: a stream pouring out)
+        } finally { if (big) Creatures.scene(null); }
       } else {
         const B = R_BOOST[id] || [1, 1, null];
         const pts = []; const n = Math.max(10, Math.round(W * 2)); for (let i = 0; i <= n; i++) pts.push(0.9 + (W - 1.8) * (i / n), H / 2 + Math.sin(i * 0.9 * (10 / n)) * 0.35);
@@ -42,7 +48,8 @@ const FxThumbs = (() => {
     const w = Math.round((o.w || 104) * 2); const h = Math.round((o.h || 72) * 2);
     const key = `${kind}|${id}|${w}x${h}|${o.color || ''}|${o.variant || ''}`;
     if (!cache.has(key)) {
-      cache.set(key, ground(FLOOR[`${kind}|${id}`]).then((bg) => new Promise((res) => {
+      const pics = typeof Creatures === 'object' && Creatures.ready ? Creatures.ready() : Promise.resolve(); // (second-birds: the painted creatures)
+      cache.set(key, Promise.all([ground(FLOOR[`${kind}|${id}`]), pics]).then(([bg]) => new Promise((res) => {
         const run = () => {
           try {
             const c = document.createElement('canvas'); c.width = w; c.height = h;

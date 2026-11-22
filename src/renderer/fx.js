@@ -1115,7 +1115,7 @@ const FX = (() => {
     S.forEach((st, si) => {
       if (st.poly || st.cut) return; // (an outline: its dots carry it; what was erased carries nothing)
       const p = st.pts; const d0 = Math.max(0.05, st.r * step); const cuts = later[si];
-      const put = (x, y) => { if (!inCut(cuts, x, y)) out.push([x, y, st.r]); };
+      const put = (x, y) => { if (!inCut(cuts, x, y)) out.push([x, y, st.r, st.nm ? 1 : 0]); }; // (Beta 3.63: the fourth says it is a dot of a Box or a Round)
       for (let i = 0; i < p.length; i += 2) {
         if (i >= 2) {
           const px = p[i - 2]; const py = p[i - 1]; const d = Math.hypot(p[i] - px, p[i + 1] - py);
@@ -1125,6 +1125,31 @@ const FX = (() => {
       }
     });
     return out;
+  }
+  // (Beta 3.63) how big a painted area is, in the units of its strokes (squares when the strokes are in squares): what
+  // its strokes cover together, without what was erased, however it was painted (a Box, a Round, one brush line or
+  // ten over each other). keep(stroke): which strokes count. Counted on a grid, kept until the strokes change.
+  const areaCache = new Map();
+  function areaOf(fx, tag = '', keep = null) {
+    const S = fx.strokes || []; const key = `${fx.id}|${tag}`; const sig = `${strokeSig(fx)}|${S.length}`;
+    const e = areaCache.get(key); if (e && e.sig === sig) return e.a;
+    const later = cutsAfter(S); const use = [];
+    let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+    S.forEach((st, i) => {
+      if (st.cut || st.nm || !st.pts || (keep && !keep(st))) return; // (a shape's dots lie inside its outline)
+      const r = st.poly ? 0 : st.r || 0;
+      for (let k = 0; k + 1 < st.pts.length; k += 2) { x0 = Math.min(x0, st.pts[k] - r); x1 = Math.max(x1, st.pts[k] + r); y0 = Math.min(y0, st.pts[k + 1] - r); y1 = Math.max(y1, st.pts[k + 1] + r); }
+      use.push([[st], later[i]]);
+    });
+    let a = 0;
+    if (use.length && x1 > x0 && y1 > y0) {
+      const step = Math.max(0.2, Math.sqrt(((x1 - x0) * (y1 - y0)) / 30000)); let n = 0;
+      for (let y = y0 + step / 2; y < y1; y += step) for (let x = x0 + step / 2; x < x1; x += step) if (use.some(([one, cuts]) => inCut(one, x, y) && !inCut(cuts, x, y))) n++;
+      a = n * step * step;
+    }
+    if (areaCache.size > 200) areaCache.clear();
+    areaCache.set(key, { sig, a });
+    return a;
   }
   // a part of an area that does not move, drawn once into its own small canvas (the box the area covers)
   const flatCache = new Map();
@@ -2975,5 +3000,7 @@ const FX = (() => {
   return { drawStrokes, strokeSig, // (Beta 3.58: painted grass's blades, living.js)
     // Second Builder (second-water-works): the helpers creatures.js draws with
     samples, flowLines, along, heading, regionMask, regionBox, scratch, stamp, patternAt, noiseTile, causticTile, tinted, flowDir, h, count, dot, smoke, centreOf,
+    areaOf, // (Beta 3.63: how big a painted area really is)
+    layerAlpha, // (second-birds: the Birds layer fades in and out like the others)
     setQuality, emitter, waveOf, ventLevel, region, regionLights, anchor, sway, roof, lightMask, windowIcon, darkness, glow, weather, flashes, strike, weatherOn, spell, ghost, envelope, seedOf, sprite, rgba, mix, skinOf, flowTurn };
 })();

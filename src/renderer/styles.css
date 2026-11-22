@@ -4256,8 +4256,8 @@ body.gm[data-tool="mark"] .sv-text { pointer-events: auto; cursor: move; }
 .fx-ban-acts { position: absolute; right: 5px; top: 5px; display: flex; gap: 2px; background: rgba(10, 11, 14, 0.72); border-radius: 9px; padding: 2px; z-index: 1; }
 .fx-ban-acts .icon-btn { width: 26px; height: 26px; }
 .fx-ban-tag { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 999px; background: var(--torch); color: var(--torch-ink); font-size: 11px; font-weight: 600; z-index: 1; }
-.fx-chips { display: flex; gap: 4px; user-select: none; }
-.fx-chips .cs-chip { padding: 3px 7px; font-size: 11px; white-space: nowrap; }
+.fx-chips { display: flex; gap: 3px; user-select: none; }
+.fx-chips .cs-chip { flex: 1 1 auto; min-width: 0; padding: 3px 2px; font-size: 10.5px; white-space: nowrap; text-align: center; } /* (Beta 3.63: seven chips with Animals; Battle was cut off) */
 .fx-chips .cs-chip.on { border-color: var(--fc); color: var(--fc); background: color-mix(in srgb, var(--fc) 14%, transparent); }
 /* five in a row; four rows show, then the tiles scroll (Glinn) */
 .fx-gal { position: relative; user-select: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; max-height: 271px; overflow-y: auto; scrollbar-width: thin; flex: none; align-content: start; }

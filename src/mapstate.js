@@ -319,7 +319,7 @@ function normalize(m) {
 }
 
 // ---------- weather: a list of layers (rain, splashes, clouds, lightning ...) ----------
-const WEATHER_KEYS = ['amount', 'opacity', 'size', 'speed', 'color', 'dir', 'gust', 'hidden', 'thunder'];
+const WEATHER_KEYS = ['amount', 'opacity', 'size', 'speed', 'color', 'dir', 'gust', 'hidden', 'thunder', 'variant']; // (second-birds: variant, the kind of a Birds layer)
 function weatherLayer(p, now) {
   const L = { id: p.id || newId('w'), type: String(p.type || 'rain'), amount: 1, opacity: 1, size: 1, speed: 1, color: null, dir: null, gust: 0, hidden: false, born: now || 0, dying: null };
   Object.assign(L, pick(p, WEATHER_KEYS));
@@ -1007,6 +1007,7 @@ function applyRaw(map, type, p, media) {
       if (!fx) {
         fx = { id: p.id, kind: 'region', preset: String(p.preset || 'mist'), strokes: [], intensity: p.intensity ?? 1, hidden: false, color: p.color || null, density: p.density ?? 1, speed: p.speed ?? 1 };
         if (p.variant) fx.variant = String(p.variant).slice(0, 20); // Second Builder (second-water-works): a painted kind (Bubbling pool)
+        if (p.spin === -1) fx.spin = -1; // Second Builder (second-sun-sand-gears): Turning parts the other way round
         map.fx.push(fx);
       }
       let s = fx.strokes.find((x) => x.sid === p.sid);
@@ -1021,6 +1022,7 @@ function applyRaw(map, type, p, media) {
       if (!fx) {
         fx = { id: p.id, kind: 'region', preset: String(p.preset || 'mist'), strokes: [], intensity: p.intensity ?? 1, hidden: false, color: p.color || null, density: p.density ?? 1, speed: p.speed ?? 1 };
         if (p.variant) fx.variant = String(p.variant).slice(0, 20); // (second-water-works)
+        if (p.spin === -1) fx.spin = -1; // (second-sun-sand-gears)
         map.fx.push(fx);
       }
       if (fx.kind !== 'region') return { changed: null };
@@ -1119,6 +1121,13 @@ function applyRaw(map, type, p, media) {
       map.fx = map.fx.filter((x) => x.id !== p.id);
       return { changed: 'all', label: FXDATA.isLight(fx) ? `${lightName(fx)} removed` : 'Effect removed' };
     }
+    case 'fx.anchor': { // Second Builder (second-sun-sand-gears): a windmill's angle and rate, from the GM (no undo step)
+      const fx = map.fx.find((f) => f.id === p.id);
+      const A = p.anc || {};
+      if (!fx || fx.preset !== 'turn' || ![A.at, A.a, A.r0, A.r1].every((v) => Number.isFinite(Number(v)))) return { changed: null };
+      fx.anc = { at: Math.round(Number(A.at)), a: Number(A.a), r0: Math.max(0, Math.min(5, Number(A.r0))), r1: Math.max(0, Math.min(5, Number(A.r1))) };
+      return { changed: 'all', label: null };
+    }
     case 'light.update': {
       const L = map.light;
       const changes = 'darkness' in p || 'tint' in p;
@@ -1126,7 +1135,8 @@ function applyRaw(map, type, p, media) {
       const fade = Math.min(120, Math.max(0, Number(p.fade) || 0));
       if (changes && fade) { const cur = Vision.lightNow(L); L.from = { darkness: cur.darkness, tint: cur.tint, t0: Date.now(), s: fade }; }
       else if (changes) delete L.from;
-      Object.assign(L, pick(p, ['darkness', 'tint', 'memory', 'mood']));
+      Object.assign(L, pick(p, ['darkness', 'tint', 'memory', 'mood', 'moths'])); // (second-bats-insects: moths, Moths round the lights)
+      if ('moths' in p) L.moths = !!L.moths;
       if (changes && !('mood' in p)) L.mood = null;
       L.darkness = Math.min(1, Math.max(0, Number(L.darkness) || 0));
       return { changed: 'all', label: p.mood && p.label ? p.label : null };

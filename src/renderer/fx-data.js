@@ -108,6 +108,12 @@ const FXDATA = (() => {
     // Second Builder (second-water-works): drawn by creatures.js. spin: which way it turns; swirl: the map's own water turns too
     { id: 'whirl', label: 'Whirlpool', icon: 'spiral', r: 1.5, kinds: [['whirlpool', 'Whirlpool'], ['maelstrom', 'Maelstrom']], kindsLabel: 'Kind', spin: true, tip: 'Foam spiralling into a dark middle; the map\'s own water turns with it' },
     { id: 'geyser', label: 'Geyser', icon: 'ripple-up', r: 1, tip: 'A pool that bubbles, builds up and erupts now and then (Speed: how often)' },
+    // Second Builder (second-birds): fly: drawn on the fly layer, above the tree tops (creatures.js)
+    { id: 'devil', label: 'Dust devil', icon: 'tornado', r: 0.8, fly: true, kinds: [['dust', 'Dust'], ['ash', 'Ash'], ['leaves', 'Leaves']], kindsLabel: 'Kind', noColor: true, tip: 'A little whirl of dust that comes now and then, wanders round its spot and leans with the wind. Calm air: rare' }, // (second-sun-sand-gears)
+    { id: 'circling', label: 'Circling birds', icon: 'feather', r: 2.5, fly: true, kinds: [['vultures', 'Vultures'], ['eagle', 'Eagle'], ['gulls', 'Gulls'], ['crows', 'Crows']], kindsLabel: 'Kind', noColor: true, tip: 'Birds circling over a spot. Size: the circle; Amount: how many' },
+    // Second Builder (second-bats-insects): on the fly layer too
+    { id: 'bats', label: 'Bats', icon: 'bat', r: 1.5, fly: true, turn: true, kinds: [['flutter', 'Flutter'], ['stream', 'Stream from here']], kindsLabel: 'Kind', noColor: true, tip: 'Bats round a spot. Stream from here: now and then a ribbon of bats pours out the way it faces (a cave mouth at dusk)' },
+    { id: 'insects', label: 'Insects', icon: 'butterfly', r: 1.5, fly: true, kinds: [['butterflies', 'Butterflies'], ['bees', 'Bees'], ['dragonflies', 'Dragonflies'], ['moths', 'Moths'], ['flies', 'Flies']], kindsLabel: 'Kind', colorKinds: ['butterflies'], tip: 'Butterflies over a meadow, bees at the flowers, dragonflies over water, moths by a lamp, flies over carrion. Size: where they keep to' },
     // 4.9: sunlight through a window: the bright patch on the floor with the shadows of its bars, dust in the air above it
     { id: 'window', label: 'Window light', icon: 'sun-low', r: 1, turn: true, tip: 'Sunlight through a window falling on the floor: the shadows of its bars, dust in the beam. Pick the window\'s shape and its bars; it lights a dark map' },
   ];
@@ -136,6 +142,9 @@ const FXDATA = (() => {
     // Second Builder (second-water-works): drawn by creatures.js
     { id: 'rapids', label: 'Rapids', icon: 'wave-saw-tool', tip: 'Whitewater: paint it the way the river flows. Amount: how many rocks break it' },
     { id: 'bubbling', label: 'Bubbling pool', icon: 'bubble', kinds: [['mud', 'Mud'], ['bog', 'Bog'], ['spring', 'Hot spring'], ['tar', 'Tar']], kindsLabel: 'Kind', tip: 'Bubbles that swell and pop on the map\'s own mud or pool. Over 100 % Strength it brings its own colour' },
+    // Second Builder (second-ground-life): painted creatures (creatures.js)
+    { id: 'fish', label: 'Fish', icon: 'fish', kinds: [['small', 'Small fish'], ['koi', 'Koi'], ['trout', 'Trout (river)'], ['eels', 'Eels'], ['shadow', 'Big shadow']], kindsLabel: 'Kind', tip: 'Fish under the surface: paint them where the water is. No water of its own. Trout face against the way you paint' },
+    { id: 'critters', label: 'Critters', icon: 'paw', kinds: [['rats', 'Rats'], ['mice', 'Mice'], ['roaches', 'Roaches'], ['spiders', 'Spiders'], ['lizards', 'Lizards']], kindsLabel: 'Kind', tip: 'A wide area: they scurry about in it. A thin stroke (a wall, a gutter): they run along it and vanish at its ends' },
     { id: 'surf', label: 'Surf', icon: 'beach', tip: 'Paint the sea: waves of foam roll in to the edge of what you painted' },
     { id: 'blood', label: 'Blood', icon: 'droplet', tip: 'Pools and splatter; a fresh stroke spreads out for a moment' },
     { id: 'acid', label: 'Acid', icon: 'flask', tip: 'A green pool that bubbles and fumes' },
@@ -154,6 +163,10 @@ const FXDATA = (() => {
     // Beta 3.1: where it is painted the weather stays off (indoors, caves); not seen on the TV
     { id: 'roof', label: 'Roof', icon: 'umbrella', tip: 'Paint over houses and caves: rain, snow and the other weather stay off there. Not seen on the table', noColor: true, still: true },
     { id: 'sway', label: 'Sway', icon: 'wind', tip: 'Paint over tree tops, reeds or banners: the map itself sways there, the way you paint the stroke', noColor: true },
+    // Second Builder (second-sun-sand-gears)
+    { id: 'turn', label: 'Turning parts', icon: 'rotate-clockwise', kinds: [['steady', 'Steady'], ['windmill', 'Windmill'], ['ticking', 'Ticking']], kindsLabel: 'Kind', spin: true, noBrush: true, noColor: true, tip: 'Draw a Round over windmill sails, a wheel or a gear: the map turns there. A Box rolls it the way you drag (a conveyor, a mill race). Windmill follows the wind' },
+    { id: 'dapple', label: 'Sun through leaves', icon: 'sun', kinds: [['sunlight', 'Sunlight'], ['moonlight', 'Moonlight'], ['rays', 'Rays']], kindsLabel: 'Kind', tip: 'Soft spots of light under a canopy, shifting as the leaves move. Rays: soft beams in a clearing. Amount: smaller, more spots' },
+    { id: 'drift', label: 'Drifting sand', icon: 'wind', kinds: [['sand', 'Sand'], ['snow', 'Snow'], ['ash', 'Ash']], kindsLabel: 'Kind', tip: 'Low streamers sliding over dunes the way the wind blows (the way you paint when the air is calm), puffs off the crests' },
     { id: 'oil', label: 'Oil', icon: 'droplet-half-2', tip: 'A dark slick with a rainbow sheen. Its card can set it alight' },
   ];
   // Weather covers the whole table, above the fog
@@ -178,6 +191,10 @@ const FXDATA = (() => {
     { id: 'bubbles', label: 'Bubbles', icon: 'bubble', dir: 270, color: '#e6f8ff', still: true },
     { id: 'wind', label: 'Wind', icon: 'wind', dir: 10, color: '#ffffff' },
     { id: 'haze', label: 'Heat shimmer', icon: 'haze', dir: 270, color: '#ffd9a0', nogust: true },
+    // Second Builder (second-birds): sky: drawn on the fly layer (creatures.js), not under Indoors; a flock now and then
+    { id: 'birds', label: 'Birds', icon: 'feather', dir: 200, color: null, sky: true, nogust: true, noColor: true, kinds: [['small', 'Small birds'], ['crows', 'Crows'], ['gulls', 'Gulls'], ['doves', 'Doves'], ['geese', 'Geese'], ['bats', 'Bats']] },
+    // Second Builder (second-sun-sand-gears): drawn on the fly layer (creatures.js); rolls with the map's wind, none in calm air
+    { id: 'tumble', label: 'Tumbleweeds', icon: 'circle-dotted', dir: 0, color: null, sky: true, nogust: true, noColor: true },
   ];
   // Ready-made mixes (the GM can save their own)
   const WEATHER = [
@@ -266,13 +283,18 @@ const FXDATA = (() => {
     { id: 'water', label: 'Water', color: '#5aa9e6' },
     { id: 'fire', label: 'Fire', color: '#ff8a3a' },
     { id: 'nature', label: 'Nature', color: '#7dc46a' },
+    { id: 'animals', label: 'Animals', color: '#d9a35a' }, // (second-birds)
     { id: 'magic', label: 'Magic', color: '#b07cff' },
     { id: 'battle', label: 'Battle', color: '#e2525a' },
   ];
   const ELEMENTS = [
     ['region', 'water', 'water'], ['region', 'current', 'water'], ['region', 'surf', 'water'], ['region', 'swamp', 'water'], ['region', 'ice', 'water'], ['emitter', 'falls', 'water'], ['region', 'rapids', 'water'], ['emitter', 'whirl', 'water'], ['region', 'bubbling', 'water'], ['emitter', 'geyser', 'water'], // (second-water-works)
     ['region', 'lava', 'fire'], ['region', 'burning', 'fire'], ['emitter', 'vent', 'fire'], ['emitter', 'smoke', 'fire'], ['emitter', 'steam', 'fire'],
-    ['region', 'mist', 'nature'], ['region', 'dust', 'nature'], ['region', 'grass', 'nature'], ['region', 'sway', 'nature'], ['emitter', 'fireflies', 'nature'], ['emitter', 'shaft', 'nature'], ['emitter', 'window', 'nature'],
+    ['region', 'mist', 'nature'], ['region', 'dust', 'nature'], ['region', 'grass', 'nature'], ['region', 'sway', 'nature'], ['region', 'turn', 'nature'], ['emitter', 'fireflies', 'nature'], ['emitter', 'shaft', 'nature'], ['emitter', 'window', 'nature'], ['region', 'drift', 'nature'], ['emitter', 'devil', 'nature'], // (Beta 3.63, Glinn: Sun through leaves ('dapple') has no tile yet: as white laid over the map it read as mist. It comes back with the one engine, where it can brighten the map itself; its drawing stays in creatures.js)
+    // (second-sun-sand-gears: Turning parts after Sway; Sun through leaves, Drifting sand, Dust devil)
+    ['region', 'fish', 'animals'], // (second-ground-life)
+    ['emitter', 'circling', 'animals'], // (second-birds)
+    ['emitter', 'bats', 'animals'], ['region', 'critters', 'animals'], ['emitter', 'insects', 'animals'], // (second-bats-insects; second-ground-life: Critters)
     ['region', 'glow', 'magic'], ['region', 'darkness', 'magic'], ['emitter', 'glow', 'magic'], ['emitter', 'sparkles', 'magic'], ['emitter', 'runes', 'magic'], ['emitter', 'portal', 'magic'], ['emitter', 'arcs', 'magic'],
     ['region', 'blood', 'battle'], ['region', 'acid', 'battle'], ['region', 'oil', 'battle'], ['region', 'web', 'battle'],
   ].map(([kind, id, family]) => { const d = (kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === id); return { key: `${kind === 'region' ? 'r' : 'e'}:${id}`, kind, id, family, label: d.label, icon: d.icon, tip: d.tip || null }; });

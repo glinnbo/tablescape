@@ -117,6 +117,8 @@ class SceneView {
     this.cv = {
       sway: layerCanvas('sv-sway', 3840), // (Beta 3.1) the map picture moving where Sway is painted: as sharp as the map
       atmo: layerCanvas('sv-atmo', 1280),
+      crit: layerCanvas('sv-crit', 2560), // Second Builder (second-ground-life): critters, sharper than the effects layer, under the grid
+      fly: layerCanvas('sv-fly', 2560), // Second Builder (second-birds): birds, bats, insects: above the tree tops, under the light and the fog
       grid: layerCanvas('sv-gridc', 3840),
       veil: layerCanvas('sv-veil', 1280), // magical darkness: above the grid, under the tokens
       light: layerCanvas('sv-light', 960),
@@ -168,7 +170,7 @@ class SceneView {
     // Beta 3.20: living trees: one canvas per level that has any (made when the first tree comes), see drawTrees
     this.tcv = {}; this.treeN = 0; this.treeAt = 0; this.treeWindNow = null; this.treeShadows = true;
     this.unTrees = typeof Trees === 'object' ? Trees.onChange(() => { if (this.map && !this.dead) { this.renderLayers(); this.redrawSoon(); this.updateAnimation(); } }) : null;
-    this.world.append(this.mapA, this.cv.sway.el, this.mapA2, this.cv.atmo.el, this.cv.grid.el, this.mapA3, this.cv.veil.el, this.cv.dv.el, this.mapB, this.mapA4, this.cv.light.el, this.cv.glow.el, this.cv.spell.el,
+    this.world.append(this.mapA, this.cv.sway.el, this.mapA2, this.cv.atmo.el, this.cv.crit.el, this.cv.grid.el, this.mapA3, this.cv.veil.el, this.cv.dv.el, this.mapB, this.mapA4, this.cv.fly.el, this.cv.light.el, this.cv.glow.el, this.cv.spell.el,
       this.mapC, this.mapT, this.annoEl, this.glassEl, this.labelsEl, this.fogEl, this.offEl, this.wallsEl, this.areasEl, this.tableOv, this.cv.weather.el, this.cv.moment.el, this.inkEl, this.handlesEl, this.gizmoEl, this.marks);
     this.root.appendChild(this.world);
     host.appendChild(this.root);
@@ -2015,6 +2017,8 @@ class SceneView {
     const t = ms / 1000 - T0;
     this.drawSway(t);
     this.drawAtmo(t);
+    this.drawCrit(t); // (second-ground-life)
+    this.drawFly(t); // (second-birds)
     this.drawLight(t);
     this.drawSpells(ms);
     this.drawWeather(t);
@@ -2225,7 +2229,9 @@ class SceneView {
     const k = this.ppi * c.res;
     ctx.setTransform(k, 0, 0, k, 0, 0);
     const at = (m) => this.mapToTable(m.x, m.y);
-    Moments.draw(ctx, this.W / this.ppi, this.H / this.ppi, list, now, at, { gm: this.gm });
+    if (typeof Creatures === 'object') Creatures.scene({ dark: Vision.lightNow(this.map.light).darkness, cell: this.cellK() }); // (second-birds: Birds take flight)
+    Moments.draw(ctx, this.W / this.ppi, this.H / this.ppi, list, now, at, { gm: this.gm, sq: this.cellK() * this.v.zoom });
+    if (typeof Creatures === 'object') Creatures.scene(null);
   }
   // videos and effects stand still while time stops; they go on from there afterwards
   setFreeze(at) {
@@ -2278,20 +2284,74 @@ class SceneView {
     const items = this.map.fx.filter((f) => f.kind === 'region' && f.preset === 'sway' && this.shown(f));
     // Second Builder (second-water-works): a whirlpool turns the map's own water under it, on this sharp layer too
     const swirls = typeof Creatures === 'object' ? this.map.fx.filter((f) => f.kind === 'emitter' && f.preset === 'whirl' && f.swirl !== false && !f.hidden && this.shown(f)) : [];
-    this.stats.sway = items.length + swirls.length;
-    const p = items.length || swirls.length ? this.bgPlacement() : null;
+    // Second Builder (second-sun-sand-gears): Turning parts turn (a Round) or roll (a Box) the map picture here too
+    const parts = typeof Creatures === 'object' ? this.map.fx.filter((f) => f.kind === 'region' && f.preset === 'turn' && this.shown(f)) : [];
+    this.stats.sway = items.length + swirls.length + parts.length;
+    const p = items.length || swirls.length || parts.length ? this.bgPlacement() : null;
     if (!p || !this.bgNode) { clearCanvas(c); return; }
     const ctx = startCanvas(c);
     this.mapXform(ctx, c.res);
     const bg = { el: this.bgNode.el, x: p.x, y: p.y, w: p.w, h: p.h, turn: this.bgTurn(), key: this.bgNode.url };
     for (const f of items) FX.sway(ctx, f.hidden ? { ...f, intensity: (f.intensity ?? 1) * 0.35 } : f, t, this.cellK(), bg);
     for (const f of swirls) { const q = this.fxPos(f); Creatures.swirl(ctx, f, q.x, q.y, t, bg); } // (second-water-works)
+    this.stats.turning = 0;
+    for (const f of parts) this.stats.turning += Creatures.turnPart(ctx, f.hidden ? { ...f, intensity: (f.intensity ?? 1) * 0.35 } : f, t, bg, this.cellK()); // (second-sun-sand-gears)
+  }
+  // Second Builder (second-birds): the fly layer: Birds (a weather layer, in table space) and what flies from the map
+  // (Circling birds, in map space). Above the tree tops, under the light (night darkens them) and the fog; Indoors
+  // does not cut it.
+  drawFly(t) {
+    const c = this.cv.fly;
+    if (typeof Creatures !== 'object') { showLayer(c, false); this.stats.fly = 0; return; }
+    const w = this.map.weather;
+    const sky = ((w && w.layers) || []).some((l) => (l.type === 'birds' || l.type === 'tumble') && !l.hidden); // (one being removed still fades out; second-sun-sand-gears: and Tumbleweeds)
+    const items = this.map.fx.filter((f) => f.kind === 'emitter' && FLY.has(f.preset) && this.shown(f));
+    const dark = Vision.lightNow(this.map.light).darkness;
+    // Second Builder (second-bats-insects): Moths round the lights, as dark as Dusk or darker, round every lit light
+    const lamps = this.map.light.moths && dark >= 0.4 ? this.mothLights() : [];
+    if (!sky && !items.length && !lamps.length) { if (!c.empty) clearCanvas(c); showLayer(c, false); this.stats.fly = 0; this.stats.moths = 0; return; }
+    showLayer(c, true);
+    const ctx = startCanvas(c);
+    let n = 0;
+    if (sky) {
+      const k = this.ppi * c.res;
+      ctx.setTransform(k, 0, 0, k, 0, 0);
+      const W = (this.wideOn && this.R ? this.R.w : this.W) / this.ppi; const H = (this.wideOn && this.R ? this.R.h : this.H) / this.ppi;
+      n += Creatures.tumble(ctx, w, W, H, t, Date.now(), { sq: this.cellK() * this.v.zoom, dark }); // (second-sun-sand-gears: on the ground, under the birds)
+      n += Creatures.sky(ctx, w, W, H, t, Date.now(), { sq: this.cellK() * this.v.zoom, dark });
+    }
+    if (items.length) {
+      Creatures.scene({ dark, cell: this.cellK() });
+      this.mapXform(ctx, c.res);
+      for (const f of items) { const p = this.fxPos(f); FX.emitter(ctx, f.hidden ? { ...f, intensity: (f.intensity ?? 1) * 0.35 } : f, p.x, p.y, t); n++; }
+      Creatures.scene(null);
+    }
+    this.stats.moths = 0;
+    if (lamps.length) { this.mapXform(ctx, c.res); this.stats.moths = Creatures.moths(ctx, lamps, t, { cell: this.cellK(), dark }); } // (second-bats-insects)
+    this.stats.fly = n;
+  }
+  // Second Builder (second-ground-life): Critters on their own sharp layer (painted areas, in squares like the effects)
+  drawCrit(t) {
+    const c = this.cv.crit;
+    const items = typeof Creatures === 'object' ? this.map.fx.filter((f) => f.kind === 'region' && f.preset === 'critters' && this.shown(f)) : [];
+    this.stats.critters = items.length;
+    if (!items.length) { if (!c.empty) clearCanvas(c); showLayer(c, false); return; }
+    showLayer(c, true);
+    const ctx = startCanvas(c);
+    this.mapXform(ctx, c.res);
+    for (const f of items) FX.region(ctx, f.hidden ? { ...f, intensity: (f.intensity ?? 1) * 0.35 } : f, t, this.cellK());
+  }
+  // Second Builder (second-bats-insects): the lit lights moths circle (not a token's own sight, not a resting marker)
+  mothLights() {
+    const idle = Vision.markersIdle(this.map);
+    return this.map.fx.filter((f) => FXDATA.givesLight(f) && !f.eye && this.shown(f) && !Vision.idleMarker(f, idle) && this.outK(f) > 0.05).map((f) => { const p = this.fxPos(f); return { x: p.x, y: p.y, id: f.id }; });
   }
   drawAtmo(t) {
     this._lo = this.myMoments(Date.now()).find((m) => m.id === 'lightsout') || null;
     if (typeof Creatures === 'object') Creatures.wind(Trees.windOf(this.map)); // Second Builder (second-water-works): steam and gas drift with the map's wind
     const blades = this.bladesOn(); // (Beta 3.58: painted grass grows blades on the living layer instead)
-    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f) && !(blades && f.kind === 'region' && f.preset === 'grass')); // (Sway has a layer of its own; Roof only cuts the weather; Beta 3.54: a light put out has no flame)
+    const all = this.map.fx.filter((f) => f.kind !== 'light' && f.preset !== 'sway' && f.preset !== 'roof' && f.lit !== false && this.shown(f) && !(blades && f.kind === 'region' && f.preset === 'grass') && !(f.kind === 'emitter' && FLY.has(f.preset)) && !(f.kind === 'region' && f.preset === 'critters')); // (second-birds: what flies has the fly layer; second-ground-life: critters their own)
+    all.sort((a, b) => (b.preset === 'fish') - (a.preset === 'fish')); // (second-ground-life: fish first, under any water painted here today. Fish look submerged by themselves; once Water is on the living layer this has no effect) // (Sway has a layer of its own; Roof only cuts the weather; Beta 3.54: a light put out has no flame)
     this.stats.emitters = all.filter((f) => f.kind === 'emitter').length;
     this.stats.regions = all.filter((f) => f.kind === 'region').length;
     // magical darkness goes on its own layer above the grid, so grid lines don't show through it
@@ -3323,6 +3383,8 @@ function smoothPath(pts, kx, ky) {
 const PIN_SVG = '<svg viewBox="0 0 24 32" class="pin"><path d="M12 31c-1-4-9-11-9-18a9 9 0 0 1 18 0c0 7-8 14-9 18z" fill="var(--c)" stroke="rgba(0,0,0,0.6)" stroke-width="1.5"/><circle cx="12" cy="12.5" r="3.6" fill="rgba(255,255,255,0.92)"/></svg>';
 const X_SVG = '<svg viewBox="0 0 24 24" class="xmark"><path d="M5 5l14 14M19 5L5 19" stroke="rgba(0,0,0,0.6)" stroke-width="7" stroke-linecap="round"/><path d="M5 5l14 14M19 5L5 19" stroke="var(--c)" stroke-width="4" stroke-linecap="round"/></svg>';
 function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+// Second Builder (second-birds): the effects that fly (fx-data.js fly: true): drawn on the fly layer, not the effects layer
+const FLY = new Set(FXDATA.EMITTERS.filter((d) => d.fly).map((d) => d.id));
 function layerCanvas(cls, maxW) {
   const el = document.createElement('canvas');
   el.className = `sv-canvas ${cls}`;
@@ -3336,6 +3398,9 @@ function sizeCanvas(c, W, H) {
   c.el.style.width = `${W}px`;
   c.el.style.height = `${H}px`;
 }
+// (Beta 3.63) a layer with nothing on it is taken out of the picture, so the screen has one layer less to put together
+// (the fly and the critters layer are empty on most maps)
+function showLayer(c, on) { if (c.shown === on) return; c.shown = on; c.el.style.display = on ? '' : 'none'; }
 function clearCanvas(c) {
   if (c.empty) return;
   c.ctx.setTransform(1, 0, 0, 1, 0, 0);

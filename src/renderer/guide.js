@@ -25,6 +25,12 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.63', [
+      'Animals: a Birds weather layer (small birds, crows, gulls, doves, geese or bats cross now and then), Circling birds (vultures, an eagle, gulls, crows) and the moment Birds take flight. They fly above the trees, under the fog',
+      'Animals: Bats (fluttering, or a stream pouring out of a cave now and then), Insects (butterflies, bees, dragonflies, moths, flies), the moment Bat swarm, and Scene → Time of day → More → Moths round the lights',
+      'Animals: paint Fish where the water is (small fish, koi, trout, eels, a big shadow in the sea). Critters scurry in an area or run along a thin stroke (rats, mice, roaches, spiders, lizards)',
+      'Nature: Drifting sand, a Dust devil, Tumbleweeds (a weather layer) that roll with the wind, and Turning parts: draw a round over windmill sails or a gear and the map turns there (a windmill follows the wind)',
+    ]],
     ['Beta 3.62', [
       'Water: Rapids, a Whirlpool (Whirlpool or Maelstrom, either way round; it can swirl the map\'s own water), a Bubbling pool (mud, bog, hot spring, tar) and a Geyser that erupts now and then',
     ]],

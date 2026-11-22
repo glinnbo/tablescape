@@ -401,10 +401,27 @@ const Play = (() => {
   // =====================================================================
   // State in
   // =====================================================================
+  // Second Builder (second-sun-sand-gears): a windmill (Turning parts) turns with the map's wind. When the wind or its
+  // Speed changes, the GM stores where it is and where its rate is heading (fx.anc), so the TV turns it the same way
+  const millSent = new Map();
+  function millAnchors(m) {
+    if (typeof Creatures !== 'object' || typeof Trees !== 'object' || !Array.isArray(m.fx)) return;
+    let wind = null;
+    for (const f of m.fx) {
+      if (f.kind !== 'region' || f.preset !== 'turn' || f.variant !== 'windmill') continue;
+      if (!wind) wind = Trees.windOf(m);
+      const r1 = Math.round(Creatures.millRate(wind.strength) * (f.speed ?? 1) * 1e5) / 1e5;
+      if (f.anc && Math.abs((f.anc.r1 || 0) - r1) < 1e-4) { millSent.delete(f.id); continue; }
+      if (millSent.get(f.id) === r1) continue; // (already on its way)
+      millSent.set(f.id, r1);
+      cmd('fx.anchor', { id: f.id, anc: Creatures.millAnchor(f, Date.now(), r1), noHistory: true }); // (no undo step: Undo never turns a windmill back)
+    }
+  }
   function update(s) {
     const prevMapId = S && S.map ? S.map.id : null;
     S = s;
     view.setView(s.view);
+    if (s.map) millAnchors(s.map); // Second Builder (second-sun-sand-gears)
     const m = s.map;
     const switched = (m ? m.id : null) !== prevMapId;
     if (switched) {
@@ -1385,7 +1402,7 @@ const Play = (() => {
       shownIf(() => { const d = lookDef(); return !!(d && d.id === 'window'); }, windowPicks()),
       // Second Builder (second-water-works): a whirlpool's direction, and whether the map's own water turns with it
       shownIf(() => { const d = lookDef(); return !!(d && d.spin); }, seg({ label: 'Turns', options: [{ value: 1, label: 'Clockwise' }, { value: -1, label: 'Anticlockwise' }], get: () => (lookGet('spin') === -1 ? -1 : 1), set: (v) => lookSet('spin', v) })),
-      shownIf(() => { const d = lookDef(); return !!(d && d.spin); }, toggle({ label: 'Swirl the water', get: () => lookGet('swirl') !== false, set: (v) => lookSet('swirl', v) })),
+      shownIf(() => { const d = lookDef(); return !!(d && d.spin && d.id === 'whirl'); }, toggle({ label: 'Swirl the water', get: () => lookGet('swirl') !== false, set: (v) => lookSet('swirl', v) })),
       // 4.3.2: the dust in a light shaft (4.9: and a window light), up to ten times as big
       shownIf(() => { const d = lookDef(); return !!(d && (d.id === 'shaft' || d.id === 'window')); }, slider({ label: 'Dust size', min: 0.1, max: 10, step: 0.05, get: () => lookGet('dust') ?? 1, set: (v, k) => lookSet('dust', v, k), fmt: (v) => `${round(v, 2)}×` })),
     ];
@@ -1517,11 +1534,14 @@ const Play = (() => {
     openPop('fx'); updateBrushCursor(); showToolHint();
   }
   const fxFold = (key, label, ...kids) => popFold(key, label, ...kids);
+  // Second Builder (second-sun-sand-gears): the painted effect in hand takes no brush (Turning parts)
+  const noBrush = () => ui.fxMode === 'paint' && !lookTarget() && !!(FXDATA.REGIONS.find((d) => d.id === ui.region) || {}).noBrush;
   const SHAPE_TOOLS = [
     ['box', 'Box', 'square', 'Drag a box on the grid (Shift: a square · Alt: erase a box)'], ['round', 'Round', 'circle', 'Drag a round on the grid (Shift: a circle · Alt: erase a round)'],
     ['brush', 'Brush', 'brush', 'Paint it on freely ([ and ] size the brush)'], ['erase', 'Erase', 'eraser', 'Brush away any painted effect']];
   let fxSides = null; let fxGalScroll = 0; let fxShown = '';
   function buildFxPop(o = {}) {
+    if (noBrush() && ui.paintShape === 'brush') ui.paintShape = 'round'; // Second Builder (second-sun-sand-gears): Turning parts: only Round and Box
     if (ui.fxMode === 'light' && ui.lightTab !== 'sources') ui.fxMode = 'weather'; // (the map's light is part of Scene)
     const group = fxGroup();
     let body = []; let fly = null;
@@ -1535,7 +1555,7 @@ const Play = (() => {
     const groups = h('div', { class: `os-tools os-tabs os-groups fx-groups${o.again ? '' : ' slide'}` }, ...FX_GROUPS.map((g, i) => h('button', {
       class: `tile ${g.id === group ? 'open' : ''}`, dataset: { v: `fxg-${g.id}`, g: g.id }, 'data-tip': g.tip, 'aria-label': g.label, style: `--i:${i}`, onclick: () => setFxGroup(g.id),
     }, iconEl(g.icon), h('span', {}, g.label))));
-    const shapes = tools ? h('div', { class: `os-tools os-tabs os-tabs2 g-${group}${slide}` }, ...SHAPE_TOOLS.map(([v, label, icon, tip], i) => h('button', {
+    const shapes = tools ? h('div', { class: `os-tools os-tabs os-tabs2 g-${group}${slide}` }, ...SHAPE_TOOLS.filter(([v]) => !(v === 'brush' && noBrush())).map(([v, label, icon, tip], i) => h('button', {
       class: `tile ${ui.paintShape === v ? 'on' : ''}`, dataset: { v: `fxt-${v}` }, 'data-tip': tip, 'aria-label': label, style: `--i:${i}`,
       onclick: () => { ui.paintShape = v; openPop('fx'); updateBrushCursor(); showToolHint(); },
     }, iconEl(icon), h('span', {}, label)))) : null;
@@ -1570,6 +1590,7 @@ const Play = (() => {
       fxFold('fxMoreLight', 'More',
         h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Colour of the dark'), tints),
         toggle({ label: 'Remember lit areas', get: () => map().light.memory, set: (v) => cmd('light.update', { memory: v }) }),
+        toggle({ label: 'Moths round the lights', get: () => !!map().light.moths, set: (v) => cmd('light.update', { moths: v }) }), // Second Builder (second-bats-insects): at dusk and night a few moths circle every lit light
         row(btn('Forget explored areas', 'eraser', () => undoable('light.forget', {}), { kind: 'small', tip: 'Make everything dark again' })),
         seg({ label: 'Change over', options: [{ value: 10, label: '10 seconds' }, { value: 0, label: 'At once' }], get: () => ui.moodFade, set: (v) => { ui.moodFade = v; try { localStorage.setItem('moodFade', String(v)); } catch {} refreshPop(); } })),
       h('div', { class: 'ctl' }, h('div', { class: 'row fx-sec-row' }, h('span', { class: 'ctl-label fx-sec grow' }, 'Weather'), roof), W.presets),
@@ -1596,7 +1617,7 @@ const Play = (() => {
       const shape = { box: 'a box', round: 'a round', brush: 'the brush', erase: 'erase' }[ui.paintShape] || 'a box';
       return erase ? 'rubs out any painted effect' : [shape, def && def.noColor ? null : lookGet('color') ? 'your colour' : 'its own colour'].filter(Boolean).join(' · ');
     };
-    const picture = (k, d, look) => (k === 'region' && (d.id === 'sway' || d.id === 'roof') ? h('span', { class: 'fx-pic noimg' }, iconEl(d.icon)) : FxThumbs.img(k, d.id, { w: 284, h: 86, zoom: 0.56, ...look }));
+    const picture = (k, d, look) => (k === 'region' && (d.id === 'sway' || d.id === 'roof' || d.id === 'turn') ? h('span', { class: 'fx-pic noimg' }, iconEl(d.icon)) : FxThumbs.img(k, d.id, { w: 284, h: 86, zoom: 0.56, ...look }));
     const acts = f ? h('div', { class: 'fx-ban-acts' }) : null;
     const showBan = (k, d, look, title, text, tag) => { ban.replaceChildren(...[picture(k, d, look), tag ? h('span', { class: 'fx-ban-tag' }, tag) : null, acts, cap].filter(Boolean)); cap.replaceChildren(h('b', {}, title), text); };
     const paintBan = (force) => {
@@ -1617,7 +1638,7 @@ const Play = (() => {
     // its rows: only what fits it
     const rows = [];
     if (def && def.kinds && !erase) rows.push(seg({ label: def.kindsLabel || 'What comes out', options: def.kinds.map(([v, label]) => ({ value: v, label })), get: () => kindOf(def), set: (v) => lookSet('variant', v) })); // (second-water-works: kindsLabel, kindOf)
-    if (def && !def.noColor && !erase) rows.push(colorSwatches(() => lookGet('color'), (v) => lookSet('color', v)));
+    if (def && !def.noColor && !erase) rows.push(def.colorKinds ? shownIf(() => def.colorKinds.includes(kindOf(def)), colorSwatches(() => lookGet('color'), (v) => lookSet('color', v))) : colorSwatches(() => lookGet('color'), (v) => lookSet('color', v))); // (second-bats-insects: colorKinds, a colour only for some kinds: Insects' butterflies)
     if (def && kind === 'emitter') {
       const base = () => def.r * cellK();
       rows.push(slider({ label: 'Size', min: 0.4, max: 3, step: 0.05, get: () => { const x = lookTarget(); return x ? x.r / base() : ui.look.size || 1; },
@@ -1838,6 +1859,11 @@ const Play = (() => {
     };
     const box = h('div', { class: 'layer-detail wx-detail' });
     const still = def.still;
+    // Second Builder (second-birds): a layer with kinds (Birds) picks its kind first
+    if (def.kinds) {
+      const kseg = seg({ label: 'Kind', options: def.kinds.map(([v, label]) => ({ value: v, label })), get: () => (def.kinds.some((k) => k[0] === cur('variant', null)) ? cur('variant', null) : def.kinds[0][0]), set: (v) => cmd('weather.update', { id: L.id, variant: v }) });
+      box.append(kseg);
+    }
     box.append(
       sl(L.type === 'lightning' ? 'How often' : 'Amount', 'amount', 0.1, 3, 0.05, x),
       sl('Opacity', 'opacity', 0.05, 1, 0.01, pct),
@@ -1850,6 +1876,7 @@ const Play = (() => {
       local(() => { th.checked = cur('thunder', true) !== false; });
       box.append(h('label', { class: 'ctl ctl-toggle' }, h('span', { class: 'ctl-label' }, 'Thunder follows each flash'), th, h('span', { class: 'switch' })));
     }
+    if (def.noColor) return box; // (second-birds: Birds are their own colours)
     // colour: the layer's own look, a few presets, or any colour
     const sw = h('div', { class: 'swatches color-row' });
     const COLS = [null, '#ffffff', '#b9cdeb', '#9fe3ff', '#cfd6dc', '#d9b77a', '#a9a39b', '#ff8f2e', '#d6ff7a', '#f6b8c9', '#2a1408', '#000000'];
@@ -4496,7 +4523,7 @@ const Play = (() => {
         if (r.w > 0 && r.h > 0) {
           const L = ui.look;
           if (d.erase) cmd('fx.cut', { sid: d.sid, shape: d.round ? 'round' : 'rect', x: r.x, y: r.y, w: r.w, h: r.h });
-          else cmd('fx.shape', { id: d.id, preset: d.preset, sid: d.sid, shape: d.round ? 'round' : 'rect', ...r, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset) }); // (second-water-works)
+          else cmd('fx.shape', { id: d.id, preset: d.preset, sid: d.sid, shape: d.round ? 'round' : 'rect', ...r, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset), ...(L.spin === -1 && (FXDATA.REGIONS.find((x) => x.id === d.preset) || {}).spin ? { spin: -1 } : {}) }); // (second-water-works)
         }
       } else if (d.kind === 'paint') {
         flushPaint(d);
@@ -5229,7 +5256,7 @@ const Play = (() => {
       d.tail = pts.slice(-2);
       return;
     }
-    cmd('fx.stroke', { id: d.id, preset: d.preset, sid: d.sid, r: d.r, pts, coalesce: d.sid, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset) }); // (second-water-works: its kind)
+    cmd('fx.stroke', { id: d.id, preset: d.preset, sid: d.sid, r: d.r, pts, coalesce: d.sid, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset), ...(L.spin === -1 && (FXDATA.REGIONS.find((x) => x.id === d.preset) || {}).spin ? { spin: -1 } : {}) }); // (second-water-works: its kind)
   }
   // Beta 3.41: a box or a round of a painted effect snaps to the grid's lines and half squares (a grid that is not
   // turned); Shift makes it a square or a circle. Returns the box in map units

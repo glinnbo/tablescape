@@ -59,6 +59,10 @@ const NAMES = [
   // Prototype 1: the players' phones move their tokens
   'run', 'device-gamepad-2', 'hand-stop', 'user-edit', 'compass',
   'stairs', // Beta 3.22: Oldschool maps
+  'feather', // Second Builder (second-birds): Birds, Circling birds, Birds take flight
+  'bat', 'butterfly', // Second Builder (second-bats-insects): Bats, Bat swarm, Insects
+  'fish', 'paw', // Second Builder (second-ground-life): Fish, Critters
+  'circle-dotted', // Second Builder (second-sun-sand-gears): Tumbleweeds
 ];
 
 const dir = path.join(__dirname, '..', 'node_modules', '@tabler', 'icons', 'icons', 'outline');

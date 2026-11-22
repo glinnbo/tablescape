@@ -430,7 +430,7 @@ module.exports = (area) => {
     await t.g(`document.querySelector('#pop .fx-fold[data-v="fxMoreWx"] summary').click()`);
     await t.until(async () => (await t.count('#pop .fx-fold[data-v="fxMoreWx"] .wx-list .layer-row')) === 2, 3000, 'Fine-tune the weather: this mix\'s layers');
     await t.clickSel('#pop .fx-addlayer');
-    t.ok(((await t.menu()) || []).includes('Lightning') && (await t.menu()).length === 18, 'Add a layer: the 18 kinds in a menu', await t.menu());
+    t.ok(((await t.menu()) || []).includes('Lightning') && (await t.menu()).length === 20, 'Add a layer: the 20 kinds in a menu', await t.menu()); // (second-birds: 18 and Birds; second-sun-sand-gears: Tumbleweeds)
     await t.menuPick('Lightning');
     await t.until(() => M(t).weather.layers.some((l) => l.type === 'lightning'), 3000, 'lightning in the mix');
     await t.until(() => t.g(`(() => { const b = document.querySelector('#pop .wx-strike'); return !!b && !b.closest('[hidden]'); })()`), 3000, 'the Lightning button');
@@ -447,7 +447,7 @@ module.exports = (area) => {
     t.eq([await groups(), await t.count('#pop .lt-groups'), await t.count('#pop .lt-kinds .tile') > 0], [['Scene', 'Lights*', 'Elements'], 1, true], 'Lights: the Light panel');
     // Elements: every effect a tile with a picture, sorted by family; a chip narrows them
     await group('elements');
-    t.eq(await t.count('#pop .fx-gal .fx-t'), 33, 'every element on one screen'); // (second-water-works: 29 and Rapids, Whirlpool, Bubbling pool, Geyser)
+    t.eq(await t.count('#pop .fx-gal .fx-t'), 41, 'every element on one screen'); // (Beta 3.63: 42 less Sun through leaves, held back for the one engine) // (second-water-works: 29 and Rapids, Whirlpool, Bubbling pool, Geyser; second-birds: Circling birds; second-bats-insects: Bats, Insects; second-ground-life: Fish, Critters; second-sun-sand-gears: Turning parts, Sun through leaves, Drifting sand, Dust devil)
     await t.until(() => t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t img')].filter((i) => /^data:image/.test(i.src)).length >= 20`), 15000, 'their pictures, drawn by the effects themselves');
     const gal = await t.g(`(() => { const g = document.querySelector('#pop .fx-gal'); const t0 = g.querySelector('.fx-t'); return { rows: Math.round(g.clientHeight / (t0.offsetHeight + 5)), scrolls: g.scrollHeight > g.clientHeight + 10, cols: getComputedStyle(g).gridTemplateColumns.split(' ').length }; })()`);
     t.eq(gal, { rows: 4, scrolls: true, cols: 5 }, 'five in a row, four rows show, the rest scrolls');
@@ -554,6 +554,283 @@ module.exports = (area) => {
     })()`);
     t.eq(r, { rapids: [true, true], mud: [true, true], spring: [true, true], whirl: [true, true], maelstrom: [true, true], foam: true, geyser: [true, 1, 0] }, 'each draws, the same moment the same way; the geyser erupts now and then');
   }, { ms: 90000 });
+
+  // Second Builder (second-birds)
+  area.deep('Birds: a weather layer with a kind (a flock now and then, on the fly layer, Indoors does not cut it), Circling birds in Animals, the moment Birds take flight', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    t.gm().webContents.focus();
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.looks = {}; Play.ui.fxFly = false`);
+    // the layer: in Add a layer, its card has a Kind and no Colour; the kind is kept (and in a snapshot's keys)
+    const r = await t.cmd('weather.add', { mapId: own, type: 'birds', dir: 200 });
+    const L = () => M(t).weather.layers.find((l) => l.type === 'birds');
+    await t.until(() => L(), 3000, 'a Birds layer');
+    t.handle('weather.update', { mapId: own, id: L().id, variant: 'geese' }); await t.settle();
+    t.eq(L().variant, 'geese', 'its kind kept');
+    t.ok(await t.g(`FXDATA.WEATHER_TYPES.some((d) => d.id === 'birds' && d.sky && d.kinds.length === 6)`), 'six kinds, drawn in the sky');
+    t.ok(await t.g(`!!ICON_PATHS.feather`), 'the feather icon is in the app (no question mark on the tiles)');
+    // a flock within 30 s at Amount 1, the same at the same moment, nothing on the weather layer
+    const sky = await t.g(`(() => {
+      const L = Play.view().map.weather.layers.find((l) => l.type === 'birds'); const w = { layers: [{ ...L, born: 0 }] };
+      const c = document.createElement('canvas'); c.width = 600; c.height = 340; const g = c.getContext('2d'); g.setTransform(20, 0, 0, 20, 0, 0);
+      let first = null; for (let t = 1000; t < 1030; t += 0.5) { if (Creatures.sky(g, w, 30, 17, t, 1e15, { sq: 1, dark: 0 }) > 0) { first = t; break; } }
+      const at = first ?? 1000;
+      const a = (g.setTransform(1, 0, 0, 1, 0, 0), g.clearRect(0, 0, 600, 340), g.setTransform(20, 0, 0, 20, 0, 0), Creatures.sky(g, w, 30, 17, at + 2, 1e15, { sq: 1, dark: 0 }), c.toDataURL());
+      const b = (g.setTransform(1, 0, 0, 1, 0, 0), g.clearRect(0, 0, 600, 340), g.setTransform(20, 0, 0, 20, 0, 0), Creatures.sky(g, w, 30, 17, at + 2, 1e15, { sq: 1, dark: 0 }), c.toDataURL());
+      return { first: first != null, same: a === b, wx: !!FX.weatherOn(Play.view().map.weather) };
+    })()`);
+    t.eq(sky, { first: true, same: true, wx: true }, 'a flock crosses within 30 s; the same moment the same way');
+    // Indoors over the whole map: the fly layer still has the birds
+    const R = await t.g(`Play.view().tableRectInMap()`);
+    t.handle('fx.shape', { mapId: own, id: 'roof-all', preset: 'roof', sid: 'r1', shape: 'rect', x: R.x, y: R.y, w: R.w, h: R.h });
+    await t.settle(); await t.sleep(300);
+    // Circling birds: in Animals, with its kinds; drawn on the fly layer (not the effects layer)
+    await t.g(`Play.ui.look = { ...Play.ui.look, variant: 'steam' }`);
+    await element(t, 'e:circling');
+    await t.g(`[...document.querySelectorAll('#pop .fx-chips .cs-chip')].find((b) => b.textContent === 'Animals').click()`); await t.sleep(200);
+    t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-gal .fx-t')].map((b) => b.textContent)`), ['Fish', 'Circling birds', 'Bats', 'Critters', 'Insects'], 'the chip Animals'); // (second-bats-insects: and Bats, Insects; second-ground-life: Fish, Critters)
+    const at = await t.scr(20 * k, 8 * k); await t.click(at.x, at.y);
+    const c = await t.until(() => M(t).fx.find((f) => f.preset === 'circling'), 3000, 'circling birds');
+    t.eq(c.variant, 'vultures', 'Vultures first (a Vent\'s steam in hand does not reach it)');
+    await t.g(`Play.closePop(); Play.setTool('select')`);
+    const st = await t.until(() => t.g(`(() => { const v = Play.view(); v.drawFrame(); return v.stats.fly >= 1 ? { fly: v.stats.fly, emitters: v.stats.emitters } : null; })()`), 4000, 'the fly layer draws');
+    t.ok(st.fly >= 1 && st.emitters === 0, 'circling birds on the fly layer, not the effects layer (Indoors over the map)', st);
+    // the moment: in the list, draws, gone after its time
+    const mo = await t.g(`(() => {
+      const d = Moments.LIST.find((x) => x.id === 'birds');
+      const c = document.createElement('canvas'); c.width = 600; c.height = 400; const g = c.getContext('2d'); g.setTransform(20, 0, 0, 20, 0, 0);
+      const now = Date.now(); const m = { key: 'x', id: 'birds', seed: 3, x: 0, y: 0, t0: now - 1000 };
+      Moments.draw(g, 30, 20, [m], now, () => ({ x: 15, y: 10 }), { sq: 1 });
+      const d1 = g.getImageData(0, 0, 600, 400).data; let n = 0; for (let i = 3; i < d1.length; i += 4) if (d1[i] > 20) n++;
+      return { dur: d.dur, spot: d.spot, ink: n > 200, over: !Moments.alive({ ...m, t0: now - 5000 }, now) };
+    })()`);
+    t.eq(mo, { dur: 4200, spot: true, ink: true, over: true }, 'Birds take flight: a spot, draws, over after 4.2 s');
+  }, { ms: 90000 });
+
+  // Second Builder (second-bats-insects)
+  area.deep('Bats and insects: Bats (Flutter; a Stream pours out the way it faces), Insects (five kinds, a colour for butterflies only), Moths round the lights only in the dark, the moment Bat swarm', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    t.gm().webContents.focus();
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.looks = {}; Play.ui.fxFly = false; Play.ui.fxMoreLight = false`);
+    t.ok(await t.g(`!!ICON_PATHS.bat && !!ICON_PATHS.butterfly`), 'the bat and butterfly icons are in the app');
+    // Insects: its kinds; the colour row only for butterflies
+    await element(t, 'e:insects');
+    const kindSeg = (sel) => t.g(`(() => { const s = [...document.querySelectorAll('#pop .seg')].find((x) => x.getAttribute('aria-label') === 'Kind'); return s ? ${sel} : null; })()`);
+    t.eq(await kindSeg(`[...s.querySelectorAll('.seg-btn')].map((b) => b.textContent)`), ['Butterflies', 'Bees', 'Dragonflies', 'Moths', 'Flies'], 'Insects: five kinds');
+    const colourShown = () => t.g(`(() => { const r = document.querySelector('#pop .color-row'); return !!r && !r.closest('[hidden]'); })()`);
+    t.ok(await colourShown(), 'butterflies: a colour row');
+    await kindSeg(`[...s.querySelectorAll('.seg-btn')].find((b) => b.textContent === 'Bees').click()`); await t.sleep(300);
+    t.ok(!(await colourShown()), 'bees: no colour row');
+    const at = await t.scr(20 * k, 8 * k); await t.click(at.x, at.y);
+    const ins = await t.until(() => M(t).fx.find((f) => f.preset === 'insects'), 3000, 'insects placed');
+    t.eq(ins.variant, 'bees', 'placed as bees');
+    // Bats: Flutter first; a Stream the way it faces
+    await element(t, 'e:bats');
+    const at2 = await t.scr(22 * k, 10 * k); await t.click(at2.x, at2.y);
+    const bat = await t.until(() => M(t).fx.find((f) => f.preset === 'bats'), 3000, 'bats placed');
+    t.eq([bat.variant, bat.angle], ['flutter', 0], 'Flutter first, facing right');
+    await t.g(`Play.closePop(); Play.setTool('select')`);
+    const st = await t.until(() => t.g(`(() => { const v = Play.view(); v.drawFrame(); return v.stats.fly >= 2 ? { fly: v.stats.fly, emitters: v.stats.emitters } : null; })()`), 4000, 'the fly layer draws them');
+    t.eq(st, { fly: 2, emitters: 0 }, 'both on the fly layer, not the effects layer');
+    const draw = await t.g(`(async () => {
+      await Creatures.ready();
+      const c = document.createElement('canvas'); c.width = 600; c.height = 300; const g = c.getContext('2d');
+      Creatures.scene({ cell: 1, dark: 0 });
+      // ink left and right of the spot (x = 15 squares, the middle): more than 2 squares off it
+      const ink = (fx, t) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 600, 300); g.setTransform(20, 0, 0, 20, 0, 0); FX.emitter(g, fx, 15, 7.5, t);
+        const d = g.getImageData(0, 0, 600, 300).data; let L = 0; let R = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 30) { const x = ((i - 3) / 4) % 600; if (x < 260) L++; else if (x > 340) R++; } return { L, R, url: c.toDataURL() }; };
+      const s = { id: 'tb', kind: 'emitter', preset: 'bats', variant: 'stream', angle: 0, r: 1.5, intensity: 1, density: 1, speed: 1 };
+      const T = Creatures.streamAt(s, 3);
+      const a = ink(s, T); const b = ink(s, T); const before = ink(s, T - 100);
+      const left = ink({ ...s, angle: 180 }, T);
+      const fl = ink({ ...s, variant: 'flutter' }, 50);
+      const bees = ink({ id: 'ti', kind: 'emitter', preset: 'insects', variant: 'bees', r: 1.5, intensity: 1, density: 1, speed: 1 }, 20);
+      const bf = { id: 'ti', kind: 'emitter', preset: 'insects', variant: 'butterflies', r: 1.5, intensity: 1, density: 1, speed: 1 };
+      const own = ink(bf, 20); const blue = ink({ ...bf, color: '#3060ff' }, 20);
+      const kinds = ['dragonflies', 'moths', 'flies'].map((v) => { const x = ink({ ...bf, variant: v }, 20); return x.L + x.R > 0 || x.url.length > 3000; });
+      Creatures.scene(null);
+      return { stream: a.R > 60 && before.R === 0, same: a.url === b.url, way: left.L > 60 && left.R === 0 && a.L === 0, flutter: fl.url !== before.url, bees: bees.url.length > 3000, tint: own.url !== blue.url, kinds };
+    })()`);
+    t.eq(draw, { stream: true, same: true, way: true, flutter: true, bees: true, tint: true, kinds: [true, true, true] }, 'a Stream pours out the way it faces (and not 100 s before), the same each time; flutter, bees, butterflies in a colour, the other kinds draw');
+    // Moths round the lights: a switch in Scene → Time of day → More; only in the dark, round each lit light
+    await t.cmd('fx.add', { mapId: own, kind: 'light', preset: 'torch', x: 10 * k, y: 8 * k, r: 4 * k });
+    await t.cmd('light.update', { mapId: own, darkness: 0.74 });
+    await t.key('E'); await t.sleep(300);
+    await t.g(`document.querySelector('#pop .fx-groups .tile[data-g="scene"]').click()`); await t.sleep(300);
+    await t.g(`document.querySelector('#pop .fx-fold[data-v="fxMoreLight"] summary').click()`); await t.sleep(300);
+    await t.g(`[...document.querySelectorAll('#pop .ctl-toggle')].find((l) => l.textContent.includes('Moths round the lights')).querySelector('input').click()`);
+    await t.until(() => M(t).light.moths === true, 3000, 'the switch sets it');
+    await t.g(`Play.closePop()`);
+    const moths = () => t.g(`(() => { const v = Play.view(); v.drawFrame(); return v.stats.moths; })()`);
+    const n = await t.until(async () => { const x = await moths(); return x >= 2 && x; }, 4000, 'moths round the torch');
+    t.ok(n >= 2 && n <= 4, '2 to 4 moths round the one light', n);
+    await t.cmd('light.update', { mapId: own, darkness: 0 });
+    await t.until(async () => (await moths()) === 0, 3000, 'none by day');
+    await t.cmd('light.update', { mapId: own, darkness: 0.74, moths: false });
+    await t.until(async () => (await moths()) === 0, 3000, 'none with the switch off');
+    // the moment
+    const mo = await t.g(`(async () => {
+      await Creatures.ready();
+      const d = Moments.LIST.find((x) => x.id === 'bats');
+      const c = document.createElement('canvas'); c.width = 600; c.height = 400; const g = c.getContext('2d'); g.setTransform(20, 0, 0, 20, 0, 0);
+      const now = Date.now(); const m = { key: 'x', id: 'bats', seed: 3, x: 0, y: 0, t0: now - 1500 };
+      Moments.draw(g, 30, 20, [m], now, () => ({ x: 15, y: 10 }), { sq: 1 });
+      const d1 = g.getImageData(0, 0, 600, 400).data; let n = 0; for (let i = 3; i < d1.length; i += 4) if (d1[i] > 20) n++;
+      return { label: d.label, dur: d.dur, spot: d.spot, ink: n > 200, over: !Moments.alive({ ...m, t0: now - 7000 }, now) };
+    })()`);
+    t.eq(mo, { label: 'Bat swarm', dur: 6500, spot: true, ink: true, over: true }, 'Bat swarm: a spot, draws, over after 6.5 s');
+  }, { ms: 90000 });
+
+  // Second Builder (second-ground-life)
+  area.deep('Fish and critters: painted areas with a kind; fish stay in the paint (under water painted over them), critters on their own layer wander a wide area and run along a thin stroke', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    t.gm().webContents.focus();
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.looks = {}; Play.ui.fxFly = false`);
+    t.ok(await t.g(`!!ICON_PATHS.fish && !!ICON_PATHS.paw`), 'the fish and paw icons are in the app');
+    const kinds = async (key) => { await element(t, key); return t.g(`(() => { const s = [...document.querySelectorAll('#pop .seg')].find((x) => x.getAttribute('aria-label') === 'Kind'); return s ? [...s.querySelectorAll('.seg-btn')].map((b) => b.textContent) : null; })()`); };
+    t.eq(await kinds('r:fish'), ['Small fish', 'Koi', 'Trout (river)', 'Eels', 'Big shadow'], 'Fish: five kinds');
+    t.eq(await kinds('r:critters'), ['Rats', 'Mice', 'Roaches', 'Spiders', 'Lizards'], 'Critters: five kinds');
+    await t.g(`Play.closePop(); Play.setTool('select')`);
+    // on the map: fish under a Water area, critters on their own layer
+    t.handle('fx.stroke', { mapId: own, id: 'fish-t', preset: 'fish', variant: 'koi', sid: 's1', r: 1.5 * k, pts: [6 * k, 6 * k, 14 * k, 6 * k] });
+    t.handle('fx.stroke', { mapId: own, id: 'water-t', preset: 'water', sid: 's1', r: 1.5 * k, pts: [6 * k, 6 * k, 14 * k, 6 * k] });
+    t.handle('fx.stroke', { mapId: own, id: 'crit-t', preset: 'critters', variant: 'roaches', sid: 's1', r: 1.5 * k, pts: [6 * k, 11 * k, 12 * k, 11 * k] });
+    await t.settle();
+    t.eq([M(t).fx.find((f) => f.id === 'fish-t').variant, M(t).fx.find((f) => f.id === 'crit-t').variant], ['koi', 'roaches'], 'their kinds kept');
+    const st = await t.until(() => t.g(`(() => { const v = Play.view(); v.drawFrame(); return v.stats.critters >= 1 ? { critters: v.stats.critters, regions: v.stats.regions } : null; })()`), 4000, 'the critters layer draws');
+    t.eq(st, { critters: 1, regions: 2 }, 'critters on their own layer; fish and water on the effects layer');
+    const order = await t.g(`(() => { const v = Play.view(); const all = v.map.fx.filter((f) => f.kind === 'region' && f.preset !== 'critters'); all.sort((a, b) => (b.preset === 'fish') - (a.preset === 'fish')); return all.map((f) => f.preset); })()`);
+    t.eq(order, ['fish', 'water'], 'fish are drawn first, under the water');
+    const draw = await t.g(`(async () => {
+      await Creatures.ready();
+      const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d');
+      // ink at moment t, and how much of it lies outside a box (in squares, 20 px a square)
+      const ink = (fx, tt, box) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 400, 300); g.setTransform(20, 0, 0, 20, 0, 0); FX.region(g, fx, tt, 1);
+        const d = g.getImageData(0, 0, 400, 300).data; let n = 0; let out = 0; let line = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 40) { n++; const x = ((i - 3) / 4) % 400 / 20; const y = Math.floor((i - 3) / 4 / 400) / 20; if (box && !box(x, y)) out++; if (Math.abs(y - 11) < 0.7) line++; }
+        return { n, out, line, url: c.toDataURL() }; };
+      const R = (id, preset, variant, strokes) => ({ id, kind: 'region', preset, variant, intensity: 1, density: 1, speed: 1, strokes });
+      const pond = R('tf', 'fish', 'koi', [{ sid: 'a', r: 1.5, pts: [5, 5, 15, 5] }]);
+      const inPond = (x, y) => x > 3.3 && x < 16.7 && y > 3.3 && y < 6.7;
+      const fishAt = [10, 37, 81, 140, 222, 333].map((tt) => ink(pond, tt, inPond));
+      const same = ink(pond, 81, inPond).url === fishAt[2].url;
+      const kinds = ['small', 'trout', 'eels'].map((v) => ink({ ...pond, variant: v }, 30, inPond)).map((r) => r.n > 30 && r.out === 0);
+      const big = [0, 20, 40, 60, 80, 100].some((tt) => ink({ ...pond, variant: 'shadow' }, tt).n > 100);
+      // critters: a wide home (y 5) and a thin run (y 11)
+      const crit = (v) => R('tc', 'critters', v, [{ sid: 'a', r: 1.4, pts: [5, 5, 15, 5] }, { sid: 'b', r: 0.25, pts: [4, 11, 16, 11] }]);
+      const inCrit = (x, y) => (x > 3.2 && x < 16.8 && y > 3.2 && y < 6.8) || (x > 3.6 && x < 16.4 && y > 10.3 && y < 11.7);
+      const ck = ['rats', 'mice', 'roaches', 'spiders', 'lizards'].map((v) => { let n = 0; let out = 0; let line = 0; for (let tt = 5; tt < 200; tt += 13) { const r = ink(crit(v), tt, inCrit); n += r.n; out += r.out; line += r.line; } return n > 200 && out === 0 && line > 0; });
+      const cs = ink(crit('rats'), 50, inCrit).url === ink(crit('rats'), 50, inCrit).url;
+      return { fish: fishAt.every((r) => r.n > 100 && r.out === 0), same, kinds, big, critters: ck, cs };
+    })()`);
+    t.eq(draw, { fish: true, same: true, kinds: [true, true, true], big: true, critters: [true, true, true, true, true], cs: true }, 'koi never outside the paint (six moments), the same each time; the other fish draw; the big shadow comes now and then; every critter kind keeps to its home and its run, and runs the thin stroke');
+  }, { ms: 90000 });
+
+  // Second Builder (second-sun-sand-gears)
+  area.deep('Sun, sand and gears: Turning parts (a Round or a Box, no brush; a windmill follows the wind from an anchor the GM stores), Sun through leaves, Drifting sand, a Dust devil, Tumbleweeds with the wind', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    t.gm().webContents.focus();
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.looks = {}; Play.ui.fxFly = false`);
+    t.ok(await t.g(`!!ICON_PATHS['circle-dotted'] && FXDATA.WEATHER_TYPES.some((d) => d.id === 'tumble')`), 'Tumbleweeds in Add a layer, with its icon');
+    const nature = await t.g(`FXDATA.ELEMENTS.filter((e) => e.family === 'nature').map((e) => e.id)`);
+    t.ok(nature.indexOf('turn') === nature.indexOf('sway') + 1 && nature.slice(-2).join() === 'drift,devil' && !nature.includes('dapple'), 'Nature: Turning parts after Sway; Drifting sand, Dust devil at the end; Sun through leaves has no tile yet (Beta 3.63: it waits for the one engine)', nature);
+    // Turning parts: only Round and Box
+    await t.g(`Play.ui.paintShape = 'brush'`);
+    await element(t, 'r:turn');
+    const tools = await t.g(`[Play.ui.paintShape, [...document.querySelectorAll('#pop .os-tabs2 .tile')].map((b) => b.dataset.v)]`);
+    t.eq(tools, ['round', ['fxt-box', 'fxt-round', 'fxt-erase']], 'no brush for Turning parts: the brush in hand becomes a Round');
+    t.eq(await t.g(`(() => { const s = [...document.querySelectorAll('#pop .seg')].find((x) => x.getAttribute('aria-label') === 'Kind'); return s ? [...s.querySelectorAll('.seg-btn')].map((b) => b.textContent) : null; })()`), ['Steady', 'Windmill', 'Ticking'], 'three kinds');
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.paintShape = 'box'`);
+    // a windmill: the GM stores its anchor, and a new one when the wind changes
+    t.handle('fx.shape', { mapId: own, id: 'mill', preset: 'turn', variant: 'windmill', sid: 's1', shape: 'round', x: 8 * k, y: 5 * k, w: 3 * k, h: 3 * k });
+    t.handle('fx.shape', { mapId: own, id: 'belt', preset: 'turn', variant: 'steady', sid: 's1', shape: 'rect', x: 14 * k, y: 5 * k, w: 4 * k, h: 1 * k, dx: 1, dy: 0 });
+    const a1 = await t.until(() => { const f = M(t).fx.find((x) => x.id === 'mill'); return f && f.anc; }, 4000, 'the windmill\'s anchor');
+    await t.cmd('wind.set', { mapId: own, auto: false, strength: 2.4 });
+    const a2 = await t.until(() => { const f = M(t).fx.find((x) => x.id === 'mill'); return f && f.anc && f.anc.r1 > a1.r1 + 0.01 && f.anc; }, 4000, 'a new anchor in the gale');
+    t.ok(a2.r0 <= a2.r1 && a2.at >= a1.at, 'it speeds up from where it was', [a1, a2]);
+    const mill = M(t).fx.find((x) => x.id === 'mill');
+    const now = Date.now();
+    const gm = await t.g(`Creatures.turnsOf(${JSON.stringify(mill)}, 10, ${now})`); const tv = await t.t(`Creatures.turnsOf(${JSON.stringify(mill)}, 10, ${now})`);
+    t.ok(Math.abs(gm - tv) < 1e-9, 'the GM and the TV turn it the same', [gm, tv]);
+    const st = await t.until(() => t.g(`(() => { const v = Play.view(); v.drawFrame(); return v.stats.turning >= 2 ? v.stats.turning : null; })()`), 6000, 'both parts on the Sway layer');
+    t.eq(st, 2, 'the Round and the Box turn the map picture');
+    t.eq(M(t).fx.filter((f) => f.preset === 'turn').map((f) => !!f.anc), [true, false], 'only the windmill has an anchor');
+    // the rest draws, the same at the same moment; tumbleweeds only with wind
+    const draw = await t.g(`(async () => {
+      const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d');
+      const ink = (fn) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 400, 300); g.setTransform(20, 0, 0, 20, 0, 0); fn(); const d = g.getImageData(0, 0, 400, 300).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 12) n++; return { n, url: c.toDataURL() }; };
+      const R = (preset, variant) => ({ id: 'ts-' + preset + variant, kind: 'region', preset, variant, intensity: 1, density: 1, speed: 1, strokes: [{ sid: 'a', r: 2, pts: [6, 7, 14, 7] }] });
+      Creatures.wind({ dir: 0, strength: 1.8, from: 'own' }); Creatures.scene({ cell: 1, dark: 0 });
+      const regions = ['dapple:sunlight', 'dapple:moonlight', 'dapple:rays', 'drift:sand', 'drift:snow', 'drift:ash'].map((x) => { const [p, v] = x.split(':'); const a = ink(() => FX.region(g, R(p, v), 30, 1)); const b = ink(() => FX.region(g, R(p, v), 30, 1)); return a.n > 300 && a.url === b.url; });
+      const dv = { id: 'ts-devil', kind: 'emitter', preset: 'devil', variant: 'dust', r: 0.8, intensity: 1, density: 1, speed: 1 };
+      const devil = ink(() => FX.emitter(g, dv, 10, 7, Creatures.devilAt(dv, 5))).n > 200;
+      const w = { layers: [{ id: 'ts-tw', type: 'tumble', amount: 2, size: 1, speed: 1, born: 0 }] };
+      const rolls = (from) => { Creatures.wind({ dir: 0, strength: 1.8, from }); for (let tt = 100; tt < 160; tt += 0.5) if (Creatures.tumble(g, w, 20, 15, tt, 1e15, { sq: 1, dark: 0 }) > 0) return true; return false; };
+      const tumble = [rolls('own'), rolls('calm')];
+      Creatures.scene(null);
+      return { regions, devil, tumble };
+    })()`);
+    t.eq(draw, { regions: [true, true, true, true, true, true], devil: true, tumble: [true, false] }, 'Sun through leaves and Drifting sand (each kind) draw, the same each time; a dust devil; tumbleweeds roll in a wind and none come in calm air');
+  }, { ms: 90000 });
+
+  // Beta 3.63 (main Builder): what the review of the four ambient-life packages turned up
+  area.deep('Beta 3.63: an area counts its real size however it was painted; fish and critters live in a Box or a Round; circling birds keep their places; the Big shadow is one soft shape; the creature layers hide while empty; seven family chips fit', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    t.gm().webContents.focus();
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.looks = {}; Play.ui.fxFly = false`);
+    // empty map: the two creature layers take no part in the picture
+    const hid = await t.until(() => t.t(`(() => { const f = document.querySelector('.sv-fly'); const c = document.querySelector('.sv-crit'); return f && c && getComputedStyle(f).display === 'none' && getComputedStyle(c).display === 'none'; })()`), 5000, 'both layers hidden on the TV');
+    t.ok(hid, 'no flyer and no critter: the fly and the critters layers are not shown');
+    // the same pond as a Box, as a Round and scrubbed with the brush
+    t.handle('fx.shape', { mapId: own, id: 'p-box', preset: 'fish', variant: 'koi', sid: 'a', shape: 'rect', x: 4 * k, y: 4 * k, w: 5 * k, h: 3 * k });
+    t.handle('fx.shape', { mapId: own, id: 'p-round', preset: 'fish', variant: 'small', sid: 'a', shape: 'round', x: 12 * k, y: 4 * k, w: 5 * k, h: 3 * k });
+    t.handle('fx.shape', { mapId: own, id: 'p-rats', preset: 'critters', variant: 'rats', sid: 'a', shape: 'rect', x: 4 * k, y: 10 * k, w: 5 * k, h: 3 * k });
+    for (let p = 0; p < 5; p++) { const pts = []; for (let i = 0; i <= 40; i++) pts.push((12.6 + 3.8 * (i / 40)) * k, (10.6 + 0.45 * p + 0.1 * Math.sin(i)) * k); t.handle('fx.stroke', { mapId: own, id: 'p-brush', preset: 'fish', variant: 'koi', sid: 's' + p, r: 0.6 * k, pts }); }
+    await t.settle();
+    const fxs = M(t).fx.filter((f) => /^p-/.test(f.id)).map((f) => ({ ...f, strokes: f.strokes.map((s) => ({ ...s, r: s.r / k, pts: s.pts.map((v) => v / k) })) }));
+    const shown = await t.until(() => t.t(`getComputedStyle(document.querySelector('.sv-crit')).display !== 'none'`), 5000, 'the critters layer shows once rats live on the map');
+    t.ok(shown, 'with rats on the map the critters layer is shown again');
+    const res = await t.g(`(async () => {
+      await Creatures.ready();
+      const FXS = ${JSON.stringify(fxs)}; const F = (id) => FXS.find((f) => f.id === id);
+      const area = { box: FX.areaOf(F('p-box'), 't'), round: FX.areaOf(F('p-round'), 't'), brush: FX.areaOf(F('p-brush'), 't') };
+      const c = document.createElement('canvas'); c.width = 440; c.height = 300; const g = c.getContext('2d');
+      // where the ink lies at a moment (20 px a square): its box, and how many pixels
+      const ink = (fn, min = 40) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 440, 300); g.setTransform(20, 0, 0, 20, 0, 0); fn();
+        const d = g.getImageData(0, 0, 440, 300).data; let n = 0; let x0 = 1e9; let x1 = -1; let y0 = 1e9; let y1 = -1; let top = 0;
+        for (let i = 3; i < d.length; i += 4) { if (d[i] > top) top = d[i]; if (d[i] > min) { n++; const x = ((i - 3) / 4) % 440; const y = Math.floor((i - 3) / 4 / 440); if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } }
+        return { n, x0: x0 / 20, x1: x1 / 20, y0: y0 / 20, y1: y1 / 20, top }; };
+      // koi in the Box: over many moments they are seen all over it, never outside (its soft edge is a quarter square)
+      let bx0 = 1e9; let bx1 = -1; let by0 = 1e9; let by1 = -1; let koiOut = 0; let koiN = 0;
+      for (let tt = 5; tt < 400; tt += 9) { const r = ink(() => FX.region(g, F('p-box'), tt, 1)); if (!r.n) continue; koiN++; bx0 = Math.min(bx0, r.x0); bx1 = Math.max(bx1, r.x1); by0 = Math.min(by0, r.y0); by1 = Math.max(by1, r.y1); if (r.x0 < 3.75 || r.x1 > 9.25 || r.y0 < 3.75 || r.y1 > 7.25) koiOut++; }
+      const small = ink(() => FX.region(g, F('p-round'), 30, 1)).n;
+      // rats in the Box: they draw, and they wander (not one spot)
+      let rx0 = 1e9; let rx1 = -1; let ratN = 0; let ratFar = 0;
+      for (let tt = 5; tt < 300; tt += 7) { const r = ink(() => FX.region(g, F('p-rats'), tt, 1)); if (r.n) ratN++; rx0 = Math.min(rx0, r.x0); rx1 = Math.max(rx1, r.x1); if (r.x0 < 3.4 || r.x1 > 9.6 || r.y0 < 9.4 || r.y1 > 13.6) ratFar++; }
+      const ways = [0, 1, 2].map((v) => Creatures.tourOf(F('p-rats'), 'wide', (p) => p[3] || p[2] > 0.6, v)).map((T) => T.P.slice(0, 6).map((p) => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(' '));
+      // the Big shadow: one soft shape, nowhere darker than its own shade (overlapping strips showed as bars)
+      let shTop = 0; let shN = 0; const sea = { ...F('p-box'), id: 'p-sea', variant: 'shadow' };
+      for (let tt = 0; tt < 200; tt += 4) { const r = ink(() => FX.region(g, sea, tt, 1), 20); if (r.n > shN) { shN = r.n; shTop = r.top; } }
+      // circling vultures: no two closer than a wing's length, at any moment
+      const pos = (tt) => { const out = []; const q = document.createElement('canvas').getContext('2d'); const seen = new Set(); q.drawImage = function () { const m = this.getTransform(); const key = m.e.toFixed(2) + '|' + m.f.toFixed(2); if (!seen.has(key)) { seen.add(key); out.push([m.e, m.f]); } }; // (a bird is three pieces at one place)
+        Creatures.scene({ dark: 0.7, cell: 1 }); q.setTransform(1, 0, 0, 1, 0, 0); FX.emitter(q, { id: 'tc-vult', kind: 'emitter', preset: 'circling', variant: 'vultures', r: 2, intensity: 1, density: 1, speed: 1 }, 10, 7, tt); Creatures.scene(null); return out; };
+      let near = 1e9; let birds = 0;
+      for (let tt = 0; tt < 600; tt += 3.7) { const P = pos(tt); birds = Math.max(birds, P.length); for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) near = Math.min(near, Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1])); }
+      return { area, koi: { n: koiN, out: koiOut, w: bx1 - bx0, h: by1 - by0 }, small, rats: { n: ratN, far: ratFar, w: rx1 - rx0 }, ways, sh: { n: shN, top: shTop }, near, birds };
+    })()`);
+    t.ok(Math.abs(res.area.box - 15) < 0.4 && Math.abs(res.area.round - 11.8) < 0.5 && res.area.brush > 12 && res.area.brush < 18, 'a Box of 5 × 3 counts 15 squares, the Round its ellipse, the scrubbed pond what it covers (not each pass again)', res.area);
+    t.ok(res.koi.n > 30 && res.koi.out === 0 && res.koi.w > 3.5 && res.koi.h > 1.8, 'koi in a Box swim all through it and never leave it', res.koi);
+    t.ok(res.small > 20, 'small fish in a Round draw', res.small);
+    t.ok(res.rats.n > 35 && res.rats.far === 0 && res.rats.w > 3.5, 'rats in a Box are there, wander through it and stay with it', res.rats);
+    t.ok(new Set(res.ways).size === 3, 'three ways round an area, so they do not all take one path', res.ways);
+    t.ok(res.sh.n > 100 && res.sh.top < 110, 'the Big shadow is one faint shape (no darker bars where its strips overlap)', res.sh);
+    t.ok(res.birds === 3 && res.near > 1.2, 'three vultures circle and none flies through another', [res.birds, res.near]);
+    // the family chips
+    await t.g(`(() => { Play.setTool('fx'); Play.ui.fxMode = 'place'; Play.ui.fxFam = 'all'; Play.openPop('fx'); })()`);
+    await t.until(async () => (await t.count('#pop .fx-chips .cs-chip')) >= 7, 4000, 'the family chips');
+    const chips = await t.g(`(() => { const b = document.querySelector('#pop .pop-body').getBoundingClientRect(); return [...document.querySelectorAll('#pop .fx-chips .cs-chip')].map((c) => { const r = c.getBoundingClientRect(); return [c.textContent, r.right <= b.right + 0.5 && c.scrollWidth <= c.clientWidth]; }); })()`);
+    t.ok(chips.length === 7 && chips.every((c) => c[1]), 'All and six families: every chip inside the panel, none cut off', chips);
+    await t.g(`Play.closePop(); Play.setTool('select')`);
+  }, { ms: 120000 });
 
   area.deep('on the TV the effects lie under the fog, the weather above it', async (t) => {
     await clean(t);
