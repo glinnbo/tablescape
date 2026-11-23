@@ -88,6 +88,52 @@ module.exports = (area) => {
     t.ok(again.ok === false, 'a second Roll enemies has nothing to roll', again);
   });
 
+  // D4 (open point): Start the fight with enemies still without a number asks to roll them: Yes (Enter) rolls and
+  // starts, No starts as it is; with every enemy rolled it starts at once
+  area.deep('Start the fight asks to roll the remaining enemies: Enter rolls and starts, No starts as it is', async (t) => {
+    const ask = () => t.g(`(() => { const d = [...document.querySelectorAll('.modal')].find((m) => /Roll the remaining enemies/.test(m.textContent)); return d ? d.textContent : null; })()`);
+    const startBtn = `[...document.querySelectorAll('.fp[data-id="init"] button')].find((b) => b.textContent.trim() === 'Start the fight')`;
+    const ready = async () => {
+      await fresh(t);
+      await t.cmd('init.prepare', {});
+      await t.cmd('init.add', { name: 'Skeleton', bonus: 2 });
+      await t.g(`Play.TB.openPanel('init')`);
+      await t.until(() => t.g(`!!(${startBtn})`), 4000, 'Start the fight in the panel');
+    };
+    // No: the fight starts, the Skeleton keeps no number
+    await ready();
+    const n = I(t).entries.filter((e) => !e.pc && e.init == null).length; // (the Skeleton and the map's own enemies)
+    await t.g(`(${startBtn}).click()`);
+    const text = await t.until(ask, 3000, 'the question');
+    t.ok(n >= 1 && text.includes(`${n} ${n === 1 ? 'enemy has' : 'enemies have'} no number yet`), 'it says how many', [n, text]);
+    t.eq(I(t).running, false, 'nothing starts while it asks');
+    await t.g(`document.querySelector('.ini-ask-no').click()`);
+    await t.until(() => I(t).running, 3000, 'the fight to start');
+    t.eq(E(t, 'Skeleton').init, null, 'No: started without rolling');
+    // Enter: Yes is the default, it rolls and starts
+    await ready();
+    await t.g(`(${startBtn}).click()`);
+    await t.until(ask, 3000, 'the question again');
+    t.gm().webContents.focus();
+    { // (Enter as a keyboard sends it: a focused button acts on the typed character, which t.key leaves out for named keys)
+      const w = t.gm().webContents;
+      w.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' }); w.sendInputEvent({ type: 'char', keyCode: '\r' }); w.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+      await t.settle();
+    }
+    await t.until(() => I(t).running, 3000, 'the fight to start');
+    const sk = E(t, 'Skeleton');
+    t.ok(sk.init != null && sk.init === sk.roll.d20 + 2, 'Enter: the Skeleton rolled (d20 + 2), then the fight started', sk);
+    t.ok(I(t).entries.filter((e) => e.pc).every((e) => e.init == null), 'the players still type their own');
+    t.ok(!(await ask()), 'the question is gone');
+    // every enemy rolled already: no question
+    await ready();
+    await t.cmd('init.roll', {});
+    await t.g(`(${startBtn}).click()`);
+    await t.until(() => I(t).running, 3000, 'the fight to start at once');
+    t.ok(!(await ask()), 'nothing to ask');
+    t.handle('init.end', {}); await t.g(`Play.Floats.hide('init')`);
+  });
+
   area.deep('the list sorts from the highest number down; a new number moves its row', async (t) => {
     await fresh(t);
     fight(t, [{ name: 'A', init: 5 }, { name: 'B', init: 18 }, { name: 'C', init: 11 }]);
@@ -171,5 +217,23 @@ module.exports = (area) => {
     await t.cmd('init.prepare', {});
     t.eq(I(t).entries.filter((e) => e.pc).map((e) => e.name).sort(), ['Ayla', 'Bo'], 'the players are ready for the next fight');
     t.ok(I(t).entries.filter((e) => e.pc).every((e) => e.init == null), 'without numbers');
+  });
+
+  // P5 (open point): a column taken out of the turn order comes back with Undo, with the fighters' values in it
+  area.quick('a column taken away comes back with Undo, its values with it', async (t) => {
+    t.handle('init.start', { mapId: t.state.editMapId, list: [{ name: 'Mira', init: 15, pc: true }, { name: 'Goblin', init: 12 }] });
+    try {
+      t.ok(t.handle('init.col', { add: { kind: 'num', name: 'Slots' } }).ok, 'a column added');
+      const col = (t.store.cur.meta.initCols || []).find((c) => c.name === 'Slots');
+      const gob = t.state.init.entries.find((e) => e.name === 'Goblin');
+      t.handle('init.set', { id: gob.id, vals: { [col.id]: 3 } });
+      const r = t.handle('init.col', { remove: col.id });
+      t.ok(r.ok && r.undo, 'taken away, with an Undo', r);
+      t.ok(!(t.store.cur.meta.initCols || []).some((c) => c.id === col.id), 'gone');
+      t.handle(r.undo.type, r.undo.payload);
+      t.ok((t.store.cur.meta.initCols || []).some((c) => c.id === col.id && c.name === 'Slots'), 'back');
+      t.eq(t.state.init.entries.find((e) => e.name === 'Goblin').vals[col.id], 3, "the Goblin's value with it");
+      t.handle('init.col', { remove: col.id });
+    } finally { t.handle('init.end', {}); }
   });
 };

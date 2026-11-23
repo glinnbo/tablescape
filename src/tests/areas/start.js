@@ -38,12 +38,11 @@ module.exports = (area) => {
     t.eq(about && about.version, PKG.version, 'the version in About');
   });
 
-  area.quick('the top: Tutorial, Guide, Library, Discord and Ko-fi; no Options there (it is in the menu)', async (t) => {
+  area.quick('the top: Guide, Library, Discord and Ko-fi; no Options there (it is in the menu), no Tutorial until there is one', async (t) => {
     const btns = await t.g(`[...document.querySelectorAll('.hm-actions .btn')].map((b) => b.getAttribute('aria-label') || b.textContent.trim())`);
-    for (const b of ['Tutorial', 'Guide', 'Library', 'Discord', 'Ko-fi']) t.has(btns, b, `${b} at the top`);
+    for (const b of ['Guide', 'Library', 'Discord', 'Ko-fi']) t.has(btns, b, `${b} at the top`);
     t.ok(!btns.includes('Options'), 'Options is not at the top', btns);
-    await t.clickText('.hm-actions .btn', 'Tutorial');
-    await t.until(async () => /coming soon/i.test(await t.g(`document.getElementById('toasts').textContent`)), 3000, 'the Tutorial says it is coming soon');
+    t.ok(!btns.includes('Tutorial'), 'no Tutorial button that only says "coming soon" (P6)', btns);
   });
 
   // the box beside "Check for updates": every state a new version goes through
@@ -293,34 +292,44 @@ module.exports = (area) => {
     await t.g('App.closeOptions()');
   });
 
+  // the GM window at a size of its own (page pixels): not maximized (Windows keeps a maximized window as it is), and on a
+  // screen too small for it the window zoomed out, so the page still lays out at w × h (the tests run on a 1080 p screen)
+  const sized = async (t, w, h, fn) => {
+    const win = t.gm(); const { screen } = require('electron');
+    const max = win.isMaximized(); const was = win.getContentSize(); const z0 = win.webContents.getZoomFactor();
+    const a = screen.getDisplayMatching(win.getBounds()).workArea;
+    const k = Math.min(1, (a.width - 40) / w, (a.height - 60) / h);
+    try {
+      if (max) { win.unmaximize(); await t.sleep(300); }
+      win.webContents.setZoomFactor(z0 * k);
+      win.setContentSize(Math.round(w * k), Math.round(h * k));
+      await t.sleep(800);
+      return await fn();
+    } finally {
+      win.webContents.setZoomFactor(z0); win.setContentSize(was[0], was[1]); if (max) win.maximize(); await t.sleep(400);
+    }
+  };
+
   area.quick('a small window: the home screen shrinks as a whole and everything stays in view', async (t) => {
     await home(t);
-    const win = t.gm();
-    const was = win.getContentSize();
-    try {
-      win.setContentSize(1100, 680);
-      await t.sleep(700);
+    await sized(t, 1100, 680, async () => {
       const r = await t.g(`(() => { const inView = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return b.left >= -1 && b.top >= -1 && b.right <= innerWidth + 1 && b.bottom <= innerHeight + 1; };
         return { hs: +getComputedStyle(document.getElementById('home')).getPropertyValue('--hs'), play: inView('.hm-item[data-id="play"]'), options: inView('.hm-item[data-id="options"]'), slot: inView('.hm-slot.on'), right: inView('.hm-right'), top: inView('.hm-actions') }; })()`);
       t.ok(r.hs > 0.6 && r.hs < 0.8, 'scaled down', r);
       t.ok(r.play && r.options && r.slot && r.right && r.top, 'all in view', r);
-    } finally { win.setContentSize(was[0], was[1]); await t.sleep(400); }
+    });
   });
 
   // Beta 3.19: a tall window: the top at the top, the campaigns at the bottom, the campaign itself in the middle
   area.quick('a tall window: the campaign sits in the middle between the top and the campaigns', async (t) => {
     await home(t);
-    const win = t.gm();
-    const was = win.getContentSize();
-    try {
-      win.setContentSize(1300, 1225);
-      await t.sleep(800);
+    await sized(t, 1300, 1225, async () => {
       const r = await t.g(`(() => { const b = (sel) => document.querySelector(sel).getBoundingClientRect();
         const top = b('.hm-top'); const main = b('.hm-main'); const foot = b('.hm-foot'); const left = b('.hm-left'); const right = b('.hm-right');
         return { above: Math.round(main.top - top.bottom), below: Math.round(foot.top - main.bottom), tops: Math.round(Math.abs(left.top - right.top)), footEnd: Math.round(innerHeight - foot.bottom) }; })()`);
       t.ok(r.above > 150 && Math.abs(r.above - r.below) < 40, 'as much room above as below', r);
       t.ok(r.tops < 4, 'both columns start at the same height', r);
       t.ok(r.footEnd < 60, 'the campaigns stay at the bottom', r);
-    } finally { win.setContentSize(was[0], was[1]); await t.sleep(400); }
+    });
   });
 };

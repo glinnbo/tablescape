@@ -42,7 +42,7 @@ const FloatPanels = (() => {
       close.onclick = () => hide(def.id);
       el.addEventListener('pointerdown', () => front(p), true);
       // a panel that grows (a wider turn order) stays on the screen
-      if (window.ResizeObserver) { p.ro = new ResizeObserver(() => { if (!p.el.classList.contains('dragging')) keepInside(p); }); p.ro.observe(el); }
+      if (window.ResizeObserver) { p.ro = new ResizeObserver(() => { if (!p.el.classList.contains('dragging')) { besidePreview(p); keepInside(p); } }); p.ro.observe(el); } // (B2: and off the preview, e.g. Initiative once its turn order is in)
       drag(p, head);
       onChange();
       return p;
@@ -85,13 +85,34 @@ const FloatPanels = (() => {
     function place(p, st) {
       const r = host().getBoundingClientRect();
       const n = open.size - 1;
+      const pv = previewBox(r);
       const own = (st.x == null || p.def.placeAlways) && p.def.place ? p.def.place(r, p.el) : null; // a panel may say where it opens first (Prototype 17: or every time)
-      const x = own ? own.x : st.x != null ? st.x : r.width - 212 - 24 - 300 - 12;
+      const x = own ? own.x : st.x != null ? st.x : pv ? pv.x - (p.el.offsetWidth || 300) - 12 : r.width - 212 - 24 - 300 - 12;
       const y = own ? own.y : st.y != null ? st.y : 12 + n * 36;
       p.el.style.left = `${x}px`;
       p.el.style.top = `${y}px`;
+      besidePreview(p);
       keepInside(p);
     }
+    // B2: the preview of the TV (the table controls, top right) is never covered by a panel. One that would lie on it
+    // (where it was last time, where its own rule puts it, or the preview grew under it) moves just left of it.
+    function previewBox(r) {
+      const t = document.getElementById('table-ctl');
+      if (!t || !t.offsetWidth) return null;
+      const b = t.getBoundingClientRect();
+      return { x: b.left - r.left, y: b.top - r.top, w: b.width, h: b.height };
+    }
+    function besidePreview(p) {
+      const b = previewBox(host().getBoundingClientRect());
+      if (!b) return false;
+      const x = parseFloat(p.el.style.left) || 0; const y = parseFloat(p.el.style.top) || 0;
+      const w = p.el.offsetWidth || 300; const hh = p.el.offsetHeight || 40;
+      if (!(x < b.x + b.w && x + w > b.x && y < b.y + b.h && y + hh > b.y)) return false;
+      p.el.style.left = `${Math.max(0, Math.round(b.x - w - 12))}px`;
+      return true;
+    }
+    // the preview was made bigger: the open panels it now reaches move aside
+    function avoidPreview() { for (const p of open.values()) if (besidePreview(p)) { keepInside(p); remember(p); } }
     function keepInside(p) {
       const r = host().getBoundingClientRect();
       const w = p.el.offsetWidth || 300; const hh = p.el.querySelector('.fp-head').offsetHeight || 40;
@@ -131,7 +152,7 @@ const FloatPanels = (() => {
     setInterval(() => { if (open.size && document.body.dataset.screen === 'play' && !window.__tsMoving) refresh(); }, 250); // (4.8: not while the map moves) // not while the maps are away
 
     return {
-      show, hide, toggle, refresh, rebuild,
+      show, hide, toggle, refresh, rebuild, avoidPreview,
       isOpen: (id) => open.has(id),
       ids: () => [...open.keys()],
       closeAll: () => { for (const id of [...open.keys()]) hide(id); },

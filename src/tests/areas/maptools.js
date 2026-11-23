@@ -7,6 +7,19 @@ module.exports = (area) => {
   area.before(async (K) => { await K.openDemo(); own = await K.newMap('Map tools (test)', { tv: true }); K.handle('fog.enabled', { mapId: own, enabled: false }); await K.settle(); });
 
   const M = (t) => t.store.map(own);
+  // A10 (open point): a map's thumbnail menu has Replace the picture: that map opens, the Library asks for a new picture
+  area.quick('a map\'s thumbnail menu: Replace the picture opens that map and the Library to pick a new one', async (t) => {
+    const other = await t.g(`([...document.querySelectorAll('.map-tile')].map((x) => x.dataset.id).find((id) => id !== Play.state().editMapId)) || null`);
+    t.ok(other, 'another map\'s thumbnail');
+    await t.rightClickSel(`.map-tile[data-id="${other}"]`);
+    const items = await t.until(() => t.menu(), 3000, 'the thumbnail\'s menu');
+    t.ok(items.some((x) => /Replace the picture/.test(x)), 'Replace the picture is in the menu', items);
+    await t.menuPick('Replace the picture');
+    await t.until(() => t.state.editMapId === other, 4000, 'that map open');
+    await t.until(() => t.g('Play.Drawer.isOpen'), 4000, 'the Library to pick a picture');
+    await t.g('Play.Drawer.close()');
+    t.handle('edit.open', { id: own }); await t.settle();
+  });
   const clean = async (t) => {
     if (t.state.liveMapId !== own || t.state.editMapId !== own) { t.handle('edit.open', { id: own }); await t.send(own); }
     t.handle('draw.clear', { mapId: own }); t.handle('mark.clear', { mapId: own });
@@ -119,6 +132,76 @@ module.exports = (area) => {
     await t.cmd('mark.add', { mapId: own, kind: 'counter', x: 20 * k, y: 6 * k, label: 'Still', value: 5 });
     await t.cmd('round.next', { mapId: own });
     t.eq(M(t).marks.find((x) => x.label === 'Still').value, 5, 'a counter that does not follow the rounds stays');
+  });
+
+  // N1 (open point): Undo in a toast after switching map undoes the map it was done on, not the one open now
+  area.quick('Undo in a toast after a switch of map undoes the map it was done on', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    const id = (await t.cmd('layer.add', { mapId: own, path: t.pic('tokens', /Goblin/i), role: 'token', x: 6.5 * k, y: 6.5 * k, size: 1 })).selected;
+    await t.until(() => t.rect(`.sv-token[data-id="${id}"]`), 3000, 'the token');
+    await t.g(`Play.undoable('layer.remove', { id: ${JSON.stringify(id)} })`);
+    await t.until(() => !M(t).layers.some((l) => l.id === id), 3000, 'the token removed');
+    const other = t.store.allMapIds().find((x) => x !== own);
+    const n0 = t.store.map(other).layers.length; const w0 = t.store.map(other).walls.length;
+    t.handle('wall.add', { mapId: other, segs: [[1, 1, 2, 1]] }); // (something to undo on the other map)
+    t.handle('edit.open', { id: other });
+    await t.until(() => t.g(`Play.state().map.id === ${JSON.stringify(other)}`), 4000, 'the other map open');
+    await t.until(() => t.rect('.toast .toast-undo'), 3000, 'the toast with Undo still there');
+    await t.clickSel('.toast .toast-undo');
+    await t.until(() => M(t).layers.some((l) => l.id === id), 3000, 'Undo brings the token back on its own map');
+    t.eq([t.store.map(other).layers.length, t.store.map(other).walls.length], [n0, w0 + 1], 'the open map untouched');
+    t.handle('edit.open', { id: own });
+  });
+
+  // N2 (open point): with no map, the map's panels don't open (they broke); the Toolbox still does
+  area.quick('with no map open, the map\'s panels stay shut without an error', async (t) => {
+    await clean(t);
+    const before = t.state.editMapId;
+    t.state.editMapId = null; t.broadcast();
+    try {
+      await t.until(() => t.g('!Play.state().map'), 3000, 'no map open');
+      for (const id of ['walls', 'fog', 'party', 'fx']) {
+        await t.g(`Play.openPop(${JSON.stringify(id)})`);
+        t.ok(!(await t.g(`!!document.querySelector('#pop .pop-error, #pop .pop-fail')`)) && !(await t.g(`document.querySelector('#pop') && document.querySelector('#pop').textContent.includes('ran into a problem')`)), `${id}: no "ran into a problem"`);
+      }
+    } finally { t.handle('edit.open', { id: before || own }); await t.until(() => t.g('!!Play.state().map'), 3000, 'the map back'); }
+  });
+
+  // N5, N7, N8, N9 (open points): token Bigger snaps to the 5e sizes; X after J puts marks on the table again; Esc with
+  // nothing else to close goes back to Select; a painted area's wheel says Stronger / Weaker
+  area.quick('token Bigger steps to Large on the grid; X after J; Esc back to Select; Stronger and Weaker for a painted area', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    const id = (await t.cmd('layer.add', { mapId: own, path: t.pic('tokens', /Goblin/i), role: 'token', x: 8.5 * k, y: 8.5 * k, size: 1 })).selected;
+    try {
+      await t.until(() => t.rect(`.sv-token[data-id="${id}"]`), 3000, 'the token');
+      t.gm().webContents.focus(); await t.key('V');
+      await t.rightClickSel(`.sv-token[data-id="${id}"]`);
+      await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the wheel');
+      await t.clickText('#radial.on .radial-item', 'More');
+      await t.until(() => t.menu(), 3000, 'More …');
+      await t.menuPick('Bigger');
+      const l = await t.until(() => { const x = M(t).layers.find((q) => q.id === id); return x && x.size !== 1 && x; }, 3000, 'bigger');
+      t.eq(l.size, 2, 'Medium → Large (was 1.5)');
+      const g = M(t).grid; const off = (v, o) => { const q = (v - (o || 0)) / g.size; return Math.abs(q - Math.round(q)); };
+      t.ok(off(l.x, g.ox) < 0.01 && off(l.y, g.oy) < 0.01, 'a Large token sits on grid lines (its middle on a corner)', [off(l.x, g.ox), off(l.y, g.oy)]);
+    } finally { await t.cmd('layer.remove', { mapId: own, id }); }
+    // N7
+    await t.key('J'); await t.sleep(200);
+    t.ok(await t.g('!!Play.ui.mark.me'), 'J: a note only you see');
+    await t.key('X'); await t.sleep(200);
+    t.ok(await t.g('!Play.ui.mark.me'), 'X afterwards: marks go on the table again');
+    // N8
+    await t.key('W'); await t.until(() => t.g(`Play.ui.tool === 'walls'`), 3000, 'Walls');
+    await t.key('Escape'); await t.sleep(150);
+    if (await t.g(`Play.ui.tool !== 'select'`)) { await t.key('Escape'); await t.sleep(150); }
+    t.eq(await t.g('Play.ui.tool'), 'select', 'Esc, with nothing else to close: back to Select');
+    // N9
+    const rid = (await t.cmd('fx.add', { mapId: own, kind: 'region', preset: 'mist', intensity: 1, density: 1, speed: 1, strokes: [{ sid: 'a', r: 2 * k, pts: [12 * k, 12 * k, 16 * k, 12 * k] }] })).selected;
+    try {
+      await t.g(`Play.openFxRadial(${JSON.stringify(rid)}, 400, 300)`);
+      const labels = await t.until(async () => { const x = await t.g(`[...document.querySelectorAll('#radial .radial-item > span')].map((s) => s.textContent)`); return x.length && x; }, 3000, 'the area\'s wheel');
+      t.has(labels, 'Stronger', 'the area\'s wheel'); t.has(labels, 'Weaker', 'the area\'s wheel');
+    } finally { await t.g(`document.querySelector('#radial .radial-center') && document.querySelector('#radial .radial-center').click()`); if (rid) t.handle('fx.remove', { mapId: own, id: rid }); }
   });
 
   area.deep('a note is for the GM alone: on the GM screen, never on the TV', async (t) => {

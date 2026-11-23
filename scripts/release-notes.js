@@ -10,10 +10,12 @@ const start = src.indexOf(`['${label}', [`);
 let lines = [];
 if (start >= 0) {
   const end = src.indexOf(']],', start);
-  const block = src.slice(start, end);
+  const block = src.slice(start, end).split(/^\s*\],\s*\[\s*$/m)[0]; // (G5: an entry may end with "], [" and its two or three highlights; they are not repeated here)
   const re = /^\s*'((?:[^'\\]|\\.)*)',?\s*$/gm;
   let m;
   while ((m = re.exec(block))) lines.push(m[1].replace(/\\'/g, "'"));
   lines = lines.filter((x) => x !== label);
 }
-process.stdout.write(`## ${label} (${pkg.version})\n\n${lines.length ? lines.map((x) => `- ${x}`).join('\n') : '- (no notes)'}\n`);
+// S2 (open point): no What's new lines for this version: the release stops here (it said "(no notes)" and went on)
+if (!lines.length) { console.error(`release-notes: no What's new entry for ${label} in src/renderer/guide.js`); process.exit(1); }
+process.stdout.write(`## ${label} (${pkg.version})\n\n${lines.map((x) => `- ${x}`).join('\n')}\n`);

@@ -34,11 +34,13 @@ const Table = (() => {
     window.ts.onView((d) => { const v = views.get(d.mapId); if (v) v.view.setViewLive(d.view); if (atlas) atlas.viewLive(d); }); // 4.4: the map moving
     window.ts.onPing((p) => { const v = views.get(liveId); if (v && p.mapId === liveId) v.view.ping(p); });
     // 4.11.1: the room lights' picture of the table, drawn here when main asks (a capture of the window made it flicker)
-    const amb = document.createElement('canvas');
+    // K5 (open point): the layers (on the graphics card) are composed on a canvas there too, copied once into a small
+    // one for reading, and read once: drawing them straight into a read-back canvas stalled the drawing every 0.7 s
+    const amb = document.createElement('canvas'); const ambRead = document.createElement('canvas');
     window.ts.onAmbSample(() => {
       const w = 32; const hh = Math.max(8, Math.round((32 * (innerHeight || 9)) / (innerWidth || 16)));
-      if (amb.width !== w || amb.height !== hh) { amb.width = w; amb.height = hh; }
-      const g = amb.getContext('2d', { willReadFrequently: true });
+      for (const c of [amb, ambRead]) if (c.width !== w || c.height !== hh) { c.width = w; c.height = hh; }
+      const g = amb.getContext('2d');
       g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
       g.fillStyle = '#000'; g.fillRect(0, 0, w, hh);
       const lv = views.get(liveId);
@@ -50,7 +52,11 @@ const Table = (() => {
         if (st && st.classList.contains('soft')) { const dim = Number(st.style.getPropertyValue('--soft-dim')) || 1; if (dim < 1) { g.fillStyle = `rgba(0, 0, 0, ${1 - dim})`; g.fillRect(0, 0, w, hh); } }
       }
       let d = null;
-      try { d = g.getImageData(0, 0, w, hh).data; } catch { window.ts.ambFrame(null); return; } // (a picture it may not read)
+      try {
+        const rg = ambRead.getContext('2d', { willReadFrequently: true });
+        rg.globalCompositeOperation = 'copy'; rg.drawImage(amb, 0, 0);
+        d = rg.getImageData(0, 0, w, hh).data;
+      } catch { window.ts.ambFrame(null); return; } // (a picture it may not read)
       const out = new Uint8Array(d.length); // in the order of a screen capture: blue, green, red
       for (let i = 0; i < d.length; i += 4) { out[i] = d[i + 2]; out[i + 1] = d[i + 1]; out[i + 2] = d[i]; out[i + 3] = 255; }
       window.ts.ambFrame({ w, h: hh, data: out });

@@ -4,3 +4,4 @@ selftest-out/
 *.log
 src/update-key.json
 release-notes.md
+.claude/

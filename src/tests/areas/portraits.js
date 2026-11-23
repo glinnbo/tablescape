@@ -96,10 +96,11 @@ module.exports = (area) => {
       t.eq(cast()[1], list[1].path, 'and speaks');
       // the small TV: a frame on each, as the TV lays them out
       await t.until(() => t.g(`document.querySelectorAll('.fp[data-id="talk"] .cs-frame').length === 2`), 3000, 'two frames on the small TV');
-      await t.sleep(1800);
-      const g = await t.g(`(() => { const st = document.querySelector('.fp[data-id="talk"] .cs-stage').getBoundingClientRect(); return [...document.querySelectorAll('.fp[data-id="talk"] .cs-frame')].map((f) => { const r = f.getBoundingClientRect(); return { p: f.dataset.path, x: (r.left - st.left) / st.width, w: r.width / st.width, h: r.height / st.height }; }); })()`);
-      const tv = await t.t(`(() => [...document.querySelectorAll('.tv-talk .talk-layer.castl.near .talk-npc:not(.out)')].map((n) => { const r = n.getBoundingClientRect(); return { p: n.dataset.src, x: r.left / innerWidth, w: r.width / innerWidth, h: r.height / innerHeight }; }))()`);
+      // T2 (open point): waits until each frame matches its portrait on the TV (a fixed 1.8 s before)
       const near = (a, b) => Math.abs(a - b) < 0.03;
+      let g = null; let tv = null;
+      const match = async () => { g = await t.g(`(() => { const st = document.querySelector('.fp[data-id="talk"] .cs-stage').getBoundingClientRect(); return [...document.querySelectorAll('.fp[data-id="talk"] .cs-frame')].map((f) => { const r = f.getBoundingClientRect(); return { p: f.dataset.path, x: (r.left - st.left) / st.width, w: r.width / st.width, h: r.height / st.height }; }); })()`); tv = await t.t(`(() => [...document.querySelectorAll('.tv-talk .talk-layer.castl.near .talk-npc:not(.out)')].map((n) => { const r = n.getBoundingClientRect(); return { p: n.dataset.src, x: r.left / innerWidth, w: r.width / innerWidth, h: r.height / innerHeight }; }))()`); return tv.length === 2 && g.every((f, i) => tv[i] && near(f.x, tv[i].x) && near(f.w, tv[i].w) && near(f.h, tv[i].h)); };
+      await t.until(match, 5000, 'the frames to match the TV').catch(() => {});
       const pairs = g.map((f, i) => [f, tv[i]]);
       t.ok(tv.length === 2 && pairs.every(([f, v]) => v && near(f.x, v.x) && near(f.w, v.w) && near(f.h, v.h)), 'each frame where its portrait stands on the TV', { g, tv });
       // a click on the one behind: it speaks
@@ -384,7 +385,8 @@ module.exports = (area) => {
       await t.clickText(`${W} .cs-picked .cs-look`, 'Hidden');
       await t.until(() => fx().hidden === true, 3000, 'Hidden');
       // Ctrl + wheel: the small TV at once, the TV once the wheel rests; the Size slider follows
-      await t.sleep(1700);
+      await t.until(() => Math.abs((((t.settings.portraitSize || {})[p.path]) || 1) - 1) < 0.001, 3000, 'the size back to 100 %');
+      await t.sleep(1700); // (T2 checked: this one waits out the small TV's own memory of the last drag, 1.5 s: a timer with nothing to watch)
       const sz0 = ((t.settings.portraitSize || {})[p.path]) || 1;
       await t.g(`(() => { const st = document.querySelector('${W} .cs-stage'); const r = st.getBoundingClientRect(); for (let k = 0; k < 3; k++) st.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); })()`);
       await t.until(async () => /115 %/.test(await t.g(`(document.querySelector('${W} .cs-frame .cs-size:not([hidden])') || {}).textContent || ''`)), 2000, 'the size shown on the small TV');

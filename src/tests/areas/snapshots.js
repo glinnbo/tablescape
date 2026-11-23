@@ -7,6 +7,29 @@ module.exports = (area) => {
   area.before(async (K) => { await K.openDemo(); own = await K.newMap('Snapshots (test)', { tv: true }); K.handle('fog.enabled', { mapId: own, enabled: false }); await K.settle(); });
 
   const M = (t) => t.store.map(own);
+  // E7 (open point): the name box comes with what the map shows ("Night, rain, 2 tokens"); a name taken gets (2)
+  area.quick('a new snapshot\'s name says what the map shows: its light, its weather, its tokens', async (t) => {
+    if (t.state.editMapId !== own) { t.handle('edit.open', { id: own }); await t.settle(); }
+    for (const s of [...(M(t).snaps || [])]) t.handle('snap.remove', { mapId: own, id: s.id });
+    t.eq(await t.g(`Play.Snaps.suggestName(Play.state().map, 3)`), 'Snapshot 3', 'nothing on the map: Snapshot 3');
+    // night and two tokens (one more, hidden, does not count)
+    const g = M(t).grid.size || 1;
+    t.handle('light.update', { mapId: own, darkness: 0.74, mood: 'night' });
+    const ids = [1, 2, 3].map((i) => t.handle('layer.add', { mapId: own, path: t.pic('tokens'), role: 'token', x: (4 + i * 2) * g, y: 5 * g, size: 1 }).selected);
+    t.handle('layer.update', { mapId: own, id: ids[2], hidden: true });
+    await t.settle();
+    await t.until(async () => (await t.g(`Play.state().map.light.mood`)) === 'night', 3000, 'night on the GM screen');
+    const name = await t.g(`Play.Snaps.suggestName(Play.state().map, 3)`);
+    t.eq(name, 'Night, 2 tokens', 'the light and the tokens the players see');
+    t.handle('snap.save', { mapId: own, name });
+    await t.until(() => (M(t).snaps || []).length === 1, 3000, 'the snapshot saved');
+    await t.settle(); await t.sleep(300);
+    t.eq(await t.g(`Play.Snaps.suggestName(Play.state().map, 4)`), 'Night, 2 tokens (2)', 'the same picture again: (2)');
+    for (const s of [...(M(t).snaps || [])]) t.handle('snap.remove', { mapId: own, id: s.id });
+    t.handle('layer.removeMany', { mapId: own, ids });
+    t.handle('light.update', { mapId: own, darkness: 0, mood: 'day' });
+    await t.settle();
+  });
   const clean = async (t) => {
     if (t.state.liveMapId !== own || t.state.editMapId !== own) { t.handle('edit.open', { id: own }); await t.send(own); }
     for (const s of [...(M(t).snaps || [])]) t.handle('snap.remove', { mapId: own, id: s.id });

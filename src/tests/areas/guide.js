@@ -15,6 +15,20 @@ module.exports = (area) => {
     await t.sleep(200);
   };
 
+  // G6 (open point): Keys has Print; the sheet the printer gets is one page, the keys in black on white
+  area.quick('Keys: Print makes a cheat sheet of one page', async (t) => {
+    await open(t, 'keys');
+    t.ok(await t.g(`!!document.querySelector('.keys-print')`), 'a Print button on Keys');
+    await t.g('Guide.keySheet(true)');
+    try {
+      const pdf = await t.gm().webContents.printToPDF({ landscape: true, pageSize: 'A4', preferCSSPageSize: true, printBackground: true });
+      const pages = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+      t.eq(pages, 1, 'the keys fit on one page');
+      t.ok(pdf.length > 5000, 'and the page has the keys on it', pdf.length);
+    } finally { await t.g('Guide.keySheet(false)'); }
+    t.ok(!(await t.g(`!!document.getElementById('print-sheet')`)), 'gone again from the screen');
+  });
+
   area.quick('the Guide lists its pages', async (t) => {
     await open(t, 'start');
     const tabs = await t.g(`[...document.querySelectorAll('.guide-tab')].map((b) => b.textContent.trim())`);
@@ -51,6 +65,29 @@ module.exports = (area) => {
   area.quick('What\'s new starts with this release', async (t) => {
     const top = await t.g(`Guide.NEWS[0] && (Guide.NEWS[0].title || Guide.NEWS[0].v || Guide.NEWS[0][0])`);
     t.ok(String(top).includes(LABEL), `the newest entry is ${LABEL}`, top);
+    // G5: from Beta 3.67 on, every version has two or three highlights (the third part of its entry), short and plain
+    const bad = await t.g(`Guide.NEWS.filter(([v, , top]) => Number((v.match(/(\\d+)\\.(\\d+)/) || [0, 0, 0])[2]) >= 67 && Number((v.match(/(\\d+)\\./) || [0, 0])[1]) >= 3 && !(Array.isArray(top) && top.length >= 2 && top.length <= 3 && top.every((x) => x.length <= 70))).map((x) => x[0])`);
+    t.eq(bad, [], 'versions without two or three short highlights');
+  });
+
+  // G5 (open point): the newest version with its highlights and every change folded; older versions folded
+  area.quick('What\'s new: the highlights on top, everything else folded; after an update the card shows them once', async (t) => {
+    const had = await t.g('Guide.NEWS[0].length > 2');
+    if (!had) await t.g(`Guide.NEWS[0][2] = ['First highlight (test)', 'Second highlight (test)']`);
+    try {
+      await open(t, 'news');
+      const v = await t.g(`(() => { const b = document.querySelector('.guide-body'); return { top: b.querySelectorAll('.news-now .news-top li').length, all: (b.querySelector('.news-now > details.news-fold > summary') || {}).textContent, closed: [...b.querySelectorAll('details.news-fold')].every((d) => !d.open), old: b.querySelectorAll('.news-older > details.news-old').length }; })()`);
+      const n = await t.g('Guide.NEWS.length');
+      const count = await t.g('Guide.NEWS[0][1].length');
+      t.eq(v, { top: had ? v.top : 2, all: `All ${count} changes`, closed: true, old: n - 1 }, 'highlights, then "All … changes" and every older version folded');
+      await t.g('Guide.close()');
+      await t.g('App.previewUpdateDone()');
+      const card = await t.until(() => t.g(`(() => { const d = document.querySelector('.upd-done'); return d && { h: d.querySelector('h2').textContent, li: d.querySelectorAll('.upd-done-top li').length, btns: [...d.querySelectorAll('.modal-actions .btn')].map((b) => b.textContent.trim()) }; })()`), 3000, 'the card after an update');
+      t.eq(card, { h: `Now on ${LABEL}`, li: had ? card.li : 2, btns: ['All changes', 'OK'] }, 'the card: the version, its highlights, All changes and OK');
+      await t.clickText('.upd-done .modal-actions .btn', 'All changes');
+      await t.until(() => t.g(`Guide.isOpen() && Guide.tab === 'news'`), 3000, 'All changes opens What\'s new');
+      await t.g('Guide.close()');
+    } finally { if (!had) await t.g('Guide.NEWS[0].length = 2'); }
   });
 
   area.quick('About: Discord, Ko-fi, the license, privacy and credits (Beta 3.0)', async (t) => {

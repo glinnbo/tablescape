@@ -612,7 +612,9 @@ void main() {
   const SLOW_MS = 40; // three looks, each at the most pixels a spell takes (both passes): slower than this, the old drawing
   const role = /role=table/.test(location.search) ? 'table' : 'gm';
   const note = (text) => { try { if (window.ts && window.ts.app) window.ts.app('note', { text: `[${role}] spells: ${text}` }).catch(() => {}); } catch { /* */ } };
-  function settle() { const w = waiters; waiters = []; for (const f of w) f(status()); }
+  // the GM screen tells the main process how far its build is: the TV waits for it (see the end of this file)
+  const report = () => { if (role !== 'gm') return; try { if (window.ts && window.ts.app) window.ts.app('spells', { state }).catch(() => {}); } catch { /* */ } };
+  function settle() { report(); const w = waiters; waiters = []; for (const f of w) f(status()); }
   function quit(next, why) {
     clearTimeout(pollT);
     state = next; stats.why = String(why || '').slice(0, 300);
@@ -637,7 +639,7 @@ void main() {
       gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, (fsh = sh(gl.FRAGMENT_SHADER, FS)));
       gl.linkProgram(prog); // (no status asked here: asking would wait for the build)
       canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); quit('failed', 'the graphics card reset'); });
-      state = 'building';
+      state = 'building'; report();
       pollT = setTimeout(poll, ext ? 50 : 0); // (without the extension the first status waits for the build: once, here)
     } catch (err) { quit('failed', (err && err.message) || err); }
   }
@@ -766,7 +768,7 @@ void main() {
     gl.uniform1f(U.uCell, cell);
     const lenSq = tpl.kind === 'circle' ? tpl.R / cell : (sp.size / 5);
     gl.uniform1f(U.uLen, lenSq);
-    gl.uniform1f(U.uT, ((now - (sp.t0 || 0)) / 1000) % 3600 + 7.3);
+    gl.uniform1f(U.uT, ((now - (sp.t0 || 0)) / 1000) % 14400 + 7.3); // (M4: a spell's time from its own start, wrapped every four hours: still exact to a millisecond as a 32-bit number; an hour made a long-lasting spell jump once an hour)
     gl.uniform1f(U.uAge, env.tb);
     gl.uniform1f(U.uLevel, env.level);
     gl.uniform1f(U.uA, 1);
@@ -805,4 +807,16 @@ void main() {
   return { draw, supported, stats, SKIN_IDS, cellOf, warm, retry, status, setOff, allowSoft };
 })();
 // Second Builder (second-spell-warmup): build it from the start, in the background (the start screen waits for it)
-if (!/role=sound/.test(location.search)) setTimeout(() => SpellGL.warm(), 0);
+// The TV builds the program only once the GM screen's build is over. A build from nothing takes ~20 s on Windows;
+// the GM and the TV both building it at the start doubled that, and a TV window closed while its build still ran
+// left the next one frozen (invisible, not loading) until the graphics process was done with it. Built once, the
+// program is in the graphics process's cache, and the TV's own build takes ~0.1 s. Until then: the old drawing.
+if (/role=table/.test(location.search)) {
+  const t0 = Date.now();
+  const wait = async () => {
+    let gm = 'idle'; try { gm = await window.ts.app('spells'); } catch { /* */ }
+    if ((gm === 'idle' || gm === 'building') && Date.now() - t0 < 90000) { setTimeout(wait, 1000); return; }
+    SpellGL.warm();
+  };
+  setTimeout(wait, 0);
+} else if (!/role=sound/.test(location.search)) setTimeout(() => SpellGL.warm(), 0);

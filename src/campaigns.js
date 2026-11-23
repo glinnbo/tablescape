@@ -16,10 +16,13 @@ const RUNTIME_KEYS = new Set(['url', 'missing', 'broken']); // 'broken' (Beta 1)
 function readJson(file, fallback = null) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
+// J4 (open point): written to a .tmp file, pushed onto the disk (fsync), then put in place: after a power cut the file is
+// either the old one or the new one, never empty
 function writeJson(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, (k, v) => (RUNTIME_KEYS.has(k) ? undefined : v), 1));
+  const fd = fs.openSync(tmp, 'w');
+  try { fs.writeSync(fd, JSON.stringify(data, (k, v) => (RUNTIME_KEYS.has(k) ? undefined : v), 1)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
   fs.renameSync(tmp, file);
 }
 function safeName(name) {
@@ -127,7 +130,7 @@ class CampaignStore {
   }
 
   open(id) {
-    this.close();
+    if (!this.close()) return null; // (J1: the open campaign's changes could not be saved: it stays open)
     const dir = this.findDir(id);
     if (!dir) return null;
     const meta = readJson(path.join(dir, 'campaign.json'));
@@ -161,10 +164,16 @@ class CampaignStore {
     return this.cur;
   }
 
-  close() {
-    if (!this.cur) return;
-    this.flush();
+  // J1 (open point): a campaign whose changes could not be saved is not closed: the save is tried a few times (a sync
+  // tool or an antivirus often lets go of the file within a moment); if it still fails, it stays open with its changes
+  // and close() answers false. { force: true } closes anyway (the campaign is being deleted or a backup brought back).
+  close({ force = false } = {}) {
+    if (!this.cur) return true;
+    let ok = this.flush();
+    for (let i = 0; !ok && i < 3; i++) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); ok = this.flush(); }
+    if (!ok && !force) return false;
     this.cur = null;
+    return ok;
   }
 
   // ---------- saving ----------
@@ -175,10 +184,11 @@ class CampaignStore {
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.flush(), 700);
   }
+  // true: everything is on the disk (or there was nothing to save); false: a write failed, the changes stay in memory
   flush() {
     clearTimeout(this.saveTimer);
     const c = this.cur;
-    if (!c) return;
+    if (!c) return true;
     try {
       for (const id of c.dirty) {
         const m = c.maps.get(id);
@@ -198,9 +208,13 @@ class CampaignStore {
         c.metaDirty = false;
       }
       if (this.onSaved) this.onSaved();
+      this.lastError = null;
+      return true;
     } catch (err) {
       console.error('save failed', err);
+      this.lastError = err;
       if (this.onSaveError) { try { this.onSaveError(err); } catch {} }
+      return false;
     }
   }
   // Beta 1: a damaged map is given up and starts over as an empty map (its file is written again)
@@ -223,7 +237,8 @@ class CampaignStore {
   map(id) { return this.cur ? this.cur.maps.get(id) || null : null; }
   history(id) {
     if (!this.cur) return new History();
-    if (!this.cur.history.has(id)) this.cur.history.set(id, new History());
+    if (!this.cur.pool) this.cur.pool = { bytes: 0, list: new Set() }; // (Q1: all the maps' undo steps within one size)
+    if (!this.cur.history.has(id)) this.cur.history.set(id, new History(this.cur.pool));
     return this.cur.history.get(id);
   }
 
@@ -238,10 +253,11 @@ class CampaignStore {
     return true;
   }
   remove(id) {
-    if (this.cur && this.cur.meta.id === id) this.close();
+    if (this.cur && this.cur.meta.id === id) this.close({ force: true }); // (it goes to Recently deleted as it is on the disk)
     const dir = this.findDir(id);
     if (!dir) return null;
-    const trash = path.join(library.root, '.cache', 'trash', `${path.basename(dir)}-${Date.now()}`);
+    fs.mkdirSync(this.trashDir, { recursive: true }); // (J6: the folder may have been deleted while Tablescape runs)
+    const trash = path.join(this.trashDir, `${path.basename(dir)}-${Date.now()}`);
     fs.renameSync(dir, trash);
     return { trash, dir };
   }
@@ -251,8 +267,22 @@ class CampaignStore {
     return true;
   }
 
-  // ---------- recently deleted (2.4): a deleted campaign waits in the library's .cache/trash until it is emptied ----------
-  get trashDir() { return path.join(library.root, '.cache', 'trash'); }
+  // ---------- recently deleted (2.4): a deleted campaign waits in Campaigns/.trash until it is emptied ----------
+  // J6 (open point): it was in .cache/trash, and .cache is "safe to delete"; what is still there moves over once
+  get trashDir() {
+    const dir = path.join(this.dir, '.trash');
+    if (this.trashFrom !== library.root) {
+      this.trashFrom = library.root;
+      const old = path.join(library.root, '.cache', 'trash');
+      let names = [];
+      try { names = fs.readdirSync(old); } catch {}
+      for (const n of names) {
+        if (!this.trashKey(n)) continue;
+        try { fs.mkdirSync(dir, { recursive: true }); if (!fs.existsSync(path.join(dir, n))) fs.renameSync(path.join(old, n), path.join(dir, n)); } catch (err) { console.error('trash move', err); }
+      }
+    }
+    return dir;
+  }
   trashKey(key) { const k = String(key || ''); return /^[^\\/]+-\d{13}$/.test(k) && !k.includes('..') ? k : null; }
   deleted() {
     let names = [];
@@ -262,9 +292,9 @@ class CampaignStore {
       if (!this.trashKey(key)) continue;
       const f = path.join(this.trashDir, key, 'campaign.json');
       if (!fs.existsSync(f)) continue;
-      let meta;
-      try { meta = readJson(f); } catch { continue; }
-      const chapters = meta.chapters || [];
+      const meta = readJson(f);
+      if (!meta || typeof meta !== 'object') { out.push({ key, id: null, name: key.replace(/-\d{13}$/, ''), deleted: Number(key.slice(-13)), chapters: 0, maps: 0, lastSession: 0, broken: true }); continue; } // (J2: damaged: listed, so it can still be deleted for good)
+      const chapters = Array.isArray(meta.chapters) ? meta.chapters : [];
       out.push({
         key, id: meta.id, name: meta.name || key.replace(/-\d{13}$/, ''), deleted: Number(key.slice(-13)),
         chapters: chapters.length, maps: chapters.reduce((n, c) => n + (c.maps || []).length, 0), lastSession: meta.lastSession || 0,
@@ -278,12 +308,13 @@ class CampaignStore {
     const from = k && path.join(this.trashDir, k);
     if (!from || !fs.existsSync(path.join(from, 'campaign.json'))) return null;
     const meta = readJson(path.join(from, 'campaign.json'));
-    if (!meta.id || this.findDir(meta.id)) { meta.id = newId('c'); writeJson(path.join(from, 'campaign.json'), meta); }
+    if (meta && typeof meta === 'object' && (!meta.id || this.findDir(meta.id))) { meta.id = newId('c'); writeJson(path.join(from, 'campaign.json'), meta); }
+    // (J2: a damaged one comes back as it is: the campaign list shows it as damaged, with its backups)
     const base = k.replace(/-\d{13}$/, '');
     let dest = path.join(this.dir, base);
     for (let i = 2; fs.existsSync(dest); i++) dest = path.join(this.dir, `${base} (${i})`);
     fs.renameSync(from, dest);
-    return meta.id;
+    return meta && meta.id ? meta.id : CampaignStore.brokenId(dest);
   }
   purge(key) {
     const k = this.trashKey(key);
@@ -373,10 +404,18 @@ class CampaignStore {
         if (!m || !x) return { ok: false };
         const copy = { ...structuredClone(m), id: newId('m'), name: `${m.name} copy` };
         // its snapshots are its own (new ids, their pictures copied)
+        // (U3: a picture is named in s.thumb, "<id>-<time>.jpg"; the copy looked for "<id>.jpg", found nothing and the
+        // duplicate shared the original's pictures, gone with it. Pictures of the old naming are copied too.)
         copy.snaps = (copy.snaps || []).map((s) => {
           const id = newId('q');
-          try { const dir = path.join(c.dir, 'snaps'); if (fs.existsSync(path.join(dir, `${s.id}.jpg`))) fs.copyFileSync(path.join(dir, `${s.id}.jpg`), path.join(dir, `${id}.jpg`)); } catch {}
-          return { ...s, id };
+          const dir = path.join(c.dir, 'snaps');
+          let thumb = s.thumb;
+          try {
+            if (typeof s.thumb === 'string' && /^[\w.-]+\.jpg$/.test(s.thumb) && fs.existsSync(path.join(dir, s.thumb))) {
+              thumb = `${id}-${Date.now().toString(36)}.jpg`; fs.copyFileSync(path.join(dir, s.thumb), path.join(dir, thumb));
+            } else if (fs.existsSync(path.join(dir, `${s.id}.jpg`))) fs.copyFileSync(path.join(dir, `${s.id}.jpg`), path.join(dir, `${id}.jpg`));
+          } catch {}
+          return thumb ? { ...s, id, thumb } : { ...s, id };
         });
         copy.snapAt = null;
         c.maps.set(copy.id, copy);

@@ -98,10 +98,17 @@ exports.make = async (env, dir) => {
     await K.settle();
   };
   K.rect = (sel) => K.g(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 }; })()`);
-  K.clickSel = async (sel, button) => { const r = await K.rect(sel); if (!r) throw new Error(`not on screen: ${sel}`); await K.click(r.cx, r.cy, button); return r; };
+  // where something is once it has stopped moving: a panel that slides in (Options) would else be clicked where it was
+  // a moment ago, and the click land on its neighbour (fast graphics finish the slide later than the click arrives)
+  const still = async (where) => {
+    let a = await where(); const end = Date.now() + 1500;
+    while (a && Date.now() < end) { await sleep(60); const b = await where(); if (!b) return b; if (Math.abs(b.x - a.x) < 0.5 && Math.abs(b.y - a.y) < 0.5) return b; a = b; }
+    return a;
+  };
+  K.clickSel = async (sel, button) => { const r = await still(async () => { const x = await K.rect(sel); return x && { ...x, x: x.cx, y: x.cy }; }); if (!r) throw new Error(`not on screen: ${sel}`); await K.click(r.cx, r.cy, button); return r; };
   // the first element matching sel whose text (or label) contains `text`
   K.findText = (sel, text) => K.g(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.textContent.includes(${JSON.stringify(text)}) || (x.getAttribute('aria-label') || '').includes(${JSON.stringify(text)})); if (!b) return null; b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-  K.clickText = async (sel, text, button) => { const p = await K.findText(sel, text); if (!p) throw new Error(`not on screen: ${sel} "${text}"`); await K.click(p.x, p.y, button); return p; };
+  K.clickText = async (sel, text, button) => { const p = await still(() => K.findText(sel, text)); if (!p) throw new Error(`not on screen: ${sel} "${text}"`); await K.click(p.x, p.y, button); return p; };
   K.rightClickSel = async (sel) => {
     const r = await K.rect(sel); if (!r) throw new Error(`not on screen: ${sel}`);
     await K.click(r.cx, r.cy, 'right');
@@ -121,6 +128,13 @@ exports.make = async (env, dir) => {
     await sleep(250);
     const img = await w.webContents.capturePage();
     fs.writeFileSync(path.join(dir, `${name}.png`), img.toPNG());
+    return img; // (T1: a check can look at it)
+  };
+  // T1: how much a picture varies: the spread of its brightness (0: one flat colour), from every 7th pixel
+  K.spread = (img) => {
+    const b = img.toBitmap(); let n = 0; let s = 0; let s2 = 0;
+    for (let i = 0; i + 3 < b.length; i += 28) { const v = 0.11 * b[i] + 0.59 * b[i + 1] + 0.3 * b[i + 2]; n++; s += v; s2 += v * v; }
+    return n ? Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)) : 0;
   };
   // "null", "undefined" or "NaN" written anywhere visible
   K.badText = async () => {
@@ -221,7 +235,7 @@ exports.make = async (env, dir) => {
       const data = body == null ? null : JSON.stringify(body);
       const rq = http.request({ host: '127.0.0.1', port, path: pth, method, headers: data ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } : {} }, (r) => {
         const parts = []; r.on('data', (d) => parts.push(d));
-        r.on('end', () => { const buf = Buffer.concat(parts); let j = null; try { j = JSON.parse(buf.toString('utf8')); } catch {} res({ status: r.statusCode, type: r.headers['content-type'] || '', bytes: buf.length, text: j ? null : buf.toString('utf8').slice(0, 4000), ...(j || {}) }); });
+        r.on('end', () => { const buf = Buffer.concat(parts); let j = null; try { j = JSON.parse(buf.toString('utf8')); } catch {} res({ status: r.statusCode, type: r.headers['content-type'] || '', cache: r.headers['cache-control'] || '', bytes: buf.length, text: j ? null : buf.toString('utf8').slice(0, 4000), ...(j || {}) }); });
       });
       rq.on('error', (e) => res({ status: 0, error: e.message }));
       rq.end(data || undefined);

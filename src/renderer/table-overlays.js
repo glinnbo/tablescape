@@ -183,10 +183,14 @@ const TableOverlays = (() => {
     function setJoin(j) {
       joinEl.classList.toggle('on', !!j);
       if (!j) { joinSig = ''; return; }
-      const sig = `${j.url}|${j.svg.length}`;
+      const sig = `${j.url}|${j.svg.length}|${j.msg || ''}`;
       if (sig === joinSig) return;
       joinSig = sig;
-      for (const f of jFaces) { f.qr.innerHTML = j.svg; f.t.innerHTML = `<b>Scan to join</b><span>Your phone's camera, then open the link. Same Wi-Fi as the DM's PC.</span><small>${j.url.replace(/[<>&]/g, '')}</small>`; }
+      // (F1: no address on the card: the GM has it in Player phones; the GM's message, e.g. the Wi-Fi, line by line)
+      const esc = (s) => String(s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+      const lines = String(j.msg || '').split('\n').filter(Boolean);
+      const msg = lines.length ? `<div class="jn-msg">${lines.map((l) => `<i>${esc(l)}</i>`).join('')}</div>` : '';
+      for (const f of jFaces) { f.qr.innerHTML = j.svg; f.t.innerHTML = `<b>Scan to join</b><span>Point your phone's camera at the code.</span>${msg}`; }
     }
     const calibEl = el('div', 'tv-calib'); // Prototype 2
     const initEl = el('div', 'tv-init');
@@ -522,7 +526,12 @@ void main() {
     }
     function burnGive(G) {
       G.cv.remove();
-      if (burnPool.length < 10 && !G.gl.isContextLost()) { G.cv.width = 16; G.cv.height = 16; burnPool.push(G); return; }
+      // Q2 (open point): back in the pool without the handout's picture (up to 4096 x 4096 on the graphics card each),
+      // and at most three kept (ten before)
+      if (burnPool.length < 3 && !G.gl.isContextLost()) {
+        const gl = G.gl; gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+        G.cv.width = 16; G.cv.height = 16; burnPool.push(G); return;
+      }
       const lose = G.gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
     }
     let burnOn = true; // (the self-test switches the fire off where it only wants to see handouts come and go)

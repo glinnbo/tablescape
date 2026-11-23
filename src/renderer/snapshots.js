@@ -70,6 +70,20 @@ const Snapshots = (() => {
         assets: m.layers.filter((l) => l.role === 'asset' && on(l)).length, films: m.layers.filter((l) => l.role === 'overlay' && on(l)).map((l) => l.name),
         sounds: m.layers.filter((l) => l.role === 'audio' && on(l) && !l.muted).map((l) => l.name) };
     }
+    // E7 (open point): a name from what the map shows now ("Night, rain, 2 tokens"); an empty map: "Snapshot 3"
+    function suggestName(m, n) {
+      const i = infoOfMap(m);
+      const parts = [];
+      const mood = (FXDATA.MOODS || []).find((x) => x.id === i.mood);
+      if (mood) parts.push(mood.label);
+      if (i.weather && !/^none$/i.test(i.weather)) parts.push(String(i.weather));
+      const toks = m.layers.filter((l) => l.role === 'token' && !l.hidden).length;
+      if (toks) parts.push(`${toks} token${toks === 1 ? '' : 's'}`);
+      let name = parts.map((p, k) => (k ? p.charAt(0).toLowerCase() + p.slice(1) : p)).join(', ') || `Snapshot ${n}`;
+      const taken = new Set(snapsOf(m.id).map((s) => s.name));
+      if (taken.has(name)) { let k = 2; while (taken.has(`${name} (${k})`)) k++; name = `${name} (${k})`; }
+      return name;
+    }
     const moodName = (id) => ((((S().spotify || {}).moods) || []).find((m) => m.id === id) || {}).name;
     // "Explosion" over "+ Pipe burst · at once"
     function transWords(t) {
@@ -169,12 +183,12 @@ const Snapshots = (() => {
       const list = snapsOf(s.map.id);
       const thumb = await ctx.capture();
       if (!list.length) {
-        const name = await askText('Name the first snapshot', 'Snapshot 1', { ok: 'Save snapshot', placeholder: 'Pipe intact' });
+        const name = await askText('Name the first snapshot', suggestName(s.map, 1), { ok: 'Save snapshot', placeholder: 'Pipe intact' });
         if (!name) return;
         done(await cmd('snap.save', { name, thumb }));
         return;
       }
-      transDialog({ n: list.length + 1, thumb, info: infoOfMap(s.map) });
+      transDialog({ n: list.length + 1, thumb, info: infoOfMap(s.map), name: suggestName(s.map, list.length + 1) });
     }
     function done(r) {
       if (r && r.ok) { toast(r.label, { ms: 2600 }); ctx.flash(`snap:${r.id}`); } else if (r && r.error) toast(r.error, { kind: 'error' });
@@ -211,7 +225,7 @@ const Snapshots = (() => {
       const editing = !!o.snap;
       const T = o.snap && o.snap.trans ? o.snap.trans : {};
       const t = { moment: T.moment || null, sound: T.soundPath || null, music: T.music || 'keep', mood: T.mood || null, fade: !!T.fade };
-      const name = h('input', { type: 'text', class: 'st-name', value: editing ? o.snap.name : `Snapshot ${o.n}`, spellcheck: 'false', 'aria-label': 'Name' });
+      const name = h('input', { type: 'text', class: 'st-name', value: editing ? o.snap.name : (o.name || `Snapshot ${o.n}`), spellcheck: 'false', 'aria-label': 'Name' });
       const moment = h('select', { 'aria-label': 'Screen effect', onchange: () => { t.moment = moment.value || null; } },
         h('option', { value: '' }, 'None'), ...Moments.LIST.filter((d) => d.id !== 'lightning').map((d) => h('option', { value: d.id }, d.label)));
       moment.value = t.moment || '';
@@ -240,7 +254,7 @@ const Snapshots = (() => {
         ...row('music', 'Music', h('div', { class: 'stack' }, music, moodRow)),
         ...row('clock', 'Change', change));
       const box = h('div', { class: 'st-box stack' },
-        h('p', { class: 'hint' }, editing ? 'Plays whenever this snapshot comes on. Everything is optional.' : 'Everything is optional. The map ends up exactly as it is now.'),
+        // (R8: no explanation line: every row here may stay empty; the snapshot takes the map as it is now)
         h('label', { class: 'st-name-row' }, h('span', { class: 'ctl-label' }, 'Name'), name),
         grid);
       if (o.info) {
@@ -445,7 +459,7 @@ const Snapshots = (() => {
       ctx.refresh();
     }
 
-    return { def, openFor, play, playBy, go, save, transWords, closeDetails, hotItem };
+    return { def, openFor, play, playBy, go, save, transWords, closeDetails, hotItem, suggestName };
   }
 
   return { create };

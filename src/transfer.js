@@ -430,7 +430,7 @@ async function importFrom(file, campaignsDir, { progress = () => {}, cancelled =
     const swap = (s) => { for (const [a, b] of ids) s = s.split(`"${a}"`).join(`"${b}"`); return s; };
     metaText = swap(metaText);
     mapTexts = mapTexts.map((x) => ({ id: ids.get(x.id), text: swap(x.text) }));
-    const point = (o) => eachRef(o, (ref) => { if (typeof ref.rel !== 'string') return; if (library.isBuiltin(ref.rel)) { ref.path = library.resolveRef(ref); return; } if (renames.has(ref.rel)) ref.rel = renames.get(ref.rel); const t = target(ref.rel); if (t) ref.path = t; else { delete ref.rel; delete ref.path; } }); // (an unsafe name points nowhere)
+    const point = (o) => eachRef(o, (ref) => { if (typeof ref.rel !== 'string') { delete ref.path; return; } /* L1 (open point): a file named by its place on someone else's PC points nowhere here */ if (library.isBuiltin(ref.rel)) { ref.path = library.resolveRef(ref); return; } if (renames.has(ref.rel)) ref.rel = renames.get(ref.rel); const t = target(ref.rel); if (t) ref.path = t; else { delete ref.rel; delete ref.path; } }); // (an unsafe name points nowhere)
     const meta = JSON.parse(metaText);
     point(meta);
     meta.id = newId('c');

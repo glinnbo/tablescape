@@ -333,7 +333,7 @@ void main() {
     // (Beta 3.58) or { key, make, x, y, w, h, g, P }: make() gives a promise of { pic, mask, P } (paint(): painted grass)
     source(s) {
       this.wantSrc = s;
-      if (!s) { this.want = ''; this.src = null; this.state = 'off'; return; }
+      if (!s) { this.want = ''; this.src = null; this.state = 'off'; this.free(); return; }
       if (s.key === this.want) { if (this.src && !s.make) Object.assign(this.src, { x: s.x, y: s.y, w: s.w, h: s.h, g: s.g, P: s.P }); return; }
       this.want = s.key; this.state = 'loading';
       const got = s.make ? s.make() : Promise.all([image(s.pic), image(s.mask)]).then(([pic, mask]) => ({ pic, mask, P: s.P }));
@@ -345,6 +345,16 @@ void main() {
         console.error(err); this.state = `failed: ${err && err.message}`;
         if (s.make) setTimeout(() => { if (this.want === s.key) this.want = ''; }, 3000); // (a video not playing yet: try again)
       });
+    }
+    // Q2 (open point): a map without living effects: its textures (the map picture with its mip levels and four masks),
+    // its blades and the numbers read from them leave the graphics card and memory (they stayed for the whole session)
+    free() {
+      const gl = this.gl;
+      if (!gl || !this.ok) return;
+      for (const t of this.tex || []) if (t) gl.deleteTexture(t);
+      this.tex = [null, null, null, null, null]; this.picOf = null; this.data = null; this.growKey = '';
+      if (this.blades) { gl.deleteVertexArray(this.blades.vao); gl.deleteBuffer(this.blades.vb); gl.deleteBuffer(this.blades.ib); this.blades = null; }
+      this.n = 0;
     }
     load(s, pic, mask) {
       const gl = this.gl;

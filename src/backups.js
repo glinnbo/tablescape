@@ -1,12 +1,15 @@
 // Backups of a campaign: each time a campaign is opened, a copy of its files goes into
-// <campaign>/.backups/<date and time>/ (only when something changed since the last one). The last 10 are kept.
+// <campaign>/.backups/<date and time>/ (only when something changed since the last one). Kept (J3): the last 10, and
+// besides them the newest of each of the last 14 days and of each of the last 12 weeks, so a mistake noticed a week
+// later can still be undone.
 // Restoring keeps a copy of the current state first, so a restore can be undone the same way.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const KEEP = 10;
+const KEEP = 10; const DAYS = 14; const WEEKS = 12;
+const DAY = 864e5;
 const backupsDir = (dir) => path.join(dir, '.backups');
 
 // the files that make up a campaign: campaign.json, maps/*.json, Notes/*
@@ -64,13 +67,27 @@ function snapshot(dir, { force = false, label = null, keep = true } = {}) {
   if (keep) prune(dir);
   return { id, ...info };
 }
-function prune(dir) {
-  for (const b of list(dir).slice(KEEP)) { try { fs.rmSync(path.join(backupsDir(dir), b.id), { recursive: true, force: true }); } catch {} }
+function keptOf(all, now = Date.now()) {
+  const keep = new Set(all.slice(0, KEEP).map((b) => b.id));
+  const newestOf = new Map(); // a day or a week back from now: its newest backup (the list runs newest first)
+  for (const b of all) {
+    const age = now - b.made;
+    const key = age < DAYS * DAY ? `d${Math.floor(age / DAY)}` : age < WEEKS * 7 * DAY ? `w${Math.floor(age / (7 * DAY))}` : null;
+    if (key && !newestOf.has(key)) newestOf.set(key, b.id);
+  }
+  for (const id of newestOf.values()) keep.add(id);
+  return keep;
 }
+function prune(dir) {
+  const all = list(dir);
+  const keep = keptOf(all);
+  for (const b of all) if (!keep.has(b.id)) { try { fs.rmSync(path.join(backupsDir(dir), b.id), { recursive: true, force: true }); } catch {} }
+}
+const okId = (id) => typeof id === 'string' && /^[0-9 +-]{6,40}$/.test(id); // (a backup's folder name, nothing else)
 // put a backup back (the campaign must be closed); the current state is backed up first
 function restore(dir, id) {
+  if (!okId(id) || !readInfo(dir, id)) return { ok: false, error: 'That backup is gone.' };
   const from = path.join(backupsDir(dir), id);
-  if (!readInfo(dir, id)) return { ok: false, error: 'That backup is gone.' };
   const before = snapshot(dir, { force: true, label: 'Before restoring', keep: false }); // pruned afterwards, so the one restored stays
   for (const rel of filesOf(dir)) { try { fs.unlinkSync(path.join(dir, rel)); } catch {} }
   for (const rel of filesOf(from)) {
@@ -81,4 +98,4 @@ function restore(dir, id) {
   return { ok: true, before: before && before.id };
 }
 
-module.exports = { snapshot, list, restore, KEEP };
+module.exports = { snapshot, list, restore, keptOf, KEEP, DAYS, WEEKS };

@@ -805,7 +805,17 @@ module.exports = function createRoomLights(o) {
         return { ok: true };
       }
       case 'scene.rename': { const sc = sceneOf(p.id); if (!sc) return { ok: false }; sc.name = String(p.name || sc.name).trim().slice(0, 40) || sc.name; o.save(); changed(); return { ok: true }; }
-      case 'scene.delete': c.scenes = (c.scenes || []).filter((x) => x.id !== p.id); if (c.sceneId === p.id && c.mode === 'scene') c.mode = 'follow'; o.save(); changed(); return { ok: true };
+      case 'scene.delete': { // (P5: the scene and its place come back with the answer, for Undo)
+        const list = c.scenes || []; const index = list.findIndex((x) => x.id === p.id); const scene = index >= 0 ? list[index] : null;
+        c.scenes = list.filter((x) => x.id !== p.id); if (c.sceneId === p.id && c.mode === 'scene') c.mode = 'follow'; o.save(); changed();
+        return { ok: true, scene, index };
+      }
+      case 'scene.restore': { // Undo of a deleted scene: back in its place (not twice)
+        const sc = p.scene && typeof p.scene === 'object' && typeof p.scene.id === 'string' ? p.scene : null;
+        if (!sc || (c.scenes || []).some((x) => x.id === sc.id)) return { ok: false };
+        const list = [...(c.scenes || [])]; list.splice(Math.max(0, Math.min(list.length, Number(p.index) || 0)), 0, sc);
+        c.scenes = list; o.save(); changed(); return { ok: true };
+      }
       case 'hold.all': // the scene maker's "All lamps": one colour and brightness for every lamp in use
         for (const L of lamps.values()) { const m = member(L); if (!m.fx && !m.amb) continue; L.hold = { on: p.on !== false, rgb: p.rgb ? hex2rgb(p.rgb) : (L.hold || {}).rgb || WARM, bri: 'bri' in p ? clamp(Number(p.bri) || 1, 1, 100) : (L.hold || {}).bri ?? 80 }; drive(L, L.hold); }
         return { ok: true };

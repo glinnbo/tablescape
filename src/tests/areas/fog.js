@@ -33,9 +33,17 @@ module.exports = (area) => {
     const vp = await t.viewport();
     await t.click(vp.x + vp.w * 0.62, vp.y + vp.h * 0.6, 'right');
     await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the radial menu');
-    const items = await t.g(`[...document.querySelectorAll('.radial-item span')].map((s) => s.textContent)`);
-    t.ok(items.length >= 6, 'the radial menu has its entries', items);
-    for (const want of ['Reveal here', 'Cast spell', 'Light']) t.has(items, want, 'the radial menu');
+    const items = await t.g(`[...document.querySelectorAll('.radial-item > span')].map((s) => s.textContent)`);
+    t.eq(items.length, 6, 'six slots (wheel overhaul)', items);
+    for (const want of ['Reveal here', 'Cover here', 'Cast spell', 'More …']) t.has(items, want, 'the radial menu');
+    // More … opens the rest as a menu
+    await t.clickText('.radial-item', 'More');
+    const more = await t.until(() => t.menu(), 3000, 'More … as a menu');
+    for (const want of ['Effect', 'Light', 'Undo']) t.has(more, want, 'under More …');
+    await t.key('Escape');
+    await t.g(`document.getElementById('menu').classList.remove('on')`);
+    await t.click(vp.x + vp.w * 0.62, vp.y + vp.h * 0.6, 'right');
+    await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the radial menu again');
     const n0 = t.L().fog.ops.length;
     await t.clickText('.radial-item', 'Reveal here');
     await t.until(() => t.L().fog.ops.length === n0 + 1, 3000, 'the reveal');

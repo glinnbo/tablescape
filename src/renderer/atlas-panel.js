@@ -487,7 +487,7 @@ const AtlasPanel = (() => {
             if (o.kind === 'place' && o.note && A().on === mid()) items.push({ icon: 'message', label: A().note === o.id ? 'Put its note away' : 'Show its note', run: () => cmd('atlas.note', { id: o.id }) });
             if (o.kind === 'place') items.push({ icon: 'ruler-measure', label: 'How far from here', run: () => startMeasure({ x: o.x, y: o.y }, true) }); // (Second Builder (second-cartographer-polish))
             if (o.kind === 'route') items.push({ icon: 'route', label: 'Draw on', run: () => { routeId = o.id; sel = null; setTool('route'); } }, { icon: 'arrow-back-up', label: 'One point back', run: () => mcmd('mark.route', { id: o.id, back: true }) });
-            items.push({ icon: o.hidden ? 'eye' : 'eye-off', label: o.hidden ? 'Show' : 'Hide', run: () => upd({ hidden: !o.hidden }) });
+            items.push({ icon: o.hidden ? 'eye' : 'eye-off', label: o.hidden ? 'Unhide' : 'Hide', run: () => upd({ hidden: !o.hidden }) });
           }
           items.push({ icon: 'trash', label: 'Remove', danger: true, run: () => { select(it.sel); removeSel(); } });
           ctx.Radial.open(e.clientX, e.clientY, items, nameOfItem(it), { modal: true });

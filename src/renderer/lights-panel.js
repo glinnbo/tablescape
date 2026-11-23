@@ -59,7 +59,7 @@ const LightsPanel = (() => {
               { icon: 'pencil', label: 'Change the scene', action: () => Setup.openScene(x.id) },
               { icon: 'pencil', label: 'Rename', action: async () => { const n = await UI.askText('Rename the scene', x.name, { ok: 'Rename' }); if (n) act('scene.rename', { id: x.id, name: n }); } },
               Hotbar.menuItem(item),
-              { icon: 'trash', label: 'Delete', action: () => act('scene.delete', { id: x.id }) },
+              { icon: 'trash', label: 'Delete', action: async () => { const r = await act('scene.delete', { id: x.id }); if (r && r.ok && r.scene) toast(`${x.name} deleted`, { undo: () => act('scene.restore', { scene: r.scene, index: r.index }) }); } }, // (P5: with an Undo)
             ]); } },
           h('span', { class: 'rl-dots' }, ...(x.colors.length ? x.colors : ['#555']).map((cl) => h('i', { style: `background:${cl}` }))), h('span', { class: 'ellipsis' }, x.name)), item, { menu: false });
           return el;
@@ -122,8 +122,7 @@ const LightsPanel = (() => {
       function lampsTab() {
         const ls = T.lampsFull || [];
         if (!ls.length) return [hint('No lamps yet: connect them in the Room lights panel.')];
-        return [
-          hint('Try a lamp by hand. Brightest and Darkest also limit it in the game.'),
+        return [ // (H4: what the sliders do is behind Room lights' "?")
           ...ls.map((x) => {
             const send = later((p) => call('hold', { id: x.id, ...p }));
             const on = h('input', { type: 'checkbox', role: 'switch', checked: x.on, 'aria-label': `${x.name} on` });
@@ -148,8 +147,7 @@ const LightsPanel = (() => {
         ];
       }
       function moodsTab() {
-        return [
-          hint('The Ambience lamps in each situation. A change shows on the lamps for a few seconds.'),
+        return [ // (H4: behind "?")
           h('div', { class: 'rl-moods' }, ...(T.looks || []).map((m) => {
             const save = later((p) => call('look', { id: m.id, ...p }), 200);
             const col = h('input', { type: 'color', value: m.rgb, 'aria-label': `Colour for ${m.label}` });
@@ -164,8 +162,7 @@ const LightsPanel = (() => {
       }
       function effectsTab() {
         const spells = Object.entries(FXDATA.SKINS).slice(0, 8);
-        return [
-          hint('Try plays it on the Effects lamps. Switched off, the game no longer flashes it.'),
+        return [ // (H4: behind "?")
           h('div', { class: 'rl-fx' }, ...(T.effects || []).map((f) => {
             const sw = h('input', { type: 'checkbox', role: 'switch', checked: f.on, 'aria-label': `${f.label} in the game` });
             sw.addEventListener('change', () => call('fx', { id: f.id, on: sw.checked }));

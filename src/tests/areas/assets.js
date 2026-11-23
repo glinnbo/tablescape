@@ -8,6 +8,18 @@ module.exports = (area) => {
 
   const M = (t) => t.store.map(own);
   const A = (t, id) => M(t).layers.find((l) => l.id === id);
+  // H6 (open point): nothing in hand and nothing used yet: the library's assets in the panel, one click picks one
+  area.quick('Assets with nothing in hand shows the library\'s assets to pick from, right in the panel', async (t) => {
+    await t.g(`(() => { Play.ui.brush = null; Play.ui.recentBrushes = []; Play.ui.assetTab = 'library'; Play.ui.selAssets = []; Play.closePop(); })()`);
+    await t.g(`Play.setTool('asset'); Play.openPop('asset')`);
+    const n = await t.until(() => t.g(`(() => { const r = document.querySelector('#pop .brush-recent.brush-first'); return r && !r.hidden && r.querySelectorAll('.brush-pick').length; })()`), 5000, 'the library\'s assets in the panel');
+    t.ok(n >= 1, 'assets to pick from', n);
+    t.ok(!(await t.g('Play.Drawer.isOpen')), 'the panel stays (no Library over it)');
+    await t.g(`document.querySelector('#pop .brush-recent .brush-pick').click()`);
+    await t.until(() => t.g(`!!Play.ui.brush`), 3000, 'one in hand');
+    t.ok(!(await t.g(`Play.ui.brush.path`)).includes('Living trees'), 'an asset of the library, no living tree');
+    await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.brush = null`);
+  });
   // one asset on a clean map, picked in the Assets tool (to the right of the tool's panel), with its frame on
   const one = async (t, extra = {}) => {
     if (t.state.liveMapId !== own || t.state.editMapId !== own) { t.handle('edit.open', { id: own }); await t.send(own); }

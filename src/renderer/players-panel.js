@@ -31,8 +31,16 @@ const PlayersPanel = (() => {
 
     function buildPanel() {
       const onSwitch = c().toggle({ label: 'Players may move their tokens', get: () => P().on, set: (v) => set({ on: v }) });
+      // (F1: the server starts by itself; a line only when phones are switched off, or it can't listen)
       const net = h('p', { class: 'hint warn-text' });
-      c().bind(() => { const r = R(); net.hidden = !!(r.on && r.running); net.textContent = r.on ? 'The Remote is not listening yet (see that panel).' : 'Switch on the Remote first: the phones connect through it.'; });
+      c().bind(() => { const r = R(); const msg = r.allowed === false ? 'Phones and tablets are switched off (Tablescape settings → This screen).' : r.on && r.error ? `Not listening: ${r.error}.` : ''; net.hidden = !msg; net.textContent = msg; });
+
+      // F1: a message on the join card (the Wi-Fi's name and password), and the address for a phone that can't scan
+      const msgBox = h('textarea', { class: 'pp-joinmsg', rows: 2, maxLength: 160, spellcheck: 'false', 'aria-label': 'Message on the join card', placeholder: 'Wi-Fi: Tavern\nPassword: dragons123' });
+      c().bind(() => { const v = (S().settings && S().settings.joinMsg) || ''; if (document.activeElement !== msgBox && msgBox.value !== v) msgBox.value = v; });
+      msgBox.addEventListener('change', () => window.ts.settings({ joinMsg: msgBox.value }));
+      const addr = h('small', { class: 'hint pp-addr', 'data-tip': 'For a phone that can\'t scan: type this into its browser' });
+      c().bind(() => { const r = R(); const u = r.running && r.urls && r.urls[0]; addr.hidden = !u; addr.replaceChildren(iconEl('wifi'), h('span', {}, u ? u.replace('http://', '') : '')); });
 
       // ---- the join code on the TV
       const joinBtn = h('button', { class: 'btn primary', 'data-tip': 'The players\' QR code big on the table for 90 seconds (again: take it off)' });
@@ -45,19 +53,19 @@ const PlayersPanel = (() => {
         { value: 'paused', label: 'Paused', icon: 'player-pause', tip: 'Nobody moves until you let them again' }] });
       const rest = c().stepper({ name: 'Rest', label: 'Rest between steps', get: () => P().rest || 0, set: (v) => set({ rest: v }), fmt: (v) => (v ? `${v} s` : 'none'),
         prev: (v) => (v <= 0 ? 0 : v <= 5 ? v - 1 : v <= 15 ? v - 5 : v - 15), next: (v) => (v < 5 ? v + 1 : v < 15 ? v + 5 : Math.min(60, v + 15)) });
-      const speed = c().stepper({ name: 'Speed', label: 'Speed without a card', get: () => P().speed || 30, set: (v) => set({ speed: v }), fmt: (v) => `${v} ft`, prev: (v) => Math.max(5, v - 5), next: (v) => Math.min(120, v + 5) });
+      // (F4: no "Speed without a card": a player's speed is on their character card; a card without one walks 30 ft)
       // (Prototype 8) the whole group moves: movement again for everyone
       const again = Hotbar.offer(h('button', { class: 'btn', 'data-tip': 'Everyone may walk their speed again (Next round does the same)', onclick: () => act('again').then((r) => r && r.ok && toast('Movement again for everyone')) }, iconEl('refresh'), 'Movement again'), ctx.doHot('again'));
       const againRow = c().row(again);
       c().bind(() => { againRow.hidden = P().pace !== 'group' || !!P().fight; });
       const fightNote = h('p', { class: 'hint' });
-      c().bind(() => { fightNote.textContent = P().fight ? 'A turn order is running: only the player whose turn it is moves.' : P().pace === 'group' ? 'Everyone walks their speed once; Movement again (or Next round) hands it out anew.' : 'In a fight only the player whose turn it is moves.'; });
+      // (H4: only while a fight runs, as a state; how the pace works is behind "?")
+      c().bind(() => { fightNote.hidden = !P().fight; fightNote.textContent = 'A turn order is running: only the player whose turn it is moves.'; });
 
       // ---- rules
       const rules = h('div', { class: 'stack' },
         c().toggle({ label: 'A trace of the steps (a fight, Movement)', get: () => P().trace !== false, set: (v) => set({ trace: v }) }),
-        c().toggle({ label: 'Pings on the table', get: () => P().pings !== false, set: (v) => set({ pings: v }) }),
-        h('p', { class: 'hint' }, 'Sight, darkvision and light of a player token: click its name on the map.'));
+        c().toggle({ label: 'Pings on the table', get: () => P().pings !== false, set: (v) => set({ pings: v }) }));
 
       // ---- the phones
       const phones = h('div', { class: 'pp-phones' });
@@ -66,11 +74,11 @@ const PlayersPanel = (() => {
         const sig = JSON.stringify([v.phones, v.party.map((x) => x.name), v.tokens.length, v.on]); // (v.phones carries the feet left)
         if (phones.dataset.sig === sig) return;
         phones.dataset.sig = sig;
-        if (!v.phones.length) { phones.replaceChildren(h('p', { class: 'hint' }, 'No player phone yet: show the join code on the table, or the QR code under Remote → Player screen.')); return; }
+        if (!v.phones.length) { phones.replaceChildren(h('p', { class: 'hint' }, 'No player phone yet: show the join code on the table.')); return; }
         phones.replaceChildren(h('div', { class: 'ctl-label' }, 'Phones'), ...v.phones.slice().sort((a, b) => (b.connected - a.connected) || (a.name > b.name ? 1 : -1)).map((d) => {
           const charBtn = h('button', { class: 'btn small', 'data-tip': 'Which character this phone moves', onclick: (e) => openMenu(e.clientX, e.clientY, [
             ...v.party.map((p) => ({ icon: 'user', label: `${p.name}${p.holder && p.holder !== d.name ? ` (on ${p.holder})` : ''}`, disabled: d.char === p.name, action: () => act('assign', { id: d.id, name: p.name }) })),
-            ...(d.char ? ['-', { icon: 'user-off', label: 'No character (the party screen again)', action: () => act('assign', { id: d.id, name: null }) }] : []),
+            ...(d.char ? ['-', { icon: 'user-off', label: 'No character (the party again)', action: () => act('assign', { id: d.id, name: null }) }] : []),
           ]) }, iconEl('user-edit'), d.char || 'Pick a character …');
           const toks = v.tokens.filter((t) => !t.hidden || (d.token && d.token.id === t.id));
           const handBtn = d.char ? h('button', { class: 'btn small ghost', 'data-tip': 'Any token on the table for this phone (its own again: the first item)', onclick: (e) => openMenu(e.clientX, e.clientY, [
@@ -98,8 +106,8 @@ const PlayersPanel = (() => {
       return h('div', { class: 'stack pp' },
         onSwitch, net, hexNote,
         c().row(joinBtn),
-        h('p', { class: 'hint' }, 'A player scans the code, picks their character and moves its token with the stick on the phone, one square per push.'),
-        pace, againRow, rest, speed, fightNote,
+        h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Message on the join card'), msgBox), addr,
+        pace, againRow, rest, fightNote,
         h('div', { class: 'pop-sep' }),
         rules,
         h('div', { class: 'pop-sep' }),

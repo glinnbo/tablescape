@@ -148,7 +148,7 @@ class SceneView {
     this.roundBanners = ['near', 'far'].map((side) => div(`sv-round-banner ${side}`));
     this.inkEl.append(this.spotEl, this.inkSvg, this.measureEl, this.notesEl, ...this.roundBanners, this.roundEl, this.roundEl2);
     this.hud = 1; this.hudBoth = true; // size of text and panels on the TV, players on both long sides
-    this.tokLook = { pic: { ...Geom.PIC_DEFAULT }, numbers: true, turnGlow: true, shadow: false, tagSize: 1 }; // 4.10: Options → Tokens
+    this.tokLook = { pic: { ...Geom.PIC_DEFAULT }, numbers: true, turnGlow: true, shadow: false, tagSize: 1, conds: true }; // 4.10: Options → Tokens
     this.roundLook = { x: 0.07, y: 0.07, size: 1.4, banner: true, mode: 'auto' }; // where the round sits (near copy), its size
     this.roundSeen = null; // { mapId, n } the round last shown, to announce a new one
     this.labelsEl = div('sv-labels');
@@ -333,7 +333,7 @@ class SceneView {
     FogCache.set(map.id, map.fog);
     const switched = !this.map || this.map.id !== map.id;
     this.map = map;
-    if (switched) { this.fogSig = ''; this.gridSig = ''; this.geoCache.clear(); this.pinned = null; }
+    if (switched) { this.fogSig = ''; this.gridSig = ''; this.geoCache.clear(); this.pinned = null; const keep = new Set((map.fx || []).map((f) => f.id)); FX.forget(keep); if (typeof Creatures === 'object' && Creatures.forget) Creatures.forget(keep); } // (Q3)
     if (this.live) this.endLive(); // 4.4: the map stopped moving: everything is drawn anew for where it is
     const t = `translate(${this.v.x * this.ppi}px, ${this.v.y * this.ppi}px) scale(${this.v.zoom})`;
     this.tagSize();
@@ -1094,9 +1094,11 @@ class SceneView {
       wrap.append(box);
       this.tokensEl.appendChild(wrap);
       const tagBox = div('sv-tagbox'); // (Prototype 14: in the tag layer, over the token's picture)
-      tagBox.append(tag);
+      tagBox.dataset.id = l.id;
+      const conds = div('sv-conds'); // D3: the token's conditions as small animations (drawConds), above the darkness as the name
+      tagBox.append(conds, tag);
       this.tagsEl.appendChild(tagBox);
-      n = { el: wrap, box, media: m, url: l.url, role: l.role, badge, tag, tagBox };
+      n = { el: wrap, box, media: m, url: l.url, role: l.role, badge, tag, tagBox, conds };
       // 4.10: (GM) how far the picture's visible part reaches, so the selection ring goes round the creature, not its margin
       if (m.tagName === 'IMG') { // (Prototype 15: on the TV too: the name follows the picture's rim)
         const nn = n;
@@ -1206,7 +1208,21 @@ class SceneView {
     if (n.tagBox) Object.assign(n.tagBox.style, { left: `${l.x * ppi - pic / 2}px`, top: `${l.y * ppi - pic / 2}px`, width: `${pic}px`, height: `${pic}px`, display: e.style.display });
     // the name tag: on the GM screen for 'gm' and 'all', on the TV only for 'all' and never for a hidden token
     if (n.tag) { n.tagGeo = { pic, size }; this.drawTag(n, l); }
+    if (n.conds) this.drawConds(n, l, pic);
     this.canopiesSoon();
+  }
+  // D3 (open point): a token's conditions as small looping animations on it (CSS, styles.css .cd-*), on both screens.
+  // They are built to sit together; some change the picture itself (grey, lying down, shaking, see-through)
+  drawConds(n, l, pic) {
+    const list = this.tokLook.conds ? (l.cond || []).filter((c) => COND_FX[c]) : [];
+    const fs = `${Math.round(pic * 0.2 * 10) / 10}px`;
+    if (n.conds.style.fontSize !== fs) n.conds.style.fontSize = fs;
+    const sig = list.join('|');
+    if (n.conds.dataset.sig === sig) return;
+    n.conds.dataset.sig = sig;
+    for (const k of COND_CLASSES) n.el.classList.remove(k);
+    for (const c of list) for (const k of COND_FX[c].on || []) n.el.classList.add(k);
+    n.conds.innerHTML = list.map((c) => COND_FX[c].html || '').join('');
   }
   // Prototype 15: the name written along the token's rim on a thin band, centred under it. The TV writes it twice:
   // along the bottom for the near long side and upside down along the top for the far side (one side only: once).
@@ -2013,7 +2029,7 @@ class SceneView {
     if (this.strikeAt && Date.now() - this.strikeAt < 1200) return true;
     if (m.spells.some((s) => this.shown(s)) || this.ghost) return true;
     const eng = this.engineTest();
-    if (m.fx.some((f) => f.kind !== 'light' && f.preset !== 'roof' && this.shown(f) && !eng(f))) return true; // (Beta 3.1: a Roof alone doesn't move; Beta 3.58: blades move in the trees' loop)
+    if (m.fx.some((f) => f.kind !== 'light' && f.preset !== 'roof' && f.lit !== false && this.shown(f) && !eng(f))) return true; // (Beta 3.1: a Roof alone doesn't move; Beta 3.58: blades move in the trees' loop; K6: a fire put out draws nothing, as drawAtmo)
     if (m.light.from && Date.now() - m.light.from.t0 < m.light.from.s * 1000 + 400) return true; // the light is changing
     return m.light.darkness > 0 && m.fx.some((f) => f.kind === 'light' && f.lit !== false && (f.flicker || f.wave));
   }
@@ -2583,18 +2599,22 @@ class SceneView {
     const seen = this.map.light.seen;
     const sig = `${this.map.id}|${seen.length}|${c.el.width}x${c.el.height}|${this.v.x},${this.v.y},${this.v.zoom}|${this.rectSig}`;
     if (this._seen && this._seen.sig === sig) return this._seen.el;
-    const tmp = document.createElement('canvas');
-    tmp.width = c.el.width; tmp.height = c.el.height;
+    // K3 (open point): both canvases are kept and only resized when the layer's size changes (a map dragged with
+    // explored ground made a new one and reallocated the other at every frame)
+    const W = c.el.width; const H = c.el.height;
+    const tmp = this._seenTmp || (this._seenTmp = document.createElement('canvas'));
+    if (tmp.width !== W || tmp.height !== H) { tmp.width = W; tmp.height = H; }
     const tc = tmp.getContext('2d');
+    tc.setTransform(1, 0, 0, 1, 0, 0); tc.clearRect(0, 0, W, H);
     this.mapXform(tc, c.res);
     tc.beginPath();
     for (const o of seen) { tc.moveTo(o.x + o.r, o.y); tc.arc(o.x, o.y, o.r, 0, Math.PI * 2); }
     tc.fillStyle = '#fff';
     tc.fill();
     const el = (this._seen && this._seen.el) || document.createElement('canvas');
-    el.width = c.el.width; el.height = c.el.height;
+    if (el.width !== W || el.height !== H) { el.width = W; el.height = H; }
     const ec = el.getContext('2d');
-    ec.clearRect(0, 0, el.width, el.height);
+    ec.setTransform(1, 0, 0, 1, 0, 0); ec.clearRect(0, 0, W, H);
     ec.filter = `blur(${Math.max(2, Math.round(c.el.width / 160))}px)`;
     ec.drawImage(tmp, 0, 0);
     ec.filter = 'none';
@@ -2690,7 +2710,7 @@ class SceneView {
   picOf(l) { return Geom.tokenPic(l.size || 1, this.tokLook.pic, l.pic); }
   setTokenLook(look) {
     if (!look) return;
-    const L = { pic: { ...Geom.PIC_DEFAULT, ...(look.pic || {}) }, numbers: look.numbers !== false, turnGlow: look.turnGlow !== false, shadow: !!look.shadow, tagSize: Number(look.tagSize) || 1 };
+    const L = { pic: { ...Geom.PIC_DEFAULT, ...(look.pic || {}) }, numbers: look.numbers !== false, turnGlow: look.turnGlow !== false, shadow: !!look.shadow, tagSize: Number(look.tagSize) || 1, conds: look.conds !== false };
     const sig = JSON.stringify(L);
     if (sig === this.tokSig) return;
     this.tokSig = sig;
@@ -2758,11 +2778,23 @@ class SceneView {
     const g = this.map.grid;
     const list = this.showHandles === 'party' ? this.map.fx.filter((f) => f.kind === 'light' && f.preset === 'party') : this.map.fx;
     const idle = Vision.markersIdle(this.map); // (Prototype 17)
-    const sig = JSON.stringify([this.showHandles, list.map((f) => [f.id, f.kind, f.preset, f.hidden, f.lit, f.bright, f.dim, f.r, this.fxPos(f), f.kind === 'region' ? f.strokes.length : 0, f.eye]), this.v, g.size, this.selectedFx, this.ppi, idle]);
+    const sig = JSON.stringify([this.showHandles, list.map((f) => [f.id, f.kind, f.preset, f.hidden, f.lit, f.bright, f.dim, f.r, this.fxPos(f), f.kind === 'region' ? f.strokes.length : 0, f.eye, f.attachTo && this.token(f.attachTo) ? [this.token(f.attachTo).size, this.picOf(this.token(f.attachTo))] : 0]), this.v, g.size, this.selectedFx, this.ppi, idle]);
     if (sig === this.handleSig) return;
     this.handleSig = sig;
     this.handlesEl.innerHTML = '';
     const scale = this.ppi * this.v.zoom;
+    // a light a token carries: its marker sits on the token's rim, upper left (the number is lower right), not on
+    // its face; two or more side by side along the rim
+    const rim = new Map();
+    for (const f of list) if (f.attachTo) { const tk = this.token(f.attachTo); if (tk) { if (!rim.has(tk.id)) rim.set(tk.id, []); rim.get(tk.id).push(f.id); } }
+    const rimAt = (f) => {
+      const tk = this.token(f.attachTo); const ids = tk && rim.get(tk.id);
+      if (!ids) return null;
+      const c = this.mapToPx(tk.x, tk.y);
+      const r = ((tk.size || 1) * g.size * this.picOf(tk) * scale) / 2 * 0.86;
+      const a = (225 + (ids.indexOf(f.id) - (ids.length - 1) / 2) * 26) * (Math.PI / 180);
+      return { x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r };
+    };
     for (const f of list) {
       let p = this.fxPos(f);
       if (f.kind === 'region') { const a0 = FX.anchor(f); if (!a0) continue; p = a0; } // (Beta 3.41: not where it was erased)
@@ -2779,8 +2811,10 @@ class SceneView {
       const el = div(`sv-handle kind-${f.kind} ${f.preset === 'party' ? 'party' : ''} ${f.id === this.selectedFx ? 'on' : ''} ${f.hidden ? 'is-hidden' : ''} ${f.lit === false ? 'is-unlit' : ''} ${f.attachTo ? 'attached' : ''} ${f.eye && f.attachTo ? 'eye' : ''} ${Vision.idleMarker(f, idle) ? 'idle' : ''}`);
       el.dataset.id = f.id;
       if (Vision.idleMarker(f, idle)) el.dataset.tip = 'The party marker rests: the player tokens on this map see for themselves';
-      el.style.left = `${at.x}px`;
-      el.style.top = `${at.y}px`;
+      const onRim = f.attachTo ? rimAt(f) : null;
+      if (onRim) el.classList.add('rim');
+      el.style.left = `${(onRim || at).x}px`;
+      el.style.top = `${(onRim || at).y}px`;
       el.innerHTML = icon(SceneView.fxIcon(f));
       this.handlesEl.append(el);
     }
@@ -3415,6 +3449,27 @@ function fillRings(ctx, rings) {
 }
 const SVGNS = 'http://www.w3.org/2000/svg';
 // Prototype 15: measuring a name for its band along the rim
+// D3: what each condition adds to a token (styles.css .cd-*): elements over it (html) and classes on it (on)
+const COND_UP = (cls, x, d) => `<i class="cd-up ${cls}" style="--x:${x}%;--d:${d}s"></i>`;
+const COND_FX = {
+  Blinded: { html: '<i class="cd-blind"></i>' },
+  Charmed: { html: [30, 52, 72].map((x, i) => `<i class="cd-up cd-heart" style="--x:${x}%;--d:${i * 0.8}s">♥</i>`).join('') },
+  Concentrating: { html: '<i class="cd-conc"></i>' },
+  Deafened: { html: '<i class="cd-deaf"></i><i class="cd-deaf" style="--d:1s"></i>' },
+  Exhausted: { html: '<i class="cd-exh"></i><i class="cd-drop"></i>' },
+  Frightened: { on: ['cd-shake'], html: COND_UP('cd-wisp', 20, 0) + COND_UP('cd-wisp', 80, 0.9) },
+  Grappled: { html: '<i class="cd-grap"></i>' },
+  Incapacitated: { on: ['cd-grey'], html: '<i class="cd-dots">···</i>' },
+  Invisible: { on: ['cd-invis'] },
+  Paralyzed: { html: '<i class="cd-para"></i>' },
+  Petrified: { on: ['cd-stone'], html: '<svg class="cd-crack" viewBox="0 0 100 100"><path d="M30 16 L44 42 L35 62 M69 24 L59 47 L73 74 M44 42 L56 46"/></svg>' },
+  Poisoned: { html: COND_UP('cd-bub', 32, 0) + COND_UP('cd-bub cd-bub2', 52, 0.65) + COND_UP('cd-bub', 70, 1.3) },
+  Prone: { on: ['cd-prone'] },
+  Restrained: { html: '<i class="cd-chain"></i>' },
+  Stunned: { html: '<i class="cd-stars"><b>★</b><b>★</b></i>' },
+  Unconscious: { on: ['cd-grey'], html: '<i class="cd-z">z</i><i class="cd-z" style="--d:1.3s">z</i>' },
+};
+const COND_CLASSES = ['cd-shake', 'cd-grey', 'cd-invis', 'cd-stone', 'cd-prone'];
 const TAG_M = document.createElement('canvas').getContext('2d');
 let TAG_UID = 0; let TAG_FONT = null;
 function tagFont(el) { if (!TAG_FONT) TAG_FONT = (getComputedStyle(el).getPropertyValue('--display') || '').trim() || 'serif'; return TAG_FONT; }

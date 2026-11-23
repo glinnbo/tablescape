@@ -17,11 +17,15 @@ const FX = (() => {
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   }
   const rgba = (hex, a) => { const [r, g, b] = rgb(hex); return `rgba(${r},${g},${b},${a})`; };
+  // K1/K4 (open points): caches that stay small: a hit counts as fresh; past max the least recently used goes. (They
+  // grew without end, or emptied all at once and rebuilt every picture in the next frame: new canvases each time.)
+  function lruGet(map, key) { const v = map.get(key); if (v !== undefined) { map.delete(key); map.set(key, v); } return v; }
+  function lruSet(map, key, v, max) { map.set(key, v); while (map.size > max) map.delete(map.keys().next().value); return v; }
   const sprites = new Map();
   // soft round dot; hard = 0 is a pure gradient, hard = 0.5 keeps a solid core
   function sprite(hex, hard = 0) {
     const key = `${hex}|${hard}`;
-    let c = sprites.get(key);
+    let c = lruGet(sprites, key);
     if (c) return c;
     c = document.createElement('canvas');
     c.width = c.height = 64;
@@ -32,8 +36,7 @@ const FX = (() => {
     gr.addColorStop(1, rgba(hex, 0));
     g.fillStyle = gr;
     g.fillRect(0, 0, 64, 64);
-    sprites.set(key, c);
-    return c;
+    return lruSet(sprites, key, c, 160);
   }
   function dot(ctx, img, x, y, r, a, sx = 1) {
     if (a <= 0.004 || r <= 0) return;
@@ -76,7 +79,7 @@ const FX = (() => {
     const r = (fx.r || 1) * k;
     const I = (fx.intensity ?? 1) * (fx.wave ? waveOf(fx, t) : 1) * (fx.outK ?? 1);
     const C = fx.color || null;
-    t *= fx.speed ?? 1;
+    const tReal = t; t = FXDATA.phaseT(fx, t); // (M2: its own clock, no jump when Speed changes)
     ctx.globalCompositeOperation = 'lighter';
     switch (fx.preset) {
       case 'torch':
@@ -328,7 +331,7 @@ const FX = (() => {
       }
       case 'vent': { // bursts every few seconds: steam, gas or fire; a thin wisp in between
         const kind = fx.variant || 'steam';
-        const L = ventLevel(fx, t / (fx.speed ?? 1));
+        const L = ventLevel(fx, tReal);
         const per = VENT_PER; const cyc = t / per + h(s); const age = (cyc - Math.floor(cyc)) * per;
         const a0 = h(s + 0.4) * TAU; const wx = Math.cos(a0); const wy = Math.sin(a0);
         if (kind === 'fire') {
@@ -413,8 +416,7 @@ const FX = (() => {
   // a vent's burst right now: 0 between bursts, up to 1 at its height (also for the light a fire vent throws)
   const VENT_PER = 5.5; // seconds from one burst to the next (at speed 1)
   function ventLevel(fx, t) {
-    const sp = fx.speed ?? 1;
-    const cyc = (t * sp) / VENT_PER + h(seedOf(fx.id || 'v'));
+    const cyc = FXDATA.phaseT(fx, t) / VENT_PER + h(seedOf(fx.id || 'v'));
     const age = (cyc - Math.floor(cyc)) * VENT_PER;
     if (age > 1.9) return 0;
     return Math.min(1, age / 0.15) * (age > 1.1 ? 1 - (age - 1.1) / 0.8 : 1);
@@ -437,7 +439,8 @@ const FX = (() => {
   // =====================================================================
   // ---------- painted areas: the area itself as a mask, and textures ----------
   // The painted area (round strokes) as a canvas in device pixels, soft-edged; cached per area and view.
-  const maskCache = new Map();
+  let maskCache = new Map();
+  const maskSets = new Map([['', maskCache]]); // (K1: the Effects panel's playing pictures have their own)
   // what an area's cached pictures depend on: how many strokes and points it has, and (Beta 3.9) where they lie.
   // Before, only the numbers counted: a map turned with everything on it moved the points without changing their
   // number, so an area away from the middle kept its old cut-out and showed nothing (or a slice) at its new place.
@@ -527,7 +530,7 @@ const FX = (() => {
     const m = ctx.getTransform(); const W = ctx.canvas.width; const H = ctx.canvas.height;
     const key = `${W}x${H}|${m.a.toFixed(4)},${m.e.toFixed(1)},${m.f.toFixed(1)}|${strokeSig(fx)}|${soft}|${grow}`;
     const id = `${fx.id}|${soft}|${grow}`; // one per softness: the water under the surf has its own
-    let e = maskCache.get(id);
+    let e = lruGet(maskCache, id);
     if (e && e.key === key) return e.c;
     const c = (e && e.c) || document.createElement('canvas');
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
@@ -539,8 +542,7 @@ const FX = (() => {
     g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineCap = 'round'; g.lineJoin = 'round';
     drawStrokes(g, fx.strokes || [], grow);
     g.filter = 'none';
-    if (maskCache.size > 60) maskCache.clear();
-    maskCache.set(id, { key, c });
+    lruSet(maskCache, id, { key, c }, 80);
     return c;
   }
   // scratch canvases the size of the layer
@@ -549,7 +551,10 @@ const FX = (() => {
   // playing picture in the Effects panel, which would else resize the layers' canvases at every frame)
   let scratches = [];
   const scratchSets = new Map([['', scratches]]);
-  function scratchSet(name = '') { let e = scratchSets.get(name); if (!e) { e = []; scratchSets.set(name, e); } scratches = e; }
+  function scratchSet(name = '') {
+    let e = scratchSets.get(name); if (!e) { e = []; scratchSets.set(name, e); } scratches = e;
+    let mc = maskSets.get(name); if (!mc) { mc = new Map(); maskSets.set(name, mc); } maskCache = mc;
+  }
   function scratch(i, W, H, B) {
     let c = scratches[i];
     if (!c) { c = document.createElement('canvas'); scratches[i] = c; }
@@ -632,9 +637,10 @@ const FX = (() => {
   }
   // Caustics: the bright net of light that ripples on shallow water (tileable, one per colour)
   const tiles = new Map();
+  const caustics = new Map(); // (K4: one per colour, the least recently used goes past 48)
   function causticTile(color) {
     const key = `c|${color}`;
-    if (tiles.has(key)) return tiles.get(key);
+    const had = lruGet(caustics, key); if (had) return had;
     const N = 256; const G = 6; const cell = N / G;
     const pts = [];
     for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) pts.push([(i + 0.15 + 0.7 * h(i * 31 + j * 7 + 1)) * cell, (j + 0.15 + 0.7 * h(i * 13 + j * 17 + 2)) * cell]);
@@ -662,8 +668,7 @@ const FX = (() => {
       }
     }
     g.putImageData(img, 0, 0);
-    tiles.set(key, c);
-    return c;
+    return lruSet(caustics, key, c, 48);
   }
   // soft value noise (tileable), white with the noise in its alpha
   function noiseTile() {
@@ -693,15 +698,14 @@ const FX = (() => {
   function tinted(tile, color) {
     let byColor = tints.get(tile);
     if (!byColor) { byColor = new Map(); tints.set(tile, byColor); }
-    if (byColor.has(color)) return byColor.get(color);
+    const had = lruGet(byColor, color); if (had) return had;
     const c = document.createElement('canvas'); c.width = tile.width; c.height = tile.height;
     const g = c.getContext('2d');
     g.drawImage(tile, 0, 0);
     g.globalCompositeOperation = 'source-in';
     g.fillStyle = color;
     g.fillRect(0, 0, c.width, c.height);
-    byColor.set(color, c);
-    return c;
+    return lruSet(byColor, color, c, 48);
   }
 
   // =====================================================================
@@ -851,8 +855,13 @@ const FX = (() => {
   }
   // a pattern laid over the map: tileIn inches per tile, moved by (ox, oy) inches, turned by rot degrees,
   // stretched sx times along its turned x axis
+  // K2 (open point): one pattern per tile and canvas, made once; only its transform changes from frame to frame. (A new
+  // pattern each call uploads the tile again, 2 to 4 times per painted area and frame: what froze the GM screen once.)
+  // Safe because the tiles never change once made, and every caller sets it as the fill right before filling.
+  const pats = new WeakMap(); // tile -> WeakMap(context -> pattern)
   function patternAt(g, tile, m, tileIn, ox, oy, rot = 0, sx = 1) {
-    const pat = g.createPattern(tile, 'repeat');
+    let byG = pats.get(tile); if (!byG) { byG = new WeakMap(); pats.set(tile, byG); }
+    let pat = byG.get(g); if (!pat) { pat = g.createPattern(tile, 'repeat'); byG.set(g, pat); }
     const k = (m.a * tileIn) / tile.width;
     // only the offset within one tile matters. Animation time is large (millions of seconds), and an
     // unwrapped offset loses so much precision on the graphics card that the texture turns into blocks
@@ -1319,7 +1328,7 @@ const FX = (() => {
     const s = seedOf(fx.id);
     const I = fx.intensity ?? 1;
     const C = fx.color || null;
-    t *= fx.speed ?? 1;
+    t = FXDATA.phaseT(fx, t); // (M2)
     const n = Math.min(160, count(8 + pts.length * 2, fx));
     const at = (i, salt) => {
       const p = pts[Math.floor(h(s + i * 13 + salt) * pts.length)];
@@ -1426,7 +1435,7 @@ const FX = (() => {
         g.setTransform(m);
         g.lineCap = 'round'; g.lineJoin = 'round';
         g.strokeStyle = foam;
-        const v = 0.55 * (fx.speed ?? 1); // inches per second
+        const v = 0.55; // inches per second (t is already the area's own clock, Speed in it: M2)
         flowLines(fx).forEach((f, li) => {
           const r = f.st.r;
           const nw = Math.max(2, Math.round(f.len / 1.5));
@@ -2961,6 +2970,8 @@ const FX = (() => {
   // is laid over the map, cut to the painted area with a soft edge, so nothing outside it moves.
   //   bg: { el, x, y, w, h, turn, key } the map picture and where it lies (map units), k: one grid square (map units)
   const swaySrc = new Map();
+  // Q3 (open point): a map switched: the picture copies of effects that are not on it go (they stayed for the session)
+  function forget(keep) { for (const id of [...swaySrc.keys()]) if (!keep.has(id)) swaySrc.delete(id); }
   function sway(ctx, fx, t, k, bg) {
     const el = bg && bg.el;
     if (!el || !(fx.strokes || []).length) return;
@@ -2994,7 +3005,7 @@ const FX = (() => {
     }
     // 2. the moved copy, in strips across the wind
     const s = seedOf(fx.id);
-    const T = t * (fx.speed ?? 1);
+    const T = FXDATA.phaseT(fx, t); // (M2)
     const [dx, dy] = flowDir(fx, s);
     const cols = Math.abs(dx) >= Math.abs(dy); // the wind blows mostly across: columns, else rows
     const len = cols ? P.w : P.h;
@@ -3042,7 +3053,7 @@ const FX = (() => {
     // Second Builder (second-water-works): the helpers creatures.js draws with
     samples, flowLines, along, heading, regionMask, regionBox, scratch, stamp, patternAt, noiseTile, causticTile, tinted, flowDir, h, count, dot, smoke, centreOf,
     areaOf, // (Beta 3.63: how big a painted area really is)
-    hits, edge, scratchSet, // (Beta 3.64: a click in an area picks it; its outline; the playing picture's own scratch canvases)
+    hits, edge, scratchSet, forget, // (Beta 3.64: a click in an area picks it; its outline; the playing picture's own scratch canvases)
     layerAlpha, // (second-birds: the Birds layer fades in and out like the others)
     setQuality, emitter, waveOf, ventLevel, region, regionLights, anchor, sway, roof, lightMask, windowIcon, darkness, glow, weather, flashes, strike, weatherOn, spell, ghost, envelope, seedOf, sprite, rgba, mix, skinOf, flowTurn };
 })();

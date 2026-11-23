@@ -88,7 +88,7 @@ function create(o) {
     return { key: `g${groupN}:${map ? map.id : ''}:${map && map.round ? map.round.n : ''}`, group: true, who: 'Everyone', pcs: party(), mapId: map ? map.id : null };
   }
   // the character card's speed and extra moves (Cunning Action …: feet once a turn; no feet given: the speed again)
-  const speedOf = (name) => { const v = Number((o.charOf(name) || {}).speed); return v >= 5 ? v : opt().speed || 30; };
+  const speedOf = (name) => { const v = Number((o.charOf(name) || {}).speed); return v >= 5 ? v : 30; }; // (P3: a card without a speed walks 30 ft; the campaign speed of before F4 no longer counts)
   const movesOf = (name) => { const sp = speedOf(name); return ((o.charOf(name) || {}).moves || []).map((x) => ({ name: x.name, ft: Number(x.ft) >= 5 ? Number(x.ft) : sp })); };
   function budget(dev, F) {
     if (!F) return null;
@@ -299,7 +299,7 @@ function create(o) {
     const P = opt();
     const map = live();
     const col = (n) => (o.charOf(n) || {}).color || null;
-    const phones = o.devices().filter((d) => d.role === 'player' && !d.local).map((d) => {
+    const phones = o.devices().filter((d) => d.role === 'player').map((d) => {
       const tok = tokenOf(d, map);
       const can = d.char ? allowed(d, map, tok) : null;
       const R = d.char ? round() : null; const B = R && R.pcs.includes(d.char) ? budget(d, R) : null;
@@ -322,7 +322,7 @@ function create(o) {
         if ('rest' in p) s.rest = Math.min(60, Math.max(0, Math.round(Number(p.rest) || 0)));
         for (const k of ['pings', 'eyes', 'trace']) if (k in p) s[k] = !!p[k];
         for (const k of ['fightTurns', 'doors', 'diagonals', 'turning']) delete s[k]; // (Prototype 6: gone)
-        if ('speed' in p) s.speed = Math.min(120, Math.max(5, Math.round((Number(p.speed) || 30) / 5) * 5));
+        // (P3: no campaign speed any more: a player's speed is on their card, 30 ft without one)
         o.save();
         return { ok: true };
       }

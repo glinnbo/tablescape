@@ -120,10 +120,10 @@ const Characters = (() => {
       const notes = h('textarea', { rows: 4, placeholder: 'Class and level, hooks, secrets … (only you see them)', maxLength: 4000, spellcheck: 'true', 'aria-label': 'Notes' }, c.notes || '');
       notes.addEventListener('change', () => set(name, { notes: notes.value }));
       body.replaceChildren(...[gatherNote(S, draw),
-        h('div', { class: 'ch-top' }, face(c, 'ch-big'), h('div', { class: 'ch-top-txt' }, h('div', { class: 'ctl-row' }, pick, h('small', { class: 'hint' }, 'Everything here is only for you')),
-          h('div', { class: 'ch-row' }, field('Played by', text('player', c.player, 'Marco', 40)), field('Colour', h('div', { class: 'ctl-row' }, col, c.color ? h('button', { class: 'btn small ghost', onclick: async () => { await set(name, { color: null }); setTimeout(draw, 150); } }, 'None') : null), 'Player screen, cards')))),
+        h('div', { class: 'ch-top' }, face(c, 'ch-big'), h('div', { class: 'ch-top-txt' }, h('div', { class: 'ctl-row' }, pick), // (H4: "only for you" is behind the panel's "?" and in the notes' placeholder)
+          h('div', { class: 'ch-row' }, field('Played by', text('player', c.player, 'Marco', 40)), field('Colour', h('div', { class: 'ctl-row' }, col, c.color ? h('button', { class: 'btn small ghost', onclick: async () => { await set(name, { color: null }); setTimeout(draw, 150); } }, 'None') : null), 'Phones, cards')))),
         h('div', { class: 'ch-sec' }, h('h3', {}, 'Pictures'), h('div', { class: 'ch-pics' },
-          picSlot('portrait', 'Portrait', ['party', 'portraits', 'tokens'], 'Turn order, player screen, button deck'), // 4.7: the Party folder first
+          picSlot('portrait', 'Portrait', ['party', 'portraits', 'tokens'], 'Turn order, phones, button deck'), // 4.7: the Party folder first
           picSlot('sprite', 'Cut-out', ['party', 'portraits'], 'Stands in a Conversation on the table'),
           picSlot('token', 'Map token', ['party', 'tokens'], 'On the map it joins this character\'s turn'))),
         h('div', { class: 'ch-cols' },
@@ -134,9 +134,8 @@ const Characters = (() => {
           h('div', { class: 'ch-sec' }, h('h3', {}, 'Languages'), text('languages', c.languages, 'Common, Elvish, Thieves\' cant', 200))),
         // Prototype 8: for the players' phones: how far they walk in a turn, and moves that add to it once a turn
         h('div', { class: 'ch-sec' }, h('h3', {}, 'Movement'), h('div', { class: 'ch-row ch-move' },
-          field('Speed', num('speed', c.speed, 5, 120, '30'), 'feet a turn, on the phone'),
-          h('div', { class: 'ch-f ch-moves' }, h('span', {}, 'Extra moves'), ...movesList(c),
-            h('small', {}, 'A button on the phone next to Dash, once a turn. No feet: the speed again.')))),
+          field('Speed', num('speed', c.speed, 5, 120, '30'), 'feet a turn, on the phone'), // (F4: empty: 30 ft, grey; P3: the old campaign speed no longer counts)
+          h('div', { class: 'ch-f ch-moves' }, h('span', {}, 'Extra moves'), ...movesList(c)))), // (H4: what they do is behind Character cards' "?")
         h('div', { class: 'ch-sec' }, h('h3', {}, 'Notes'), notes)].filter(Boolean));
     }
     draw();
@@ -196,7 +195,7 @@ const Characters = (() => {
         if (list.dataset.sig === sig) return;
         list.dataset.sig = sig;
         const here = cs.filter((c) => c.here);
-        list.replaceChildren(...(here.length ? here.map(cardEl) : [h('p', { class: 'hint' }, cs.length ? 'Nobody is here today (home screen → Players).' : 'No players yet: add them on the campaign page (Players), then fill in their cards.')]));
+        list.replaceChildren(...(here.length ? here.map(cardEl) : [h('p', { class: 'hint' }, cs.length ? 'Nobody is here today (home screen → Players).' : 'No players yet: add them on the home screen (Players), then fill in their cards.')]));
         const gone = cs.filter((c) => !c.here);
         away.replaceChildren(...(gone.length ? [h('span', { class: 'hint' }, 'Not here today: '), ...gone.map((c) => h('button', { class: 'link-btn', onclick: () => openEditor({ state: S, name: c.name }) }, c.name))] : []));
         if (check.on) {

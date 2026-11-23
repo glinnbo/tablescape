@@ -404,7 +404,7 @@ const WallsTool = (() => {
         openMenu(rc.left, rc.bottom + 4, [{ header: 'Which scene?' }, ...r.choose.map((x) => ({ label: `${x.name} (${x.walls} walls)`, icon: 'map-2', action: () => loadFile(path, x.name) }))]);
         return r;
       }
-      if (r && r.ok) toast(r.label || 'Walls loaded', { undo: () => cmd('history.undo'), ms: 6000 });
+      if (r && r.ok) toast(r.label || 'Walls loaded', { undo: () => cmd('history.undo', { mapId: r && r.mapId }), ms: 6000 });
       else if (r && r.error) toast(r.error, { kind: 'error' });
       return r;
     }

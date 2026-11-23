@@ -8,6 +8,8 @@
 //   .github/      the release build (it names the release key, and it would run there too)
 //   README.md     the developer notes; the players' README from public/ is the front page there
 //   public/       its README.md becomes the front page, its pictures go to docs/
+//   CLAUDE.md     the rules for Claude Code in this workshop, and .claude/ (its settings): they stay private
+//   notes/        the builders' notes (a copy of the claude.ai Project's docs): they stay private
 // Anything else in the public repo is replaced, so it always is a clean copy of the released version.
 //
 //   node scripts/sync-public.js          copy it (needs GH_TOKEN with Contents: read and write on glinnbo/tablescape)
@@ -23,7 +25,11 @@ const AUTHOR = { name: 'glinnbo', email: '355398862+glinnbo@users.noreply.github
 const ROOT = path.join(__dirname, '..');
 const DRY = process.argv.includes('--dry');
 const TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
-const LEAVE_OUT = (p) => p.startsWith('.github/') || p === 'README.md' || p.startsWith('public/');
+// S2 (open point): CLAUDE.md and .claude/ stay private wherever they are (not only at the top)
+const LEAVE_OUT = (p) => p.startsWith('.github/') || p === 'README.md' || p.startsWith('public/') || p.startsWith('notes/')
+  || p.split('/').pop() === 'CLAUDE.md' || p.split('/').includes('.claude');
+// what must never be in a release at all: a builder's patch, a probe of the self-test. Found: the copy stops
+const NEVER = (p) => /\.patch$/i.test(p) || /(^|\/)src\/tests\/areas\/zz\.js$/.test(p);
 
 // git, with its output as a Buffer; the token never shows in what is printed
 function git(args, opts = {}) {
@@ -50,6 +56,8 @@ function released() {
     e.data = out.subarray(nl + 1, nl + 1 + size);
     at = nl + 1 + size + 1;
   }
+  const bad = list.map((e) => e.file).filter(NEVER);
+  if (bad.length) throw new Error(`this must not go public: ${bad.join(', ')}`);
   const files = [];
   for (const e of list) {
     if (e.file === 'public/README.md') files.push(['README.md', e.mode, e.data]);
@@ -90,4 +98,6 @@ function main() {
   }
 }
 
-try { main(); } catch (e) { console.error(`sync-public: ${e.message}`); process.exit(1); }
+// T3 (open point): the self-test loads this file to check what would go public; run as a script, it copies
+if (require.main === module) { try { main(); } catch (e) { console.error(`sync-public: ${e.message}`); process.exit(1); } }
+module.exports = { LEAVE_OUT, NEVER, released };

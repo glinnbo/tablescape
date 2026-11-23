@@ -57,6 +57,78 @@ module.exports = (area) => {
     await t.until(() => !!tok(t, id), 3000, 'the token to come back');
   });
 
+  // D3 (open point): the token's wheel has Conditions and Turn order; conditions are kept on the token, show as small
+  // animations on the TV, and the turn order shows and changes the same list. Wheel overhaul: six slots, the rest
+  // (Rename …, size, light …) under More …
+  area.quick('a token\'s wheel: six slots with Conditions, Turn order and More …; conditions show on the TV and in the turn order', async (t) => {
+    const id = add(t, 7, 3);
+    const has = (c) => JSON.stringify(tok(t, id).cond || []) === JSON.stringify(c);
+    const tv = () => t.t(`(() => { const e = document.querySelector('.tv-layer.shown .sv-token[data-id="${id}"]'); const b = document.querySelector('.tv-layer.shown .sv-tagbox[data-id="${id}"]'); return e && b && { bub: b.querySelectorAll('.sv-conds .cd-bub').length, prone: e.classList.contains('cd-prone') }; })()`);
+    try {
+      await t.until(() => t.rect(`.sv-token[data-id="${id}"]`), 3000, 'the token on the GM screen');
+      t.gm().webContents.focus();
+      await t.key('V');
+      const wheel = async () => {
+        await t.rightClickSel(`.sv-token[data-id="${id}"]`);
+        await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the token\'s wheel');
+        return t.g(`[...document.querySelectorAll('#radial.on .radial-item > span')].map((x) => x.textContent)`);
+      };
+      const inOrder = () => t.state.init && t.state.init.entries.some((e) => e.tokens.includes(id));
+      const items = await wheel();
+      t.eq(items, ['Conditions', 'Turn order', 'Show', 'Hide', 'Remove', 'More …'], 'six slots: the fight, the table, hide, remove and More');
+      t.ok(!(await t.g(`(() => { const c = document.getElementById('token-card'); return !!c && c.classList.contains('on') && getComputedStyle(c).visibility !== 'hidden'; })()`)), 'the token bar steps away while the wheel is open');
+      if (inOrder()) { // (a prepared turn order takes the map's tokens by itself)
+        t.ok(await t.g(`[...document.querySelectorAll('#radial.on .radial-item')].find((b) => b.textContent.includes('Turn order')).classList.contains('on')`), 'Turn order is lit while it is in');
+        await t.clickText('#radial.on .radial-item', 'Turn order');
+        await t.until(() => !inOrder(), 3000, 'the token out of the turn order');
+        await wheel();
+      }
+      await t.clickText('#radial.on .radial-item', 'Turn order');
+      await t.until(() => t.state.init && t.state.init.entries.some((e) => e.tokens.includes(id)), 3000, 'the token in the turn order');
+      // conditions: a grid that stays open for several
+      await wheel();
+      await t.clickText('#radial.on .radial-item', 'Conditions');
+      await t.until(() => t.rect('#cond-pick'), 3000, 'the conditions');
+      t.eq(await t.count('#cond-pick .cond-chip'), 16, 'all sixteen');
+      await t.clickText('#cond-pick .cond-chip', 'Poisoned');
+      await t.clickText('#cond-pick .cond-chip', 'Prone');
+      await t.until(() => has(['Poisoned', 'Prone']), 3000, 'two conditions on the token');
+      t.ok(await t.rect('#cond-pick'), 'the grid stays open for more');
+      await t.key('Escape');
+      await t.until(async () => !(await t.rect('#cond-pick')), 2000, 'Esc closes it');
+      await t.until(async () => { const v = await tv(); return v && v.bub === 3 && v.prone; }, 3000, 'bubbles rising and the token lying down on the TV');
+      await wheel();
+      t.eq(await t.g(`[...document.querySelectorAll('#radial.on .radial-item')].find((b) => b.textContent.includes('Conditions')).querySelector('.radial-badge').textContent`), '2', 'the wheel counts them');
+      await t.g(`document.querySelector('#radial .radial-center').click()`);
+      // the turn order shows them; a change there reaches the token, in one undo step
+      const view = await t.until(() => t.g(`(() => { const I = Play.state().init; const c = I && I.cols.find((x) => x.kind === 'cond'); const e = c && I.entries.find((q) => (q.tokens || []).includes(${JSON.stringify(id)})); return e && { id: e.id, col: c.id, v: e.vals[c.id] }; })()`), 3000, 'the turn order\'s Conditions column');
+      t.eq(view.v, ['Poisoned', 'Prone'], 'the turn order shows the token\'s conditions');
+      t.handle('init.set', { id: view.id, vals: { [view.col]: ['Stunned'] } });
+      await t.until(() => has(['Stunned']), 3000, 'set in the turn order: on the token');
+      t.handle('history.undo', {});
+      await t.until(() => has(['Poisoned', 'Prone']), 3000, 'Undo brings the two back');
+      // Campaign settings → Tokens on the table: off
+      await t.g(`window.ts.settings({ tokens: { conds: false } })`);
+      await t.until(async () => { const v = await tv(); return v && !v.bub && !v.prone; }, 3000, 'switched off: nothing on the token');
+      await t.g(`window.ts.settings({ tokens: { conds: true } })`);
+      await t.until(async () => { const v = await tv(); return v && v.bub === 3; }, 3000, 'on again');
+      // Rename
+      await wheel();
+      await t.clickText('#radial.on .radial-item', 'More');
+      const more = await t.until(() => t.menu(), 3000, 'More … as a menu');
+      for (const want of ['Rename …', 'Carry light', 'Duplicate', 'Ping', 'Bigger', 'Smaller', 'Turn']) t.has(more, want, 'under More …');
+      await t.menuPick('Rename …');
+      await t.until(() => t.g(`!!document.querySelector('.modal-back form input')`), 3000, 'the name to type');
+      await t.g(`(() => { const i = document.querySelector('.modal-back form input'); i.value = 'Grimgor'; i.closest('form').requestSubmit(); })()`);
+      await t.until(() => tok(t, id).name === 'Grimgor', 3000, 'the token renamed');
+    } finally {
+      await t.g(`window.ts.settings({ tokens: { conds: true } })`);
+      const e = t.state.init && t.state.init.entries.find((q) => q.tokens.includes(id));
+      if (e) t.handle('init.remove', { ids: [e.id] });
+      t.handle('layer.remove', { mapId: t.L().id, id });
+    }
+  });
+
   // Beta 3.2: Show to the table (table-show.js)
   const onTv = (t) => t.t(`document.querySelectorAll('#table-show .show-item').length`);
   const aside = (t, id) => t.t(`(() => { const e = document.querySelector('.tv-layer.shown .sv-token[data-id="${id}"]'); return !!e && e.classList.contains('on-show'); })()`);
@@ -67,12 +139,12 @@ module.exports = (area) => {
     await t.key('V');
     await t.rightClickSel(`.sv-token[data-id="${id}"]`);
     await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the token\'s menu');
-    await t.clickText('#radial.on .radial-item', 'Show to the table');
+    await t.clickText('#radial.on .radial-item', 'Show');
     await t.until(() => t.state.show && t.state.show.ids.includes(id), 3000, 'the show to start');
     await t.until(async () => (await onTv(t)) === 1, 3000, 'the picture on the TV');
     t.ok(await aside(t, id), 'the token itself steps aside on the TV');
-    await t.sleep(1300); // landed
-    const c = await t.t(`(() => { const r = document.querySelector('#table-show .show-pic').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, W: innerWidth, H: innerHeight }; })()`);
+    // T2 (open point): waits until it has landed in the middle (a fixed 1.3 s before)
+    const c = await t.until(async () => { const v = await t.t(`(() => { const r = document.querySelector('#table-show .show-pic').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, W: innerWidth, H: innerHeight }; })()`); return Math.abs(v.x - v.W / 2) < v.W * 0.05 && Math.abs(v.y - v.H / 2) < v.H * 0.05 && v && v; }, 5000, 'the picture to land in the middle');
     t.ok(Math.abs(c.x - c.W / 2) < c.W * 0.05 && Math.abs(c.y - c.H / 2) < c.H * 0.05 && c.w <= Math.min(c.W, c.H) * 0.67, 'big, in the middle of the TV', c);
     t.ok(await t.t(`document.querySelector('#table-show .show-spot').classList.contains('on')`), 'the map dims round it');
     t.ok(await t.g(`!!document.querySelector('.sv-token.on-show') && !!document.querySelector('.show-pill')`), 'the GM screen marks it');
@@ -109,8 +181,8 @@ module.exports = (area) => {
     t.eq(tok(t, b).hidden, false, 'revealed on the map');
     await t.until(async () => (await onTv(t)) === 2, 3000, 'both on the TV');
     t.ok(await aside(t, b), 'the revealed one waits off the map until it lands');
-    await t.sleep(1500);
-    const R = await t.t(`[...document.querySelectorAll('#table-show .show-item')].map((e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width }; })`);
+    // T2: waits until both have landed side by side (a fixed 1.5 s before)
+    const R = await t.until(async () => { const v = await t.t(`[...document.querySelectorAll('#table-show .show-item')].map((e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width }; })`); return v.length === 2 && Math.abs(v[0].y - v[1].y) < 4 && v; }, 5000, 'both to land side by side');
     t.ok(Math.abs(R[0].y - R[1].y) < 4 && Math.abs(R[0].x - R[1].x) > R[0].w * 0.9, 'side by side', R);
     t.handle('show.end');
     await t.until(async () => (await onTv(t)) === 0, 3000, 'both to land');

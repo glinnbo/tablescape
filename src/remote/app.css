@@ -350,8 +350,10 @@ body:has(.ctl.drive) .toast { bottom: auto; top: calc(150px + env(safe-area-inse
 @media (prefers-reduced-motion: reduce) { .ctl.my-turn { animation: none; } }
 .abtn.seat { opacity: 0.7; }
 @media (orientation: landscape) and (max-height: 520px) {
-  .ctl.drive { grid-template-columns: 1fr auto; grid-template-rows: auto minmax(0, 1fr); column-gap: 24px; }
-  .ctl-who { grid-column: 1; } .ctl-status { grid-column: 1; }
-  .ctl.drive .stick { grid-column: 2; grid-row: 1 / 3; --pad: min(88vh, 60vw); }
-  .ctl-acts, .ctl.drive .ctl-acts { grid-column: 1; align-content: start; padding: 0 0 4px; }
+  /* O4 (open point): name, status and the buttons each a row of their own beside the stick (with two rows the buttons
+     fell into a third, below the screen) */
+  .ctl.drive { grid-template-columns: 1fr auto; grid-template-rows: auto auto minmax(0, 1fr); column-gap: 24px; }
+  .ctl-who { grid-column: 1; grid-row: 1; } .ctl-status { grid-column: 1; grid-row: 2; }
+  .ctl.drive .stick { grid-column: 2; grid-row: 1 / 4; --pad: min(88vh, 60vw); }
+  .ctl-acts, .ctl.drive .ctl-acts { grid-column: 1; grid-row: 3; align-content: start; padding: 0 0 4px; overflow-y: auto; }
 }

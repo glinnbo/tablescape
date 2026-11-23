@@ -6,6 +6,23 @@ module.exports = (area) => {
   area.before(async (K) => { await K.openDemo(); await K.send(); });
 
   const set = async (t, slots) => { const r = await t.cmd('hotbar.set', { slots }); await t.sleep(150); return r; };
+  // D9 (open point): a new campaign's page 1 says what it is for; the campaign goes again afterwards
+  area.quick('a new campaign starts with page 1 of the hotbar filled: Blackout, Mute, Start the fight, Next turn, Lightning, Break, Join code', async (t) => {
+    const fs = require('fs');
+    const ids0 = new Set(t.store.list().map((c) => c.id));
+    let id = null;
+    try {
+      await t.cmd('campaign.create', { name: 'Hotbar defaults (test)' });
+      id = t.store.cur.meta.id;
+      t.ok(!ids0.has(id), 'a new campaign');
+      t.eq((t.store.cur.meta.hotbar || []).slice(0, 10).map((x) => x && x.ref), ['blackout', 'quiet', 'fight-start', 'next', 'strike', 'break:10', 'join'], 'page 1: seven of them, 8 to 0 free');
+      t.ok((t.store.cur.meta.hotbar || []).every((x) => !x || (x.kind === 'do' && x.label && x.icon)), 'each with its name and icon');
+    } finally {
+      await t.openDemo(); await t.send();
+      if (id && id !== t.store.cur.meta.id) { const dir = t.store.findDir(id); if (dir) fs.rmSync(dir, { recursive: true, force: true }); }
+      await t.g('Home.refresh()').catch(() => {});
+    }
+  });
   const saved = (t) => t.store.cur.meta.hotbar || [];
   const press = async (t, k) => { t.gm().webContents.focus(); await t.key(k); await t.sleep(150); await t.settle(); };
   const slotMenu = async (t, i) => {

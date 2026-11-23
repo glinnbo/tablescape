@@ -369,4 +369,37 @@ module.exports = (area) => {
     await t.g(`window.ts.settings({ handout: { log: true } })`);
     await away(t);
   });
+
+  // P1 (open point): a line Tablescape adds to the session log while the GM types ("Handout shown") is kept when the
+  // typed text is saved (before, the typed text replaced it)
+  area.quick('the session log keeps a "Handout shown" line added while the GM types', async (t) => {
+    const was = (t.store.cur.meta.notes || {}).text || '';
+    t.settings.handout = { ...(t.settings.handout || {}), log: true };
+    try {
+      const base = t.handle('notes.set', { text: 'Before the evening', base: was }).text;
+      await away(t);
+      t.handle('handout.show', { path: A });
+      const added = (t.store.cur.meta.notes || {}).text || '';
+      t.ok(/Handout shown/.test(added), 'the line is added', added.slice(-80));
+      const r = t.handle('notes.set', { text: `${base}
+Typed while it was shown`, base });
+      t.ok(/Typed while it was shown/.test(r.text) && /Handout shown/.test(r.text), 'both are kept: what was typed and the line', r.text);
+    } finally { await away(t); t.handle('notes.set', { text: was }); }
+  });
+
+  // P5 (open point): a spread deleted comes back with Undo, in its place
+  area.quick('a spread deleted comes back with Undo', async (t) => {
+    await away(t);
+    t.handle('handout.show', { path: A });
+    await t.until(async () => (await onTv(t)).length === 1, 4000, 'one on the table');
+    t.ok(t.handle('handout.spread.save', { name: 'Undo spread test' }).ok, 'a spread saved');
+    const sp = (t.store.cur.meta.handoutSpreads || []).find((x) => x.name === 'Undo spread test');
+    const r = t.handle('handout.spread.remove', { id: sp.id });
+    t.ok(r.ok && r.undo, 'deleted, with an Undo', r);
+    t.ok(!(t.store.cur.meta.handoutSpreads || []).some((x) => x.id === sp.id), 'gone');
+    t.handle(r.undo.type, r.undo.payload);
+    t.ok((t.store.cur.meta.handoutSpreads || []).some((x) => x.id === sp.id && x.name === 'Undo spread test'), 'back');
+    t.handle('handout.spread.remove', { id: sp.id });
+    await away(t);
+  });
 };

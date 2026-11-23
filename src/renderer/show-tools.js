@@ -86,8 +86,8 @@ const ShowTools = (() => {
       });
       const stopAll = Hotbar.offer(c().btn('Stop all', 'player-stop', () => cmd('moment.stop', {}), { tip: 'Stop the screen effects that are on (gas, dread, frost …)' }), ctx.doHot('stop-moments'));
       c().bind(() => { stopAll.disabled = !(S().moments || []).some((m) => !m.stop); });
+      // R7 (open point): their sounds' volume is the Soundboard's (one slider for the sound effects, there)
       return h('div', { class: 'stack' },
-        c().slider({ label: 'Volume', min: 0, max: 1, step: 0.01, get: () => S().settings && S().settings.boardVolume, set: (v) => ts.settings({ boardVolume: v }), fmt: (v) => `${Math.round(v * 100)}%` }),
         list,
         c().row(stopAll));
     }
@@ -98,7 +98,7 @@ const ShowTools = (() => {
     const cues = () => (S().campaign && S().campaign.cues) || [];
     async function playCue(cq) {
       const r = await cmd('cue.play', { id: cq.id });
-      if (r && r.ok) toast(`${cq.name}`, { ms: 1800, undo: () => cmd('history.undo') });
+      if (r && r.ok) toast(`${cq.name}`, { ms: 1800, undo: () => cmd('history.undo', { mapId: r && r.mapId }) });
       else if (r && r.error) toast(r.error, { kind: 'error' });
     }
 

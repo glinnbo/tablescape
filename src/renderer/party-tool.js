@@ -182,21 +182,20 @@ const PartyTool = (() => {
         }
       });
       // Prototype 17: player tokens on this map see for themselves: the marker rests
-      const idleHint = h('p', { class: 'hint warn-text' }, 'Player tokens see for themselves on this map, so the party marker rests.');
+      const idleHint = h('p', { class: 'hint warn-text', 'data-tip': 'Player tokens see for themselves on this map' }, 'The party marker rests'); // (R8: the reason in its tip)
       bind(() => { idleHint.hidden = !(map() && Vision.markersIdle(map())); });
       out.push(idleHint);
-      const placeHint = h('p', { class: 'hint party-place-hint' });
-      bind(() => { const on = armed(); placeHint.hidden = !on; placeHint.textContent = 'Click on the map where the party stands. Esc cancels.'; });
+      // (R8: "Click on the map where the party stands" is the note that shows when it is armed; no second line here)
       if (!list.length) {
-        out.push(hint('No party on this map yet.'));
+        // (R8: no "No party on this map yet": the button below says what to do)
         const b = btn('Put the party on the map', 'users-group', () => arm(true), { kind: 'primary wide', tip: 'Then click on the map where they stand' });
         bind(() => b.classList.toggle('on', armed()));
-        out.push(row(b), placeHint);
+        out.push(row(b));
       } else {
         out.push(rows);
         const b = btn('Another party', 'plus', () => arm(!ui.party.placing), { kind: 'ghost', tip: 'For a split group: click it, then click on the map where they stand' });
         bind(() => b.classList.toggle('on', armed()));
-        out.push(row(b), placeHint);
+        out.push(row(b));
       }
       if (cur) {
         const sel = () => parties().find((f) => f.id === ui.party.sel) || current();

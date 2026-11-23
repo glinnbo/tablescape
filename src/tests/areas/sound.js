@@ -81,6 +81,43 @@ module.exports = (area) => {
     t.ok(tr.key, 'the track has a name', tr);
   });
 
+  // F5 (open point): a sound put into Audio/SFX shows in the Soundboard by itself, and goes again (no Refresh)
+  area.quick('the Soundboard follows the Sounds folder: a new file shows by itself, a removed one goes', async (t) => {
+    const fs = require('fs'); const path = require('path');
+    const src = t.lib('sfx')[0] || t.library.listLibrary().find((x) => /SFX/.test(x.path));
+    const dst = path.join(t.library.root, 'Audio', 'SFX', `Watched sound test${path.extname(src.path)}`);
+    await t.g(`Play.TB.openPanel('sound')`);
+    await t.until(async () => (await t.panels()).some((x) => x.id === 'sound'), 4000, 'the Soundboard');
+    t.ok(!(await t.g(`document.querySelector('.fp[data-id="sound"]').textContent`)).includes('Refresh'), 'no Refresh button');
+    const has = () => t.g(`document.querySelector('.fp[data-id="sound"]').textContent.includes('Watched sound test')`);
+    try {
+      fs.copyFileSync(src.path, dst);
+      await t.until(has, 6000, 'the new sound in the Soundboard by itself');
+      fs.rmSync(dst, { force: true });
+      await t.until(async () => !(await has()), 6000, 'the removed sound to go by itself');
+    } finally { fs.rmSync(dst, { force: true }); await t.g(`Play.Floats.hide('sound')`); }
+  });
+
+  // F6 (open point): a row under the preview says what sounds on the table; ✕ stops a map's own sound
+  area.quick('a row under the preview shows what sounds on the table; its ✕ stops the map\'s sound', async (t) => {
+    const m = t.L();
+    const row = () => t.g(`(() => { const r = document.querySelector('#table-ctl .hud-sound'); if (!r) return null; const s = r.querySelector('[data-from]'); return { text: r.textContent, from: s && s.dataset.from, tip: s && s.dataset.tip, x: !!r.querySelector('.icon-btn[aria-label="Stop it"]'), green: r.classList.contains('c-green') }; })()`);
+    const ch = t.store.chapterOf(m.id);
+    if (ch && ch.ambience) {
+      const a = await t.until(row, 6000, 'the chapter\'s ambience in a row');
+      t.ok(a.text.includes(ch.ambience.name) && a.from === 'chapter' && /chapter's ambience/.test(a.tip) && a.green && !a.x, 'the chapter\'s ambience: its name, its volume, green, no ✕ (it is the chapter\'s)', a);
+    }
+    const file = t.library.listLibrary().find((x) => x.kind === 'audio' && /Ambience/.test(x.path) && !(m.layers || []).some((l) => l.path === x.path)) || t.library.listLibrary().find((x) => x.kind === 'audio');
+    const id = (await t.cmd('layer.add', { mapId: m.id, path: file.path, role: 'audio' })).selected;
+    try {
+      const r = await t.until(async () => { const x = await row(); return x && x.from === 'map' && x.x && x; }, 6000, 'the map\'s sound in the row');
+      t.ok(/%/.test(r.text), 'with its volume', r);
+      await t.g(`document.querySelector('#table-ctl .hud-sound .icon-btn[aria-label="Stop it"]').click()`);
+      await t.until(() => (t.L().layers.find((l) => l.id === id) || {}).muted === true, 4000, '✕ mutes it');
+      await t.until(async () => !(await row()), 4000, 'nothing sounds: no row');
+    } finally { await t.cmd('layer.remove', { mapId: m.id, id }); }
+  });
+
   area.deep('the ambience\'s volume slider is heard: quieter in the sound window', async (t) => {
     const ch = t.store.chapterOf(t.L().id);
     const v0 = ch.ambience.volume;

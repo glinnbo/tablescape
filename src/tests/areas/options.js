@@ -36,17 +36,43 @@ module.exports = (area) => {
       await t.sleep(250);
       t.ok((await t.text('.opt-title')).startsWith(label), 'the title of the section', await t.text('.opt-title'));
       const info = await t.g(`(() => { const b = document.querySelector('.opt-body'); return { chars: b.textContent.length, controls: b.querySelectorAll('button, input, select, .seg, .toggle').length }; })()`);
-      t.ok(info.chars > 40 && info.controls >= 1, 'the section has content and controls', info);
+      t.ok(info.chars > (id === 'players' ? 20 : 40) && info.controls >= 1, 'the section has content and controls', info); // (F4: Players is the seats alone now)
     });
   }
 
-  area.quick('Performance → Load on this computer sets animations and effects together', async (t) => {
+  // F4 (open point): the phones' rules have one home (Player phones); a player's speed is on their card
+  area.quick('Campaign settings → Players keeps the seats only; the phones\' rules are in Player phones, the speed on the card', async (t) => {
+    await t.g(`App.openOptions('players')`);
+    await t.until(() => t.findText('.opt-body', 'Players sit on'), 3000, 'Players at the table');
+    const body = await t.text('.opt-body');
+    t.ok(!/Players may move their tokens|Speed without a card|A trace of the steps|Pings on the table/.test(body), 'no phone rules here any more', body);
+    await t.g('App.closeOptions()');
+    await t.g(`Play.TB.openPanel('players')`);
+    await t.until(async () => (await t.panels()).some((x) => x.id === 'players'), 4000, 'Player phones');
+    const pp = await t.g(`document.querySelector('.fp[data-id="players"]').textContent`);
+    t.ok(/Players may move their tokens/.test(pp) && /A trace of the steps/.test(pp) && /Pings on the table/.test(pp) && !/Speed without a card/.test(pp), 'Player phones has them, without "Speed without a card"');
+    await t.g(`Play.Floats.hide('players')`);
+  });
+
+  // G1 (open point): one Quality choice for the TV and your screen; the single settings under Advanced
+  area.quick('Performance → Quality sets the TV and your screen together; the single settings are under Advanced', async (t) => {
+    const s0 = { quality: t.settings.quality, gmAnim: t.settings.gmAnim, gmFx: t.settings.gmFx };
     await t.g(`App.openOptions('perf')`);
-    await t.until(() => t.findText('.opt-body', 'Load on this computer'), 3000, 'the Load switch');
-    for (const [name, v] of [['Light', 'still'], ['Full', 'smooth'], ['Balanced', 'light']]) {
-      await t.clickText('.opt-body .seg button, .opt-body .seg-btn, .opt-body [role="radio"]', name);
-      await t.until(() => t.settings.gmAnim === v && t.settings.gmFx === v, 3000, `${name} to set both`);
-    }
+    await t.until(() => t.findText('.opt-body', 'Quality'), 3000, 'the Quality switch');
+    const labels = await t.g(`[...document.querySelectorAll('.opt-body .ctl-label')].filter((e) => !e.closest('details')).map((e) => e.textContent)`);
+    t.ok(labels.includes('Quality') && !labels.includes('Effects quality') && !labels.includes('Load on this computer'), 'one quality choice on top', labels);
+    const adv = await t.g(`[...document.querySelectorAll('.opt-body details.opt-adv .ctl-label')].map((e) => e.textContent)`);
+    for (const want of ['Effects on the TV', 'Animated assets on your screen', 'Effects on your screen', 'Who draws the animations']) t.has(adv, want, 'under Advanced');
+    const lit = () => t.g(`(() => { const c = [...document.querySelectorAll('.opt-body .ctl')].find((e) => !e.closest('details') && (e.querySelector('.ctl-label') || {}).textContent === 'Quality'); const b = c && c.querySelector('.on, [aria-checked="true"], [aria-pressed="true"]'); return b ? b.textContent.trim() : ''; })()`);
+    try {
+      for (const [name, q, v] of [['Light', 'medium', 'still'], ['Best', 'high', 'smooth'], ['Balanced', 'high', 'light']]) {
+        await t.clickText('.opt-body .seg button, .opt-body .seg-btn, .opt-body [role="radio"]', name);
+        await t.until(() => t.settings.quality === q && t.settings.gmAnim === v && t.settings.gmFx === v, 3000, `${name} to set the TV and your screen`);
+        await t.until(async () => (await lit()) === name, 2000, `${name} lit`);
+      }
+      await t.g(`window.ts.settings({ quality: 'low' })`);
+      await t.until(async () => (await lit()) === '', 2000, 'a mix of its own: none lit');
+    } finally { await t.g(`window.ts.settings(${JSON.stringify(s0)})`); }
   });
 
   area.quick('a setting made in Options is saved', async (t) => {
@@ -92,24 +118,24 @@ module.exports = (area) => {
     const A = t.store.cur.meta.id;
     const was = JSON.parse(JSON.stringify(tb()));
     const deck0 = JSON.parse(JSON.stringify(t.settings.remote.decks.phone));
-    const speed0 = (t.settings.players && t.settings.players.speed) || 30;
+    const pings0 = !(t.settings.players && t.settings.players.pings === false); // (P3: the campaign speed is gone; Pings stands in for the phones' rules)
     let B = null;
     try {
       await set({ tableStyle: 'meadow', initFoes: 'enemy', seats: 'one', tokens: { shadow: true } });
-      await t.g(`window.ts.players('set', { speed: 45 })`);
+      await t.g(`window.ts.players('set', { pings: false })`);
       await t.g(`window.ts.remote('deck.set', { which: 'phone', deck: ${JSON.stringify({ ...deck0, pages: [[{ kind: 'moment', ref: 'nat20', label: 'Nat 20', icon: null }]] })} })`);
       const nat = (pages) => !!(pages && pages[0] && pages[0][0] && pages[0][0].ref === 'nat20');
-      await t.until(() => tb().tableStyle === 'meadow' && tb().initFoes === 'enemy' && tb().seats === 'one' && tb().tokens && tb().tokens.shadow === true && tb().phones && tb().phones.speed === 45 && tb().deck && nat(tb().deck.phone), 3000, 'kept in the campaign');
+      await t.until(() => tb().tableStyle === 'meadow' && tb().initFoes === 'enemy' && tb().seats === 'one' && tb().tokens && tb().tokens.shadow === true && tb().phones && tb().phones.pings === false && tb().deck && nat(tb().deck.phone), 3000, 'kept in the campaign');
       // a new campaign: like the one played last
       t.handle('campaign.create', { name: 'Settings test' });
       B = t.store.cur.meta.id;
       t.ok(B !== A, 'a new campaign is open');
-      t.eq([tb().tableStyle, tb().seats, tb().phones.speed, nat(tb().deck.phone)], ['meadow', 'one', 45, true], 'it starts like the one played last');
+      t.eq([tb().tableStyle, tb().seats, tb().phones.pings, nat(tb().deck.phone)], ['meadow', 'one', false, true], 'it starts like the one played last');
       await set({ tableStyle: 'ice', seats: 'both', tokens: { shadow: false } });
       await t.until(() => tb().tableStyle === 'ice' && tb().seats === 'both', 3000, 'its own');
       // each campaign brings its own back
       t.handle('campaign.open', { id: A });
-      await t.until(() => t.settings.tableStyle === 'meadow' && t.settings.seats === 'one' && t.settings.tokens.shadow === true && t.settings.players.speed === 45 && nat(t.settings.remote.decks.phone.pages), 3000, 'the first campaign\'s again');
+      await t.until(() => t.settings.tableStyle === 'meadow' && t.settings.seats === 'one' && t.settings.tokens.shadow === true && t.settings.players.pings === false && nat(t.settings.remote.decks.phone.pages), 3000, 'the first campaign\'s again');
       await t.until(async () => (await t.g('App.state.settings.tableStyle')) === 'meadow', 3000, 'the GM window knows it');
       t.handle('campaign.open', { id: B });
       await t.until(() => t.settings.tableStyle === 'ice' && t.settings.seats === 'both' && t.settings.tokens.shadow === false, 3000, 'the second\'s again');
@@ -128,7 +154,7 @@ module.exports = (area) => {
     } finally {
       await t.openDemo();
       await set({ tableStyle: was.tableStyle || 'ink', initFoes: was.initFoes || 'names', seats: was.seats || 'both', tokens: { shadow: !!(was.tokens && was.tokens.shadow) } });
-      await t.g(`window.ts.players('set', { speed: ${speed0} })`);
+      await t.g(`window.ts.players('set', { pings: ${pings0} })`);
       await t.g(`window.ts.remote('deck.set', { which: 'phone', deck: ${JSON.stringify(deck0)} })`);
       if (B) {
         t.handle('campaign.delete', { id: B });

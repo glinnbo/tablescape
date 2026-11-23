@@ -56,7 +56,9 @@ const Play = (() => {
   // =====================================================================
   // Commands
   // =====================================================================
-  const cmd = (type, payload) => ts.cmd(type, payload);
+  // N3 (open point): Undo and Redo first end a line of walls or a fog area being drawn (its walls may be what is undone)
+  const cmd = (type, payload) => { if (type === 'history.undo' || type === 'history.redo') endDrafts(); return ts.cmd(type, payload); };
+  function endDrafts() { try { if (Walls) Walls.endChain(); } catch { /* (not made yet) */ } cancelArea(); }
   // rAF-throttled sender for continuous input (drags, sliders); latest value per key wins.
   const pending = new Map();
   let frameQueued = false;
@@ -81,7 +83,7 @@ const Play = (() => {
   // Destructive map edits get an undo toast instead of a confirmation.
   async function undoable(type, payload, label) {
     const r = await cmd(type, payload);
-    if (r && r.ok) toast(label || r.label || 'Done', { undo: () => cmd('history.undo') });
+    if (r && r.ok) toast(label || r.label || 'Done', { undo: () => cmd('history.undo', { mapId: r.mapId }) }); // (N1: the map it was done on, also after a switch)
     return r;
   }
   async function structural(type, payload) {
@@ -192,7 +194,7 @@ const Play = (() => {
   // =====================================================================
   // Undo and redo on top; two groups: building the map (prep) and playing on it (at the table); library, campaigns, table and keys below.
   // Prototype 5: with one of these in hand the map shows whole, lit and with its effects, also beyond the TV's edge
-  const WIDE_TOOLS = ['oldschool', 'map', 'fx', 'asset', 'walls', 'notes'];
+  const WIDE_TOOLS = ['oldschool', 'map', 'fx', 'asset', 'walls'];
   const wideFor = (t) => WIDE_TOOLS.includes(t) && !(S && S.settings && S.settings.buildWide === false);
   const RAIL = [
     { group: 'history' },
@@ -384,7 +386,7 @@ const Play = (() => {
       h('div', { class: 'fps-ask-text' }, iconEl('gauge'),
         h('span', {}, h('b', {}, `The TV is stuttering (${fps} fps).`), ` Switch ${name} to ${next === 'medium' ? 'Medium' : 'Low'} effects?`, heavy ? h('small', {}, `Heaviest here: ${heavy}`) : null)),
       h('div', { class: 'fps-ask-btns' },
-        h('button', { class: 'btn small primary', onclick: () => { ts.settings({ mapQuality: { mapId, level: next } }); done(); toast(`${name} plays with ${next === 'medium' ? 'Medium' : 'Low'} effects (Settings → Performance)`); } }, `Switch to ${next === 'medium' ? 'Medium' : 'Low'}`),
+        h('button', { class: 'btn small primary', onclick: () => { ts.settings({ mapQuality: { mapId, level: next } }); done(); toast(`${name} plays lighter (Effects on the TV: ${next === 'medium' ? 'Medium' : 'Low'}; Tablescape settings → Performance)`); } }, `Switch to ${next === 'medium' ? 'Medium' : 'Low'}`),
         h('button', { class: 'btn small ghost', onclick: () => { fpsSnooze.add(mapId); done(); } }, 'Not now')));
     const done = () => { box.remove(); ui.fpsAsk = null; fpsLog.length = 0; };
     els.tctl.after(box);
@@ -425,6 +427,7 @@ const Play = (() => {
     const m = s.map;
     const switched = (m ? m.id : null) !== prevMapId;
     if (switched) {
+      endDrafts(); // (N3: a line of walls or a fog area half drawn on the map before doesn't go on here)
       if (prevMapId && !view.cam.auto) cams.set(prevMapId, { s: view.cam.s, tx: view.cam.tx, ty: view.cam.ty });
       ui.selected = null; ui.selFx = null; ui.selSpell = null; ui.aimFrom = null;
       ui.expanded = null;
@@ -536,6 +539,7 @@ const Play = (() => {
   }
 
   function setTool(t, opts = {}) {
+    if (t === 'notes') t = 'mark'; // (U1: the old Notes tool is Marks; an old rail pin may still name it)
     // 4.8: the Map tool in hand: both screens keep the fog ready for a move
     if ((t === 'map') !== (ui.tool === 'map')) { if (view) view.prepareMove(t === 'map'); cmd('move.prepare', { on: t === 'map' }); }
     if (t !== 'oldschool') OS.cancel(); // (Beta 3.22: a shape half drawn goes)
@@ -568,7 +572,7 @@ const Play = (() => {
 
   const MAP_TOOLS = {
     'point:ping': { label: 'Ping', icon: 'target' }, 'point:laser': { label: 'Laser', icon: 'pointer' }, 'point:spot': { label: 'Spotlight', icon: 'focus-2' }, 'point:measure': { label: 'Ruler', icon: 'ruler-measure' },
-    'draw:chalk': { label: 'Chalk', icon: 'scribble' }, 'draw:pen': { label: 'Pen', icon: 'ballpen' }, 'draw:text': { label: 'Label', icon: 'typography' }, 'draw:erase': { label: 'Erase', icon: 'eraser' },
+    'draw:chalk': { label: 'Chalk', icon: 'scribble' }, 'draw:pen': { label: 'Pen', icon: 'ballpen' }, 'draw:erase': { label: 'Erase', icon: 'eraser' },
     'mark:marker': { label: 'Marks', icon: 'map-pin' }, 'mark:counter': { label: 'Counter', icon: 'plus-minus' }, // (Third Builder (third-marks-tool): Text and Counter left the Toolbox; a hotbar that has them opens Marks)
   };
   const TOOLBOX_TIP = 'Map tools and panels: pointer, sketch, marks, initiative, sounds, screen effects and more';
@@ -644,8 +648,6 @@ const Play = (() => {
         tbRail.dataset.tip = `Toolbox · ${m.label} is in use (Esc: back to Select)`;
       }
     }
-    const timerBtn = els.rail.querySelector('[data-id="timer"]');
-    if (timerBtn) timerBtn.classList.toggle('is-running', !!(S && S.timer));
     const tbBtn = els.rail.querySelector('[data-id="toolbox"]');
     if (tbBtn) tbBtn.classList.toggle('is-running', !!(S && (S.timer || (S.init && S.init.running) || S.brk)));
     const talkBtn = els.rail.querySelector('[data-id="talk"]');
@@ -704,7 +706,7 @@ const Play = (() => {
       walled() ? 'Line of sight: they see what the walls allow.' : 'No walls (or line of sight off): they reveal a circle around them.',
       'What they revealed stays revealed, also when you remove the party.', 'A split group: Another party.'],
     spell: ['Pick a spell from the list, or set up your own: a shape at the side, its size, its look.', 'Click the map to cast; drag to aim a cone, line or cube.', 'Ctrl + wheel turns the area before you place it (Shift: small steps).', '+ and − change the size in 5 ft steps.',
-      'Shift snaps the aim to 15°, Alt skips the grid.', 'Right-click a placed area for its options; H hides it from the players.', 'Drag a spell onto the hotbar to cast it with a number key.', 'When it is cast: a screen effect, whether players see the squares, counting rounds, the sounds. Speakers: Settings → Sound.'],
+      'Shift snaps the aim to 15°, Alt skips the grid.', 'Right-click a placed area for its options; H hides it from the players.', 'Drag a spell onto the hotbar to cast it with a number key.', 'When it is cast: a screen effect, whether players see the squares, counting rounds, the sounds. Speakers: Tablescape settings → Sound.'],
     asset: ['Stamp places one per click, Scatter paints many.', 'Library: your own pictures and animations. Living: trees, bushes and mushrooms that move in the wind.',
       'Every living tree looks a little different and is turned a little differently; Another look gives a selected one a new look. Mixed sizes and Scatter paint a forest.',
       'The wind in the trees is the map\'s wind: Effects → Scene.', 'Look is the look of the next one you place; a picked asset shows its own look in the panel.',
@@ -717,7 +719,7 @@ const Play = (() => {
     sound: ['The chapter\'s ambience plays on every map of this chapter that has no sounds of its own.', 'A map with its own sounds replaces the chapter ambience while it is on the table. A video map\'s own sound has its row too.',
       'Fight music fades in over the ambience and out again when the fight ends. With "Start with Initiative" a fight in Initiative starts and ends it.',
       'The card that sounds on the table says Playing. Mute all fades everything out, for talk out of the game.',
-      'Music from Audio/Music fits well; a Spotify mood works too (Toolbox → Spotify).', 'Speakers and spell sounds: Settings → Sound.'],
+      'Music from Audio/Music fits well; a Spotify mood works too (Toolbox → Spotify).', 'Speakers and spell sounds: Tablescape settings → Sound.'],
     token: ['Click the map to drop one, click again for more.', 'Drag a token to move it; right-click it for its options.', 'The groups at the side: Ready (ticked for this chapter), Party, Recent and Starred. All tokens has every token by folder: click to pick one up, tick to keep it ready.',
       'Ctrl + D duplicates the selected token; Alt while dragging places it without snapping.'],
     point: () => [...({
@@ -780,6 +782,12 @@ const Play = (() => {
     for (const x of TB.PANELS) { const tips = TB.PANEL_TIPS[x.id]; if (tips) add(x.label, tips, x.id); }
     add('Snapshots', Snaps.def().tips, 'snaps');
     add('Player tokens', PLAYER_TIPS, 'player');
+    // H4: the hotbar (it has no "?" of its own)
+    add('Hotbar', ['Right-click an empty slot to pick an action, a panel or a tool for it; 1 to 0 play the slots.', 'Anything from the Library or a panel (a token, a sound, a handout, a portrait): drag it onto a slot.',
+      'A door or a window: right-click it on the map → Put on the hotbar.', 'Its shape (a row, two rows, a column): Tablescape settings → This screen, or right-click the hotbar.'], 'hotbar');
+    // H1: the chapter's one Ready list
+    add('Ready', ['Each chapter has one Ready list: the tokens, portraits, handouts and sounds you want at hand there.', 'The tick on a picture (in the Library, All tokens, the portraits\' and the handouts\' lists) puts it on the list, or takes it off. Dragging onto the Library\'s Ready row does the same.',
+      'Tokens, Conversation and Handouts show their part of it; with nothing ready yet they show everything.', 'Right-click the map → Ready to drop something from it in.'], 'ready');
     return out;
   }
   // Prototype 25: one line with what you cannot guess, shown for a few seconds when a tool is picked (Options → This screen)
@@ -885,6 +893,8 @@ const Play = (() => {
   function openPop(id, anchor) {
     if (id === 'talk' && S) { if (popId) closePop(); TB.openPanel('talk'); renderRail(); return; } // (Second Builder, second-conversation-stage: a window of its own)
     if (!POPS[id] || !S) return;
+    // N2 (open point): a chapter without a map: the map's panels don't open (they broke with "ran into a problem")
+    if (!S.map && !['toolbox', 'timer', 'talk'].includes(id)) { toast('This chapter has no map yet', { ms: 2200 }); return; }
     if (id !== 'toolbox' || popId !== 'toolbox') popTicker = null;
     if (id === 'toolbox' && popId !== 'toolbox' && !anchor && !ui.tbKeep) ui.tb = ui.tb || 'home';
     if (ui.drawer) Drawer.close();
@@ -966,7 +976,7 @@ const Play = (() => {
     const input = h('input', { type: 'checkbox', role: 'switch' });
     input.addEventListener('change', () => o.set(input.checked));
     bind(() => { input.checked = !!o.get(); });
-    return h('label', { class: 'ctl ctl-toggle' }, h('span', { class: 'ctl-label' }, o.label), input, h('span', { class: 'switch' }));
+    return h('label', { class: 'ctl ctl-toggle', 'data-tip': o.tip || null }, h('span', { class: 'ctl-label' }, o.label), input, h('span', { class: 'switch' })); // (R8: o.tip, what a hint line said)
   }
   function seg(o) {
     const wrap = h('div', { class: `seg ${o.cls || ''}`, role: 'radiogroup', 'aria-label': o.label || '' });
@@ -1184,7 +1194,8 @@ const Play = (() => {
   function oneInch() {
     if (!S.map) return;
     zoomAround(1 / grid().size, null, `one-inch-${Date.now()}`);
-    toast('Map scaled: one grid cell is now one inch on the table.', { undo: () => cmd('history.undo') });
+    const mapId = S.editMapId;
+    toast('Map scaled: one grid cell is now one inch on the table.', { undo: () => cmd('history.undo', { mapId }) });
   }
 
   // ---------- fog popover ----------
@@ -1307,7 +1318,7 @@ const Play = (() => {
 
   // ---------- effects popover ----------
   const { EMITTERS, REGIONS, LIGHTS, WEATHER, SKINS, SPELLS, SHAPES } = FXDATA;
-  // Beta 3.54: Torch, Campfire and Candles are lights now (Effects → Light → Light sources → Flame); Place keeps the rest
+  // Beta 3.54: Torch, Campfire and Candles are lights now (Effects → Lights → Flame); Place keeps the rest
   const PLACE = EMITTERS.filter((d) => !d.light);
   if (!PLACE.some((d) => d.id === ui.emitter)) ui.emitter = PLACE[0].id;
   const fxLabel = (f) => {
@@ -1850,7 +1861,7 @@ const Play = (() => {
         list.append(h('div', { class: `layer-row ${open ? 'open' : ''} ${L.hidden ? 'is-hidden' : ''}` },
           h('button', { class: 'layer-main', onclick: () => { ui[key] = open ? null : L.id; again(); } }, iconEl(def.icon), h('span', { class: 'ellipsis grow' }, def.label), iconEl(open ? 'chevron-up' : 'chevron-down')),
           h('button', { class: 'icon-btn', 'aria-label': L.hidden ? 'Show' : 'Hide', 'data-tip': L.hidden ? 'Off. Click to show it' : 'Showing. Click to hide it', onclick: () => wcmd('weather.update', { id: L.id, hidden: !L.hidden }) }, iconEl(L.hidden ? 'eye-off' : 'eye')),
-          h('button', { class: 'icon-btn', 'aria-label': 'Remove', 'data-tip': 'Remove', onclick: () => wcmd('weather.remove', { id: L.id }) }, iconEl('trash'))));
+          h('button', { class: 'icon-btn', 'aria-label': 'Remove', 'data-tip': 'Remove', onclick: async () => { const mapId = wmap().id; const r = await wcmd('weather.remove', { id: L.id }); if (r && r.ok) toast(`${def.label} removed`, { undo: () => cmd('history.undo', { mapId }) }); } }, iconEl('trash')))); // H5: with an Undo
         if (open) list.append(wxDetail(L, def, (f) => { details.push(f); f(); }, o));
       }
     });
@@ -2627,6 +2638,8 @@ const Play = (() => {
       { icon: 'cast', label: 'Send to table', key: 'T', action: () => cmd('table.send', { id: m.id }) },
       { icon: 'pencil', label: 'Rename', action: async () => { const n = await askText('Rename map', m.name); if (n) cmd('map.rename', { id: m.id, name: n }); } },
       { icon: 'copy', label: 'Duplicate', action: () => structural('map.duplicate', { id: m.id }) },
+      // A10 (open point): a new picture for this map, from its thumbnail (grid, fog, tokens and effects stay), as in the Map panel
+      { icon: 'photo', label: 'Replace the picture …', action: async () => { if (S.editMapId !== m.id) { await cmd('edit.open', { id: m.id }); } Drawer.open({ filter: 'maps', purpose: 'replace' }); } },
       Hotbar.menuItem({ kind: 'map', ref: m.id, label: m.name, icon: 'map-2' }),
       ...others.map((c) => ({ icon: 'book-2', label: `Move to ${c.name}`, action: () => cmd('map.move', { id: m.id, chapterId: c.id }) })),
       '-',
@@ -2702,6 +2715,35 @@ const Play = (() => {
     t.classList.add('on');
   }
 
+  // D4: Start the fight (Initiative panel, hotbar). Enemies still without a number: it asks to roll them first;
+  // Yes (Enter) rolls and starts, No starts as it is
+  async function startFight() {
+    const go = async (roll) => {
+      const x = await cmd('init.start', roll == null ? { ask: true } : { roll });
+      if (x && x.ask) return ask(x.ask);
+      if (x && x.ok) toast('Round 1. Next turn: Enter'); else if (x && x.error) toast(x.error, { kind: 'error' });
+    };
+    const ask = (n) => {
+      const dlg = UI.dialog('Roll the remaining enemies?', h('div', { class: 'stack' },
+        h('p', { class: 'hint' }, `${n} ${n === 1 ? 'enemy has' : 'enemies have'} no number yet.`),
+        h('div', { class: 'modal-actions' },
+          h('button', { class: 'btn ghost ini-ask-no', onclick: () => { dlg.close(); go(false); } }, 'No, start'),
+          h('button', { class: 'btn primary ini-ask-yes', onclick: () => { dlg.close(); go(true); } }, iconEl('dice'), 'Roll and start'))));
+      const yes = dlg.el.querySelector('.ini-ask-yes'); if (yes) yes.focus(); // (Y/n: Enter rolls)
+    };
+    return go(null);
+  }
+
+  // B1: Close sits right under Blackout and Mute; a slip of the mouse would shut the players' window mid-game
+  function askCloseTable() {
+    const dlg = UI.dialog('Close the table window?', h('div', { class: 'stack' },
+      h('p', { class: 'hint' }, 'The players\' TV shows your desktop until you open it again. Blackout (B) only hides the map.'),
+      h('div', { class: 'modal-actions' },
+        h('button', { class: 'btn ghost tc-close-keep', onclick: () => dlg.close() }, 'Cancel'),
+        h('button', { class: 'btn danger tc-close-go', onclick: () => { dlg.close(); if (S.table.open) cmd('table.toggle'); } }, iconEl('device-tv'), 'Close'))));
+    const keep = dlg.el.querySelector('.tc-close-keep'); if (keep) keep.focus(); // (Enter right after the click keeps it open)
+  }
+
   function renderTableCtl() {
     const c = els.tctl;
     const t = S.table;
@@ -2719,13 +2761,13 @@ const Play = (() => {
       const grip = h('span', { class: 'tc-grip', 'data-tip': 'Drag to make the preview bigger or smaller', 'aria-label': 'Preview size' }, iconEl('arrows-diagonal'));
       grip.addEventListener('pointerdown', previewDrag);
       c.append(
-        h('div', { class: 'tc-shot' }, img, grip, h('span', { class: 'tc-fps', 'data-tip': 'Frames per second on the TV. Low? Try lighter effects in Settings → Performance' })),
+        h('div', { class: 'tc-shot' }, img, grip, h('span', { class: 'tc-fps', 'data-tip': 'Frames per second on the TV. Low? Try a lighter Quality in Tablescape settings → Performance' })),
         h('div', { class: 'tc-status' }, h('span', { class: 'dot' }), h('span', { class: 'tc-text ellipsis' }),
           h('button', { class: 'icon-btn small tc-title-off', 'aria-label': 'Take the title off the table', 'data-tip': 'Take the title off the table (sending a map does it too)', onclick: () => cmd('title.show', { on: false }) }, iconEl('x'))),
         h('div', { class: 'tc-btns' },
           Hotbar.offer(h('button', { class: 'btn tc-black', 'data-key': 'B', onclick: () => cmd('table.blackout') }, iconEl('screen-share-off'), h('span', {}, 'Blackout')), doHot('blackout')),
           Hotbar.offer(h('button', { class: 'btn tc-quiet', onclick: () => cmd('sound.quiet') }, iconEl('volume'), h('span', {}, 'Mute')), doHot('quiet')),
-          h('button', { class: 'btn tc-open', onclick: () => cmd('table.toggle') }, iconEl('device-tv'), h('span', {}, 'Open'))),
+          h('button', { class: 'btn tc-open', onclick: () => (S.table.open ? askCloseTable() : cmd('table.toggle')) }, iconEl('device-tv'), h('span', {}, 'Open'))),
         h('div', { class: 'tc-hud' }), // (Beta 3.15: sorted by colour: combat, what is on the TV, the rest; Spotify last)
         h('div', { class: 'tc-moments' }),
         h('div', { class: 'tc-spotify' }));
@@ -2815,6 +2857,7 @@ const Play = (() => {
       g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); g.removeEventListener('pointercancel', up);
       els.tctl.classList.remove('sizing');
       setPreviewWidth(w0 + (x0 - ev.clientX), true);
+      if (Floats) Floats.avoidPreview(); // (B2: a bigger preview pushes the panels it reaches aside)
     };
     g.addEventListener('pointermove', move); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up);
   }
@@ -3116,10 +3159,19 @@ const Play = (() => {
     })), '-', { header: `Its picture: ${pctOf(own)} of its squares` },
     { icon: 'minus', label: `Smaller (${pctOf(Math.max(0.5, own - 0.1))})`, action: () => setPic(Math.max(0.5, own - 0.1)) },
     { icon: 'plus', label: `Bigger (${pctOf(Math.min(2, own + 0.1))})`, action: () => setPic(Math.min(2, own + 0.1)) },
-    { icon: own === 1 ? 'check' : null, checked: own === 1, label: `As set in Settings → Tokens (${pctOf(1)})`, action: () => setPic(1) }]);
+    { icon: own === 1 ? 'check' : null, checked: own === 1, label: `As set in Tablescape settings → Tokens (${pctOf(1)})`, action: () => setPic(1) }]);
   }
   // a token that changes size keeps sitting on the grid
   const snapFor = (l, size) => Geom.snap(grid(), l.x, l.y, size);
+  // N5 (open point): Bigger and Smaller step through the D&D sizes (Tiny, Medium, Large, Huge, Gargantuan, then 6 and 8
+  // squares) and keep the token on the grid, as the size menu does (half steps left it half a square off)
+  const TOKEN_STEPS = [0.5, 1, 2, 3, 4, 6, 8];
+  function stepSize(l, dir) {
+    const cur = l.size || 1;
+    const next = dir > 0 ? TOKEN_STEPS.find((v) => v > cur + 1e-6) : [...TOKEN_STEPS].reverse().find((v) => v < cur - 1e-6);
+    if (next == null) return null;
+    return cmd('layer.update', { id: l.id, size: next, ...snapFor(l, next) });
+  }
   // ---------- token names: rename one or all copies, and the name tag (Off / Only me / Players too) ----------
   const TAG_LOOK = { off: { label: 'No name tag', icon: 'tag', tip: 'Name tag: off' }, gm: { label: 'Name tag: only me', icon: 'tag', tip: 'Name tag on your screen only' }, all: { label: 'Name tag: players see it', icon: 'tag', tip: 'Name tag on the table too (not while the token is hidden)' } };
   const copiesOf = (l) => (map() ? map().layers.filter((x) => x.role === 'token' && x.path === l.path && !x.named) : []);
@@ -3132,7 +3184,7 @@ const Play = (() => {
       // Prototype 17: any token can be a player's (a familiar, a summon, an ally): it sees and carries their light
       ...(((S.chars || []).length && !pcOf(l)) ? ['-', { header: 'Make this a player token' }, ...(S.chars || []).filter((c) => c.here).map((c) => ({ icon: 'user', label: c.name, action: () => cmd('layer.update', { id: l.id, player: c.name, stepLabel: 'Player token' }) }))] : []),
       '-', { header: 'Name tag' },
-      ...['off', 'gm', 'all'].map((t) => ({ icon: (l.tag || 'off') === t ? 'check' : null, checked: (l.tag || 'off') === t, label: { off: 'Off', gm: 'Only me (my screen)', all: 'Players see it too' }[t], action: () => cmd('layer.update', { id: l.id, tag: t }) })),
+      ...['off', 'gm', 'all'].map((t) => ({ icon: (l.tag || 'off') === t ? 'check' : null, checked: (l.tag || 'off') === t, label: { off: 'Off', gm: 'Only me (my screen)', all: 'Players too' }[t], action: () => cmd('layer.update', { id: l.id, tag: t }) })),
     ]);
   }
   async function renameToken(l) {
@@ -3152,10 +3204,10 @@ const Play = (() => {
     return [
       h('button', { class: 'card-title card-name ellipsis', 'data-tip': 'Rename, name tag', onclick: (e) => nameMenu(e.currentTarget, l) }, iconEl('user'), `${l.name}${l.n ? ` ${l.n}` : ''}`, iconEl('pencil', 'card-pen')),
       ib(tag.icon, `${tag.tip}. Click to change`, (e) => nameMenu(e.currentTarget, l), { on: (l.tag || 'off') !== 'off', cls: `card-tag tag-${l.tag || 'off'}` }),
-      ib('minus', 'Smaller', () => cmd('layer.update', { id: l.id, size: Math.max(0.5, l.size - 0.5) })),
+      ib('minus', 'Smaller', () => stepSize(l, -1)),
       h('button', { class: `card-size ${tokSet().card === 'compact' ? '' : 'wide'}`, 'data-tip': `${PlayTools.sizeName(l.size)}. Click to change the size`, onclick: (e) => sizeMenu(e.currentTarget, l) },
         tokSet().card === 'compact' ? PlayTools.sizeShort(l.size) : PlayTools.sizeName(l.size)),
-      ib('plus', 'Bigger', () => cmd('layer.update', { id: l.id, size: Math.min(8, l.size + 0.5) })),
+      ib('plus', 'Bigger', () => stepSize(l, 1)),
       cardSep(),
       ib('rotate-clockwise', 'Turn 45°', () => cmd('layer.update', { id: l.id, rotation: ((l.rotation || 0) + 45) % 360 })),
       ib(l.hidden ? 'eye-off' : 'eye', l.hidden ? 'Hidden. Click to show players' : 'Hide from players', () => cmd('layer.update', { id: l.id, hidden: !l.hidden }), { on: l.hidden, key: 'H' }),
@@ -3191,7 +3243,7 @@ const Play = (() => {
     openMenu(...menuAt(e), [{ header: `${l.name}${l.n ? ` ${l.n}` : ''} (${name})` },
       { icon: 'pencil', label: 'Rename the token …', action: () => renameToken(l) },
       { header: 'Name tag' },
-      ...['off', 'gm', 'all'].map((t) => ({ icon: tag === t ? 'check' : null, checked: tag === t, label: { off: 'Off', gm: 'Only me (my screen)', all: 'Players see it too' }[t], action: () => cmd('layer.update', { id: l.id, tag: t }) })),
+      ...['off', 'gm', 'all'].map((t) => ({ icon: tag === t ? 'check' : null, checked: tag === t, label: { off: 'Off', gm: 'Only me (my screen)', all: 'Players too' }[t], action: () => cmd('layer.update', { id: l.id, tag: t }) })),
       '-',
       { icon: 'id-badge-2', label: `${name}'s character card …`, action: () => Characters.openEditor({ state: () => S, name }) },
       { icon: 'user-x', label: 'Not a player token', action: () => cmd('layer.update', { id: l.id, player: false, stepLabel: 'Not a player token' }) },
@@ -3214,10 +3266,10 @@ const Play = (() => {
         () => (phones && mv.left != null ? ts.players('resetChar', { name }).then((r) => r && r.ok && toast(`${name}: movement again`, { ms: 1600 })) : openPlayer(name, l.id)), { cls: 'pc-move' }) : null,
       hp ? chip('heart', hp, c.hp ? 'HP now (from the turn order). Click to change' : 'Max HP. Click to change', () => openPlayer(name, l.id, 'hp'), { cls: `pc-hp ${c.down ? 'down' : ''}` }) : null,
       cardSep(),
-      ib('minus', 'Smaller', () => cmd('layer.update', { id: l.id, size: Math.max(0.5, l.size - 0.5) })),
+      ib('minus', 'Smaller', () => stepSize(l, -1)),
       h('button', { class: `card-size ${tokSet().card === 'compact' ? '' : 'wide'}`, 'data-tip': `${PlayTools.sizeName(l.size)}. Click to change the size`, onclick: (e) => sizeMenu(e.currentTarget, l) },
         tokSet().card === 'compact' ? PlayTools.sizeShort(l.size) : PlayTools.sizeName(l.size)),
-      ib('plus', 'Bigger', () => cmd('layer.update', { id: l.id, size: Math.min(8, l.size + 0.5) })),
+      ib('plus', 'Bigger', () => stepSize(l, 1)),
       ib('rotate-clockwise', 'Turn 45°', () => cmd('layer.update', { id: l.id, rotation: ((l.rotation || 0) + 45) % 360 })),
       ib(l.hidden ? 'eye-off' : 'eye', l.hidden ? 'Hidden. Click to show players' : 'Hide from players', () => cmd('layer.update', { id: l.id, hidden: !l.hidden }), { on: l.hidden, key: 'H', cls: 'pc-hide' }),
       ib('dots', 'More: name tag, character card, not a player token, remove', (e) => pcMoreMenu(e, l, name)),
@@ -3424,7 +3476,7 @@ const Play = (() => {
     if (lit) { cmd('fx.remove', { id: lit.id }); return; }
     const d = LIGHTS.find((x) => x.id === ui.lt.plain) || LIGHTS[1]; // (Beta 3.54: the Light panel's Just light)
     cmd('fx.add', { kind: 'light', preset: d.id, attachTo: l.id, x: l.x, y: l.y, bright: d.bright, dim: d.dim, color: d.color, ...(d.cone ? { cone: d.cone, angle: 0 } : {}) });
-    if (!map().light.darkness) toast(`${l.name} carries a ${d.label.toLowerCase()}. It shows once the map is dark (Effects → Light).`);
+    if (!map().light.darkness) toast(`${l.name} carries a ${d.label.toLowerCase()}. It shows once the map is dark (Effects → Scene → Darkness).`);
   }
   function selectSpell(id) {
     ui.selSpell = id;
@@ -3481,24 +3533,25 @@ const Play = (() => {
     if (sid) { spellRadial(spellOf(sid), pt, clientX, clientY); return; }
     const roomR = 3 / zoom();
     const area = areaAt(pt); const room = area ? null : roomAt(pt); // a marked area wins over the walled room
+    // Wheel overhaul: the fog, a token and a spell first; the rest under More …
     Radial.open(clientX, clientY, [
-      { icon: 'target', label: 'Ping', run: () => ts.ping({ mapId: S.editMapId, ...pt }) },
       area ? { icon: 'polygon', label: `Reveal ${area.name}`, run: () => revealRings(area.rings, 'reveal', pt, area.name) }
         : room ? { icon: 'door', label: 'Reveal room', run: () => revealRings(room.rings, 'reveal', pt) }
           : { icon: 'eye', label: 'Reveal here', run: () => cmd('fog.op', { mode: 'reveal', shape: 'circle', x: pt.x, y: pt.y, r: roomR }) },
+      area ? { icon: 'eye-off', label: `Cover ${area.name}`, run: () => revealRings(area.rings, 'cover', pt, area.name) }
+        : room ? { icon: 'eye-off', label: 'Cover room', run: () => revealRings(room.rings, 'cover', pt) }
+          : { icon: 'eye-off', label: 'Cover here', run: () => cmd('fog.op', { mode: 'cover', shape: 'circle', x: pt.x, y: pt.y, r: roomR }) },
       trayItems().length
         ? { icon: 'bookmarks', label: 'Ready', keep: true, run: () => trayRadial(pt, clientX, clientY) }
         : { icon: 'user', label: 'Add token', run: () => Drawer.open({ cat: 'tokens', purpose: 'place', at: pt }) },
       { icon: 'wand', label: 'Cast spell', keep: true, run: () => castRadial(pt, clientX, clientY) },
+      { icon: 'target', label: 'Ping', run: () => ts.ping({ mapId: S.editMapId, ...pt }) },
       { icon: 'flame', label: 'Effect', keep: true, run: () => effectRadial(pt, clientX, clientY) },
       { icon: 'sun-moon', label: 'Light', keep: true, run: () => moodRadial(clientX, clientY) },
       isLive()
         ? { icon: 'screen-share-off', label: S.table.blackout ? 'Unblack' : 'Blackout', run: () => cmd('table.blackout') }
         : { icon: 'cast', label: 'Send to table', run: () => cmd('table.send') },
       { icon: 'arrow-back-up', label: 'Undo', disabled: !S.history.canUndo, run: () => cmd('history.undo') },
-      area ? { icon: 'eye-off', label: `Cover ${area.name}`, run: () => revealRings(area.rings, 'cover', pt, area.name) }
-        : room ? { icon: 'eye-off', label: 'Cover room', run: () => revealRings(room.rings, 'cover', pt) }
-          : { icon: 'eye-off', label: 'Cover here', run: () => cmd('fog.op', { mode: 'cover', shape: 'circle', x: pt.x, y: pt.y, r: roomR }) },
     ], 'Here');
   }
   function tokenRadial(l, pt, x, y) {
@@ -3506,42 +3559,70 @@ const Play = (() => {
     if (ui.tool !== 'select') setTool('select');
     ui.selected = l.id; view.setSelected(l.id); placeCard();
     const lit = tokenLight(l.id);
-    // Prototype 14 / 17: a player's token: the player panel and their sight instead of Duplicate and a light
+    // Wheel overhaul: the five that matter in play first (the fight, the table, hide, remove); the rest under More …
+    // (size and turning are also on the token bar)
+    const sh = showItems(l);
+    const hide = { icon: l.hidden ? 'eye' : 'eye-off', label: l.hidden ? 'Unhide' : 'Hide', hint: l.hidden ? 'Hidden from the table: click to show it' : 'Hide it from the table', run: () => cmd('layer.update', { id: l.id, hidden: !l.hidden }) };
+    const remove = { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('layer.remove', { id: l.id }) };
+    const ping = { icon: 'target', label: 'Ping', run: () => ts.ping({ mapId: S.editMapId, ...pt }) };
+    const size = [
+      { icon: 'plus', label: 'Bigger', run: () => stepSize(l, 1) },
+      { icon: 'minus', label: 'Smaller', run: () => stepSize(l, -1) },
+      { icon: 'rotate-clockwise', label: 'Turn', run: () => cmd('layer.update', { id: l.id, rotation: ((l.rotation || 0) + 45) % 360 }) }];
+    // Prototype 14 / 17: a player's token: the player panel and their sight instead of Rename, Duplicate and a light
     const pc = pcOf(l);
     if (pc) {
       const c = pcCard(pc) || { eye: true };
-      Radial.open(x, y, [
-        { icon: 'plus', label: 'Bigger', run: () => cmd('layer.update', { id: l.id, size: Math.min(8, l.size + 0.5) }) },
-        { icon: 'rotate-clockwise', label: 'Turn', run: () => cmd('layer.update', { id: l.id, rotation: ((l.rotation || 0) + 45) % 360 }) },
-        { icon: l.hidden ? 'eye' : 'eye-off', label: l.hidden ? 'Show' : 'Hide', run: () => cmd('layer.update', { id: l.id, hidden: !l.hidden }) },
-        { icon: 'user', label: 'Player …', run: () => openPlayer(pc, l.id) },
-        { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('layer.remove', { id: l.id }) },
-        { icon: c.eye ? 'eye-off' : 'eye', label: c.eye ? 'Sight off' : 'Sight on', run: () => charSet(pc, { eye: !c.eye }) },
-        ...showItems(l),
-        { icon: 'target', label: 'Ping', run: () => ts.ping({ mapId: S.editMapId, ...pt }) },
-        { icon: 'minus', label: 'Smaller', run: () => cmd('layer.update', { id: l.id, size: Math.max(0.5, l.size - 0.5) }) },
-      ], `${l.name} (${pc})`);
+      Radial.open(x, y, [...fightItems(l, x, y), { icon: 'user', label: 'Player …', run: () => openPlayer(pc, l.id) }, ...sh.slice(0, 1), remove,
+        { icon: c.eye ? 'eye-off' : 'eye', label: c.eye ? 'Sight off' : 'Sight on', run: () => charSet(pc, { eye: !c.eye }) }, hide, ping, ...sh.slice(1), ...size], `${l.name} (${pc})`);
       return;
     }
-    Radial.open(x, y, [
-      { icon: 'plus', label: 'Bigger', run: () => cmd('layer.update', { id: l.id, size: Math.min(8, l.size + 0.5) }) },
-      { icon: 'rotate-clockwise', label: 'Turn', run: () => cmd('layer.update', { id: l.id, rotation: ((l.rotation || 0) + 45) % 360 }) },
-      { icon: l.hidden ? 'eye' : 'eye-off', label: l.hidden ? 'Show' : 'Hide', run: () => cmd('layer.update', { id: l.id, hidden: !l.hidden }) },
-      { icon: 'copy', label: 'Duplicate', run: () => duplicateToken(l) },
-      { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('layer.remove', { id: l.id }) },
+    Radial.open(x, y, [...fightItems(l, x, y), ...sh.slice(0, 1), hide, remove,
+      { icon: 'pencil', label: 'Rename …', run: () => renameToken(l) },
       { icon: 'bulb', label: lit ? 'Put out light' : 'Carry light', run: () => toggleTokenLight(l) },
-      ...showItems(l),
-      { icon: 'target', label: 'Ping', run: () => ts.ping({ mapId: S.editMapId, ...pt }) },
-      { icon: 'minus', label: 'Smaller', run: () => cmd('layer.update', { id: l.id, size: Math.max(0.5, l.size - 0.5) }) },
-    ], l.name);
+      { icon: 'copy', label: 'Duplicate', run: () => duplicateToken(l) }, ping, ...sh.slice(1), ...size], l.name);
   }
   // Beta 3.2: show a token to the table (table-show.js): only for the map on the table. While one turns, more join it.
+  // D3 (open point): a fight from the token's wheel: its conditions, and into or out of the turn order
+  function fightItems(l, x, y) {
+    const e = S.init && (S.init.entries || []).find((q) => (q.tokens || []).includes(l.id));
+    const n = (l.cond || []).length;
+    return [{ icon: 'tags', label: 'Conditions', badge: n || null, hint: n ? l.cond.join(', ') : 'Poisoned, Prone, Stunned …', run: () => condPicker(x, y, l) },
+      e ? { icon: 'swords', label: 'Turn order', cls: 'on', hint: 'In the turn order: click to take it out', run: () => cmd('init.remove', { ids: [e.id] }).then((r) => { if (r && r.ok) toast(r.label, { undo: () => cmd('init.restore') }); }) }
+        : { icon: 'swords', label: 'Turn order', hint: 'Not in the turn order: click to add it', run: () => cmd('init.addToken', { id: l.id }).then((r) => { if (r && r.ok) toast(r.label, { ms: 1800 }); else if (r && r.error) toast(r.error, { kind: 'error' }); }) }];
+  }
+  // a token's conditions from a small grid that stays open (several at once); Esc or a click elsewhere closes it
+  function condPicker(x, y, l) {
+    const old = document.getElementById('cond-pick');
+    if (old) old.remove();
+    let list = [...(l.cond || [])];
+    const grid = h('div', { class: 'cond-grid' });
+    const paint = () => { for (const b of grid.children) { const on = list.includes(b.dataset.v); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } };
+    for (const c of CONDS) {
+      grid.append(h('button', { class: 'cond-chip', dataset: { v: c }, onclick: () => {
+        list = list.includes(c) ? list.filter((q) => q !== c) : [...list, c];
+        paint();
+        cmd('layer.update', { id: l.id, cond: list, stepLabel: 'Conditions' });
+      } }, c));
+    }
+    const box = h('div', { id: 'cond-pick', class: 'cond-pick', role: 'dialog', 'aria-label': `Conditions of ${l.name}` },
+      h('div', { class: 'menu-head' }, `${l.name}${l.n ? ` ${l.n}` : ''}`), grid);
+    document.body.append(box);
+    paint();
+    const r = box.getBoundingClientRect();
+    box.style.left = `${Math.max(4, Math.min(x - r.width / 2, innerWidth - r.width - 4))}px`;
+    box.style.top = `${Math.max(4, Math.min(y - r.height / 2, innerHeight - r.height - 4))}px`;
+    const off = (ev) => { if (!box.contains(ev.target)) close(); };
+    const key = (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } };
+    function close() { box.remove(); document.removeEventListener('pointerdown', off, true); document.removeEventListener('keydown', key, true); }
+    setTimeout(() => { document.addEventListener('pointerdown', off, true); document.addEventListener('keydown', key, true); }, 0);
+  }
   function showItems(l) {
     if (!S || !S.table || S.table.liveMapId !== S.editMapId) return [];
     const sh = S.show && S.show.phase === 'show' && S.show.mapId === S.editMapId ? S.show : null;
     if (sh && sh.ids.includes(l.id)) return [{ icon: 'rotate-360', label: 'Bring back', run: () => cmd('show.end') }];
     const go = (reveal) => cmd('show.start', { id: l.id, reveal }).then((r) => { if (r && !r.ok && r.error) toast(r.error, { kind: 'error' }); });
-    const items = [{ icon: 'rotate-360', label: sh ? 'Add to the show' : 'Show to the table', run: () => go(false) }];
+    const items = [{ icon: 'rotate-360', label: sh ? 'Add to show' : 'Show', hint: sh ? 'Add it to the show on the TV' : 'Show it to the table: big in the middle of the TV', run: () => go(false) }];
     if (l.hidden) items.push({ icon: 'eye-check', label: sh ? 'Add and reveal' : 'Show and reveal', run: () => go(true) });
     return items;
   }
@@ -3551,7 +3632,7 @@ const Play = (() => {
     Radial.open(x, y, [
       { icon: 'bolt', label: 'Cast again', run: () => cmd('spell.burst', { id: sp.id }) },
       { icon: 'plus', label: 'Round +1', run: () => cmd('spell.update', { id: sp.id, rounds: (sp.rounds ?? 0) + 1 }) },
-      { icon: sp.hidden ? 'eye' : 'eye-off', label: sp.hidden ? 'Show' : 'Hide', run: () => cmd('spell.update', { id: sp.id, hidden: !sp.hidden }) },
+      { icon: sp.hidden ? 'eye' : 'eye-off', label: sp.hidden ? 'Unhide' : 'Hide', run: () => cmd('spell.update', { id: sp.id, hidden: !sp.hidden }) },
       { icon: 'hourglass', label: sp.mode === 'stay' ? 'Let it fade' : 'Keep it', run: () => cmd('spell.update', { id: sp.id, mode: sp.mode === 'stay' ? 'burst' : 'stay' }) },
       { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('spell.remove', { id: sp.id }) },
       { icon: 'grid-4x4', label: sp.squares ? 'Hide squares' : 'Show squares', run: () => cmd('spell.update', { id: sp.id, squares: !sp.squares }) },
@@ -3564,14 +3645,16 @@ const Play = (() => {
     selectFx(f.id);
     const light = Fixtures.isLight(f); // (Beta 3.54: every light, its reach and lit or put out)
     Radial.open(x, y, [
-      { icon: 'plus', label: light ? 'More light' : 'Bigger', run: () => (light ? cmd('fx.lightSet', { id: f.id, bright: (f.bright || 0) + 5 }) : cmd('fx.update', f.kind === 'region' ? { id: f.id, intensity: Math.min(2, (f.intensity ?? 1) + 0.2) } : { id: f.id, r: f.r * 1.25 })) },
-      { icon: f.hidden ? 'eye' : 'eye-off', label: f.hidden ? 'Show' : 'Hide', run: () => cmd('fx.update', { id: f.id, hidden: !f.hidden }) },
+      // N9 (open point): the same words and limits as the effect's card: a painted area is Stronger / Weaker, a placed one
+      // Bigger / Smaller between 0.1 and 8
+      { icon: 'plus', label: light ? 'More light' : f.kind === 'region' ? 'Stronger' : 'Bigger', run: () => (light ? cmd('fx.lightSet', { id: f.id, bright: (f.bright || 0) + 5 }) : cmd('fx.update', f.kind === 'region' ? { id: f.id, intensity: round(Math.min(2, (f.intensity ?? 1) + 0.2), 2) } : { id: f.id, r: round(Math.min(8, f.r * 1.25), 3) })) },
+      { icon: f.hidden ? 'eye' : 'eye-off', label: f.hidden ? 'Unhide' : 'Hide', run: () => cmd('fx.update', { id: f.id, hidden: !f.hidden }) },
       light ? { icon: f.lit === false ? 'bulb' : 'bulb-off', label: f.lit === false ? 'Light it' : 'Put it out', run: () => cmd('fx.lit', { id: f.id, on: f.lit === false }) } : null,
       f.attachTo
         ? { icon: 'user-circle', label: 'Leave here', run: () => { const p = view.fxPos(f); cmd('fx.update', { id: f.id, attachTo: null, x: p.x, y: p.y }); } }
         : { icon: 'copy', label: 'Duplicate', disabled: f.kind === 'region', run: () => cmd('fx.duplicate', { id: f.id, dx: grid().size, dy: 0 }) },
       { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('fx.remove', { id: f.id }) },
-      { icon: 'minus', label: light ? 'Less light' : 'Smaller', run: () => (light ? cmd('fx.lightSet', { id: f.id, bright: Math.max(5, (f.bright || 5) - 5) }) : cmd('fx.update', f.kind === 'region' ? { id: f.id, intensity: Math.max(0.1, (f.intensity ?? 1) - 0.2) } : { id: f.id, r: f.r / 1.25 })) },
+      { icon: 'minus', label: light ? 'Less light' : f.kind === 'region' ? 'Weaker' : 'Smaller', run: () => (light ? cmd('fx.lightSet', { id: f.id, bright: Math.max(5, (f.bright || 5) - 5) }) : cmd('fx.update', f.kind === 'region' ? { id: f.id, intensity: round(Math.max(0.1, (f.intensity ?? 1) - 0.2), 2) } : { id: f.id, r: round(Math.max(0.1, f.r / 1.25), 3) })) },
     ].filter(Boolean), fxLabel(f));
   }
   const DEFAULT_RECENT = ['Fireball', 'Burning Hands', 'Thunderwave', 'Lightning Bolt', 'Fog Cloud', 'Spirit Guardians', 'Darkness'];
@@ -3615,12 +3698,24 @@ const Play = (() => {
   }
   // Beta 3.15: a right-click while it is open only closes it (it used to open a new one at once); a click on its middle
   // closes it; opened with { modal: true } (the Map table), the click that closes it does nothing else.
+  // Wheel overhaul: at most six slots: the first five items (each wheel lists them most important first) and More …,
+  // which opens the rest as a plain menu. it.hint: what the middle says while the pointer is on it; it.badge: a number.
+  const RADIAL_MAX = 6;
   const Radial = (() => {
     let el = null; let shutAt = -1e9; let modal = false;
-    function open(x, y, items, title, o = {}) {
+    function open(x, y, items0, title, o = {}) {
       if (performance.now() - shutAt < 350) return; // (the right-click that just closed it)
       close();
       modal = !!o.modal;
+      let items = items0.filter(Boolean);
+      if (items.length > RADIAL_MAX) { // (Remove and the like always stay on the wheel)
+        const bad = items.filter((it) => it.danger).slice(0, 1);
+        const top = [...items.filter((it) => !bad.includes(it)).slice(0, RADIAL_MAX - 1 - bad.length), ...bad];
+        const rest = items.filter((it) => !top.includes(it));
+        items = [...items.filter((it) => top.includes(it)), { icon: 'dots', label: 'More …', hint: rest.map((it) => it.label).join(', '), run: () => openMenu(x, y, [{ header: title }, ...rest.map((it) => ({
+          icon: it.icon, label: it.label, danger: it.danger, disabled: it.disabled, checked: /(^|\s)on(\s|$)/.test(it.cls || ''), action: it.run }))]) }];
+      }
+      document.body.classList.add('radial-open');
       const R = Math.max(112, Math.round((items.length * 86) / (2 * Math.PI))); // more items: a wider ring
       el = h('div', { id: 'radial', role: 'menu' });
       const center = h('div', { class: 'radial-center', 'data-tip': 'Close', onclick: () => close() }, h('span', {}, title));
@@ -3630,10 +3725,11 @@ const Play = (() => {
         const b = h('button', {
           class: `radial-item ${it.danger ? 'danger' : ''} ${it.cls || ''}`, role: 'menuitem', disabled: it.disabled,
           style: { left: `${Math.cos(a) * R}px`, top: `${Math.sin(a) * R}px` },
-          onpointerenter: () => { center.firstChild.textContent = it.label; },
+          onpointerenter: () => { center.firstChild.textContent = it.hint || it.label; },
           onpointerleave: () => { center.firstChild.textContent = title; },
           onclick: () => { if (!it.keep) close(); it.run(); },
-        }, it.thumb ? h('span', { class: 'radial-thumb' }, Thumbs.img(it.thumb.path, it.thumb.kind, null, 'thumb')) : iconEl(it.icon), h('span', {}, it.label));
+        }, it.thumb ? h('span', { class: 'radial-thumb' }, Thumbs.img(it.thumb.path, it.thumb.kind, null, 'thumb')) : iconEl(it.icon), h('span', {}, it.label),
+        it.badge ? h('b', { class: 'radial-badge' }, String(it.badge)) : null);
         if (it.thumb) b.classList.add('has-thumb');
         el.append(b);
       });
@@ -3643,7 +3739,7 @@ const Play = (() => {
       el.style.top = `${clamp(y, m, innerHeight - m)}px`;
       requestAnimationFrame(() => el && el.classList.add('on'));
     }
-    function close() { if (el) { el.remove(); el = null; } }
+    function close() { if (el) { el.remove(); el = null; } document.body.classList.remove('radial-open'); }
     document.addEventListener('pointerdown', (e) => {
       if (!el || (e.target.closest && e.target.closest('#radial'))) return;
       const eat = modal && e.button === 0;
@@ -3767,7 +3863,7 @@ const Play = (() => {
       tool: typeof r === 'string' && (r.includes(':') || (railItem(r) || {}).tool) ? 'switch to this tool (again: its panel)' : 'open or close it',
       door: 'open or close this door',
       do: doValue(r) ? doValue(r).def.what : ({ send: 'send this map to the table', blackout: 'blackout on or off', quiet: 'all table sound out, again to bring it back', next: 'next turn (no fight: next round)', fight: 'fight music on or off',
-        strike: 'a lightning flash on the table', 'stop-moments': 'stop the screen effects that are on', grid: 'the grid on or off', fit: 'fit your view to the table', again: 'movement again for every phone',
+        strike: 'a lightning flash on the table', 'stop-moments': 'stop the screen effects that are on', grid: 'the grid on or off', fit: 'fit your view to the table', again: 'movement again for every phone', join: 'the players\' join code on the TV, again to take it off',
         'fight-start': 'round 1 begins with the first in the list', 'fight-end': 'end the fight', prev: 'back one turn', 'roll-enemies': 'd20 + bonus for every enemy without a number', 'init-sort': 'highest first',
         'sp-toggle': 'pause Spotify, again to go on', 'sp-next': 'the next song', 'sel-hide': 'hide what is selected, again to show it', 'sel-lock': 'lock the selected assets, again to unlock',
         'sel-dup': 'a copy of the selected token or asset', 'page-next': 'the next page of this hotbar', 'page-prev': 'the page before' })[r] || '',
@@ -3797,6 +3893,7 @@ const Play = (() => {
       case 'door': { const w = m && r && r.map === m.id && (m.walls || []).find((x) => x.id === r.id); return !!(w && (w.door ? w.open : !w.shut)); } // (Beta 3.1: a window, open)
       case 'do': return r === 'blackout' ? !!S.table.blackout : r === 'quiet' ? !!(S.sound && S.sound.quiet) : r === 'fight' ? !!(S.sound && S.sound.fightNow) : r === 'grid' ? !!(m && m.grid.show)
         : r === 'storm' ? !!(m && m.wind && m.wind.storm)
+        : r === 'join' ? !!(S.players && S.players.join) // (F1: lit while the join code is on the TV)
         : r === 'sp-toggle' ? !!(S.spotify && S.spotify.now && S.spotify.now.playing)
         : doValue(r) ? (doValue(r).key === 'timer' ? !!S.timer : doValue(r).key === 'break' ? !!S.brk : doValue(r).key === 'dark' ? !!(m && Math.round((m.light.darkness || 0) * 100) === doValue(r).v) : false) : false;
       case 'snap': { const lm = allMaps().find((x) => x.id === S.table.liveMapId); return r !== 'next' && !!(lm && (lm.snaps || []).some((x) => x.id === r && x.at)); }
@@ -3840,13 +3937,14 @@ const Play = (() => {
     const it = railItem(r);
     if (it && HOT_RAIL(it)) railClick(it, railButton(r) || els.rail);
   }
-  const HOT_RENAMED = { Moments: 'Screen effects', Talk: 'Conversation', Portraits: 'Conversation', /* (Prototype 30) */ 'Phone & tablet': 'Remote', 'Players\' phones': 'Player phones', Characters: 'Character cards', 'Fog brush': 'Fog: brush',
+  const HOT_RENAMED = { Moments: 'Screen effects', Talk: 'Conversation', Portraits: 'Conversation', /* (Prototype 30) */ 'Phone & tablet': 'Gamemaster remote', Remote: 'Gamemaster remote', 'Players\' phones': 'Player phones', Characters: 'Character cards', 'Fog brush': 'Fog: brush',
     'Fog rectangle': 'Fog: rectangle', Quiet: 'Mute', 'Stop moments': 'Stop effects', Party: 'Party marker', Sound: 'Ambience', Keys: 'Guide' };
   const DO_HOT = {
     send: { label: 'Send to table', icon: 'cast' }, blackout: { label: 'Blackout', icon: 'screen-share-off' }, quiet: { label: 'Mute', icon: 'volume-off' },
     next: { label: 'Next turn', icon: 'player-track-next' }, fight: { label: 'Fight music', icon: 'swords' }, strike: { label: 'Lightning', icon: 'bolt' },
     'stop-moments': { label: 'Stop effects', icon: 'player-stop' }, grid: { label: 'Grid on/off', icon: 'grid-4x4' }, fit: { label: 'Fit the view', icon: 'zoom-scan' },
     again: { label: 'Movement again', icon: 'refresh' },
+    join: { label: 'Join code', icon: 'qrcode' }, // (F1: the players' code on the TV, again: off)
     storm: { label: 'Storm in the trees', icon: 'tornado' }, // (Beta 3.20: the living trees; again: the storm passes)
     // fight (the Initiative panel's buttons)
     'fight-start': { label: 'Start the fight', icon: 'swords' }, 'fight-end': { label: 'End the fight', icon: 'player-stop' }, prev: { label: 'Previous turn', icon: 'player-skip-back' },
@@ -3858,7 +3956,7 @@ const Play = (() => {
     // the hotbar itself
     'page-next': { label: 'Next hotbar page', icon: 'chevron-down' }, 'page-prev': { label: 'Previous hotbar page', icon: 'chevron-up' },
   };
-  const DO_GROUPS = [['Table', ['send', 'blackout', 'quiet', 'strike', 'storm', 'stop-moments', 'grid', 'fit']], ['Fight', ['fight-start', 'next', 'prev', 'roll-enemies', 'init-sort', 'fight-end', 'fight', 'again']],
+  const DO_GROUPS = [['Table', ['send', 'blackout', 'quiet', 'join', 'strike', 'storm', 'stop-moments', 'grid', 'fit']], ['Fight', ['fight-start', 'next', 'prev', 'roll-enemies', 'init-sort', 'fight-end', 'fight', 'again']],
     ['Selection', ['sel-hide', 'sel-lock', 'sel-dup']], ['Spotify', ['sp-toggle', 'sp-next']], ['Hotbar', ['page-next', 'page-prev']]];
   // H: hide or show what is selected (a token, a marker, assets, a spell area, an effect)
   function toggleSelHidden() {
@@ -3887,7 +3985,7 @@ const Play = (() => {
     ];
     const q = h('input', { type: 'search', placeholder: 'Find …', 'aria-label': 'Find something for the hotbar', spellcheck: 'false' });
     const list = h('div', { class: 'dk-cat-list hp-list' });
-    const dlg = dialog(`Hotbar slot ${KEY}`, h('div', { class: 'dk-cat hot-pick' }, q, list, h('p', { class: 'hint' }, 'Doors: right-click a door on the map. Anything else: drag it onto the hotbar.')));
+    const dlg = dialog(`Hotbar slot ${KEY}`, h('div', { class: 'dk-cat hot-pick' }, q, list)); // (H4: doors and dragging: the Guide's Help, Hotbar)
     const put = async (it) => {
       let item = it;
       if (it.ask) { item = await askDoValue(it.ask); if (!item) return; }
@@ -3953,7 +4051,7 @@ const Play = (() => {
       case 'stop-moments': cmd('moment.stop', {}); break;
       case 'grid': if (m) cmd('grid.update', { show: !m.grid.show }); break;
       case 'fit': view.fit(); break;
-      case 'fight-start': { const x = await cmd('init.start', {}); if (x && x.ok) toast('Round 1. Next turn: Enter'); else if (x && x.error) toast(x.error, { kind: 'error' }); break; }
+      case 'fight-start': startFight(); break;
       case 'fight-end': { const x = await cmd('init.end'); if (x && x.ok) toast(x.label, { undo: () => cmd('init.restore') }); break; }
       case 'prev': cmd('init.prev'); break;
       case 'roll-enemies': { const x = await cmd('init.roll', {}); if (x && !x.ok && x.error) toast(x.error); break; }
@@ -3977,6 +4075,7 @@ const Play = (() => {
       }
       case 'page-next': Hot.setPage(Hot.page() + 1); break;
       case 'page-prev': Hot.setPage(Hot.page() - 1); break;
+      case 'join': { const x = await window.ts.players('join', {}); if (x && x.error) toast(x.error, { kind: 'error', ms: 4000 }); break; } // (F1: shows the code, again takes it off)
       case 'again': { const x = await window.ts.players('again'); if (x && x.error) toast(x.error, { kind: 'error' }); else if (x && x.ok) toast('Movement again for everyone', { ms: 1600 }); break; }
       default: break;
     }
@@ -4143,7 +4242,7 @@ const Play = (() => {
     dragging: () => !!drag, updateCursor: () => updateBrushCursor(),
     startTokenDrag: (id, pt) => startTokenDrag(id, pt),
     openToolbox: (id) => TB.openPanel(id), tick: () => { if (popTicker) popTicker(); },
-    togglePanel: (def) => { Floats.toggle(def); renderRail(); }, panelOpen: (id) => !!(Floats && Floats.isOpen(id)), // 4.7: Tokens → List
+    togglePanel: (def) => { Floats.toggle(def); renderRail(); }, showPanel: (def) => { Floats.show(def); renderRail(); }, panelOpen: (id) => !!(Floats && Floats.isOpen(id)), // 4.7: Tokens → List
     // a spot on the map moved to the middle of this screen (a note from the Notes list)
     showPoint: (x, y) => { const p = view.mapToScreen(x, y); const r = els.viewport.getBoundingClientRect(); view.panBy(r.left + r.width / 2 - p.x, r.top + r.height / 2 - p.y); },
   });
@@ -4153,7 +4252,7 @@ const Play = (() => {
     doHot, toolHot, // Prototype 24: actions and tools on the hotbar
     ui, cmd, state: () => S, ready: Ready, ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib, ctlLabel: (t) => h('div', { class: 'ctl-label' }, t) },
     refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), closePop: () => closePop(), get Drawer() { return Drawer; }, get Tools() { return Tools; }, get Show() { return Show; }, get Spot() { return Spot; }, get Lights() { return Lights; }, get Remote() { return Remote; }, get Players() { return PlayersP; }, get Atlas() { return AtlasP; }, get Chars() { return Chars; }, get Dice() { return Dice; },
-    setTick: (fn) => { popTicker = fn; }, nextTurn: () => Tools.nextRound(),
+    setTick: (fn) => { popTicker = fn; }, nextTurn: () => Tools.nextRound(), startFight: () => startFight(),
     showPanel: (def) => Floats.show(def), togglePanel: (def) => Floats.toggle(def), panelOpen: (id) => Floats.isOpen(id),
     preview: () => lastPreview, previewSize: () => sendPreviewSize(), // (Second Builder: the small TV in Conversation)
     pins: () => pins, togglePin: (id) => togglePin(id),
@@ -4465,7 +4564,7 @@ const Play = (() => {
           updateBrushCursor();
           break;
         }
-        case 'token': case 'point': case 'draw': case 'mark': case 'notes':
+        case 'token': case 'point': case 'draw': case 'mark':
           drag = Tools.pointerDown(e, pt);
           break;
         case 'walls':
@@ -4792,9 +4891,9 @@ const Play = (() => {
         placeLightAt(pt, tok);
         toast(`${tok.name} carries a ${d.label.toLowerCase()}`);
       } else {
-        placeLightAt(pt, null).then((r) => { if (r && r.ok) toast(r.label || `${d.label} placed`, { ms: 1400, undo: () => cmd('history.undo') }); });
+        placeLightAt(pt, null).then((r) => { if (r && r.ok) toast(r.label || `${d.label} placed`, { ms: 1400, undo: () => cmd('history.undo', { mapId: r.mapId }) }); });
       }
-      if (!map().light.darkness && d.group === 'plain') toast('Lights show once the map is dark: raise Darkness above.');
+      if (!map().light.darkness && d.group === 'plain') toast('Lights show once the map is dark: Effects → Scene → Darkness.');
     }
   }
 
@@ -5074,7 +5173,8 @@ const Play = (() => {
     if (!list.length) return;
     if (list.length === 1) cmd('layer.update', { id: list[0].id, locked: true }); else cmd('layer.many', { patches: list.map((a) => ({ id: a.id, locked: true })) });
     setAssetSelection([]);
-    toast(`${list.length === 1 ? list[0].name : `${list.length} assets`} locked. Unlock in the Assets panel or in Layers.`, { undo: () => cmd('history.undo'), ms: 6000 });
+    const mapId = S.editMapId;
+    toast(`${list.length === 1 ? list[0].name : `${list.length} assets`} locked. Unlock in the Assets panel or in Layers.`, { undo: () => cmd('history.undo', { mapId }), ms: 6000 });
   }
   // Prototype 23: where an asset lies: under the effects (the ground), in front of them (Prototype 18), above the tokens
   const ASSET_LEVELS = [
@@ -5188,22 +5288,29 @@ const Play = (() => {
   }
   function assetRadial(a, x, y) {
     selectAsset(a.id);
-    Radial.open(x, y, [
-      { icon: 'rotate-clockwise', label: 'Turn 45°', run: () => cmd('layer.update', { id: a.id, rotation: normAngle((a.rotation || 0) + 45) }) },
-      { icon: 'plus', label: 'Bigger', run: () => cmd('layer.update', { id: a.id, w: round(a.w * 1.25, 3) }) },
-      a.tree ? { icon: 'arrows-shuffle', label: 'Another look', run: () => cmd('layer.reroll', { id: a.id }) } : { icon: 'flip-vertical', label: 'Mirror', run: () => cmd('layer.update', { id: a.id, flip: !a.flip }) },
+    Radial.open(x, y, [ // (wheel overhaul: the five most used first; size, mirror, order and video under More …)
       { icon: 'copy', label: 'Duplicate', run: () => cmd('layer.duplicate', { id: a.id, dx: grid().size, dy: 0 }) },
-      { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('layer.remove', { id: a.id }) },
-      { icon: 'arrow-bar-to-down', label: 'To back', run: () => cmd('layer.order', { id: a.id, to: 'back' }) },
+      { icon: 'rotate-clockwise', label: 'Turn 45°', run: () => cmd('layer.update', { id: a.id, rotation: normAngle((a.rotation || 0) + 45) }) },
+      { icon: a.hidden ? 'eye' : 'eye-off', label: a.hidden ? 'Unhide' : 'Hide', run: () => cmd('layer.update', { id: a.id, hidden: !a.hidden }) },
       { icon: 'stack-front', label: 'Level …', run: () => levelMenu({ clientX: x, clientY: y }, [a]) }, // Prototype 18 / 23
-      { icon: a.hidden ? 'eye' : 'eye-off', label: a.hidden ? 'Show' : 'Hide', run: () => cmd('layer.update', { id: a.id, hidden: !a.hidden }) },
+      { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('layer.remove', { id: a.id }) },
+      { icon: 'plus', label: 'Bigger', run: () => cmd('layer.update', { id: a.id, w: round(a.w * 1.25, 3) }) },
       { icon: 'minus', label: 'Smaller', run: () => cmd('layer.update', { id: a.id, w: round(a.w / 1.25, 3) }) },
+      a.tree ? { icon: 'arrows-shuffle', label: 'Another look', run: () => cmd('layer.reroll', { id: a.id }) } : { icon: 'flip-vertical', label: 'Mirror', run: () => cmd('layer.update', { id: a.id, flip: !a.flip }) },
+      { icon: 'arrow-bar-to-down', label: 'To back', run: () => cmd('layer.order', { id: a.id, to: 'back' }) },
       a.kind === 'video' ? { icon: 'movie', label: a.asVideo ? 'Prepared frames' : 'Sharp video', run: () => setAsVideo(a, !a.asVideo) } : null, // 4.8
     ].filter(Boolean), a.name);
   }
   // (Beta 3.61) Library and Living stand at the side as groups, Stamp and Scatter beside them. A banner shows the asset
   // in hand; the look of the next one is a card beside the panel. A picked asset turns the panel into its card.
   let assetSides = null;
+  // (H6) the library's own assets, for the Assets panel with nothing in hand (not the living trees: their own tab)
+  let assetLib = null; let assetLibAt = 0;
+  function loadAssetLib() {
+    if (Date.now() - assetLibAt < 30000) return;
+    assetLibAt = Date.now();
+    ts.library('list').then((l) => { assetLib = (l || []).filter((x) => x.cat === 'assets' && !x.tree); if (popId === 'asset') refreshPop(); }).catch(() => {});
+  }
   function buildAssetPop(o = {}) {
     const sel = () => ui.selAssets.map(layer).filter(Boolean);
     const picked = sel().length > 0;
@@ -5287,7 +5394,7 @@ const Play = (() => {
     }
     bind(() => {
       const b = ui.brush;
-      const text = b ? [how(), sq(ui.assetCells)].join(' · ') : 'pick one from your library';
+      const text = b ? [how(), sq(ui.assetCells)].join(' · ') : assetLib && assetLib.length ? 'pick one below, or in the Library' : 'pick one from your library'; // (H6: as Tokens says it)
       const sig = JSON.stringify([b && b.path, text]);
       if (ban.dataset.sig === sig) return;
       ban.dataset.sig = sig; ban.dataset.path = b ? b.path : '';
@@ -5296,13 +5403,19 @@ const Play = (() => {
         h('span', { class: 'pop-ban-btn' }, btn(b ? 'Change' : 'Pick one', 'photo', () => Drawer.open({ cat: 'assets', purpose: 'brush', back: { pop: 'asset', tool: 'asset' } }), { kind: b ? 'small' : 'small primary', tip: 'Pick an asset from your library' })), cap);
     });
     const recent = h('div', { class: 'brush-recent' });
+    // H6 (open point): nothing in hand and nothing used yet: the library's assets right here, one click picks one
+    // (instead of a sentence that asks for a pick; Pick one still opens the whole Library)
+    loadAssetLib();
     bind(() => {
-      const list = (ui.recentBrushes || []).slice(0, 8);
-      const sig = list.map((b) => b.path).join('|') + (ui.brush ? ui.brush.path : '');
+      const recents = (ui.recentBrushes || []).slice(0, 8);
+      const first = !ui.brush && recents.length < 2 && assetLib && assetLib.length ? assetLib.slice(0, 12) : null;
+      const list = first || recents;
+      const sig = `${first ? 'lib:' : ''}${list.map((b) => b.path).join('|')}${ui.brush ? ui.brush.path : ''}`;
       if (recent.dataset.sig === sig) return;
       recent.dataset.sig = sig;
       recent.innerHTML = '';
-      recent.hidden = list.length < 2;
+      recent.classList.toggle('brush-first', !!first);
+      recent.hidden = !first && list.length < 2;
       for (const b of list) recent.append(h('button', { class: `brush-pick ${ui.brush && ui.brush.path === b.path ? 'on' : ''}`, 'data-tip': b.name, 'aria-label': b.name, onclick: () => setBrush(b) }, Thumbs.img(b.path, b.kind)));
     });
     return h('div', { class: 'stack asset-pop' },
@@ -5407,13 +5520,13 @@ const Play = (() => {
     if (len * view.cam.s > 12) view.setGridPreview(alignGrid(d.p0, pt, ui.align.cells));
   }
   async function finishAlign(p0, p1) {
-    const n = ui.align ? ui.align.cells : 3;
+    const n = ui.align ? ui.align.cells : 3; const alignMap = S.editMapId;
     stopAlign();
     if (Math.hypot(p1.x - p0.x, p1.y - p0.y) * zoom() < 0.2) return;
     const g = alignGrid(p0, p1, n);
     await cmd('grid.update', { type: g.type, size: g.size, angle: g.angle, ox: g.ox, oy: g.oy, show: true, coalesce: `align-${Date.now()}` });
     const phys = g.size * zoom();
-    toast(`Grid matched${Math.abs(g.angle) > 0.2 ? ` (tilted ${round(g.angle, 1)}°)` : ''}. One cell is ${round(phys, 2)}″ on the table${Math.abs(phys - 1) > 0.05 ? ': use "Make grid squares 1 inch" for miniatures' : ''}.`, { undo: () => cmd('history.undo'), ms: 8000 });
+    toast(`Grid matched${Math.abs(g.angle) > 0.2 ? ` (tilted ${round(g.angle, 1)}°)` : ''}. One cell is ${round(phys, 2)}″ on the table${Math.abs(phys - 1) > 0.05 ? ': use "Make grid squares 1 inch" for miniatures' : ''}.`, { undo: () => cmd('history.undo', { mapId: alignMap }), ms: 8000 });
   }
 
   // =====================================================================
@@ -5577,6 +5690,7 @@ const Play = (() => {
         else if (ui.selFx) selectFx(null);
         else if (ui.selAsset) selectAsset(null);
         else if (ui.selMark) Tools.selectMark(null);
+        else if (!typing && ui.tool !== 'select') setTool('select'); // N8 (open point): nothing else to close: back to Select (as the Toolbox's tip says)
         Tools.spotOff();
         if (typing) a.blur();
         return;
@@ -5653,7 +5767,7 @@ const Play = (() => {
         case 'o': togglePop('talk'); break;
         case 'q': if (popId === 'toolbox') closePop(); else { ui.tb = 'home'; openPop('toolbox'); } break;
         case 'i': TB.togglePanel(e.shiftKey ? 'chars' : 'init'); break;
-        case 'x': setTool('mark'); if (popId !== 'mark') openPop('mark'); break;
+        case 'x': Tools.tableMarks(); setTool('mark'); if (popId !== 'mark') openPop('mark'); else refreshPop(); break; // (N7)
         case 'j': Tools.noteMode(); setTool('mark'); if (popId !== 'mark') openPop('mark'); else refreshPop(); break; // (Third Builder (third-marks-tool): a note only you see, in Marks)
         case 'enter':
           if (a && a !== document.body && a.tagName === 'BUTTON') break; // Enter on a focused button clicks that button
@@ -5697,6 +5811,7 @@ const Play = (() => {
       }
     });
     window.addEventListener('keyup', (e) => { if (e.key === ' ') spaceDown = false; });
+    window.addEventListener('blur', () => { spaceDown = false; }); // (N4: Space let go in another window: no stuck pan)
   }
 
   // Away from the maps (the campaign page, the start screen) the GM's map stops drawing and its videos pause,
@@ -5720,6 +5835,7 @@ const Play = (() => {
 
   return {
     helpSections, showToolHint, mount, update, setActive, setTool, openPop, closePop, Drawer, view: () => view, ui, state: () => S,
+    undoable, openFxRadial: (id, x, y) => fxRadial(fxOf(id), x, y), // (self-test: N1, N9)
     offTable: () => [...offTable().entries()].map(([id, o]) => ({ id, ...o })), fitAll, aimMoment, Show, get TB() { return TB; }, get Floats() { return Floats; }, get Atlas() { return AtlasP; },
     simFps: (r) => { const n = typeof r === 'number' ? r : r.fps; ui.tableFps = n; ui.fpsSimAt = Date.now(); fpsWatch(n, r.hitches || 0, r.heavy || null); }, bigPreview, setPreviewWidth,
     openRadial, startAlign, finishAlign, alignGrid, castAt, cast, spellFromPointer, setSpell, pickSpell, oneInch, fitView, selectFx: (id) => selectFx(id),

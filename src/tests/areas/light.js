@@ -7,6 +7,8 @@ module.exports = (area) => {
   area.before(async (K) => { await K.openDemo(); own = await K.newMap('Light (test)', { tv: true }); K.handle('fog.enabled', { mapId: own, enabled: false }); await K.settle(); });
 
   const M = (t) => t.store.map(own);
+  // as on a PC without a graphics card (true), on any PC (trees.js has the same): the engine's tiles and water drop out
+  const noCard = async (t, on) => { await t.g(`Trees.never(${on})`); await t.t(`Trees.never(${on})`); await t.settle(); };
   const clean = async (t) => {
     if (t.state.liveMapId !== own || t.state.editMapId !== own) { t.handle('edit.open', { id: own }); await t.send(own); }
     for (const f of [...M(t).fx]) t.handle('fx.remove', { mapId: own, id: f.id });
@@ -51,6 +53,90 @@ module.exports = (area) => {
     await t.drag({ x: h.cx, y: h.cy }, { x: h.cx + 60, y: h.cy + 30 }, 6);
     const b = M(t).fx[0];
     t.ok(Math.hypot(b.x - a.x, b.y - a.y) > 0.2 * k, 'the effect moved', [a.x, a.y, b.x, b.y, r]);
+  });
+
+  // M2 (open point): an effect's Speed changed: its own clock goes on from where it was (no jump), at the new pace
+  area.quick('changing an effect\'s Speed doesn\'t make it jump: its clock goes on from where it was', async (t) => {
+    const F = require('../../renderer/fx-data');
+    const m = await clean(t); const k = m.grid.size;
+    await t.cmd('fx.add', { mapId: own, kind: 'emitter', preset: 'torch', x: 14 * k, y: 7 * k, r: 1, bright: 20, dim: 20 });
+    const id = M(t).fx[0].id;
+    const now = () => Date.now() / 1000 - F.TBASE;
+    for (const sp of [2.5, 0.35, 1.7]) {
+      const before = F.phaseT(M(t).fx.find((f) => f.id === id), now());
+      t.handle('fx.update', { mapId: own, id, speed: sp });
+      const fx = M(t).fx.find((f) => f.id === id);
+      const after = F.phaseT(fx, now());
+      t.ok(Math.abs(after - before) < 0.05, `to Speed ${sp}: the clock goes on where it was`, [before, after]);
+      t.near(F.phaseT(fx, now() + 1) - F.phaseT(fx, now()), sp, 0.01, `and runs at ${sp}`);
+    }
+  });
+
+  // M1 (open point): a geyser building up: two frames close together look nearly the same (before, the bubbles and
+  // rings jumped to new places every frame, as their rate rose with the time multiplied in)
+  area.quick('a geyser building up changes little from one frame to the next', async (t) => {
+    const r = await t.g(`(() => {
+      const fx = { id: 'm1-geyser', kind: 'emitter', preset: 'geyser', r: 3, intensity: 1, speed: 1 };
+      // (at the real clock, millions of seconds: where the old rate × time jumped most) the next eruption from now
+      const T = Date.now() / 1000 - 1.7e9; let te = null;
+      for (let tt = T; tt < T + 200 && te == null; tt += 0.05) if (Creatures.erupting(fx, tt) && !Creatures.erupting(fx, tt - 0.05)) te = tt;
+      const tb = te - 3; // three seconds before it erupts
+      const shot = (tt) => { const c = document.createElement('canvas'); c.width = 240; c.height = 240; const g = c.getContext('2d'); g.setTransform(30, 0, 0, 30, 0, 0); FX.emitter(g, fx, 4, 4, tt, 1); return g.getImageData(0, 0, 240, 240).data; };
+      const a = shot(tb); const b = shot(tb + 1 / 120);
+      let moved = 0; let lit = 0;
+      for (let i = 3; i < a.length; i += 4) { if (a[i] > 20 || b[i] > 20) lit++; if (Math.abs(a[i] - b[i]) > 60) moved++; }
+      return { moved, lit, share: lit ? moved / lit : 0 };
+    })()`);
+    t.ok(r.lit > 200, 'the geyser is drawn', r);
+    t.ok(r.share < 0.01, 'what changed in 1/120 s of the build-up (the old code: about 3 %)', r);
+  });
+
+  // K6 (open point): a fire that is put out draws nothing, so with nothing else moving the TV stops redrawing
+  area.quick('a fire put out lets the TV rest; lit again, it moves again', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    await t.cmd('fx.add', { mapId: own, kind: 'emitter', preset: 'torch', x: 14 * k, y: 7 * k, r: 1, bright: 20, dim: 20 });
+    const id = M(t).fx[0].id;
+    await t.until(async () => (await t.tvDebug()).fx.animating, 4000, 'the TV draws the flame');
+    await t.cmd('fx.lit', { mapId: own, id, on: false });
+    await t.until(async () => !(await t.tvDebug()).fx.animating, 4000, 'put out: the TV rests');
+    await t.cmd('fx.lit', { mapId: own, id, on: true });
+    await t.until(async () => (await t.tvDebug()).fx.animating, 4000, 'lit again: it moves');
+  });
+
+  // K1/K2 (open points): a painted mist makes its fill patterns and its mask once, not again every frame. Drawn here
+  // straight onto a canvas, 20 frames (a test TV behind the GM window draws nothing: the browser rests covered windows)
+  area.quick('a painted mist makes no new fill patterns or masks from frame to frame', async (t) => {
+    const r = await t.g(`(() => {
+      const c = document.createElement('canvas'); c.width = 640; c.height = 360; const ctx = c.getContext('2d');
+      ctx.setTransform(20, 0, 0, 20, 0, 0);
+      const f = { id: 'k2-test', kind: 'region', preset: 'mist', intensity: 1, density: 1, speed: 1, strokes: [{ sid: 'a', r: 2, pts: [6, 8, 24, 8] }] };
+      const P = CanvasRenderingContext2D.prototype; const cp = P.createPattern; const mk = document.createElement; let pats = 0; let cans = 0;
+      FX.region(ctx, f, 1e8, 1); // (warm: its tiles, patterns and mask)
+      P.createPattern = function (...a) { pats++; return cp.apply(this, a); };
+      document.createElement = function (tag, ...a) { if (String(tag).toLowerCase() === 'canvas') cans++; return mk.call(this, tag, ...a); };
+      try { for (let i = 1; i <= 20; i++) FX.region(ctx, f, 1e8 + i / 30, 1); } finally { P.createPattern = cp; document.createElement = mk; }
+      return { pats, cans };
+    })()`);
+    t.eq(r, { pats: 0, cans: 0 }, 'new patterns and new canvases in 20 frames of mist (were 2 to 4 patterns a frame)');
+  });
+
+  // a light a token carries: its marker is a badge on the token's rim (upper left), not on its face; a click picks it
+  area.quick('a carried light\'s marker sits on the token\'s rim, upper left, and a click picks the light', async (t) => {
+    const m = await clean(t); const k = m.grid.size;
+    const tid = (await t.cmd('layer.add', { mapId: own, path: t.pic('tokens', /Goblin/i), role: 'token', x: 12.5 * k, y: 8.5 * k, size: 1 })).selected;
+    try {
+      await t.cmd('fx.add', { mapId: own, kind: 'light', preset: 'torch', attachTo: tid, x: 12.5 * k, y: 8.5 * k, bright: 20, dim: 20 });
+      const fid = M(t).fx.find((f) => f.attachTo === tid).id;
+      t.gm().webContents.focus();
+      await t.key('E');
+      await select(t);
+      const h = await t.until(() => t.rect(`.sv-handle.rim[data-id="${fid}"]`), 3000, 'the marker on the rim');
+      const tk = await t.rect(`.sv-token[data-id="${tid}"]`);
+      const d = Math.hypot(h.cx - tk.cx, h.cy - tk.cy);
+      t.ok(h.cx < tk.cx && h.cy < tk.cy && d > tk.w * 0.4, 'upper left, out on the rim (not on the face)', { h, tk, d });
+      await t.click(h.cx, h.cy);
+      await t.until(() => t.g(`Play.ui.selFx === ${JSON.stringify(fid)}`), 3000, 'a click picks the light');
+    } finally { await t.cmd('layer.remove', { mapId: own, id: tid }); }
   });
 
   // Beta 3.9: a map turned with everything on it. A painted area away from the middle kept its old cut-out (its
@@ -417,6 +503,7 @@ module.exports = (area) => {
   }, { ms: 120000 });
 
   area.deep('Beta 3.60: Effects in three groups: Scene (time of day, weather, wind, Indoors), Lights, Elements (picture tiles by family); each effect keeps its own look; letting go places nothing; another colour starts a new area', async (t) => {
+    await noCard(t, true); try { // (written for a PC without a graphics card: with one the engine draws these, see Trees)
     const m = await clean(t); const k = m.grid.size;
     t.gm().webContents.focus();
     await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.fxMode = 'weather'; Play.ui.fxMoreWx = false; Play.ui.fxMoreLight = false; Play.ui.looks = {}; Play.ui.fxFam = 'all'; Play.ui.fxFly = false; Play.ui.paintShape = 'box'`);
@@ -439,6 +526,13 @@ module.exports = (area) => {
     await t.menuPick('Lightning');
     await t.until(() => M(t).weather.layers.some((l) => l.type === 'lightning'), 3000, 'lightning in the mix');
     await t.until(() => t.g(`(() => { const b = document.querySelector('#pop .wx-strike'); return !!b && !b.closest('[hidden]'); })()`), 3000, 'the Lightning button');
+    // H5 (open point): a layer's trash shows Undo, and Undo brings the layer back
+    const lit = () => M(t).weather.layers.some((l) => l.type === 'lightning' && !l.dying);
+    await t.g(`[...document.querySelectorAll('#pop .wx-list .layer-row')].find((r) => r.textContent.includes('Lightning')).querySelector('.icon-btn[aria-label="Remove"]').click()`);
+    await t.until(() => !lit(), 3000, 'the trash to take Lightning out');
+    await t.until(() => t.rect('.toast .toast-undo'), 3000, 'a note with Undo');
+    await t.clickSel('.toast .toast-undo');
+    await t.until(lit, 3000, 'Undo to bring Lightning back');
     await t.g(`document.querySelector('#pop .fx-fold[data-v="fxMoreWx"] summary').click()`);
     // Indoors: the Roof of before; the shape tools come out, the group stays Scene
     await t.g(`document.querySelector('#pop .fx-indoors').click()`); await t.sleep(300);
@@ -498,7 +592,7 @@ module.exports = (area) => {
     await t.g(`document.querySelector('#pop .os-fxset').click()`); await t.sleep(300);
     t.eq(await t.g(`[...document.querySelectorAll('#pop .fx-fly .ctl-label')].filter((e) => e.offsetParent).map((e) => e.textContent)`), ['Strength', 'Amount', 'Speed'], 'Mist settings');
     await t.g(`Play.ui.fxFly = false; Play.ui.looks = {}; Play.closePop(); Play.setTool('select')`);
-  }, { ms: 120000 });
+  } finally { await noCard(t, false); } }, { ms: 120000 });
 
   // Second Builder (second-water-works)
   area.deep('Water: Rapids, Whirlpool (its direction, Swirl the water), Bubbling pool (a kind per area) and a Geyser; they draw the same moment the same way', async (t) => {
@@ -539,7 +633,7 @@ module.exports = (area) => {
     t.eq(M(t).fx.find((f) => f.id === w.id).swirl, false, 'Swirl the water off');
     // drawn: the same moment the same way (both screens), something on the canvas, a geyser erupting is a moment to see
     const r = await t.g(`(() => {
-      const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d');
+      const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d', { willReadFrequently: true });
       const draw = (fx, t, kind) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 400, 300); g.setTransform(40, 0, 0, 40, 0, 0); if (kind === 'r') FX.region(g, fx, t, 1); else FX.emitter(g, fx, 5, 3.75, t); return c.toDataURL(); };
       const ink = () => { const d = g.getImageData(0, 0, 400, 300).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; };
       const st = [{ sid: 'a', r: 1.2, pts: [1, 3.75, 4, 3.5, 7, 4, 9, 3.75], t0: 0 }];
@@ -577,7 +671,7 @@ module.exports = (area) => {
     // a flock within 30 s at Amount 1, the same at the same moment, nothing on the weather layer
     const sky = await t.g(`(() => {
       const L = Play.view().map.weather.layers.find((l) => l.type === 'birds'); const w = { layers: [{ ...L, born: 0 }] };
-      const c = document.createElement('canvas'); c.width = 600; c.height = 340; const g = c.getContext('2d'); g.setTransform(20, 0, 0, 20, 0, 0);
+      const c = document.createElement('canvas'); c.width = 600; c.height = 340; const g = c.getContext('2d', { willReadFrequently: true }); g.setTransform(20, 0, 0, 20, 0, 0);
       let first = null; for (let t = 1000; t < 1030; t += 0.5) { if (Creatures.sky(g, w, 30, 17, t, 1e15, { sq: 1, dark: 0 }) > 0) { first = t; break; } }
       const at = first ?? 1000;
       const a = (g.setTransform(1, 0, 0, 1, 0, 0), g.clearRect(0, 0, 600, 340), g.setTransform(20, 0, 0, 20, 0, 0), Creatures.sky(g, w, 30, 17, at + 2, 1e15, { sq: 1, dark: 0 }), c.toDataURL());
@@ -603,7 +697,7 @@ module.exports = (area) => {
     // the moment: in the list, draws, gone after its time
     const mo = await t.g(`(() => {
       const d = Moments.LIST.find((x) => x.id === 'birds');
-      const c = document.createElement('canvas'); c.width = 600; c.height = 400; const g = c.getContext('2d'); g.setTransform(20, 0, 0, 20, 0, 0);
+      const c = document.createElement('canvas'); c.width = 600; c.height = 400; const g = c.getContext('2d', { willReadFrequently: true }); g.setTransform(20, 0, 0, 20, 0, 0);
       const now = Date.now(); const m = { key: 'x', id: 'birds', seed: 3, x: 0, y: 0, t0: now - 1000 };
       Moments.draw(g, 30, 20, [m], now, () => ({ x: 15, y: 10 }), { sq: 1 });
       const d1 = g.getImageData(0, 0, 600, 400).data; let n = 0; for (let i = 3; i < d1.length; i += 4) if (d1[i] > 20) n++;
@@ -639,7 +733,7 @@ module.exports = (area) => {
     t.eq(st, { fly: 2, emitters: 0 }, 'both on the fly layer, not the effects layer');
     const draw = await t.g(`(async () => {
       await Creatures.ready();
-      const c = document.createElement('canvas'); c.width = 600; c.height = 300; const g = c.getContext('2d');
+      const c = document.createElement('canvas'); c.width = 600; c.height = 300; const g = c.getContext('2d', { willReadFrequently: true });
       Creatures.scene({ cell: 1, dark: 0 });
       // ink left and right of the spot (x = 15 squares, the middle): more than 2 squares off it
       const ink = (fx, t) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 600, 300); g.setTransform(20, 0, 0, 20, 0, 0); FX.emitter(g, fx, 15, 7.5, t);
@@ -677,7 +771,7 @@ module.exports = (area) => {
     const mo = await t.g(`(async () => {
       await Creatures.ready();
       const d = Moments.LIST.find((x) => x.id === 'bats');
-      const c = document.createElement('canvas'); c.width = 600; c.height = 400; const g = c.getContext('2d'); g.setTransform(20, 0, 0, 20, 0, 0);
+      const c = document.createElement('canvas'); c.width = 600; c.height = 400; const g = c.getContext('2d', { willReadFrequently: true }); g.setTransform(20, 0, 0, 20, 0, 0);
       const now = Date.now(); const m = { key: 'x', id: 'bats', seed: 3, x: 0, y: 0, t0: now - 1500 };
       Moments.draw(g, 30, 20, [m], now, () => ({ x: 15, y: 10 }), { sq: 1 });
       const d1 = g.getImageData(0, 0, 600, 400).data; let n = 0; for (let i = 3; i < d1.length; i += 4) if (d1[i] > 20) n++;
@@ -688,6 +782,7 @@ module.exports = (area) => {
 
   // Second Builder (second-ground-life)
   area.deep('Fish and critters: painted areas with a kind; fish stay in the paint (under water painted over them), critters on their own layer wander a wide area and run along a thin stroke', async (t) => {
+    await noCard(t, true); try { // (written for a PC without a graphics card: with one the engine draws these, see Trees)
     const m = await clean(t); const k = m.grid.size;
     t.gm().webContents.focus();
     await t.g(`Play.closePop(); Play.setTool('select'); Play.ui.looks = {}; Play.ui.fxFly = false`);
@@ -708,7 +803,7 @@ module.exports = (area) => {
     t.eq(order, ['fish', 'water'], 'fish are drawn first, under the water');
     const draw = await t.g(`(async () => {
       await Creatures.ready();
-      const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d');
+      const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d', { willReadFrequently: true });
       // ink at moment t, and how much of it lies outside a box (in squares, 20 px a square)
       const ink = (fx, tt, box) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 400, 300); g.setTransform(20, 0, 0, 20, 0, 0); FX.region(g, fx, tt, 1);
         const d = g.getImageData(0, 0, 400, 300).data; let n = 0; let out = 0; let line = 0;
@@ -729,7 +824,7 @@ module.exports = (area) => {
       return { fish: fishAt.every((r) => r.n > 100 && r.out === 0), same, kinds, big, critters: ck, cs };
     })()`);
     t.eq(draw, { fish: true, same: true, kinds: [true, true, true], big: true, critters: [true, true, true, true, true], cs: true }, 'koi never outside the paint (six moments), the same each time; the other fish draw; the big shadow comes now and then; every critter kind keeps to its home and its run, and runs the thin stroke');
-  }, { ms: 90000 });
+  } finally { await noCard(t, false); } }, { ms: 90000 });
 
   // Second Builder (second-sun-sand-gears)
   area.deep('Sun, sand and gears: Turning parts (a Round or a Box, no brush; a windmill follows the wind from an anchor the GM stores), Sun through leaves, Drifting sand, a Dust devil, Tumbleweeds with the wind', async (t) => {
@@ -762,7 +857,7 @@ module.exports = (area) => {
     t.eq(M(t).fx.filter((f) => f.preset === 'turn').map((f) => !!f.anc), [true, false], 'only the windmill has an anchor');
     // the rest draws, the same at the same moment; tumbleweeds only with wind
     const draw = await t.g(`(async () => {
-      const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d');
+      const c = document.createElement('canvas'); c.width = 400; c.height = 300; const g = c.getContext('2d', { willReadFrequently: true });
       const ink = (fn) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 400, 300); g.setTransform(20, 0, 0, 20, 0, 0); fn(); const d = g.getImageData(0, 0, 400, 300).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 12) n++; return { n, url: c.toDataURL() }; };
       const R = (preset, variant) => ({ id: 'ts-' + preset + variant, kind: 'region', preset, variant, intensity: 1, density: 1, speed: 1, strokes: [{ sid: 'a', r: 2, pts: [6, 7, 14, 7] }] });
       Creatures.wind({ dir: 0, strength: 1.8, from: 'own' }); Creatures.scene({ cell: 1, dark: 0 });
@@ -799,7 +894,7 @@ module.exports = (area) => {
       await Creatures.ready();
       const FXS = ${JSON.stringify(fxs)}; const F = (id) => FXS.find((f) => f.id === id);
       const area = { box: FX.areaOf(F('p-box'), 't'), round: FX.areaOf(F('p-round'), 't'), brush: FX.areaOf(F('p-brush'), 't') };
-      const c = document.createElement('canvas'); c.width = 440; c.height = 300; const g = c.getContext('2d');
+      const c = document.createElement('canvas'); c.width = 440; c.height = 300; const g = c.getContext('2d', { willReadFrequently: true });
       // where the ink lies at a moment (20 px a square): its box, and how many pixels
       const ink = (fn, min = 40) => { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 440, 300); g.setTransform(20, 0, 0, 20, 0, 0); fn();
         const d = g.getImageData(0, 0, 440, 300).data; let n = 0; let x0 = 1e9; let x1 = -1; let y0 = 1e9; let y1 = -1; let top = 0;

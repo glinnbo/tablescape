@@ -25,6 +25,28 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.67', [
+      'Right-click a token: Conditions and Turn order. Poisoned, Prone, Stunned and the rest show as small animations on the token, on the TV too (bubbles, stars, lying down …). They stay on the token, in a fight or not; Campaign settings → Tokens on the table can turn them off',
+      'Every right-click wheel has six slots: the five that matter for what you clicked, and More … with the rest (Rename, size, light …)',
+      'The GM screen no longer stalls while effects play: painted effects, explored ground and colours make no new pictures every frame',
+      'Phones: Gamemaster remote and Player phones are two panels. The join card is dark with an orange glow, shows no address and can carry a message (the Wi-Fi name, say); Join code can go on the hotbar. The party screen is gone',
+      'A player\'s speed is on their character card (30 ft without one). Start the fight asks whether to roll the enemies that have no number yet',
+      'One Ready list per chapter, with the same tick in Tokens, Conversation, Handouts and the Library',
+      'A row under the table preview says what sounds on the table; its ✕ stops a map\'s own sound. The Soundboard follows its folder by itself',
+      'Snapshots get names that say what the map shows; a new campaign\'s hotbar comes filled; Guide → Keys prints a cheat sheet; a map\'s thumbnail menu has Replace the picture',
+      'Tablescape settings → Performance: one Quality choice (Best, Balanced, Light); the single settings are under Advanced',
+      'More things have Undo: removing weather, a lamp scene, a spread, a turn-order column, a phone that was forgotten. Undo in a message undoes the map it was done on',
+      'Saving: a campaign whose changes can\'t be saved stays open (quitting asks first); backups are kept for about three months; the turn order is kept with the campaign; Recently deleted moved to Campaigns/.trash',
+      'Phones: a handout taken back closes and can\'t be fetched again; a double tap runs once; on bad Wi-Fi a phone says so after a few seconds',
+      'Speed sliders, the geyser and windmills in Time Stop no longer jump; a light a token carries shows its marker on the token\'s rim',
+      'Token Bigger and Smaller step through the D&D sizes and stay on the grid; Esc goes back to Select',
+      'Help and messages use today\'s names (Tablescape settings, Campaign settings); explanation lines in panels became tips',
+      'What\'s new shows each version\'s highlights first; after an update they show once',
+    ], [
+      'Conditions on tokens: bubbles, stars and more',
+      'Right-click wheels: the five that matter, the rest under More',
+      'A smooth GM screen, and nothing lost when a save fails',
+    ]],
     ['Beta 3.66', [
       'Effects has a Select tool, first among the side tools of Elements and Lights. Only with it do painted areas show their outline and placed effects their marker, and a click picks one. With any other tool a click or a drag always places or paints. Outlines also stay in place when the map is zoomed',
       'Scene: one Wind slider. Follow the weather, the direction, Storm, Lean, Branches and Leaves are under Advanced wind',
@@ -643,11 +665,11 @@ const Guide = (() => {
     return h('div', { class: 'guide-text' },
       h('h3', {}, 'Your first evening'),
       h('ul', { class: 'guide-checks' },
-        li('screens', b('Two screens. '), 'Tablescape runs on your laptop; the table shows on a TV lying flat (or a projector). ', b('Settings → TV'), ' picks the TV and opens the table there. With one screen only, the table opens as a window, so you can try everything.'),
-        li('inch', b('One inch is one inch. '), 'Hold a bank card against the TV and match the outline (Settings → TV → Calibrate). The grid then fits your miniatures: one square is one inch.'),
+        li('screens', b('Two screens. '), 'Tablescape runs on your laptop; the table shows on a TV lying flat (or a projector). ', b('Tablescape settings → TV'), ' picks the TV and opens the table there. With one screen only, the table opens as a window, so you can try everything.'),
+        li('inch', b('One inch is one inch. '), 'Hold a bank card against the TV and match the outline (Tablescape settings → TV → Calibrate). The grid then fits your miniatures: one square is one inch.'),
         li('campaign', b('A campaign has chapters, chapters have maps. '), 'Pick the demo campaign on the home screen, press ', b('Prepare the maps'), ', pick a map, and press ', kbd('T'), ' to send it to the table. What you prepare stays on your screen until you send it.'),
         li('rail', b('The rail on the left. '), 'Build tools on top, Play tools below. Hover a button for what it does and its key; right-click anything on the map for its menu.'),
-        li('sound', b('Sound. '), 'Settings → Sound picks the speakers, one for ambience and music, one for effects. Spotify is optional and needs Premium.'),
+        li('sound', b('Sound. '), 'Tablescape settings → Sound picks the speakers, one for ambience and music, one for effects. Spotify is optional and needs Premium.'),
         li('minis', b('Keep your minis. '), 'Tokens are only for NPCs and monsters you don\'t have as miniatures. Everything else is cardboard, dice and people around the TV.')),
       h('h3', {}, 'While you play'),
       h('ul', { class: 'guide-list' },
@@ -672,19 +694,34 @@ const Guide = (() => {
       p('Everything Tablescape shows lives in one folder, the library. Put your own files into its folders, or drop them onto the map or the library drawer (', kbd('L'), '): they are copied in.'),
       root ? h('p', { class: 'guide-path' }, iconEl('folder'), h('code', {}, root), h('button', { class: 'btn small ghost', onclick: () => ts.library('open') }, 'Open')) : null,
       h('div', { class: 'guide-table' }, ...folders.map(([n, d]) => h('div', { class: 'guide-row' }, h('b', {}, n), h('span', {}, d)))),
-      p('Settings → Library shows where the library is and can ', b('move'), ' it, to another disk for instance. A sync folder (OneDrive, Dropbox) works, but syncing while you play can make files busy for a moment.'),
+      p('Tablescape settings → Library shows where the library is and can ', b('move'), ' it, to another disk for instance. A sync folder (OneDrive, Dropbox) works, but syncing while you play can make files busy for a moment.'),
       h('h3', {}, 'Animated assets'),
-      p('An animated asset is prepared the first time a map uses it (the little maid runs along the top meanwhile). Settings → Performance lists them.'),
+      p('An animated asset is prepared the first time a map uses it (the little maid runs along the top meanwhile). Tablescape settings → Performance lists them.'),
       h('h3', {}, 'Safety net'),
       h('ul', { class: 'guide-list' },
-        li(b('Backups '), '(… on a campaign): a copy is made each time you open a campaign; the last 10 are kept.'),
+        li(b('Backups '), '(right-click a campaign, or Campaign settings → Campaign): a copy is made each time you open a campaign: the last 10 are kept, and one a day for two weeks and one a week for three months.'),
         li(b('Recently deleted '), 'on the home screen keeps deleted campaigns until you empty it.'),
-        li(b('Missing files '), 'are listed in the table check (home screen, the line under the menu) when a map, token or sound moved; open its map to find it again.')));
+        li(b('Missing files '), 'are listed in Tablescape settings → Table check when a map, token or sound moved; open its map to find it again.')));
   }
 
+  const keyCols = () => h('div', { class: 'help-cols' }, ...KEYS.map(([title, rows]) => h('section', {}, h('h3', {}, title),
+    ...rows.map(([k, d]) => h('div', { class: 'key-row' }, kbd(k), h('span', {}, d))))));
+  // G6 (open point): the keys on one sheet of paper, to lie beside the laptop: a page of its own for the printer only
+  function keySheet(on) { // (the sheet the printer gets; the self-test lays it out as a PDF to count its pages)
+    const old = document.getElementById('print-sheet'); if (old) old.remove();
+    document.body.classList.toggle('printing-keys', !!on);
+    if (on) document.body.append(h('div', { id: 'print-sheet' }, h('h1', {}, 'Tablescape: keys'), keyCols()));
+  }
+  function printKeys() {
+    keySheet(true);
+    const done = () => { keySheet(false); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    setTimeout(() => { try { window.print(); } catch { done(); } }, 50);
+  }
   function keysTab() {
-    return h('div', { class: 'help-cols' }, ...KEYS.map(([title, rows]) => h('section', {}, h('h3', {}, title),
-      ...rows.map(([k, d]) => h('div', { class: 'key-row' }, kbd(k), h('span', {}, d))))));
+    return h('div', { class: 'stack' },
+      h('div', { class: 'keys-top' }, h('button', { class: 'btn small keys-print', 'data-tip': 'The keys on one page, to lie beside the laptop', onclick: printKeys }, iconEl('file-export'), 'Print')),
+      keyCols());
   }
 
   // Prototype 25: Help: what every tool and panel can do that you cannot guess, in one searchable page (the "?" of a
@@ -715,9 +752,20 @@ const Guide = (() => {
     return h('div', { class: 'guide-text' }, q, list);
   }
 
+  // G5 (open point): the newest version with its two or three highlights (the third part of an entry), every change
+  // of it folded below; the older versions folded, one line each
+  const newsList = (items) => h('ul', { class: 'guide-list' }, ...items.map((t) => li(t)));
   function newsTab() {
-    return h('div', { class: 'guide-text' }, ...NEWS.map(([ver, items]) => h('section', {}, h('h3', {}, ver), h('ul', { class: 'guide-list' }, ...items.map((t) => li(t))))));
+    const [ver, items, top] = NEWS[0];
+    const now = h('section', { class: 'news-now' }, h('h3', {}, ver),
+      ...(top && top.length ? [h('ul', { class: 'guide-list news-top' }, ...top.map((t) => li(t))),
+        h('details', { class: 'news-fold' }, h('summary', {}, `All ${items.length} changes`), newsList(items))] : [newsList(items)]));
+    const older = NEWS.slice(1).map(([v, its]) => h('details', { class: 'news-fold news-old' },
+      h('summary', {}, v, h('span', { class: 'faint' }, ` · ${its.length}`)), newsList(its)));
+    return h('div', { class: 'guide-text news' }, now, h('div', { class: 'news-older' }, ...older));
   }
+  // the highlights of a version (for the card after an update), or none
+  const highlights = (label) => { const n = NEWS.find((x) => x[0] === label); return (n && n[2]) || []; };
 
   function problemTab() {
     const note = h('textarea', { class: 'guide-note', rows: 4, placeholder: 'What did you do, what happened, what did you expect? (optional)' });
@@ -745,7 +793,7 @@ const Guide = (() => {
       h('h3', {}, 'Things to know'),
       h('ul', { class: 'guide-list' },
         li('A window that stops (out of memory, a graphics driver) is loaded again by itself and says so. If that happens often, the report tells why.'),
-        li('A stuttering TV: Settings → Performance. The benchmark measures the map on the TV; "Graphics card vs processor" keeps the better way of drawing animations.'),
+        li('A stuttering TV: Tablescape settings → Performance. The benchmark measures the map on the TV; "Graphics card vs processor" keeps the better way of drawing animations.'),
         li('The table went dark when the TV was switched off: it comes back by itself when the TV does.'),
         li('A campaign or map shown as damaged: nothing was lost yet. A backup brings it back.')));
   }
@@ -820,5 +868,5 @@ const Guide = (() => {
   }
   function close() { if (el) { el.remove(); el = null; } }
   const isOpen = () => !!el;
-  return { open, close, isOpen, KEYS, NEWS, get tab() { return tab; } };
+  return { open, close, isOpen, KEYS, NEWS, keySheet, highlights, get tab() { return tab; } };
 })();

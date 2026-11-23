@@ -175,15 +175,21 @@ const App = (() => {
   function updateDone() {
     const label = (S && S.update && S.update.currentLabel) || '';
     let dlg = null;
+    // G5 (open point): the new version's highlights right on the card, once; every change in the Guide
+    const top = label ? Guide.highlights(label) : [];
     const body = h('div', { class: 'upd-done' },
       h('img', { class: 'upd-done-maid', src: 'maid-success.webp', alt: '' }),
       h('div', { class: 'upd-done-txt' },
-        h('h2', {}, 'Update successful'),
-        h('p', {}, label ? `Tablescape is now on ${label}.` : 'Tablescape is up to date.'),
-        h('p', { class: 'upd-done-q' }, 'Look at what\'s new?'),
-        h('div', { class: 'modal-actions' },
-          h('button', { class: 'btn', onclick: () => dlg.close() }, 'No'),
-          h('button', { class: 'btn primary', onclick: () => { dlg.close(); Guide.open('news'); } }, iconEl('sparkles'), 'Yes, show me'))));
+        h('h2', {}, top.length ? `Now on ${label}` : 'Update successful'),
+        ...(top.length ? [h('ul', { class: 'upd-done-top' }, ...top.map((t) => h('li', {}, t))),
+          h('div', { class: 'modal-actions' },
+            h('button', { class: 'btn', onclick: () => { dlg.close(); Guide.open('news'); } }, iconEl('sparkles'), 'All changes'),
+            h('button', { class: 'btn primary', onclick: () => dlg.close() }, 'OK'))]
+          : [h('p', {}, label ? `Tablescape is now on ${label}.` : 'Tablescape is up to date.'),
+            h('p', { class: 'upd-done-q' }, 'Look at what\'s new?'),
+            h('div', { class: 'modal-actions' },
+              h('button', { class: 'btn', onclick: () => dlg.close() }, 'No'),
+              h('button', { class: 'btn primary', onclick: () => { dlg.close(); Guide.open('news'); } }, iconEl('sparkles'), 'Yes, show me'))])));
     dlg = UI.dialog('', body);
     dlg.el.classList.add('upd-done-dlg');
   }
@@ -319,7 +325,7 @@ const App = (() => {
     const input = h('input', { type: 'checkbox', role: 'switch' });
     input.addEventListener('change', () => o.set(input.checked));
     bind(() => { input.checked = !!o.get(); });
-    return h('label', { class: 'ctl ctl-toggle' }, h('span', { class: 'ctl-label' }, o.label), input, h('span', { class: 'switch' }));
+    return h('label', { class: 'ctl ctl-toggle', 'data-tip': o.tip || null }, h('span', { class: 'ctl-label' }, o.label), input, h('span', { class: 'switch' })); // (R8: o.tip, what a hint line said)
   }
 
   // Options → Picture: brightness, contrast, gamma, saturation, warmth and black level for this TV
@@ -377,17 +383,18 @@ const App = (() => {
       tips: ['A speaker that is not connected (the TV switched off) falls back to the system\'s default.', 'Effects: soundboard, spell sounds, thunder, the countdown.',
         'Mute (under the table preview) fades all table sound out and back in.'] },
     { id: 'perf', label: 'Performance', icon: 'gauge',
-      tips: ['Medium: fewer particles. Low: also 30 frames a second on the TV, and video maps stand still on your screen (the TV still plays them).', 'The frames per second show under the table preview.',
-        'Animated assets are prepared once (the little maid runs at the top meanwhile); after that many animations stay smooth.', 'Living trees are drawn by the graphics card: Medium draws them less sharp, Low also without their soft shadows. Without a graphics card they are still pictures.', 'An animated asset that should be sharp whatever it costs: select it → the film button (Sharp video).', 'The benchmark measures the map on the TV as it is now: run it again after a change to see what it did.'] },
+      tips: ['Quality: Best, Balanced or Light. Light: lighter effects on the TV and your screen stands still. Advanced → Effects on the TV: Medium has fewer particles; Low also 30 frames a second on the TV, and video maps stand still on your screen.', 'The frames per second show under the table preview.',
+        'Animated assets are prepared once (the little maid runs at the top meanwhile); after that many animations stay smooth.', 'Living trees are drawn by the graphics card: lighter effects on the TV draw them less sharp (Low also without their soft shadows). Without a graphics card they are still pictures.', 'An animated asset that should be sharp whatever it costs: select it → the film button (Sharp video).', 'The benchmark measures the map on the TV as it is now: run it again after a change to see what it did.'] },
     { id: 'screen', label: 'This screen', icon: 'device-desktop',
-      tips: ['Ctrl + and Ctrl − change the size anywhere, Ctrl 0 goes back to 100%. The TV stays as it is.', 'Hotbar: a row, two rows or a column. Right-click the hotbar for the same.', 'Drag the hotbar by its grip to put it anywhere; a double-click on the grip puts it back.'] },
+      tips: ['Ctrl + and Ctrl − change the size anywhere, Ctrl 0 goes back to 100%. The TV stays as it is.', 'Hotbar: a row, two rows or a column. Right-click the hotbar for the same.', 'Drag the hotbar by its grip to put it anywhere; a double-click on the grip puts it back.',
+        'Phones and tablets can connect: on, your remote and the players\' phones connect over your home network as soon as you use them; off, nothing listens.'] },
     { id: 'library', label: 'Library', icon: 'folder',
       tips: ['Moving copies everything to the new place (another disk, say), then Tablescape starts again from there.', 'A folder synced to the cloud works, but files can be busy for a moment while it syncs.',
         'Add the demo campaign: the newest demo comes in next to your campaigns. Yours stay as they are, an older demo too.'] },
   ];
   const CAMP_SECTIONS = [
     { id: 'campaign', label: 'Campaign', icon: 'building-castle',
-      tips: ['A backup is made each time the campaign opens; the last 10 are kept.', 'Export: one file with the campaign and its pictures, to share or keep. As an adventure it goes as prepared, with its looks; your remote\'s buttons, the phones\' rules and the seating stay here.',
+      tips: ['A backup is made each time the campaign opens: the last 10 are kept, and one a day for two weeks and one a week for three months. Restoring keeps a copy of how it is now.', 'Export: one file with the campaign and its pictures, to share or keep. As an adventure it goes as prepared, with its looks; your remote\'s buttons, the phones\' rules and the seating stay here.',
         'Deleted campaigns wait under Recently deleted on the home screen until you empty it.'] },
     { id: 'screens', label: 'Screens', title: 'Screens on the table', icon: 'device-tv',
       tips: ['Title: the TV shows it when the session starts, until the first map.', 'Break: a clock and a line of text; the music goes on.', 'Show it on the table tries the open tab on the TV.'] },
@@ -396,7 +403,7 @@ const App = (() => {
     { id: 'init', label: 'Initiative', icon: 'swords',
       tips: ['Hidden from the table, the turn order still runs for you, and the phones still wait for their turn.', 'Players see the round (next to the round counter) still hides it for one fight.', 'Where the round badge sits on the TV: Tablescape settings → TV.'] },
     { id: 'players', label: 'Players', title: 'Players at the table', icon: 'users',
-      tips: ['Both long sides: everything with text shows twice, once facing each side.', 'In a fight only the player whose turn it is moves; you can still drag any token.', 'The rest of the phones (pace, rest between steps, handing a character to a phone): Toolbox → Player phones on the maps.'] },
+      tips: ['Both long sides: everything with text shows twice, once facing each side.', 'In a fight only the player whose turn it is moves; you can still drag any token.', 'The phones and their rules (moving tokens, pace, the trace of the steps, pings): Toolbox → Player phones on the maps. A player\'s speed: their character card.'] },
     { id: 'tabletok', label: 'Tokens', title: 'Tokens on the table', icon: 'user-circle',
       tips: ['What the players see of the tokens. Their picture size, what new tokens get and your toolbar: Tablescape settings → Tokens.'] },
   ];
@@ -409,24 +416,20 @@ const App = (() => {
     const st = () => S;
     if (id === 'picture') return picturePanel(st, bind);
     if (id === 'players') { // Beta 3.18: Campaign settings → Players at the table: the seats and the phones
-      const P = () => (S && S.players) || {};
       return h('div', { class: 'stack' },
         segCtl(bind, { label: 'Players sit on', options: [{ value: 'both', label: 'Both long sides', tip: 'Everything with text shows twice, once facing each side' }, { value: 'one', label: 'One side' }],
-          get: () => set().seats || 'both', set: (v) => ts.settings({ seats: v }) }),
-        optHead('Phones'),
-        toggleCtl(bind, { label: 'Players may move their tokens', get: () => !!P().on, set: (v) => ts.players('set', { on: v }) }),
-        sliderCtl(bind, { label: 'Speed without a card', min: 5, max: 120, step: 5, fmt: (v) => `${v} ft`, get: () => P().speed || 30, set: (v) => ts.players('set', { speed: v }) }),
-        toggleCtl(bind, { label: 'A trace of the steps', get: () => P().trace !== false, set: (v) => ts.players('set', { trace: v }) }),
-        toggleCtl(bind, { label: 'Pings on the table', get: () => P().pings !== false, set: (v) => ts.players('set', { pings: v }) }));
+          get: () => set().seats || 'both', set: (v) => ts.settings({ seats: v }) }));
+      // (F4: the phones' rules have one home, Toolbox → Player phones; a player's speed is on their card)
     }
     if (id === 'tabletok') { // Beta 3.18: Campaign settings → Tokens on the table (what the players see of them)
       const tk = () => set().tokens || {};
       const T = (patch) => ts.settings({ tokens: patch });
       return h('div', { class: 'stack tok-opts' },
-        sliderCtl(bind, { label: 'Name tags', min: 0.5, max: 2.5, step: 0.05, get: () => tk().tagSize || 1, set: (v) => T({ tagSize: v }), fmt: pct }),
+        sliderCtl(bind, { label: 'Name tag size', min: 0.5, max: 2.5, step: 0.05, get: () => tk().tagSize || 1, set: (v) => T({ tagSize: v }), fmt: pct }), // (G4: the Tokens panel's "Name tags" picks who sees them; this is their size)
         toggleCtl(bind, { label: 'Numbers on copies (Goblin 1, 2, 3)', get: () => tk().numbers !== false, set: (v) => T({ numbers: v }) }),
         toggleCtl(bind, { label: 'Glow around whose turn it is', get: () => tk().turnGlow !== false, set: (v) => T({ turnGlow: v }) }),
-        toggleCtl(bind, { label: 'Shadow under tokens', get: () => !!tk().shadow, set: (v) => T({ shadow: v }) }));
+        toggleCtl(bind, { label: 'Shadow under tokens', get: () => !!tk().shadow, set: (v) => T({ shadow: v }) }),
+        toggleCtl(bind, { label: 'Conditions show on tokens', get: () => tk().conds !== false, set: (v) => T({ conds: v }) })); // D3
     }
     if (id === 'campaign') return Home.campaignSection({ bind, refill: fillOptions, refresh: refreshOptions }); // (gm-home.js)
     if (id === 'check') return Home.checkSection({ bind, refill: fillOptions, refresh: refreshOptions });
@@ -499,6 +502,8 @@ const App = (() => {
           { value: 'names', label: 'By name', tip: 'Goblin 1, Goblin 2, the Ogre …' },
           { value: 'enemy', label: '"Enemy"', tip: 'No names that give anything away' }],
           get: () => set().initFoes || 'names', set: (v) => ts.settings({ initFoes: v }) }),
+        // R6 (open point): with the other initiative settings (it was under This screen)
+        toggleCtl(bind, { label: 'Initiative sorts itself when the last number is in', get: () => set().initAuto !== false, set: (v) => ts.settings({ initAutoSort: v }) }),
         optHead('The round'),
         segCtl(bind, { label: 'Round on the table', options: [
           { value: 'auto', label: 'In the turn order', tip: 'During a fight the round is part of the turn order; without one, the badge shows it' },
@@ -524,20 +529,44 @@ const App = (() => {
         mapLine.innerHTML = '';
         mapLine.hidden = !lv;
         if (!lv) return;
-        mapLine.append(iconEl('gauge'), h('span', { class: 'grow' }, `${s.table.liveName || 'This map'} plays with ${lv === 'low' ? 'Low' : 'Medium'} effects${lv === 'low' ? ' (videos stand still on your screen)' : ''}`),
+        mapLine.append(iconEl('gauge'), h('span', { class: 'grow' }, `${s.table.liveName || 'This map'} plays lighter (Effects on the TV: ${lv === 'low' ? 'Low' : 'Medium'})`),
           h('button', { class: 'btn small', onclick: () => ts.settings({ mapQuality: { mapId: mid, level: null } }) }, 'Back to normal'));
       });
+      // G1 (open point): one Quality choice sets the TV and your screen together; the single settings are under Advanced
+      const QUALITY = { best: ['high', 'smooth'], balanced: ['high', 'light'], light: ['medium', 'still'] };
+      const qNow = () => { const x = set(); const q = x.quality || 'high'; const a = x.gmAnim || 'light'; const f = x.gmFx || 'light';
+        return Object.keys(QUALITY).find((k) => QUALITY[k][0] === q && QUALITY[k][1] === a && a === f) || ''; };
       return h('div', { class: 'stack' },
-        segCtl(bind, { label: 'Effects quality', options: [
-          { value: 'high', label: 'High' },
-          { value: 'medium', label: 'Medium', tip: 'Fewer particles, lighter effect layers' },
-          { value: 'low', label: 'Low', tip: 'For weaker computers: 30 frames a second on the TV; video maps stand still on your screen' }],
-        get: () => set().quality || 'high', set: (v) => ts.settings({ quality: v }) }),
+        segCtl(bind, { label: 'Quality', options: [
+          { value: 'best', label: 'Best', tip: 'Everything at full speed, on the TV and on your screen. For a strong computer' },
+          { value: 'balanced', label: 'Balanced', tip: 'The TV at its best; your screen at about 12 frames a second' },
+          { value: 'light', label: 'Light', tip: 'When the TV stutters: lighter effects on the TV; your screen stands still' }],
+        get: qNow, set: (v) => { const [q, a] = QUALITY[v]; ts.settings({ quality: q, gmAnim: a, gmFx: a }); } }),
         mapLine,
         toggleCtl(bind, { label: 'Ask to lower the effects when the TV stutters', get: () => set().fpsWatch, set: (v) => ts.settings({ fpsWatch: v }) }),
+        h('details', { class: 'opt-adv' }, h('summary', {}, 'Advanced'),
+          segCtl(bind, { label: 'Effects on the TV', options: [
+            { value: 'high', label: 'High' },
+            { value: 'medium', label: 'Medium', tip: 'Fewer particles, lighter effect layers' },
+            { value: 'low', label: 'Low', tip: 'For weaker computers: 30 frames a second on the TV; video maps stand still on your screen' }],
+          get: () => set().quality || 'high', set: (v) => ts.settings({ quality: v }) }),
+          segCtl(bind, { label: 'Animated assets on your screen', options: [
+            { value: 'smooth', label: 'Full speed' },
+            { value: 'light', label: '12 fps', tip: 'About 12 frames a second on your screen; the TV plays at full speed' },
+            { value: 'still', label: 'Still', tip: 'Standing still on your screen; the TV plays them' }],
+          get: () => set().gmAnim || 'light', set: (v) => ts.settings({ gmAnim: v }) }),
+          // Prototype 19: the effects (mist, fire, weather, flickering light, spells) on your screen
+          segCtl(bind, { label: 'Effects on your screen', options: [
+            { value: 'smooth', label: 'Full speed', tip: 'Every frame your screen shows: smoothest, heaviest for the laptop' },
+            { value: 'light', label: '12 fps', tip: 'About 12 frames a second on your screen; the TV plays at full speed' },
+            { value: 'still', label: 'Still', tip: 'Drawn only when something changes: lightest. The TV plays them' }],
+          get: () => set().gmFx || 'light', set: (v) => ts.settings({ gmFx: v }) }),
+          segCtl(bind, { label: 'Who draws the animations', options: [
+            { value: 'cpu', label: 'Processor', tip: 'The default: smooth with many animations' },
+            { value: 'gpu', label: 'Graphics card', tip: 'Lighter with few animations. "Graphics card vs processor" below picks the better one' }],
+          get: () => set().animDraw || 'cpu', set: (v) => ts.settings({ animDraw: v }) })),
         spellGpuCtl(set, bind), // Second Builder (second-spell-warmup)
-        toggleCtl(bind, { label: 'Build tools show the whole map with light and effects', get: () => set().buildWide !== false, set: (v) => ts.settings({ buildWide: v }) }),
-        h('p', { class: 'hint' }, 'Off: light and effects are drawn only inside the TV\'s frame, as while playing.'),
+        toggleCtl(bind, { label: 'Build tools show the whole map with light and effects', tip: 'Off: light and effects are drawn only inside the TV frame, as while playing', get: () => set().buildWide !== false, set: (v) => ts.settings({ buildWide: v }) }), // (R8: the hint line became its tip)
         h('div', { class: 'pop-sep' }),
         animPanel(st, bind),
         h('div', { class: 'pop-sep' }),
@@ -554,7 +583,8 @@ const App = (() => {
         // Prototype 25: a line with a tool's keys for a few seconds when you pick it
         toggleCtl(bind, { label: 'Show a tool\'s keys when you pick it', get: () => { try { return localStorage.getItem('toolHints') !== '0'; } catch { return true; } },
           set: (v) => { try { localStorage.setItem('toolHints', v ? '1' : '0'); } catch { /* */ } refreshOptions(); } }),
-        toggleCtl(bind, { label: 'Initiative sorts itself when the last number is in', get: () => set().initAuto !== false, set: (v) => ts.settings({ initAutoSort: v }) }));
+        // F1 (open point): the one switch for phones and tablets; on, they connect by themselves when a panel needs them
+        toggleCtl(bind, { label: 'Phones and tablets can connect', get: () => !(S && S.remote && S.remote.allowed === false), set: (v) => ts.remote('allow', { on: v }).then(() => refreshOptions()) }));
     }
     if (id === 'library') return libraryBox(bind);
     if (id === 'tv') {
@@ -589,8 +619,7 @@ const App = (() => {
     const setPref = (k, v) => { const p = play(); if (p) p.setTokPref(k, v); refreshOptions(); };
     const picT = {};
     return h('div', { class: 'stack tok-opts' },
-      optHead('Picture size'),
-      h('p', { class: 'faint opt-note' }, 'How big a token\'s picture is drawn over its squares.'),
+      h('h3', { class: 'opt-h', 'data-tip': 'How big a token\'s picture is drawn over its squares' }, 'Picture size'), // (R8: the note became the heading's tip)
       ...PIC_SIZES.map(([k, label]) => sliderCtl(bind, { label, min: 0.7, max: 1.7, step: 0.05, get: () => (tk().pic || {})[k],
         set: (v) => { clearTimeout(picT[k]); picT[k] = setTimeout(() => T({ pic: { [k]: v } }), 60); }, fmt: pct })),
       h('div', { class: 'ctl-row' }, h('button', { class: 'btn small ghost', onclick: () => T({ picReset: true }) }, iconEl('restore'), 'Back to the standard sizes')),
@@ -700,29 +729,8 @@ const App = (() => {
     refresh();
     const off = AnimBaker.on(() => { if (!line.isConnected) { off(); return; } clearTimeout(line._t); line._t = setTimeout(refresh, 400); });
     return h('div', { class: 'stack anim-perf' },
-      h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Animated assets'), line, disk, rows, h('div', { class: 'ctl-row' }, prep, clear)),
-      // Prototype 26: one switch for how much your screen draws; the single settings are under Advanced
-      segCtl(bind, { label: 'Load on this computer', options: [
-        { value: 'still', label: 'Light', tip: 'Animations and effects stand still on your screen. The TV plays everything.' },
-        { value: 'light', label: 'Balanced', tip: 'About 12 frames a second on your screen. The TV plays at full speed.' },
-        { value: 'smooth', label: 'Full', tip: 'Every frame on your screen too: smoothest, heaviest for the laptop' }],
-      get: () => { const x = st().settings || {}; const a = x.gmAnim || 'light'; return a === (x.gmFx || 'light') ? a : ''; }, set: (v) => ts.settings({ gmAnim: v, gmFx: v }) }),
-      h('details', { class: 'opt-adv' }, h('summary', {}, 'Advanced'),
-        segCtl(bind, { label: 'Animated assets on your screen', options: [
-          { value: 'smooth', label: 'Full speed' },
-          { value: 'light', label: '12 fps', tip: 'About 12 frames a second on your screen; the TV plays at full speed' },
-          { value: 'still', label: 'Still', tip: 'Standing still on your screen; the TV plays them' }],
-        get: () => (st().settings && st().settings.gmAnim) || 'light', set: (v) => ts.settings({ gmAnim: v }) }),
-        // Prototype 19: the effects (mist, fire, weather, flickering light, spells) on your screen
-        segCtl(bind, { label: 'Effects on your screen', options: [
-          { value: 'smooth', label: 'Full speed', tip: 'Every frame your screen shows: smoothest, heaviest for the laptop' },
-          { value: 'light', label: '12 fps', tip: 'About 12 frames a second on your screen; the TV plays at full speed' },
-          { value: 'still', label: 'Still', tip: 'Drawn only when something changes: lightest. The TV plays them' }],
-        get: () => (st().settings && st().settings.gmFx) || 'light', set: (v) => ts.settings({ gmFx: v }) }),
-        segCtl(bind, { label: 'Who draws the animations', options: [
-          { value: 'cpu', label: 'Processor', tip: 'The default: smooth with many animations' },
-          { value: 'gpu', label: 'Graphics card', tip: 'Lighter with few animations. "Graphics card vs processor" below picks the better one' }],
-        get: () => (st().settings && st().settings.animDraw) || 'cpu', set: (v) => ts.settings({ animDraw: v }) })));
+      h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Animated assets'), line, disk, rows, h('div', { class: 'ctl-row' }, prep, clear)));
+    // (G1: how much your screen draws is part of Quality on top of Performance; the single settings are under its Advanced)
   }
 
   // 2.4: the benchmark (bench.js, main.js): the map on the TV measured for 20 s, or twice (animations as videos, then
@@ -846,7 +854,7 @@ const App = (() => {
       dlg.body.innerHTML = '';
       if (!all.length) { dlg.body.append(h('p', { class: 'hint' }, 'No results yet.')); return; }
       dlg.body.append(h('div', { class: 'bench-list wide' }, ...benchGroups(all).map((g) => benchCard(g, all))),
-        h('div', { class: 'ctl-row' }, h('button', { class: 'btn small danger', onclick: async () => { await ts.bench('clear'); fill(); } }, iconEl('trash'), 'Clear all results')));
+        h('div', { class: 'ctl-row' }, h('button', { class: 'btn small danger', onclick: async () => { const r = await ts.bench('clear'); fill(); if (r && r.before && r.before.length) UI.toast('Results cleared', { undo: async () => { await ts.bench('restore', { list: r.before }); fill(); } }); } }, iconEl('trash'), 'Clear all results')));
     };
     fill();
   }

@@ -30,6 +30,21 @@ const FxThumbs = (() => {
   const tmp = {};
   const plane = (n, w, h) => { let c = tmp[n]; if (!c) { c = document.createElement('canvas'); tmp[n] = c; } if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } const g = c.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.filter = 'none'; g.clearRect(0, 0, w, h); return { c, g }; };
   const hash = (n) => { const x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x); };
+  // the floor at one size, drawn once and copied at every frame. Filling with the floor's pattern at every frame of the
+  // playing banner made the GM window give up the graphics card for new canvases after ~10 s; the map's layers made
+  // after that (the panel closing resizes them) were drawn by the processor, and the GM screen stalled for seconds
+  const floorPics = new Map();
+  function floorPic(bg, w, h, k) {
+    const key = `${bg.src}|${w}x${h}|${k.toFixed(4)}`;
+    let c = floorPics.get(key);
+    if (!c) {
+      c = document.createElement('canvas'); c.width = w; c.height = h;
+      const fg = c.getContext('2d'); fg.scale(k, k); fg.fillStyle = fg.createPattern(bg, 'repeat'); fg.fillRect(0, 0, w / k, h / k);
+      if (floorPics.size > 24) floorPics.delete(floorPics.keys().next().value);
+      floorPics.set(key, c);
+    }
+    return c;
+  }
   function mapLight(g, w, h, ppi, id, t, bg) {
     if (!bg) return;
     const W = w / ppi; const H = h / ppi;
@@ -47,7 +62,7 @@ const FxThumbs = (() => {
     else { const m = Math.round(W * 3.2); for (let i = 0; i < m; i++) blob(hash(i + 1) * W, hash(i + 31) * H, 0.5 + 0.5 * hash(i + 77), 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * (id === 'ember' ? 0.8 : 0.9) + hash(i + 5) * 40))); }
     // the floor's own picture, kept where the band and the rhythm are, then added to what is there
     const P = plane('p', w, h); const k = (ppi / 34) * 0.55;
-    P.g.save(); P.g.scale(k, k); P.g.fillStyle = P.g.createPattern(bg, 'repeat'); P.g.fillRect(0, 0, w / k, h / k); P.g.restore();
+    P.g.drawImage(floorPic(bg, w, h, k), 0, 0);
     P.g.globalCompositeOperation = 'destination-in'; P.g.drawImage(A.c, 0, 0); P.g.drawImage(R.c, 0, 0);
     g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'lighter';
     g.globalAlpha = id === 'ember' ? 1 : 0.9; g.drawImage(P.c, 0, 0); if (id === 'ember') { g.globalAlpha = 0.7; g.drawImage(P.c, 0, 0); }
@@ -70,7 +85,7 @@ const FxThumbs = (() => {
     if (kind === 'region' && R_ZOOM[id]) ppi *= R_ZOOM[id];
     g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.filter = 'none';
     g.fillStyle = '#2a2622'; g.fillRect(0, 0, w, h);
-    if (bg) { const k = (ppi / 34) * 0.55; g.save(); g.scale(k, k); g.fillStyle = g.createPattern(bg, 'repeat'); g.fillRect(0, 0, w / k, h / k); g.restore(); }
+    if (bg) g.drawImage(floorPic(bg, w, h, (ppi / 34) * 0.55), 0, 0);
     g.fillStyle = `rgba(4,6,12,${kind === 'region' && id === 'darkness' ? 0.2 : 0.45})`; g.fillRect(0, 0, w, h);
     g.save(); g.setTransform(ppi, 0, 0, ppi, 0, 0);
     try {

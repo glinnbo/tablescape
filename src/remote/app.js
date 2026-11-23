@@ -61,8 +61,11 @@
 
   // ---------------------------------------------------------------- talking to Tablescape
   let token = null; let role = null; let S = null; let label = ''; let es = null;
+  // O3 (open point): a request gives up after 6 s (on bad Wi-Fi a key spun for minutes, and the reconnect waited for it)
   async function post(url, body) {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' });
+    const ctl = new AbortController(); const giveUp = setTimeout(() => ctl.abort(), 6000);
+    let r;
+    try { r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store', signal: ctl.signal }); } finally { clearTimeout(giveUp); }
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) unpaired();
     return j;
@@ -211,13 +214,14 @@
     let swiped = 0;
     async function press(el, it) {
       if (Date.now() - swiped < 400) return;
+      if (el.dataset.busy) return; // O2 (open point): a double tap runs it once (Next turn skipped someone, Blackout flipped back)
       if (it.pc) { toast('This one needs the mouse on the map: use it at the PC'); return; }
       if (it.missing) { toast(`${it.label} isn't in this campaign`); return; }
       if (S && !S.at && !FREE.has(it.kind)) { toast('Open the campaign on the PC first'); return; }
       vib();
-      el.classList.add('busy');
+      el.classList.add('busy'); el.dataset.busy = '1';
       const r = await act('run', { item: it }).catch(() => null);
-      el.classList.remove('busy');
+      el.classList.remove('busy'); setTimeout(() => { delete el.dataset.busy; }, 350);
       if (!r) { toast('Tablescape didn\'t answer'); return; }
       if (!r.ok) { if (r.error) toast(r.error); el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); return; }
       el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
@@ -297,9 +301,13 @@
       banner.hidden = !!st.at;
       banner.textContent = st.screen === 'home' || !st.campaign ? 'On the PC: open a campaign to play.' : 'On the PC: open the campaign (Play).';
     }
+    let initBusy = false;
     async function initDo(d) {
+      if (initBusy) return; // (O2: one turn per tap, however quick the second)
+      initBusy = true;
       vib();
-      const r = said(await act('init', { do: d }).catch(() => null));
+      let r = null;
+      try { r = said(await act('init', { do: d }).catch(() => null)); } finally { setTimeout(() => { initBusy = false; }, 350); }
       if (r && r.ok && r.label && /^Round/.test(r.label)) toast(r.label);
     }
     function drawStrip(st) {
@@ -427,7 +435,7 @@
     function showHandout(x) {
       const img = h('img', { src: faceSrc(x.url), alt: 'Handout', draggable: false }); // (Beta 3.8: no name: the phone never gets one)
       const stage = h('div', { class: 'ho-stage' }, img);
-      const view = h('div', { class: 'ho-view', role: 'dialog', 'aria-label': 'Handout' },
+      const view = h('div', { class: 'ho-view', role: 'dialog', 'aria-label': 'Handout', dataset: { url: x.url } },
         stage, h('div', { class: 'ho-cap' }, h('span', {}), h('button', { class: 'ho-x', 'aria-label': 'Close', onclick: (e) => { e.stopPropagation(); cancelAnimationFrame(glide); view.remove(); } }, ic('x'))));
       let z = 1; let tx = 0; let ty = 0; // zoom and shift of the picture (from the middle of the screen)
       let glide = 0;
@@ -540,7 +548,7 @@
       if (hos.length === 1) { showHandout(hos[0]); return; }
       const sheet = h('div', { class: 'ho-list', role: 'dialog', 'aria-label': 'Handouts', onclick: (e) => { if (e.target === sheet) sheet.remove(); } },
         h('div', { class: 'ho-sheet' }, h('h2', {}, 'Handouts'),
-          h('div', { class: 'ho-grid' }, ...hos.map((x, i) => h('button', { class: 'ho-tile', 'aria-label': `Handout ${i + 1}`, onclick: () => { sheet.remove(); showHandout(x); } },
+          h('div', { class: 'ho-grid' }, ...hos.map((x, i) => h('button', { class: 'ho-tile', 'aria-label': `Handout ${i + 1}`, dataset: { url: x.url }, onclick: () => { sheet.remove(); showHandout(x); } },
             h('img', { src: faceSrc(x.url), alt: '', draggable: false })))),
           h('button', { class: 'pbtn', onclick: () => sheet.remove() }, 'Close')));
       for (const old of document.querySelectorAll('.ho-list')) old.remove();
@@ -555,7 +563,11 @@
       hos = list;
       hoBtn.hidden = !list.length;
       hoBtn.lastChild.textContent = list.length > 1 ? String(list.length) : '';
-      if (!list.length) for (const el of document.querySelectorAll('.ho-view, .ho-list')) el.remove(); // (taken back)
+      // L2 (open point): one taken back closes, also while others stay (before: only when every one was taken back)
+      const still = new Set(keys);
+      for (const v of document.querySelectorAll('.ho-view')) if (!still.has(v.dataset.url)) v.remove();
+      for (const tl of document.querySelectorAll('.ho-list .ho-tile')) if (!still.has(tl.dataset.url)) tl.remove();
+      if (!list.length) for (const el of document.querySelectorAll('.ho-list')) el.remove();
     }
     put(app, head, row, ctlEl, more, hoBtn);
     let showT = 0;
@@ -750,9 +762,16 @@
       if (me.fight && me.fight.mine) { const t = me.fight.group ? 'Everyone moves' : 'Your turn'; return me.fight.left >= 5 ? `${t} · ${me.fight.left} ft left` : `${t} · no movement left`; }
       return me.can ? 'Push the stick, let go: one square' : me.error || '…';
     }
-    const ab = (icn, label, on, cls = '') => h('button', { class: `abtn ${cls}`, onclick: async () => { const r = await on(); if (r && r.ok === false) fail(r); } }, ic(icn), h('span', {}, label));
+    // (O2/O3: one run per tap, and a word when Tablescape doesn't answer: Dash and Ping said nothing before)
+    const ab = (icn, label, on, cls = '') => h('button', { class: `abtn ${cls}`, onclick: async (e) => {
+      const btn = e.currentTarget; if (btn.dataset.busy) return; btn.dataset.busy = '1';
+      try { const r = await Promise.resolve().then(on).catch(() => null); if (!r) toast("Tablescape didn't answer"); else if (r.ok === false) fail(r); } finally { setTimeout(() => { delete btn.dataset.busy; }, 350); }
+    } }, ic(icn), h('span', {}, label));
     function draw(ctl, force) {
       C = ctl;
+      // O1 (open point): the seat set-up ends when it can't go on (moving by phone switched off, the character let go):
+      // the flag stayed on and every later state was ignored, so the phone kept a stale screen until reloaded
+      if (calibrating && (!C.me || !C.on)) { calibrating = false; act('calib', { on: false }).catch(() => null); }
       // (Beta 3.7) who you are comes first, also at a table with miniatures (moving by phone off): the DM's handouts
       // for single players find the right phone. Then the phone just says who it is.
       if (!C.me) { me = null; pick(C.chars || []); return; }

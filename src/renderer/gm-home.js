@@ -49,7 +49,7 @@ const Home = (() => {
       h('div', { class: 'hm-brand' }, h('h1', { class: 'wordmark' }, 'Tablescape'), el.release),
       h('div', { class: 'hm-actions' },
         h('div', { class: 'upd-slot' }),
-        h('button', { class: 'btn hm-tb', 'data-tip': 'A guided first evening', onclick: () => toast('The tutorial is coming soon.', { ms: 2600 }) }, iconEl('compass'), 'Tutorial'),
+        // (P6: the Tutorial button comes back with the tutorial; it only said "coming soon")
         h('button', { class: 'btn hm-tb', 'data-tip': 'Guide: first evening, keys, what\'s new, report a problem (?)', onclick: () => Guide.open('start') }, iconEl('book'), 'Guide'),
         h('button', { class: 'btn hm-tb', 'data-tip': 'Open the folder with your maps, tokens and effects', onclick: () => window.ts.library('open') }, iconEl('folder'), 'Library'),
         h('button', { class: 'btn hm-tb hm-ic', 'aria-label': 'Discord', 'data-tip': 'Tablescape on Discord: help, bug reports, ideas, news', onclick: () => window.ts.app('link.open', { to: 'discord' }) }, iconEl('logo-discord')),
@@ -425,7 +425,7 @@ const Home = (() => {
           if (!b.classList.contains('sure')) { b.classList.add('sure'); b.lastChild.textContent = 'Sure? Delete for good'; return; }
           await cmd('campaign.purge', { key: d.key }); refresh(); fill();
         } }, iconEl('trash'), h('span', {}, 'Delete for good'))))),
-        h('p', { class: 'hint' }, 'Kept in the library folder under .cache/trash.'));
+        h('p', { class: 'hint' }, 'Kept in the library folder under Campaigns/.trash.'));
     };
     fill();
   }
@@ -436,7 +436,7 @@ const Home = (() => {
     const rows = await window.ts.app('backups.list', { id: c.id });
     dlg.body.innerHTML = '';
     if (!rows.length) { dlg.body.append(h('div', { class: 'dlg-empty' }, 'No backups yet. One is made each time you open the campaign.')); return; }
-    dlg.body.append(h('div', { class: 'hint' }, 'A copy is made each time you open the campaign; the last 10 are kept. Restoring keeps a copy of how it is now.'));
+    // (R8: what is kept and that a restore keeps a copy of now: in the Guide and the tips of Campaign settings)
     for (const b of rows) {
       const when = new Date(b.made).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
       dlg.body.append(h('div', { class: 'dlg-row' },
@@ -712,7 +712,7 @@ const Home = (() => {
         row('rename', 'pencil', 'Rename', c.name, () => rename({ id: c.id, name: c.name })),
         row('cover', 'photo', 'Cover picture', coverName, () => { coverOpen = true; E.refill(); }),
         row('folder', 'folder', 'Show in folder', null, () => window.ts.library('open', c.folder)),
-        row('backups', 'history', 'Backups', 'A copy each time it opens; the last 10 are kept', () => earlier({ id: c.id, name: c.name })),
+        row('backups', 'history', 'Backups', 'A copy each time it opens; kept for three months', () => earlier({ id: c.id, name: c.name })),
         row('export', 'file-export', 'Export', 'One file to share or keep', () => TransferUI.exportDialog({ id: c.id, name: c.name })),
         h('div', { class: 'hm-set-gap' }),
         row('delete', 'trash', 'Delete campaign…', 'Kept under Recently deleted until you empty it', () => askDelete(it), true));

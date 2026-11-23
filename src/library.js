@@ -29,7 +29,6 @@ const FOLDERS = [
   'Packs',
   'Campaigns',
   '.cache/thumbs',
-  '.cache/trash',
   '.cache/vtt',
   '.cache/anim',
 ];
@@ -112,7 +111,7 @@ function ensureLibrary(root, demoDir) {
       '  Tables            tables for the wheel of luck (.txt, .csv, .md), for every campaign',
       '  Packs             creator downloads, kept as they come',
       '  Campaigns         your campaigns (made by the app)',
-      '  .cache            thumbnails, baked animations and deleted items, safe to delete',
+      '  .cache            thumbnails and baked animations, safe to delete',
       '',
     ].join('\r\n'));
   }
@@ -445,7 +444,22 @@ function defaultFolder(cat, kind) {
     default: return kind === 'video' ? 'Maps/Animated' : 'Maps/Static';
   }
 }
-const sameFile = (a, b) => { try { const x = fs.statSync(a); const y = fs.statSync(b); return x.size === y.size; } catch { return false; } };
+// J8 (open point): the same size is not enough (two exports of the same kind often are): the bytes are compared, a
+// megabyte at a time, stopping at the first difference
+function sameFile(a, b) {
+  let fa = null; let fb = null;
+  try {
+    if (fs.statSync(a).size !== fs.statSync(b).size) return false;
+    fa = fs.openSync(a, 'r'); fb = fs.openSync(b, 'r');
+    const A = Buffer.alloc(1 << 20); const B = Buffer.alloc(1 << 20);
+    for (;;) {
+      const n = fs.readSync(fa, A, 0, A.length, null); const m = fs.readSync(fb, B, 0, B.length, null);
+      if (n !== m) return false;
+      if (n === 0) return true;
+      if (!A.subarray(0, n).equals(B.subarray(0, n))) return false;
+    }
+  } catch { return false; } finally { if (fa != null) fs.closeSync(fa); if (fb != null) fs.closeSync(fb); }
+}
 // a name that is free in dir (or the same file already there): "Crypt.png", "Crypt (2).png" ...
 function freeName(dir, base, src) {
   const { name, ext } = path.parse(base);

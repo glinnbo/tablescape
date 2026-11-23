@@ -428,7 +428,8 @@ const Creatures = (() => {
     const cx = m.a * x + m.c * y + m.e; const cy = m.b * x + m.d * y + m.f;
     const S = Math.max(8, Math.ceil(Rd * 2 + 4));
     const w0 = work || (work = document.createElement('canvas'));
-    if (w0.width < S || w0.height < S) { w0.width = Math.max(w0.width, S); w0.height = Math.max(w0.height, S); }
+    // (Q3: it grows as needed and shrinks again once it is far too big: a whirlpool seen close up left a huge one behind)
+    if (w0.width < S || w0.height < S || (w0.width > 2 * S && w0.width > 1024)) { w0.width = S; w0.height = S; }
     const g0 = w0.getContext('2d');
     const o = S / 2; // the middle of the work canvases
     const blit = (alpha) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = Math.min(1, alpha); ctx.drawImage(w0, 0, 0, S, S, cx - o, cy - o, S, S); ctx.restore(); };
@@ -515,8 +516,13 @@ const Creatures = (() => {
   // Two copies, each turning for a while from rest, fade into each other (as flow maps do), so the water keeps
   // turning one way and never winds up into a smear.
   const swirlSrc = new Map();
+  // Q3 (open point): a map switched: the picture copies of effects not on it go; the work canvases shrink
+  function forget(keep) {
+    for (const M of [swirlSrc, turnSrc]) for (const id of [...M.keys()]) if (!keep.has(id)) M.delete(id);
+    if (work) { work.width = 1; work.height = 1; }
+  }
   // how far the water is twisted at the eye right now (it breathes slowly; also for the engine's water, living.js)
-  const twistOf = (fx, t) => (fx.spin === -1 ? -1 : 1) * (fx.variant === 'maelstrom' ? 1.2 : 0.8) * Math.min(1.5, fx.intensity ?? 1) * (0.85 + 0.15 * Math.sin(t * (fx.speed ?? 1) * 0.5 + F().seedOf(fx.id || 's'))); // radians at the eye
+  const twistOf = (fx, t) => (fx.spin === -1 ? -1 : 1) * (fx.variant === 'maelstrom' ? 1.2 : 0.8) * Math.min(1.5, fx.intensity ?? 1) * (0.85 + 0.15 * Math.sin(FXDATA.phaseT(fx, t) * 0.5 + F().seedOf(fx.id || 's'))); // radians at the eye (M2: its own clock)
   function swirl(ctx, fx, x, y, t, bg) {
     const el = bg && bg.el;
     if (!el || fx.swirl === false) return;
@@ -592,6 +598,9 @@ const Creatures = (() => {
     const { since, until } = geyserState(fx, t);
     const ERUPT = 4.5; const BUILD = 8;
     const build = until < BUILD ? 1 - until / BUILD : 0; // 0..1 as it builds up
+    // M1 (open point): what the build-up adds, counted from its own start (the integral of the rate's rise): the bubbles
+    // and rings quicken smoothly. (Time times a rate that rises jumped them about every frame of the build-up)
+    const tau = build > 0 ? BUILD - until : 0; const extra = (tau * tau) / (2 * BUILD);
     const erupt = since < ERUPT ? since / ERUPT : -1;
     const [wx, wy, ws] = windVec(s);
     ctx.globalCompositeOperation = 'source-over';
@@ -610,8 +619,7 @@ const Creatures = (() => {
     const bub = clearPic('#ffffff');
     const nb = Math.round(3 + 14 * build);
     for (let i = 0; i < nb; i++) {
-      const rate = 0.5 + 2.5 * build;
-      const ph = t * rate * (0.8 + 0.4 * h(s + i)) + h(s + i * 3); const u = fract(ph); const n = Math.floor(ph);
+      const ph = (0.5 * t + 2.5 * extra) * (0.8 + 0.4 * h(s + i)) + h(s + i * 3); const u = fract(ph); const n = Math.floor(ph);
       const a = h(s + i * 7 + n * 1.3) * TAU; const d = Math.sqrt(h(s + i * 11 + n * 0.7)) * r * 0.3;
       const bx = x + Math.cos(a) * d; const by = y + Math.sin(a) * d; const br = r * (0.025 + 0.03 * h(s + i + n));
       if (u < 0.85) put(ctx, bub, bx, by, br * (0.5 + u), 0.7 * A);
@@ -623,7 +631,7 @@ const Creatures = (() => {
       dot(ctx, sprite(mix(water, '#ffffff', 0.6)), x, y, r * (0.2 + 0.2 * build), 0.35 * build * build * A * (0.8 + 0.2 * Math.sin(t * 9)));
       ctx.globalCompositeOperation = 'source-over';
       for (let k = 0; k < 3; k++) {
-        const ph = fract(t * (0.6 + build) + k / 3);
+        const ph = fract(0.6 * t + extra + k / 3);
         ring(ctx, x, y, r * (0.25 + 0.6 * ph), 0.55 * build * (1 - ph) * A, '#ffffff', r * 0.015);
       }
     }
@@ -966,7 +974,7 @@ const Creatures = (() => {
   // a picture in another colour: its coloured parts take the colour, its black veins and white spots stay (made once)
   const tints = new Map();
   function tinted(n, im, hex) {
-    const key = `${n}|${hex}`; let c = tints.get(key); if (c) return c;
+    const key = `${n}|${hex}`; let c = tints.get(key); if (c) { tints.delete(key); tints.set(key, c); return c; } // (K4: the least recently used goes past 96)
     const w = im.naturalWidth || im.width; const hh = im.naturalHeight || im.height;
     c = document.createElement('canvas'); c.width = w; c.height = hh; c.cy = im.cy;
     const g = c.getContext('2d'); g.drawImage(im, 0, 0);
@@ -986,7 +994,8 @@ const Creatures = (() => {
       }
       g.putImageData(D, 0, 0);
     } catch { /* a picture we may not read: its own colours */ }
-    tints.set(key, c); return c;
+    tints.set(key, c); while (tints.size > 96) tints.delete(tints.keys().next().value);
+    return c;
   }
   const BUTTERFLY_MIX = [null, '#f4d23a', '#f6f1df', '#9cc6ec', null, '#f4d23a']; // orange (its own), yellow, white, pale blue
   // a smooth wander inside a circle of radius 1: two slow sines a coordinate (the sum stays inside)
@@ -1232,7 +1241,7 @@ const Creatures = (() => {
       // a hidden area on the GM screen): put together solid first, then drawn faint as one)
       const k = devK(g); const pad = Math.max(H * 0.6, len * 0.14);
       const tw = Math.max(2, Math.ceil(len * 1.1 * k) + 2); const th = Math.max(2, Math.ceil((H + 2 * pad) * k) + 2);
-      const c = bodyTmp; if (c.width < tw) c.width = tw; if (c.height < th) c.height = th;
+      const c = bodyTmp; if (c.width < tw || (c.width > 2 * tw && c.width > 1024)) c.width = tw; if (c.height < th || (c.height > 2 * th && c.height > 1024)) c.height = th; // (Q3: shrinks again)
       const q = c.getContext('2d'); q.setTransform(1, 0, 0, 1, 0, 0); q.globalAlpha = 1; q.globalCompositeOperation = 'source-over'; q.clearRect(0, 0, tw, th);
       q.setTransform(k, 0, 0, k, 1 + len * 0.05 * k, 1 + (pad + H / 2) * k);
       strips(q, 0);
@@ -1591,7 +1600,7 @@ const Creatures = (() => {
     const K = DAPPLE[fx.variant] || DAPPLE.sunlight; const I = Math.min(1.6, o.I);
     const m = ctx.getTransform(); const W = ctx.canvas.width; const H = ctx.canvas.height;
     const B = regionBox(ctx, fx, 0.6); if (!B) return;
-    const wind = Wd().strength || 1; const sway = t * (0.35 + 0.3 * wind);
+    const wind = Wd().strength || 1; const sway = t * 0.5; const amp = 0.06 * (0.55 + 0.45 * Math.min(2, wind)); // (M2: a steady pace; more wind sways further, not faster: wind times the time jumped with every change of wind)
     const light = o.C || K.light;
     const sc = scratch(14, W, H, B); const g = sc.g;
     // the shade
@@ -1606,14 +1615,14 @@ const Creatures = (() => {
     const big = fx.variant === 'rays' ? 1.6 : 1;
     for (let i = 0; i < n; i++) {
       const p = S[Math.floor(h(o.s + i * 3.7) * S.length)]; const a0 = h(o.s + i * 5.1) * TAU; const d0 = Math.sqrt(h(o.s + i * 6.9)) * p[2];
-      const x = p[0] + Math.cos(a0) * d0 + Math.sin(sway * (0.8 + h(o.s + i)) + i) * 0.06; const y = p[1] + Math.sin(a0) * d0 + Math.cos(sway * (0.7 + h(o.s + i * 2)) + i * 2) * 0.06;
+      const x = p[0] + Math.cos(a0) * d0 + Math.sin(sway * (0.8 + h(o.s + i)) + i) * amp; const y = p[1] + Math.sin(a0) * d0 + Math.cos(sway * (0.7 + h(o.s + i * 2)) + i * 2) * amp;
       const r = (0.12 + 0.3 * h(o.s + i * 8.3)) * big / Math.sqrt(Math.max(0.4, fx.density ?? 1));
       F().dot(sg, spr, x, y, r, 0.55 + 0.45 * Math.sin(sway * 1.3 + i * 1.7));
     }
     sg.setTransform(1, 0, 0, 1, 0, 0);
     if (light !== '#ffffff') { sg.globalCompositeOperation = 'source-atop'; sg.fillStyle = light; sg.fillRect(B.x, B.y, B.w, B.h); sg.globalCompositeOperation = 'source-over'; }
     if (fx.variant !== 'rays') { g.globalCompositeOperation = 'destination-out'; g.drawImage(spots.c, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h); g.globalCompositeOperation = 'source-over'; }
-    g.globalAlpha = K.la * I * (0.9 + 0.1 * Math.sin(t * 1.7 * wind)); g.drawImage(spots.c, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h); g.globalAlpha = 1;
+    g.globalAlpha = K.la * I * (0.9 + 0.1 * Math.min(1.5, wind) * Math.sin(t * 1.7)); g.drawImage(spots.c, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h); g.globalAlpha = 1;
     if (fx.variant === 'rays') { // soft beams from the top-left, slowly breathing, motes drifting in them
       g.setTransform(m);
       if (S.length) {
@@ -1806,7 +1815,7 @@ const Creatures = (() => {
   function turnsOf(fx, t, nowMs) {
     const spin = fx.spin === -1 ? -1 : 1; const v = fx.speed ?? 1;
     if (fx.variant === 'windmill') return spin * (fx.anc ? millTurns(fx.anc, nowMs) : millRate(Wd().strength) * v * (nowMs / 1000));
-    const T = t * v; // (t is the effects' clock)
+    const T = FXDATA.phaseT(fx, t); // (t is the effects' clock; M2: the part's own, no jump when Speed changes)
     if (fx.variant === 'ticking') { const k = Math.floor(T); const f = T - k; const e = f < 0.3 ? 1 + 0.12 * Math.sin((f / 0.3) * Math.PI) * (1 - f / 0.3) - Math.pow(1 - f / 0.3, 3) : 1; return (spin * (k + e)) / 12; }
     return spin * T * 0.08;
   }
@@ -1842,7 +1851,7 @@ const Creatures = (() => {
   function turnPart(ctx, fx, t, bg, cell = 1) {
     const { scratch } = F();
     const m = ctx.getTransform(); const W = ctx.canvas.width; const H = ctx.canvas.height;
-    const turns = turnsOf(fx, t, Date.now()); let n = 0;
+    const turns = turnsOf(fx, t, (t + FXDATA.TBASE) * 1000); let n = 0; // (M3: the effects' clock, which stands still in Time Stop)
     (fx.strokes || []).forEach((st, si) => {
       if (!st.poly || st.cut || !st.pts || st.pts.length < 8) return;
       const q = st.pts; const k = q.length / 2;
@@ -1924,10 +1933,10 @@ const Creatures = (() => {
     }
   }
   // how far into an eruption a geyser is right now (0 before and after, for a sound or the TV's stats)
-  function erupting(fx, t) { const c = geyserState(fx, t * (fx.speed ?? 1)); return c.since < 4.5 ? 1 : 0; }
+  function erupting(fx, t) { const c = geyserState(fx, FXDATA.phaseT(fx, t)); return c.since < 4.5 ? 1 : 0; }
   // a moment (seconds, at speed 1) when this geyser is `since` seconds into an eruption (for still pictures)
   function eruptionAt(fx, since = 1.2) { for (let t = 0; t < GEYSER_PER * 3; t += 0.05) if (Math.abs(geyserState(fx, t).since - since) < 0.03) return t; return 0; }
 
-  return { emitter, region, swirl, wind, cycle, erupting, eruptionAt, GEYSER_PER, scene, sky, burst, ready, SPR, FLOCKS, CIRCLERS, SWARMS, moths, streamAt, STREAM_PER, GROUND, FISH, CRITS, tumble, turnPart, turnsOf, millAnchor, millRate, devilAt, tourOf, twistOf, walker }; // (second-ground-life: GROUND, FISH, CRITS; second-sun-sand-gears: tumble … millRate) // (second-birds: scene … CIRCLERS; second-bats-insects: SWARMS … STREAM_PER)
+  return { forget, emitter, region, swirl, wind, cycle, erupting, eruptionAt, GEYSER_PER, scene, sky, burst, ready, SPR, FLOCKS, CIRCLERS, SWARMS, moths, streamAt, STREAM_PER, GROUND, FISH, CRITS, tumble, turnPart, turnsOf, millAnchor, millRate, devilAt, tourOf, twistOf, walker }; // (second-ground-life: GROUND, FISH, CRITS; second-sun-sand-gears: tumble … millRate) // (second-birds: scene … CIRCLERS; second-bats-insects: SWARMS … STREAM_PER)
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = Creatures;

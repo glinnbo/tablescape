@@ -438,6 +438,7 @@ function updateLayer(l, p) {
   if ('tag' in p && !TAGS.includes(l.tag)) l.tag = 'off';
   if ('player' in p) { if (p.player === false) l.player = false; else if (p.player) l.player = String(p.player).slice(0, 40); else delete l.player; } // (Prototype 17: a player token by the DM's word)
   if ('name' in p) l.name = String(l.name ?? '').trim().slice(0, 60) || 'Token';
+  if ('cond' in p) { const c = [...new Set((Array.isArray(p.cond) ? p.cond : []).map((x) => String(x).trim().slice(0, 24)).filter(Boolean))].slice(0, 12); if (c.length) l.cond = c; else delete l.cond; } // D3: a token's conditions (Poisoned, Prone …)
   if ('pic' in p) { const k = Number(p.pic); if (p.pic == null || !Number.isFinite(k) || Math.abs(k - 1) < 0.001) delete l.pic; else l.pic = Math.round(Math.min(2, Math.max(0.5, k)) * 100) / 100; }
   if ('front' in p) { if (p.front) l.front = true; else delete l.front; } // (Prototype 18: an asset in front of the effects)
   if ('over' in p) { if (p.over) { l.over = true; delete l.front; } else delete l.over; } // (Prototype 23: above the tokens: tree tops, roofs)
@@ -985,6 +986,7 @@ function applyRaw(map, type, p, media) {
     case 'fx.update': {
       const fx = map.fx.find((x) => x.id === p.id);
       if (!fx) return { changed: null };
+      if ('speed' in p && Number(p.speed) !== Number(fx.speed ?? 1)) fx.panc = FXDATA.phaseAnchor(fx, Date.now()); // M2: its clock goes on from here at the new Speed
       Object.assign(fx, pick(p, ['x', 'y', 'r', 'color', 'intensity', 'hidden', 'bright', 'dim', 'flicker', 'attachTo', 'preset', 'density', 'speed', 'sat', 'variant', 'cone']));
       if ('angle' in p) fx.angle = normDeg(p.angle);
       if ('eye' in p) fx.eye = !!p.eye;
@@ -1703,23 +1705,60 @@ const STEP_WORDS = [
   [/^draw\./, 'Drawing'], [/^os\./, 'Drawing the map'], [/^mark\./, 'Marker'], [/^round\./, 'Round counter'], [/^vision\./, 'Line of sight'], [/^scene\./, 'Snapshot'],
 ];
 const stepWords = (type) => { for (const [re, w] of STEP_WORDS) if (re.test(type || '')) return w; return 'Last change'; };
+// Q1 (open point): every undo step is a copy of the whole map (its fog picture and drawing too), so the steps are kept
+// within a size: 64 MB a map, 256 MB for all the maps of the campaign (the pool). Past that the oldest steps go, first
+// those of the maps touched longest ago. (80 steps a map stays the limit too.)
+const HIST_MAP_MAX = 64e6;
+const HIST_POOL_MAX = 256e6;
+function sizeOf(v) { // about how many bytes a copy holds (strings count double: UTF-16)
+  if (typeof v === 'string') return 16 + 2 * v.length;
+  if (!v || typeof v !== 'object') return 8;
+  let n = 32;
+  if (Array.isArray(v)) { for (const x of v) n += sizeOf(x); } else for (const k of Object.keys(v)) n += 2 * k.length + sizeOf(v[k]);
+  return n;
+}
 class History {
-  constructor() { this.undo = []; this.redo = []; this.ul = []; this.rl = []; this.ut = []; this.rt = []; this.lastKey = null; this.lastTime = 0; } // (Prototype 14: ut / rt: when each copy was taken)
+  constructor(pool = null) {
+    this.undo = []; this.redo = []; this.ul = []; this.rl = []; this.ut = []; this.rt = []; this.lastKey = null; this.lastTime = 0; // (Prototype 14: ut / rt: when each copy was taken)
+    this.us = []; this.rs = []; this.bytes = 0; this.pool = pool; // (Q1: each step's size)
+    if (pool) pool.list.add(this);
+  }
+  grow(n) { this.bytes += n; if (this.pool) this.pool.bytes += n; }
+  // the oldest undo step goes (its size with it)
+  dropOldest() {
+    if (!this.undo.length) return false;
+    this.undo.shift(); this.ul.shift(); this.ut.shift(); this.grow(-(this.us.shift() || 0));
+    return true;
+  }
+  trim() {
+    while (this.undo.length > 1 && this.bytes > HIST_MAP_MAX) this.dropOldest();
+    const P = this.pool;
+    if (!P) return;
+    while (P.bytes > HIST_POOL_MAX) {
+      let worst = null; // the history touched longest ago that still has steps to give (this one last)
+      for (const h of P.list) if (h !== this && h.undo.length && (!worst || h.lastTime < worst.lastTime)) worst = h;
+      if (!worst) { if (this.undo.length > 1) this.dropOldest(); else break; continue; }
+      worst.dropOldest();
+    }
+  }
   // hold: a drag still in progress (4.5.1): the same gesture however long the hand rested
   before(map, key, type, label, hold = false) {
     if (NO_HISTORY.has(type)) return false;
     const now = Date.now();
     if (key && key === this.lastKey && (hold || now - this.lastTime < 2500)) { this.lastTime = now; return false; }
-    this.undo.push(snapshot(map));
+    const snap = snapshot(map); const size = sizeOf(snap);
+    this.undo.push(snap); this.us.push(size); this.grow(size);
     this.ul.push(label || stepWords(type)); this.ut.push(now);
-    if (this.undo.length > 80) { this.undo.shift(); this.ul.shift(); this.ut.shift(); }
-    this.redo = []; this.rl = []; this.rt = [];
+    if (this.undo.length > 80) this.dropOldest();
+    this.grow(-this.rs.reduce((a, b) => a + b, 0));
+    this.redo = []; this.rl = []; this.rt = []; this.rs = [];
     this.lastKey = key || null;
     this.lastTime = now;
+    this.trim();
     return true;
   }
   // a step that changed nothing is taken back
-  drop() { this.undo.pop(); this.ul.pop(); this.ut.pop(); }
+  drop() { if (!this.undo.length) return; this.undo.pop(); this.ul.pop(); this.ut.pop(); this.grow(-(this.us.pop() || 0)); }
   step(map, dir) {
     const from = dir === 'undo' ? this.undo : this.redo;
     const to = dir === 'undo' ? this.redo : this.undo;
@@ -1727,12 +1766,16 @@ class History {
     const tl = dir === 'undo' ? this.rl : this.ul;
     const ft = dir === 'undo' ? this.ut : this.rt;
     const tt = dir === 'undo' ? this.rt : this.ut;
+    const fs_ = dir === 'undo' ? this.us : this.rs;
+    const ts_ = dir === 'undo' ? this.rs : this.us;
     if (!from.length) return false;
-    to.push(snapshot(map));
+    const now = snapshot(map); const size = sizeOf(now);
+    to.push(now); ts_.push(size); this.grow(size);
     tl.push(fl.pop() || 'Last change');
     const when = ft.pop() || 1; tt.push(Date.now());
-    restore(map, from.pop());
-    this.lastKey = null;
+    restore(map, from.pop()); this.grow(-(fs_.pop() || 0));
+    this.lastKey = null; this.lastTime = Date.now();
+    this.trim();
     return when; // (Prototype 14: when the copy put back was taken: what the phones moved after it stays where it is)
   }
   get state() {
@@ -1744,4 +1787,4 @@ const SNAP_KEYS = ['bg', 'view', 'layers', 'grid', 'fog', 'fx', 'spells', 'weath
 function snapshot(map) { return structuredClone(Object.fromEntries(SNAP_KEYS.map((k) => [k, map[k]]))); }
 function restore(map, snap) { for (const k of SNAP_KEYS) if (k in snap) map[k] = snap[k]; }
 
-module.exports = { defaultOs, cleanOs, emptyMap, normalize, apply, expire, recordSeen, recordSight, newId, History, defaultGrid, sceneOf, sceneMatches };
+module.exports = { defaultOs, cleanOs, emptyMap, normalize, apply, expire, recordSeen, recordSight, newId, History, defaultGrid, sceneOf, sceneMatches, sizeOf, HIST_MAP_MAX, HIST_POOL_MAX };

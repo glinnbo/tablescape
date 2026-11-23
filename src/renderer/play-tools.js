@@ -105,7 +105,9 @@ const PlayTools = (() => {
       if (['pin', 'x', 'dot'].includes(v)) { ui.mark.mode = 'marker'; ui.mark.shape = v; } else ui.mark.mode = v;
       save(); ctx.refreshPop();
     }
-    function noteMode() { routeEnd(); ui.mark.mode = 'label'; ui.mark.me = true; save(); } // (J: a note only you see)
+    function noteMode() { routeEnd(); ui.mark.mode = 'label'; ui.mark.me = true; ui.mark.byJ = true; save(); } // (J: a note only you see)
+    // N7 (open point): X after J: marks go on the table again (J's "only me" stayed for every mark after it)
+    function tableMarks() { if (ui.mark.byJ) { ui.mark.me = false; ui.mark.byJ = false; save(); } }
     // old names still on a hotbar or the rail: Draw → Text and Map notes open Marks
     const normTool = (t, mode) => (t === 'draw' && mode === 'text' ? ['mark', 'label'] : t === 'notes' ? ['mark', 'label'] : [t, mode]);
     const isMe = (m) => m.kind === 'note' || !!m.hidden;
@@ -186,7 +188,7 @@ const PlayTools = (() => {
           bind: c().bind, round: true,
           items: () => libTokens,
           pathOf: PickList.pathOf, shortName: PickList.shortName, rootLabel: 'Tokens', memKey: 'tokens', // (4.11: its folders, all of them)
-          shelves: [{ id: 'map', label: 'On this map', icon: 'map-2', has: (it) => onMap().has(it.path) }, { id: 'fav', label: 'Favourites', icon: 'star', has: (it) => !!it.fav },
+          shelves: [{ id: 'map', label: 'On this map', icon: 'map-2', has: (it) => onMap().has(it.path) }, { id: 'fav', label: 'Starred', icon: 'star', has: (it) => !!it.fav },
             { id: 'recent', label: 'Recent', icon: 'clock', has: (it) => it.recent >= 0 || recentPaths().has(it.path) }],
           pick: (it) => setTokenBrush(it),
           state: (it) => ({ on: !!(ui.tok.brush && ui.tok.brush.path === it.path), tip: `${it.name}: click to pick it up` }),
@@ -204,7 +206,7 @@ const PlayTools = (() => {
       { value: 'ready', label: 'Ready', icon: 'checklist', tip: 'The tokens you ticked for this chapter' },
       { value: 'party', label: 'Party', icon: 'users', tip: 'The party\'s own tokens, from their cards' },
       { value: 'recent', label: 'Recent', icon: 'clock', tip: 'The tokens you picked last' },
-      { value: 'starred', label: 'Starred', icon: 'star', tip: 'Your favourites: the star in All tokens' }];
+      { value: 'starred', label: 'Starred', icon: 'star', tip: 'The tokens you starred in All tokens' }];
     function tokenGroup(id) {
       if (id === 'party') return (S().chars || []).filter((c) => c.here && c.token).map((c) => ({ path: c.token.path, name: c.name, kind: 'image', url: c.token.url }));
       if (id === 'ready') return ctx.ready.chapter() ? ctx.ready.list('tokens') : [];
@@ -221,24 +223,32 @@ const PlayTools = (() => {
       tokSides = { els: [c().sideTabs(TOK_GROUPS, () => ui.tok.group, (v) => { ui.tok.group = v; ctx.refreshPop(); }, { groups: true, cls: 'pop-groups tok-groups', again: o.again, label: 'Tokens' })] };
       const strip = h('div', { class: 'tok-strip' });
       c().bind(() => {
-        const g = ui.tok.group; const ready = g === 'ready'; const ch = ctx.ready.chapter();
-        const list = tokenGroup(g);
-        const sig = JSON.stringify([g, ch && ch.name, list.map((x) => [x.path, !!x.missing]), ui.tok.brush && ui.tok.brush.path]);
+        const g = ui.tok.group; const ch = ctx.ready.chapter();
+        // H1 (open point): nothing ready yet: every token instead, with the tick that gets one ready (no dead end)
+        const own = tokenGroup(g);
+        const showAll = g === 'ready' && !own.length && !!ch && libTokens.length > 0;
+        const ready = g === 'ready' && !showAll;
+        const list = showAll ? libTokens : own;
+        const rdy = new Set(ch ? ctx.ready.list('tokens').map((x) => x.path) : []);
+        const sig = JSON.stringify([g, showAll, ch && ch.name, list.slice(0, 48).map((x) => [x.path, !!x.missing, rdy.has(x.path)]), ui.tok.brush && ui.tok.brush.path]);
         if (strip.dataset.sig === sig) return;
         strip.dataset.sig = sig;
         strip.innerHTML = '';
-        const title = ready ? (ch ? `Ready · ${ch.name}` : 'Ready') : g === 'party' ? 'The party' : g === 'recent' ? 'Recent' : 'Favourites';
+        const title = showAll ? 'All tokens' : ready ? (ch ? `Ready · ${ch.name}` : 'Ready') : g === 'party' ? 'The party' : g === 'recent' ? 'Recent' : 'Starred'; // (R5: one name: the side tab says Starred)
         strip.append(h('div', { class: 'tok-group' }, h('span', { class: 'grow ellipsis' }, title),
           ready && list.length ? h('button', { class: 'tg-clear', 'data-tip': 'Empty this chapter\'s Ready list', onclick: () => ctx.ready.clear('tokens') }, 'Clear') : null));
         const row = h('div', { class: `tok-row ${ready ? 'ready-row' : ''}` });
+        // the tick (a span: the token itself is a button), as in All tokens
+        const tick = (it) => (ch && !it.missing ? h('span', { class: `pl-tick ${rdy.has(it.path) ? 'on' : ''}`, role: 'button', 'aria-label': `Ready for ${ch.name}: ${it.name}`, 'data-tip': rdy.has(it.path) ? `Ready for ${ch.name}: click to take it off` : `Get it ready for ${ch.name}`,
+          onclick: (e) => { e.stopPropagation(); if (rdy.has(it.path)) ctx.ready.remove('tokens', it.path); else ctx.ready.add('tokens', [{ path: it.path, name: it.name }]); } }, iconEl('check')) : null);
         for (const it of list.slice(0, 48)) {
           row.append(h('button', {
             class: `tok-pick ${ui.tok.brush && ui.tok.brush.path === it.path ? 'on' : ''} ${it.missing ? 'missing' : ''}`, 'data-tip': it.missing ? `${it.name}: no longer in the library (✕ takes it off)` : it.name, 'aria-label': it.name,
             onclick: () => (it.missing ? toast(`${it.name} is no longer in the library: ✕ takes it off the Ready list`, { ms: 3500 }) : setTokenBrush(it)),
           }, it.missing ? h('span', { class: 'miss-thumb' }, iconEl('alert-triangle')) : Thumbs.img(it.path, it.kind, it.thumb), h('span', {}, it.name),
-          ready ? h('span', { class: 'ready-x', role: 'button', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('tokens', it.path); } }, iconEl('x')) : null));
+          ready ? h('span', { class: 'ready-x', role: 'button', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('tokens', it.path); } }, iconEl('x')) : tick(it)));
         }
-        if (!list.length) row.append(h('p', { class: `hint tok-empty ${ready ? 'ready-empty' : ''}` }, ready ? 'Nothing ready yet: tick tokens in All tokens' : g === 'party' ? 'No party tokens yet: they come from the character cards' : g === 'recent' ? 'No token picked yet: All tokens has every one' : 'No favourites yet: the star in All tokens'));
+        if (!list.length) row.append(h('p', { class: `hint tok-empty ${ready ? 'ready-empty' : ''}` }, ready ? 'No tokens yet: Library → From this PC' : g === 'party' ? 'No party tokens yet: they come from the character cards' : g === 'recent' ? 'No token picked yet: All tokens has every one' : 'Nothing starred yet: the star in All tokens'));
         if (ready && ch) ctx.ready.drop(row, 'tokens');
         strip.append(row);
       });
@@ -263,7 +273,7 @@ const PlayTools = (() => {
         c().seg({ label: 'Size', cls: 'seg-sizes named', options: SIZES.map((x) => ({ value: x.id, label: x.id === 'garg' ? 'Garg.' : x.label, tip: `${x.label}: ${x.cells === 0.5 ? 'half a square' : `${x.cells} × ${x.cells} squares`}` })),
           get: () => ui.tok.size, set: (v) => { ui.tok.size = v; save(); ctx.refreshPop(); updateGhost(); } }),
         c().popFold('tokMore', 'More',
-          c().toggle({ label: 'Place hidden (players don\'t see it yet)', get: () => ui.tok.hidden, set: (v) => { ui.tok.hidden = v; save(); ctx.refreshPop(); updateGhost(); } }),
+          c().toggle({ label: 'Place hidden', tip: 'The players don\'t see it yet', get: () => ui.tok.hidden, set: (v) => { ui.tok.hidden = v; save(); ctx.refreshPop(); updateGhost(); } }),
           allTags()),
         c().popFoot(count, listBtn));
     }
@@ -280,7 +290,7 @@ const PlayTools = (() => {
     }
     async function placeToken(pt) {
       const b = ui.tok.brush;
-      if (!b) { toast('Pick a token first.'); ctx.togglePanel(tokListDef()); return; }
+      if (!b) { toast('Pick a token first.'); ctx.showPanel(tokListDef()); return; } // (N6: opens All tokens, never shuts it)
       const cells = tokenCells();
       const p = snapOn() ? Geom.snap(grid(), pt.x, pt.y, cells) : pt; // (4.10: Options → Tokens can turn snapping off)
       const r = await cmd('layer.add', { path: b.path, role: 'token', x: p.x, y: p.y, size: cells, hidden: ui.tok.hidden, number: ui.tok.number, tag: ui.tok.tag || 'off' });
@@ -380,7 +390,7 @@ const PlayTools = (() => {
     }
 
     // =====================================================================
-    // Draw: chalk, pen, text, eraser
+    // Draw: chalk, pen, eraser (labels are in Marks)
     // =====================================================================
     const widthIn = () => (WIDTHS.find((w) => w.id === ui.draw.width) || WIDTHS[1]).in;
     const textIn = () => (TEXT_SIZES.find((w) => w.id === ui.draw.textSize) || TEXT_SIZES[1]).in;
@@ -492,7 +502,7 @@ const PlayTools = (() => {
       const who = c().seg({ cls: 'mk-who', options: [
         { value: 'table', label: 'On the table', icon: 'device-tv', tip: 'The players see the next mark' },
         { value: 'me', label: 'Only me', icon: 'eye-off', tip: 'Only on your screen, never on the TV (J)' }],
-      get: () => (ui.mark.me ? 'me' : 'table'), set: (v) => { ui.mark.me = v === 'me'; save(); ctx.refreshPop(); } });
+      get: () => (ui.mark.me ? 'me' : 'table'), set: (v) => { ui.mark.me = v === 'me'; ui.mark.byJ = false; save(); ctx.refreshPop(); } });
       const list = h('div', { class: 'mk-list' });
       c().bind(() => {
         const items = allMarks();
@@ -597,15 +607,15 @@ const PlayTools = (() => {
         eraseAt(d, pt, e);
         return d;
       }
-      if (t === 'mark' || t === 'notes') {
+      if (t === 'mark') {
         const textEl = e.target.closest('.sv-text'); // (Third Builder (third-marks-tool): a label is a mark now)
         if (textEl) {
           const d = markOf(textEl.dataset.id);
           if (!d) return null;
           selectMark(d.id);
-          return { kind: 'textmove', id: d.id, dx: d.x - pt.x, dy: d.y - pt.y, sx: e.clientX, sy: e.clientY, moved: false, key: `tx-${d.id}-${Date.now()}`, edit: false };
+          return { kind: 'textmove', id: d.id, dx: d.x - pt.x, dy: d.y - pt.y, sx: e.clientX, sy: e.clientY, moved: false, key: `tx-${d.id}-${Date.now()}` };
         }
-        const el = e.target.closest(t === 'notes' ? '.sv-note' : '.sv-mark, .sv-note');
+        const el = e.target.closest('.sv-mark, .sv-note');
         if (el) {
           const m = markOf(el.dataset.id);
           if (!m) return null;
@@ -613,7 +623,7 @@ const PlayTools = (() => {
           return { kind: 'markmove', id: m.id, dx: m.x - pt.x, dy: m.y - pt.y, sx: e.clientX, sy: e.clientY, moved: false, key: `mk-${m.id}-${Date.now()}` };
         }
         if (t === 'mark' && markMode() === 'route') { routeClick(pt, e); return null; } // (Beta 3.11)
-        placeMark(pt, t === 'notes' ? 'note' : markMode()); // (Esc deselects; a click on the map always places the next one)
+        placeMark(pt, markMode()); // (Esc deselects; a click on the map always places the next one)
         return null;
       }
       return null;
@@ -657,9 +667,6 @@ const PlayTools = (() => {
       else if ((d.kind === 'markmove' || d.kind === 'textmove') && d.moved) {
         ctx.pending.delete(d.key);
         cmd(d.kind === 'markmove' ? 'mark.update' : 'draw.update', { id: d.id, x: pt.x + d.dx, y: pt.y + d.dy, coalesce: d.key });
-      } else if (d.kind === 'textmove' && !d.moved && d.edit && e.type === 'pointerup') {
-        const t = markOf(d.id);
-        if (t) editText(t);
       }
     }
     // the pointer moves over the map with no button held
@@ -677,7 +684,7 @@ const PlayTools = (() => {
     }
     function toolChanged(t) {
       if (t !== 'point') spotOff();
-      if (t !== 'mark' && t !== 'notes' && ui.selMark) { ui.selMark = null; view().setSelectedMark(null); } // (Third Builder (third-marks-tool): labels belong to Marks)
+      if (t !== 'mark' && ui.selMark) { ui.selMark = null; view().setSelectedMark(null); } // (Third Builder (third-marks-tool): labels belong to Marks)
       if (t !== 'mark') routeId = null;
       document.body.dataset.pointMode = ui.point.mode;
       document.body.dataset.drawMode = ui.draw.mode;
@@ -705,7 +712,7 @@ const PlayTools = (() => {
     function cardTarget() {
       const m = markOf(ui.selMark);
       if (!m) return null;
-      if (!(ui.tool === 'mark' || (ui.tool === 'notes' && m.kind === 'note'))) return null; // (Third Builder (third-marks-tool): labels too)
+      if (ui.tool !== 'mark') return null; // (Third Builder (third-marks-tool): labels too)
       return { kind: 'mark', item: m };
     }
     function cardAnchor(t) {
@@ -920,8 +927,9 @@ const PlayTools = (() => {
       const sh = s.show && s.show.phase === 'show' ? s.show : null;
       const join = s.players && s.players.join ? s.players : null;
       const unit = fight && I.cur >= 0 ? I.units[I.cur] : null;
+      const snd = s.sound && s.sound.now; const quiet = !!(s.sound && s.sound.quiet);
       const sig = JSON.stringify([cb, t && [t.id, t.mode, !!t.endsAt], fight && [unit && unit.name, I.cur], talk && talk.cast.map((x) => x.name), hos.map((x) => x.path), s.brk && s.brk.id,
-        world && [world.id, world.name, A.world], sh && sh.ids, !!spotLast, !!join]);
+        world && [world.id, world.name, A.world], sh && sh.ids, !!spotLast, !!join, snd, quiet]);
       if (box.dataset.sig !== sig) {
         box.dataset.sig = sig;
         box.innerHTML = '';
@@ -967,6 +975,20 @@ const PlayTools = (() => {
             h('span', { class: 'grow ellipsis' }, talk.cast.length ? talk.cast.map((x) => x.name).reverse().join(', ') : 'Conversation: nobody on stage yet'),
             ib('user-circle', 'Conversation', 'Choose portraits', () => ctx.openPop('talk')),
             ib('player-stop', 'End the conversation', 'End the conversation', () => cmd('talk.off')));
+        }
+        // F6 (open point): what sounds on the table: the map's, the chapter's or the fight music, its volume; ⚙ the
+        // Ambience panel; ✕ stops it where that is one sound's own switch (the chapter's ambience and a fight's music:
+        // the panel, or Mute under the preview)
+        if (snd) {
+          const from = { map: 'this map\'s sound', video: 'this map\'s video', chapter: 'the chapter\'s ambience', fight: 'the fight music' }[snd.kind] || '';
+          const stop = snd.kind === 'map' ? () => { for (const id of snd.ids || []) cmd('layer.update', { mapId: snd.mapId, id, muted: true }); }
+            : snd.kind === 'video' ? () => cmd('bg.update', { mapId: snd.mapId, volume: 0 })
+              : snd.kind === 'fight' && snd.byHand ? () => cmd('sound.fight', { on: false }) : null;
+          add('sound', 'green', `hud-sound ${quiet ? 'muted' : ''}`, iconEl(quiet ? 'volume-off' : 'music'),
+            h('span', { class: 'grow ellipsis', dataset: { from: snd.kind }, 'data-tip': `${snd.name}: ${from}${snd.volume != null ? `, at ${Math.round(snd.volume * 100)} %` : ''}${quiet ? ' (muted)' : ''}` },
+              snd.name, quiet ? h('small', {}, ' · muted') : snd.volume != null ? h('small', {}, ` · ${Math.round(snd.volume * 100)} %`) : null),
+            ib('adjustments', 'Ambience', 'Open Ambience', () => ctx.openPop('sound')),
+            stop ? ib('x', 'Stop it', snd.kind === 'fight' ? 'Stop the fight music' : 'Stop this sound (Ambience brings it back)', stop) : null);
         }
         // ---- pale orange: the rest
         if (sh) {
@@ -1022,7 +1044,7 @@ const PlayTools = (() => {
     document.body.dataset.drawMode = ui.draw.mode;
 
     return {
-      buildTokenPop, tokenAround: () => tokSides, buildPointPop, buildDrawPop, buildMarkPop, buildTimerPop, noteMode, normTool, markKind, // (Third Builder (third-marks-tool): no Map notes panel; noteMode for J, normTool for old hotbar items)
+      buildTokenPop, tokenAround: () => tokSides, buildPointPop, buildDrawPop, buildMarkPop, buildTimerPop, noteMode, tableMarks, normTool, markKind, // (Third Builder (third-marks-tool): no Map notes panel; noteMode for J, normTool for old hotbar items)
       pointerDown, pointerMove, pointerUp, hover, leave, toolChanged, cycle, setMode, owns: (k) => OWN.has(k),
       cardTarget, cardAnchor, card, markRadial, removeSelected, toggleSelectedHidden, selectMark, routeEnd, onAtlas,
       setTokenBrush, placeToken, counterStep, nextRound, renderHud, update, spotOff, sizeName, SIZES,

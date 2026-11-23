@@ -133,7 +133,7 @@ const OldschoolTool = (() => {
     // between sessions). The panel is the one of Effects → Light → Light sources (gm-play.js lightPanel)
     const lightSel = () => { const m = map(); const f = m && O.lightSel ? (m.fx || []).find((x) => x.id === O.lightSel && Fixtures.isLight(x)) : null; if (!f && O.lightSel) O.lightSel = null; return f || null; };
     const wallLight = (f) => !!(f && f.holder && Fixtures.BY[f.holder] && Fixtures.BY[f.holder].wall != null);
-    function removeLight(f) { O.lightSel = null; cmd('fx.remove', { id: f.id }).then((r) => { if (r && r.ok) toast(r.label || 'Light removed', { ms: 1400, undo: () => cmd('history.undo') }); ctx.openPop('oldschool'); drawPreview(); }); }
+    function removeLight(f) { O.lightSel = null; cmd('fx.remove', { id: f.id }).then((r) => { if (r && r.ok) toast(r.label || 'Light removed', { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); ctx.openPop('oldschool'); drawPreview(); }); }
     const texShape = () => (TEX_SHAPES.some((x) => x.id === O.texShape) ? O.texShape : 'fill');
     const texNow = () => !!O.tex && !O.fx && (AREA_TOOLS.includes(O.tool) || O.tool === 'floor');
     const groupNow = () => (fxNow() ? 'style' : texNow() ? 'texture' : PARTS.includes(O.tool) ? 'structure' : 'terrain');
@@ -159,7 +159,7 @@ const OldschoolTool = (() => {
       if (item.kind === 'texcut') { dropTex(item); drawPreview(); return Promise.resolve(null); } // (Texture → Erase: nothing is added)
       if (item.shape !== 'fill') pending.push({ ...item, at: Date.now() }); // (a poured effect has no outline to show until the picture knows where it ran)
       drawPreview();
-      return cmd('os.add', { item }).then((r) => { if (r && r.ok && label !== false) toast(label || r.label || 'Drawn', { ms: 1400, undo: () => cmd('history.undo') }); return r; });
+      return cmd('os.add', { item }).then((r) => { if (r && r.ok && label !== false) toast(label || r.label || 'Drawn', { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); return r; });
     }
 
     // ---------- the pointer ----------
@@ -187,7 +187,7 @@ const OldschoolTool = (() => {
         if (hit) { const was = O.lightSel; O.lightSel = hit.id; if (was !== hit.id) ctx.openPop('oldschool'); drawPreview(pt); return { kind: 'oslight', id: hit.id, from: pt, pt, moved: false }; }
         if (lightSel()) { O.lightSel = null; ctx.openPop('oldschool'); drawPreview(pt); return null; }
         const d = ctx.lightDef();
-        ctx.placeLight(pt).then((r) => { if (r && r.ok) toast(r.label || `${d.label} placed`, { ms: 1400, undo: () => cmd('history.undo') }); });
+        ctx.placeLight(pt).then((r) => { if (r && r.ok) toast(r.label || `${d.label} placed`, { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); });
         return null;
       }
       if (t === 'pillar') { const p = pillarAt(pt, e.altKey); add({ kind: 'pillar', pts: [[p.x, p.y]], r: O.pillar.r * g(), round: O.pillar.round, mat: O.line.mat }); return null; }
@@ -248,7 +248,7 @@ const OldschoolTool = (() => {
         else if (seg.wall && Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) < g() / 3) { // (a click on a wall off the grid: a door there, or the one there goes)
           const on = (x) => { const lx = x.x2 - x.x1; const ly = x.y2 - x.y1; const L2 = lx * lx + ly * ly || 1; const u = Math.max(0, Math.min(1, ((d.a.x - x.x1) * lx + (d.a.y - x.y1) * ly) / L2)); return Math.hypot(d.a.x - x.x1 - lx * u, d.a.y - x.y1 - ly * u); };
           const old = m.os.doors.filter((x) => on(x) < g() * 0.6).sort((p, q) => on(p) - on(q))[0];
-          if (old) cmd('os.remove', { id: old.id }).then((r) => { if (r && r.ok) toast('Door removed', { ms: 1400, undo: () => cmd('history.undo') }); });
+          if (old) cmd('os.remove', { id: old.id }).then((r) => { if (r && r.ok) toast('Door removed', { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); });
           else putDoor(seg);
         } else putDoor(seg);
         drawPreview(); return;
@@ -340,7 +340,7 @@ const OldschoolTool = (() => {
       if (!it) { toast('No floor here', { ms: 1400 }); return; }
       const L = areaLook();
       const patch = O.floorMode === 'edge' ? { edge: L.edge, mat: L.mat } : O.floorMode === 'both' ? { tile: L.tile, edge: L.edge, mat: L.mat } : { tile: L.tile, mixW: L.mixW, mixU: L.mixU, mixT: L.mixT }; // (Beta 3.38: its blending with it)
-      cmd('os.update', { id: it.id, ...patch }).then((r) => { if (r && r.ok) toast(O.floorMode === 'edge' ? 'New edge' : 'New floor', { ms: 1400, undo: () => cmd('history.undo') }); });
+      cmd('os.update', { id: it.id, ...patch }).then((r) => { if (r && r.ok) toast(O.floorMode === 'edge' ? 'New edge' : 'New floor', { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); });
     }
     // Beta 3.23: a ready-made piece, centred on the pointer, its corner on the grid (oldschool-pieces.js)
     function pieceAt(pt) {
@@ -354,7 +354,7 @@ const OldschoolTool = (() => {
       const at = Date.now();
       pending.push(...P.items.map((it) => ({ ...it, at })), ...P.doors.map((d) => ({ kind: 'door', ...d, at })));
       drawPreview(pt);
-      cmd('os.add', { items: P.items, doors: P.doors }).then((r) => { if (r && r.ok) toast(`${P.p.label} placed`, { ms: 1600, undo: () => cmd('history.undo') }); });
+      cmd('os.add', { items: P.items, doors: P.doors }).then((r) => { if (r && r.ok) toast(`${P.p.label} placed`, { ms: 1600, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); });
     }
     function turnPiece() { O.turn = ((O.turn || 0) + 1) % 4; save(); drawPreview(lastPt); }
     // Beta 3.40: doors and windows on any wall, not only on grid lines: the slanted side of a Shape, a round room's
@@ -430,7 +430,7 @@ const OldschoolTool = (() => {
       else { const y = G.oy + Math.round(v) * s; const x0 = G.ox + Math.floor(u) * s; y1 = y; y2 = y; x1 = x0; x2 = x0 + s; }
       // a door already there: it goes (a click again takes it away)
       const old = map().os.doors.find((d) => Math.hypot((d.x1 + d.x2) / 2 - (x1 + x2) / 2, (d.y1 + d.y2) / 2 - (y1 + y2) / 2) < s * 0.2);
-      if (old) { cmd('os.remove', { id: old.id }).then((r) => { if (r && r.ok) toast('Door removed', { ms: 1400, undo: () => cmd('history.undo') }); }); return; }
+      if (old) { cmd('os.remove', { id: old.id }).then((r) => { if (r && r.ok) toast('Door removed', { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); }); return; }
       putDoor({ x1, y1, x2, y2 });
     }
     // Beta 3.33: a drag along a grid line: the door covers the squares (or half squares) it passes, on the line nearest to
@@ -460,7 +460,7 @@ const OldschoolTool = (() => {
         return t2 > 0 && t2 < 1 && Math.abs((mx - x1) * uy - (my - y1) * ux) / Math.sqrt(L2) < g() * 0.2;
       });
       pending.push({ kind: 'door', ...p, at: Date.now() }); drawPreview();
-      cmd('os.door', { ...p, ...(over.length ? { replace: over.map((d) => d.id) } : {}) }).then((r) => { if (r && r.ok) toast(r.label || 'Door added', { ms: 1400, undo: () => cmd('history.undo') }); });
+      cmd('os.door', { ...p, ...(over.length ? { replace: over.map((d) => d.id) } : {}) }).then((r) => { if (r && r.ok) toast(r.label || 'Door added', { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); });
     }
     // Beta 3.49, Texture → Erase: the painted textures whose middle lies in what was dragged go (the floor keeps its own tile)
     function dropTex(item) {
@@ -470,7 +470,7 @@ const OldschoolTool = (() => {
       const ids = [];
       for (const it of map().os.items) if (it.kind === 'paint') { const xs = it.pts.map((q) => q[0]); const ys = it.pts.map((q) => q[1]); const mx = (Math.min(...xs) + Math.max(...xs)) / 2; const my = (Math.min(...ys) + Math.max(...ys)) / 2; if (mx >= x0 && mx <= x1 && my >= y0 && my <= y1) ids.push(it.id); }
       if (!ids.length) { toast('No painted texture here', { ms: 1400 }); return; }
-      cmd('os.remove', { ids }).then((r) => { if (r && r.ok) toast(ids.length === 1 ? 'Painted texture removed' : `${ids.length} painted textures removed`, { ms: 1400, undo: () => cmd('history.undo') }); });
+      cmd('os.remove', { ids }).then((r) => { if (r && r.ok) toast(ids.length === 1 ? 'Painted texture removed' : `${ids.length} painted textures removed`, { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); });
     }
     // erasing a box or a round takes the doors in it away too
     function dropDoorsIn(item) {
@@ -1215,7 +1215,7 @@ const OldschoolTool = (() => {
           toggle({ label: 'Walls for sight follow the drawing', get: () => !osNow() || osNow().sight !== false, set: (v) => cmd('os.set', { sight: v }) }),
           // (Beta 3.42) what moves on the map: on or off (3.46: each effect's sliders are on its own card)
           toggle({ label: 'Living effects', get: () => liveNow().on !== false, set: (v) => cmd('live.set', { on: v }) }),
-          h('div', { class: 'row' }, btn('Clear', 'trash', async () => { if (!osNow() || !osNow().items.length) return; const r = await cmd('os.clear', {}); if (r && r.ok) toast('Drawing cleared', { undo: () => cmd('history.undo') }); }, { kind: 'small', tip: 'Take everything drawn away (undo brings it back)' })));
+          h('div', { class: 'row' }, btn('Clear', 'trash', async () => { if (!osNow() || !osNow().items.length) return; const r = await cmd('os.clear', {}); if (r && r.ok) toast('Drawing cleared', { undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); }, { kind: 'small', tip: 'Take everything drawn away (undo brings it back)' })));
       }
       const mapBtn = btn('Map settings', 'sun', () => { flyOpen = flyOpen === 'map' ? null : 'map'; ctx.openPop('oldschool'); }, { kind: `small os-mapbtn${flyOpen === 'map' ? ' on' : ''}`, tip: 'Where the light comes from, the shadows, walls for sight, Clear' });
       const note = h('span', { class: 'grow hint' });
@@ -1292,7 +1292,7 @@ const OldschoolTool = (() => {
       await pickTile({ ...it });
       if (!O.floor || (O.floor.rel || O.floor.path) !== (it.rel || it.path)) return; // (the squares were not given)
       const at = Oldschool.areaAt(map().os, pt.x, pt.y);
-      if (at) cmd('os.update', { id: at.id, tile: O.floor }).then((r) => { if (r && r.ok) toast(`${it.name} on that floor`, { ms: 1600, undo: () => cmd('history.undo') }); });
+      if (at) cmd('os.update', { id: at.id, tile: O.floor }).then((r) => { if (r && r.ok) toast(`${it.name} on that floor`, { ms: 1600, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); });
       if (ui.tool !== 'oldschool') ctx.setTool('oldschool');
       ctx.openPop('oldschool');
     }

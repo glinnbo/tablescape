@@ -2,7 +2,7 @@
 'use strict';
 
 const PANELS = [['init', 'Initiative'], ['chars', 'Character cards'], ['timer', 'Countdown'], ['dice', 'Dice'], ['moments', 'Screen effects'], ['snaps', 'Snapshots'], ['sound', 'Soundboard'],
-  ['spotify', 'Spotify'], ['handouts', 'Handouts'], ['atlas', 'Cartographer'], ['notes', 'Session log'], ['break', 'Break'], ['lights', 'Room lights'], ['players', 'Player phones'], ['remote', 'Remote']];
+  ['spotify', 'Spotify'], ['handouts', 'Handouts'], ['atlas', 'Cartographer'], ['notes', 'Session log'], ['break', 'Break'], ['lights', 'Room lights'], ['players', 'Player phones'], ['remote', 'Gamemaster remote']];
 
 module.exports = (area) => {
   area.title('Toolbox panels');
@@ -34,10 +34,63 @@ module.exports = (area) => {
       t.ok(chars > p.title.length + 8, 'the panel has content', chars);
       const box = await t.rect(`.fp[data-id="${id}"]`);
       t.ok(box.w > 150 && box.h > 60 && box.x >= 0 && box.y >= 0 && box.x + box.w <= (await t.g('innerWidth')) + 1, 'the panel lies inside the window', box);
+      const pv = await t.rect('#table-ctl');
+      t.ok(!(box.x < pv.x + pv.w && box.x + box.w > pv.x && box.y < pv.y + pv.h && box.y + box.h > pv.y), 'it does not cover the preview of the TV (B2)', { box, pv });
       await t.g(`Play.Floats.hide(${JSON.stringify(id)})`);
       await t.until(async () => !(await t.panels()).some((x) => x.id === id), 3000, 'the panel to close');
     });
   }
+
+  // B2 (open point): a panel left on the preview last time, or reached by a preview made bigger, moves just left of it
+  area.quick('a panel never opens on the preview, and moves aside when the preview grows', async (t) => {
+    const over = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    const pv = await t.rect('#table-ctl');
+    const st = await t.rect('#stage');
+    // left on the preview last time (as if dragged there before the preview was made bigger), then closed
+    await t.g(`Play.TB.openPanel('dice')`);
+    await t.until(async () => (await t.panels()).some((x) => x.id === 'dice'), 4000, 'Dice');
+    await t.g(`(() => { const e = document.querySelector('.fp[data-id="dice"]'); e.style.left = '${Math.round(pv.x - st.x + 20)}px'; e.style.top = '${Math.round(pv.y - st.y + 10)}px'; Play.Floats.hide('dice'); })()`);
+    await t.g(`Play.TB.openPanel('dice')`);
+    await t.until(async () => (await t.panels()).some((x) => x.id === 'dice'), 4000, 'Dice again');
+    const d = await t.rect('.fp[data-id="dice"]');
+    t.ok(!over(d, pv) && d.x + d.w <= pv.x, 'left last time on the preview: it opens just left of it', { d, pv });
+    t.ok(Math.abs(d.y - pv.y - 10) < 2, 'at the height it had', { d, pv });
+    // the preview made wider: the panel it reaches moves along
+    const w0 = pv.w;
+    await t.g(`(() => { document.getElementById('table-ctl').style.width = '${Math.round(w0 + 260)}px'; Play.Floats.avoidPreview(); })()`);
+    const pv2 = await t.rect('#table-ctl'); const d2 = await t.rect('.fp[data-id="dice"]');
+    t.ok(pv2.w > w0 + 200 && !over(d2, pv2), 'a bigger preview pushes it aside', { d2, pv2 });
+    await t.g(`(() => { document.getElementById('table-ctl').style.width = '${Math.round(w0)}px'; Play.Floats.hide('dice'); })()`);
+  });
+
+  // H4 (open point): explanations behind "?", not in the panels (Player phones, Character cards, Handouts)
+  area.quick('Player phones, Character cards and Handouts: explanations behind "?", not in the panel', async (t) => {
+    const gone = { players: ['A player scans the code', 'Sight, darkvision and light', 'Everyone walks their speed once', 'In a fight only the player'], chars: ['Everything here is only for you'], handouts: ['Click a handout to show it'] };
+    for (const [id, lines] of Object.entries(gone)) {
+      await t.g(`Play.TB.openPanel(${JSON.stringify(id)})`);
+      await t.until(async () => (await t.panels()).some((x) => x.id === id), 4000, id);
+      await t.sleep(300);
+      const p = await t.g(`(() => { const e = document.querySelector('.fp[data-id="${id}"]'); return { text: e.querySelector('.fp-body').textContent, help: !!e.querySelector('.fp-head .help-q') }; })()`);
+      t.ok(lines.every((l) => !p.text.includes(l)), `${id}: no explanation in the panel`, lines.filter((l) => p.text.includes(l)));
+      t.ok(p.help, `${id}: a "?" in its title bar`);
+      await t.g(`Play.Floats.hide(${JSON.stringify(id)})`);
+    }
+    // H4, part 2: Room lights' tuning lines, the card's Extra moves line, the Handout table's empty line; E4: the log
+    // switch in the Session log, not in Handouts
+    const tipsOf = async (id) => (await t.g(`Play.TB.PANEL_TIPS[${JSON.stringify(id)}]`)).join(' ');
+    t.ok(/Brightest and Darkest/.test(await tipsOf('lights')) && /next to Dash/.test(await tipsOf('chars')), 'Room lights and Character cards: their "?" say it now');
+    await t.g(`Play.TB.openPanel('handouts')`);
+    await t.until(async () => (await t.panels()).some((x) => x.id === 'handouts'), 4000, 'Handouts');
+    t.ok(!(await t.g(`document.querySelector('.fp[data-id="handouts"]').textContent`)).includes('Handout shown'), 'Handouts: no log switch');
+    await t.g(`Play.Floats.hide('handouts')`);
+    await t.g(`Play.TB.openPanel('notes')`);
+    await t.until(async () => (await t.panels()).some((x) => x.id === 'notes'), 4000, 'Session log');
+    t.ok((await t.g(`document.querySelector('.fp[data-id="notes"]').textContent`)).includes('Write "Handout shown" into the log'), 'Session log: the log switch');
+    await t.g(`Play.Floats.hide('notes')`);
+    // what left the Player phones panel is behind its "?" (the Guide's Help shows these)
+    const tips = (await t.g(`Play.TB.PANEL_TIPS.players`)).join(' ');
+    t.ok(['one square per push', 'Pace Movement', 'Sight, darkvision and light', 'only the player whose turn it is moves'].every((s) => tips.includes(s)), 'Player phones: its "?" says it now', tips);
+  });
 
   area.quick('several panels stay open side by side', async (t) => {
     for (const id of ['init', 'timer', 'dice']) await t.g(`Play.TB.openPanel(${JSON.stringify(id)})`);

@@ -1,6 +1,6 @@
 'use strict';
-// Beta 4: phones and tablets, served by Tablescape itself on the home network. Nothing listens until the GM switches
-// it on (Toolbox → Phone & tablet), or opens the player screen on another screen of this PC (then only this PC).
+// Beta 4: phones and tablets, served by Tablescape itself on the home network. Nothing listens until something needs
+// it (F1: a code shown, players moving; main.js wakeRemote), and never while Tablescape settings → This screen is off.
 //   GET  /                 the page (src/remote/): the DM's Stream Deck, or the player screen, by the device's role
 //   GET  /api/face/<k>?t=  a portrait the state names (only those: nothing else of the computer is served)
 //   POST /api/pair         { key, id, kind, name } → a token for this device; the key says DM or players (two QR codes)
@@ -50,16 +50,21 @@ function createRemote(o) {
   const cfg = () => o.cfg();
   const log = o.log || (() => {});
   let server = null; let port = null; let err = null; let boundTo = null;
-  let localWanted = false; // the player screen in a window of this PC (works with phones off: this PC only)
   const clients = new Set(); // { dev, res, last }
   const fails = new Map(); // address → times of wrong codes
   const pairs = new Map(); // address → times a new device was made
-  const faces = new Map(); // key → file (the portraits the state names right now)
+  // L1/L2 (open points): the pictures the phones' states name right now: key → { file, devs (the ids of the devices
+  // whose last state named it) }. Rebuilt with every update to all phones, so a handout taken back (or shown to one
+  // player only) can't be fetched by anyone else, or again. Only pictures inside the library are served (o.servable).
+  const faces = new Map();
+  const forgotten = new Map(); // (P5) id → { dev, at }: a device just forgotten, for Undo (kept in memory only)
+  let faceDev = null; let faceSeen = null; // (while a state is built: for which device; which keys the update named)
   if (!cfg().key) { cfg().key = newToken(); o.save(); }
   if (!cfg().playerKey) { cfg().playerKey = newToken(); o.save(); }
   const devs = () => { if (!Array.isArray(cfg().devices)) cfg().devices = []; return cfg().devices; };
-  const localDev = () => { if (!cfg().localToken) { cfg().localToken = newToken(); o.save(); } return { id: 'this-pc', token: cfg().localToken, role: 'player', name: 'This PC', kind: 'screen', local: true }; };
-  const devBy = (t) => { if (!t) return null; if (cfg().localToken && safeEq(t, cfg().localToken)) return localDev(); return devs().find((d) => safeEq(d.token, t)) || null; };
+  // (the party screen in a window of this PC is gone: its own pass, kept here before, signs in nothing any more)
+  if (cfg().localToken) { delete cfg().localToken; o.save(); }
+  const devBy = (t) => { if (!t) return null; return devs().find((d) => safeEq(d.token, t)) || null; };
   let ipCache = { at: 0, list: [] };
   const ips = () => {
     if (o.testIp) return [{ ip: o.testIp, name: 'test', rank: 0 }]; // (the self-test's computer has no home network)
@@ -68,11 +73,11 @@ function createRemote(o) {
   };
 
   // ------------------------------------------------------------------ the server
-  const wantHost = () => (cfg().on ? (o.host || '0.0.0.0') : '127.0.0.1');
+  const wantHost = () => o.host || '0.0.0.0'; // (U2: no loopback-only server any more: it was the party screen's; off is no server at all)
   let waiters = [];
   function settle() { const w = waiters; waiters = []; for (const f of w) f(); }
   function ensure() {
-    const want = !!cfg().on || localWanted;
+    const want = !!cfg().on;
     if (!want) { stop(); return; }
     if (server && boundTo === wantHost()) return;
     if (server) stop(true);
@@ -105,7 +110,6 @@ function createRemote(o) {
     if (tickT) { clearInterval(tickT); tickT = null; }
     if (!quiet) o.onChange();
   }
-  const ready = () => new Promise((resolve) => { if (!server || port) resolve(); else waiters.push(resolve); });
 
   function send(res, code, obj) {
     res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -164,9 +168,10 @@ function createRemote(o) {
     if (u.pathname === '/api/events' && req.method === 'GET') { events(req, res, u); return; }
     const fm = /^\/api\/face\/([A-Za-z0-9_-]{8,40})$/.exec(u.pathname);
     if (fm && req.method === 'GET') {
-      const file = devBy(u.searchParams.get('t')) ? faces.get(fm[1]) : null;
-      if (!file) { res.writeHead(404); res.end(); return; }
-      serveFile(req, res, file, `"f${fm[1]}`, 'private, max-age=86400');
+      const d = devBy(u.searchParams.get('t')); const e = faces.get(fm[1]);
+      const file = d && e && e.devs.has(d.id) && (!o.servable || o.servable(e.file)) ? e.file : null;
+      if (!file) { res.writeHead(404, { 'Cache-Control': 'no-store' }); res.end(); return; }
+      serveFile(req, res, file, `"f${fm[1]}`, 'private, no-cache'); // (asked again each time: a picture taken back is gone)
       return;
     }
     if (req.method !== 'POST') { send(res, 405, { ok: false }); return; }
@@ -180,8 +185,8 @@ function createRemote(o) {
       const op = String(body.op || '');
       const arg = body.arg && typeof body.arg === 'object' ? body.arg : {};
       if (op === 'ping') { send(res, 200, { ok: true }); return; }
-      if (op === 'leave') { if (!d.local) { cfg().devices = devs().filter((x) => x !== d); drop(d); o.save(); o.onChange(); } send(res, 200, { ok: true }); return; }
-      if (d.role !== 'dm' && !PLAYER_OPS.includes(op)) { send(res, 403, { ok: false, error: 'The player screen only shows' }); return; } // (Prototype 1: a player's phone moves its token)
+      if (op === 'leave') { cfg().devices = devs().filter((x) => x !== d); drop(d); o.save(); o.onChange(); send(res, 200, { ok: true }); return; }
+      if (d.role !== 'dm' && !PLAYER_OPS.includes(op)) { send(res, 403, { ok: false, error: 'A player\'s phone can\'t do that' }); return; } // (Prototype 1: a player's phone moves its token)
       const r = await o.run(op, arg, d);
       changed();
       send(res, 200, r || { ok: true });
@@ -224,21 +229,28 @@ function createRemote(o) {
     send(res, 200, { ok: true, token: d.token, role: d.role });
   }
   function drop(d) {
-    for (const c of [...clients]) if (c.dev === d || (d.local && c.dev.local)) { try { c.res.end(); } catch {} clients.delete(c); }
+    for (const c of [...clients]) if (c.dev === d) { try { c.res.end(); } catch {} clients.delete(c); }
   }
 
   // ------------------------------------------------------------------ the state, pushed
   function pushOne(c) {
     let s;
-    try { s = JSON.stringify(o.state(c.dev)); } catch (e) { log(`remote state: ${e.message}`); return; }
+    faceDev = c.dev;
+    try { s = JSON.stringify(o.state(c.dev)); } catch (e) { log(`remote state: ${e.message}`); return; } finally { faceDev = null; }
     if (s === c.last) return;
     c.last = s;
     c.res.write(`data: ${s}\n\n`);
   }
   let pushT = null;
+  // every phone's state anew; then the pictures no state names any more are forgotten
+  function pushAll() {
+    const seen = new Map(); faceSeen = seen;
+    try { for (const c of clients) pushOne(c); } finally { faceSeen = null; }
+    for (const [k, e] of faces) { const ds = seen.get(k); if (!ds) faces.delete(k); else e.devs = ds; }
+  }
   function changed() {
     if (!clients.size || pushT) return;
-    pushT = setTimeout(() => { pushT = null; for (const c of clients) pushOne(c); }, 120);
+    pushT = setTimeout(() => { pushT = null; pushAll(); }, 120);
   }
   let tickT = null; let ticks = 0;
   function tick() {
@@ -246,7 +258,8 @@ function createRemote(o) {
     tickT = setInterval(() => {
       if (!clients.size) { clearInterval(tickT); tickT = null; return; }
       ticks += 1;
-      for (const c of clients) { pushOne(c); if (ticks % 15 === 0) c.res.write('event: ping\ndata: 1\n\n'); } // moments end on their own; the ping keeps routers from closing the line, and tells the page the line still works
+      pushAll();
+      if (ticks % 15 === 0) for (const c of clients) c.res.write('event: ping\ndata: 1\n\n'); // moments end on their own; the ping keeps routers from closing the line, and tells the page the line still works
     }, 1000);
   }
   function events(req, res, u) {
@@ -269,19 +282,20 @@ function createRemote(o) {
   function faceUrl(file) {
     if (!file) return null;
     const k = crypto.createHash('sha1').update(String(file)).digest('base64url').slice(0, 16);
-    if (faces.size > 600) faces.clear();
-    faces.set(k, file);
+    if (faceDev) {
+      let e = faces.get(k); if (!e) { e = { file: String(file), devs: new Set() }; faces.set(k, e); }
+      e.devs.add(faceDev.id);
+      if (faceSeen) { if (!faceSeen.has(k)) faceSeen.set(k, new Set()); faceSeen.get(k).add(faceDev.id); }
+    }
     return `/api/face/${k}`;
   }
 
   // ------------------------------------------------------------------ the Toolbox panel
   function view() {
-    const local = cfg().localToken;
     return {
-      on: !!cfg().on, running: !!(server && port && boundTo !== '127.0.0.1'), error: err, port,
-      urls: port && boundTo !== '127.0.0.1' ? ips().map((x) => `http://${x.ip}:${port}`) : [],
+      on: !!cfg().on, running: !!(server && port), error: err, port,
+      urls: port ? ips().map((x) => `http://${x.ip}:${port}`) : [],
       keyRev: `${String(cfg().key || '').slice(0, 4)}${String(cfg().playerKey || '').slice(0, 4)}`,
-      screenLive: !!local && [...clients].some((c) => c.dev.local),
       devices: devs().map((d) => ({ id: d.id, name: d.name, kind: d.kind, deck: d.deck || null, role: d.role || 'dm', added: d.added, seen: d.seen, connected: [...clients].some((c) => c.dev === d) })),
     };
   }
@@ -310,7 +324,13 @@ function createRemote(o) {
         return { ok: true };
       case 'forget': {
         const d = devs().find((x) => x.id === p.id);
-        if (d) { cfg().devices = devs().filter((x) => x !== d); drop(d); o.save(); }
+        if (d) { cfg().devices = devs().filter((x) => x !== d); drop(d); o.save(); forgotten.set(d.id, { dev: d, at: Date.now() }); }
+        return { ok: true, name: d ? d.name : null, back: d ? d.id : null }; // (P5: Undo brings it back for a while)
+      }
+      case 'unforget': { // Undo of Forget: the device as it was, its pass working again (only a device forgotten minutes ago)
+        const d = forgotten.get(p.id);
+        if (!d || Date.now() - d.at > 10 * 60e3 || devs().some((x) => x.id === d.dev.id)) return { ok: false };
+        forgotten.delete(p.id); cfg().devices = [...devs(), d.dev]; o.save();
         return { ok: true };
       }
       case 'deckOf': { // 4.2: which deck a device shows (phone, tablet; none: by its size)
@@ -326,18 +346,8 @@ function createRemote(o) {
       default: return { ok: false };
     }
   }
-  // the player screen in a window here: this PC's own address (the server starts for this PC only if phones are off)
-  async function localUrl() {
-    localWanted = true;
-    const d = localDev();
-    ensure();
-    await ready();
-    return port ? `http://127.0.0.1:${port}/#t=${d.token}` : null;
-  }
-  function localDone() { localWanted = false; for (const c of [...clients]) if (c.dev.local) { try { c.res.end(); } catch {} clients.delete(c); } ensure(); }
-
   const connected = (d) => !!d && [...clients].some((c) => c.dev === d || c.dev.id === d.id);
-  return { start: ensure, stop: () => stop(true), view, action, changed, faceUrl, localUrl, localDone, connected, get running() { return !!server; } };
+  return { start: ensure, stop: () => stop(true), view, action, changed, faceUrl, connected, get running() { return !!server; } };
 }
 
 module.exports = createRemote;

@@ -476,7 +476,7 @@ module.exports = (area) => {
     await t.settle();
     await baked(t);
     // (how light a strip of the picture is, in squares)
-    const lum = (x0, y0, x1, y1) => t.g(`(async () => { const b = Play.state().map.bg; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0); const X = (v) => Math.round((v * ${k} - b.x) / b.scale); const Y = (v) => Math.round((v * ${k} - b.y) / b.scale); const d = g.getImageData(X(${x0}), Y(${y0}), Math.max(1, X(${x1}) - X(${x0})), Math.max(1, Y(${y1}) - Y(${y0}))).data; let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; return sum / (d.length / 4); })()`);
+    const lum = (x0, y0, x1, y1) => t.g(`(async () => { const b = ${JSON.stringify(M(t).bg)}; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0); const X = (v) => Math.round((v * ${k} - b.x) / b.scale); const Y = (v) => Math.round((v * ${k} - b.y) / b.scale); const d = g.getImageData(X(${x0}), Y(${y0}), Math.max(1, X(${x1}) - X(${x0})), Math.max(1, Y(${y1}) - Y(${y0}))).data; let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; return sum / (d.length / 4); })()`);
     const far = await lum(17.5, 3.4, 22.5, 3.9);
     const footTop = await lum(17.5, 4.86, 22.5, 4.97); const footLeft = await lum(16.86, 5.5, 16.97, 10.5);
     t.note(`the floor: ${Math.round(far)} away from the platform, ${Math.round(footTop)} at its foot on the sun's side (top), ${Math.round(footLeft)} (left)`);
@@ -508,7 +508,8 @@ module.exports = (area) => {
     await t.settle();
     await baked(t);
     // (the picture, read in squares: how many risers a strip crosses from left to right; how green a patch is)
-    const pic = (what, x0, y0, x1, y1) => t.g(`(async () => { const b = Play.state().map.bg; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0);
+    // (the picture as the map has it: baked() saw it there; the GM screen's own copy of the state may come a moment later)
+    const pic = (what, x0, y0, x1, y1) => t.g(`(async () => { const b = ${JSON.stringify(M(t).bg)}; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0);
       const X = (v) => Math.round((v * ${k} - b.x) / b.scale); const Y = (v) => Math.round((v * ${k} - b.y) / b.scale); const w = X(${x1}) - X(${x0}); const h = Y(${y1}) - Y(${y0}); const d = g.getImageData(X(${x0}), Y(${y0}), w, h).data;
       if (${JSON.stringify(what)} === 'green') { let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i + 1] - d[i]; return sum / (d.length / 4); }
       const col = []; for (let x = 0; x < w; x++) { let sum = 0; for (let y = 0; y < h; y++) { const i = (y * w + x) * 4; sum += d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; } col.push(sum / h); }
@@ -589,7 +590,7 @@ module.exports = (area) => {
     t.ok(items.every((x) => x.mixW === 1.5 && x.mixU === 0.5 && x.mixT === 0.5), 'a floor drawn mixes as the panel says', items.map((x) => [x.mixW, x.mixU, x.mixT]));
     await baked(t);
     // across the edge between grass and sand: squares of both, not a straight line
-    const row = await t.g(`(async () => { const b = Play.state().map.bg; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d'); g.drawImage(img, 0, 0); const out = []; for (let y = 2.5; y < 9; y += 1) { const r = []; for (let x = 17.5; x < 23; x += 1) { const d = g.getImageData(Math.round((x * ${k} - b.x) / b.scale), Math.round((y * ${k} - b.y) / b.scale), 1, 1).data; r.push(d[1] > d[0] ? 'g' : 's'); } out.push(r.join('')); } return out; })()`);
+    const row = await t.g(`(async () => { const b = ${JSON.stringify(M(t).bg)}; const img = new Image(); img.src = UI.pathToUrl(b.path); await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d'); g.drawImage(img, 0, 0); const out = []; for (let y = 2.5; y < 9; y += 1) { const r = []; for (let x = 17.5; x < 23; x += 1) { const d = g.getImageData(Math.round((x * ${k} - b.x) / b.scale), Math.round((y * ${k} - b.y) / b.scale), 1, 1).data; r.push(d[1] > d[0] ? 'g' : 's'); } out.push(r.join('')); } return out; })()`);
     t.note(`squares across the edge: ${row.join(' ')}`);
     t.ok(new Set(row).size > 1, 'the change is not one straight line', row);
     const first = M(t).os.items[1].id;
@@ -772,7 +773,7 @@ module.exports = (area) => {
     t.eq(M(t).os.items.length, n0, 'undo takes what was drawn away again (a slider moved in between is no step of its own)');
     // the settings: each kind of effect its own
     t.handle('live.set', { mapId: own, fx: 'grass', set: { amount: 0.75 } }); await t.settle();
-    gm = await t.until(async () => { const s = await t.g('Play.view().stats.living'); return s && s.on && s.blades < full && s; }, 15000, 'fewer blades');
+    gm = await t.until(async () => { const s = await t.g('Play.view().stats.living'); return s && s.on && s.blades > 0 && s.blades < full * 0.9 && s; }, 15000, 'fewer blades'); // (not just fewer: the undo above may leave a few less for a moment, and none while the grass is grown anew)
     t.ok(Math.abs(gm.blades / full - 0.75) < 0.05, 'Grass amount at 75 %: three quarters of the blades', [gm.blades, full]);
     t.handle('live.set', { mapId: own, fx: 'grass', set: { amount: 1, grow: 'bright' } }); await t.settle();
     const picky = await t.until(async () => { const s = await t.g('Play.view().stats.living'); return s && s.on && s.blades > 0 && s.blades < full * 0.9 && s; }, 15000, 'grass on the bright parts only');
@@ -982,7 +983,8 @@ module.exports = (area) => {
     await t.g(`Play.setTool('select'), Play.closePop()`);
     await t.settle(); await t.sleep(1500);
     await t.shot(t.gm(), 'oldschool-gm');
-    await t.shot(t.tv(), 'oldschool-tv');
-    t.ok(true, 'pictures taken');
+    const tvPic = await t.shot(t.tv(), 'oldschool-tv');
+    // T1 (open point): the TV's picture has the drawn map in it, not one flat colour (it only said "pictures taken")
+    t.ok(tvPic && t.spread(tvPic) > 12, 'the TV shows the drawn map (light and shade in its picture)', tvPic && Math.round(t.spread(tvPic)));
   }, { ms: 300000 });
 };

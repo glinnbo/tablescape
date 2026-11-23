@@ -23,6 +23,8 @@ const Toolbox = (() => {
       try { lib = await ts.library('list'); } catch { lib = []; }
       ctx.refreshPop();
     }
+    // F5: a sound put into (or taken out of) Audio/SFX shows in the Soundboard by itself (main.js watchSfx)
+    if (ts.onEvent) ts.onEvent((e) => { if (e && e.kind === 'library') loadLib(true); });
 
     // =====================================================================
     // Talk
@@ -145,7 +147,7 @@ const Toolbox = (() => {
         'Under the small TV, for the picked portrait: Take out, Mirror, Hidden, and four sliders: Height, Size, Blood and Shade (at the top the head is black). The TV follows when you let go.',
         'The chips pick what the row shows: this chapter\'s Ready portraits, all of them, or one of your Portraits folders. The wheel scrolls the row. Library has them all.',
         'The small TV shows the map behind blurred, the bands and the portraits: no effects, no weather.',
-        '⚙: how big they stand, the blur behind them, and the speaker\'s name on the band. The band\'s look: Options → Looks.',
+        '⚙: how big they stand, the blur behind them, and the speaker\'s name on the band. The band\'s look: Campaign settings → Looks.',
         'Portraits may run off the top and the sides of the TV, and over the far side\'s band; never below their own band.',
         'Drag the window\'s bottom right corner: the small TV grows with it.'],
       headExtra: () => h('button', { class: `icon-btn cs-gear ${gearOpen ? 'on' : ''}`, 'aria-label': 'Look settings', 'data-tip': 'How big, the blur behind, names',
@@ -172,7 +174,7 @@ const Toolbox = (() => {
           const tip = !ch.sprite ? `${ch.name}: no cut-out yet (set one on the character card)` : speak ? `${ch.name}: speaking` : i >= 0 ? `${ch.name}: on the TV. Click: they speak` : `${ch.name}: click to bring in`;
           return h('button', { class: `cs-pc ${!ch.sprite ? 'off' : ''} ${i >= 0 ? 'on' : ''} ${speak ? 'speak' : ''}`, 'aria-label': ch.name, 'data-tip': tip, dataset: { name: ch.name },
             style: ch.color ? `--pc:${ch.color}` : '',
-            onclick: () => (ch.sprite ? bringIn({ path: ch.sprite.path, name: ch.name, kind: 'image', url: ch.sprite.url }) : toast(`${ch.name} has no cut-out yet: set one on the character card (campaign page → Players)`, { ms: 4000 })) },
+            onclick: () => (ch.sprite ? bringIn({ path: ch.sprite.path, name: ch.name, kind: 'image', url: ch.sprite.url }) : toast(`${ch.name} has no cut-out yet: set one on the character card (home screen → Players)`, { ms: 4000 })) },
           pic ? h('img', { src: pic, alt: '', draggable: false }) : h('span', { class: 'cs-pc-i' }, String(ch.name || '?').trim().charAt(0).toUpperCase()));
         }));
         row.hidden = !list.length;
@@ -208,18 +210,20 @@ const Toolbox = (() => {
         const ready = ch ? ctx.ready.list('portraits') : [];
         const all = portraitLib();
         const folders = [...new Set(all.map(folderOf).filter(Boolean))].sort((x, y) => x.localeCompare(y));
-        const opts = [...(ch ? [['ready', 'Ready']] : []), ['all', 'All'], ...folders.map((f) => [`f:${f}`, f])];
+        const opts = [...(ch && ready.length ? [['ready', 'Ready']] : []), ['all', 'All'], ...folders.map((f) => [`f:${f}`, f])]; // (H1: the Ready chip once something is ready)
         let cur = opts.some(([v]) => v === chip) ? chip : (ready.length ? 'ready' : 'all');
         if (!opts.some(([v]) => v === cur)) cur = 'all';
+        if (cur === 'ready' && !ready.length) cur = 'all'; // (H1: nothing ready yet: everything, with the tick; no dead end)
         const list = cur === 'ready' ? ready : cur === 'all' ? all : all.filter((x) => folderOf(x) === cur.slice(2));
+        const rdy = new Set(ready.map((x) => x.path));
         const t = S().talk;
-        const sig = JSON.stringify([opts, cur, list.map((x) => [x.path, x.missing]), t && t.cast.map((x) => x.path), (S().settings && S().settings.portraitSize) || {}, (S().settings && S().settings.portraitOffset) || {}, (S().settings && S().settings.portraitFx) || {}]);
+        const sig = JSON.stringify([opts, cur, list.map((x) => [x.path, x.missing, rdy.has(x.path)]), t && t.cast.map((x) => x.path), (S().settings && S().settings.portraitSize) || {}, (S().settings && S().settings.portraitOffset) || {}, (S().settings && S().settings.portraitFx) || {}]);
         if (strip.dataset.sig === sig) return;
         strip.dataset.sig = sig;
         chips.replaceChildren(h('div', { class: 'cs-chip-list' }, ...opts.map(([v, label]) => h('button', { class: `cs-chip ${v === cur ? 'on' : ''}`, dataset: { v }, 'data-tip': v === 'ready' ? `Ready for ${ch.name}` : v === 'all' ? 'All your portraits' : `The folder ${label}`, onclick: () => { setChip(v); strip.dataset.sig = ''; ctx.refreshPop(); } }, label))), libBtn); // (Second Builder (second-conversation-sliders): the chips in their own block, Library as tall as it)
         row.replaceChildren();
         row.classList.toggle('ready-row', cur === 'ready');
-        if (!list.length) { row.append(c().hint(cur === 'ready' ? 'Nothing ready for this chapter: tick portraits in Library.' : 'No portraits yet: Library → From this PC.')); return; }
+        if (!list.length) { row.append(c().hint('No portraits yet: Library → From this PC.')); return; }
         for (const it of list.slice(0, 200)) {
           const i = onStage(it.path);
           const use = () => (it.missing ? toast(`${it.name} is no longer in the library: ✕ takes it off the Ready list`, { ms: 3500 }) : bringIn(it));
@@ -230,7 +234,9 @@ const Toolbox = (() => {
           h('span', { class: 'talk-name' }, it.name),
           i >= 0 ? h('b', { class: 'talk-badge' }, i === t.cast.length - 1 ? 'Speaking' : 'On') : null,
           sizeBadge(it),
-          cur === 'ready' ? h('button', { class: 'icon-btn ready-x', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('portraits', it.path); } }, iconEl('x')) : null,
+          cur === 'ready' ? h('button', { class: 'icon-btn ready-x', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('portraits', it.path); } }, iconEl('x'))
+            : ch && !it.missing ? h('button', { class: `pl-tick ${rdy.has(it.path) ? 'on' : ''}`, 'aria-label': `Ready for ${ch.name}: ${it.name}`, 'data-tip': rdy.has(it.path) ? `Ready for ${ch.name}: click to take it off` : `Get it ready for ${ch.name}`, // (H1: the same tick as in the lists)
+              onclick: (e) => { e.stopPropagation(); if (rdy.has(it.path)) ctx.ready.remove('portraits', it.path); else readyAdd(it); } }, iconEl('check')) : null,
           // Second Builder (second-conversation-rework), on hover: one on the TV shows a big ✕ that takes it off; one not
           // on the TV the eye that brings it in Hidden (its looks are set first, so the TV never shows it uncovered)
           !it.missing && i >= 0 ? h('button', { class: 'talk-off', 'aria-label': `Take ${it.name} off the TV`, 'data-tip': 'Take off the TV', onkeydown: (e) => e.stopPropagation(),
@@ -259,7 +265,7 @@ const Toolbox = (() => {
       { id: 'notes', label: 'Session log', short: 'Log', icon: 'notes', tip: 'Notes during the session, saved with the campaign' },
       { id: 'lights', label: 'Room lights', short: 'Lights', icon: 'bulb', tip: 'Govee and IKEA lamps around the table follow the game' },
       { id: 'chars', label: 'Character cards', short: 'Cards', icon: 'id-badge-2', tip: 'The party at a glance, only for you (Shift + I)' },
-      { id: 'remote', label: 'Remote', short: 'Remote', icon: 'device-mobile', tip: 'Your phone or tablet as a remote or a player screen' },
+      { id: 'remote', label: 'Gamemaster remote', short: 'GM remote', icon: 'device-mobile', tip: 'Your phone or tablet as a button deck' }, // (F1: the players' screen moved to Player phones)
       { id: 'players', label: 'Player phones', short: 'Players', icon: 'device-gamepad-2', tip: 'Players move their own tokens from their phones' },
       { id: 'mapnotes', label: 'Map notes', short: 'Notes', icon: 'note', tool: true, tip: 'Marks only you see (J)' }, // Prototype 14: from the rail; Third Builder (third-marks-tool): not in the grid any more, kept for a rail or hotbar that has it: it opens Marks with Only me
     ];
@@ -286,7 +292,7 @@ const Toolbox = (() => {
     ];
     function running(id) {
       const s = S();
-      return { lights: !!(s.lights && s.lights.started && s.lights.on && s.lights.lamps.length), init: !!(s.init && s.init.running), timer: !!s.timer, break: !!s.brk, handouts: !!s.handout, sound: false, notes: false, moments: (s.moments || []).some((m) => !m.stop), dice: !!s.dice, spotify: !!(s.spotify && s.spotify.now && s.spotify.now.playing), remote: !!(s.remote && s.remote.devices.some((d) => d.connected)) }[id];
+      return { lights: !!(s.lights && s.lights.started && s.lights.on && s.lights.lamps.length), init: !!(s.init && s.init.running), timer: !!s.timer, break: !!s.brk, handouts: !!s.handout, sound: false, notes: false, moments: (s.moments || []).some((m) => !m.stop), dice: !!s.dice, spotify: !!(s.spotify && s.spotify.now && s.spotify.now.playing), remote: !!(s.remote && s.remote.devices.some((d) => d.connected && d.role !== 'player')) }[id];
     }
     // the launcher: tools for the map switch the mouse to them; panels open as floating windows
     function buildToolbox() {
@@ -347,9 +353,9 @@ const Toolbox = (() => {
         'Roll enemies: d20 + bonus for every enemy without a number (a group rolls once).', 'HP: type 12, 12/20, −7 or +5.', 'Column adds HP, AC, conditions, notes or your own.',
         'The gear opens Campaign settings → Initiative.'],
       timer: ['Normal: a round dial at a short end or in the middle of the TV.', 'Dramatic: a big number in the middle, pulsing darker towards zero.', 'A running dial can still move to another end.'],
-      sound: ['Each sound plays once on the sound effects speaker (Settings → Sound).', 
+      sound: ['Each sound plays once on the sound effects speaker (Tablescape settings → Sound).', 
         'Star a sound to keep it at the top.', 'Drag a sound onto the hotbar to play it with a number key.', 'Subfolders of Audio/SFX become groups.'],
-      moments: ['Click to play one on the table.', 'Gas, dread, frost, madness and time stop stay until you click them again.', 'Shift + 1 to 9 play the starred ones.', 'The target button puts one where you click on the map.'],
+      moments: ['Click to play one on the table.', 'Their sounds follow the volume of the Soundboard.', 'Gas, dread, frost, madness and time stop stay until you click them again.', 'Shift + 1 to 9 play the starred ones.', 'The target button puts one where you click on the map.'],
       spotify: ['Music plays in the Spotify app, through its speaker.', 'Ctrl + 1 to 9 play the first nine moods.', 'A chapter\'s fight music can be a mood (Ambience → Combat), and so can a snapshot\'s transition.',
         'A mood plays its songs, or one of its playlists or albums.', 'Smooth changes between songs: turn on Crossfade in the Spotify app (Settings → Playback).'],
       dice: ['Dice: click a die to add it, right-click to take one out.', 'Wheel: more weight puts an entry on the reel more often.',
@@ -362,11 +368,18 @@ const Toolbox = (() => {
         'Shown so far keeps what the players have seen this session, to bring it back with one click.', 'Drag a handout onto the hotbar to show it with a number key.'],
       break: ['The map blurs and a dial counts down on the table.', 'At zero a soft chime plays and the map comes back.', '+5 min adds time while it runs.'],
       notes: ['Saved with the campaign as you type.', 'Time stamp writes the time, the map and the round where the cursor is.', 'Export writes it into a text file in the campaign\'s Notes folder.'],
-      lights: ['The lamps take the colours of the TV and flash with lightning, explosions and spells.', 'Room light: warm and bright. Off: the lamps switch off. Let go: they go back to how they were.', '−20 % and +20 % work on the hotbar too (right-click them).'],
-      chars: ['Only you see this.', 'HP and conditions come from the turn order; inspiration, exhaustion and death saves stay with the campaign.'],
-      players: ['A player scans the join code, picks their character and moves its token with a stick on the phone.', 'Steps stop at walls, closed doors and other tokens; in a fight each moves on their own turn.',
-        'Hand a token: any token on the table (a familiar, a summoned beast) for a phone.', 'Right-click a phone: movement again, take the character away.', 'These rules belong to this campaign (Campaign settings → Players has the main ones).'],
-      remote: ['Windows may ask once whether Tablescape may use the network: allow it on private networks.', 'A tablet at the table: set its Auto-Lock to Never.', 'Right-click a device in the list to choose which deck it shows.', 'The buttons belong to this campaign; a new campaign starts with those of the one played last. The devices and the layout are the same everywhere.'],
+      lights: ['The lamps take the colours of the TV and flash with lightning, explosions and spells.', 'Room light: warm and bright. Off: the lamps switch off. Let go: they go back to how they were.', '−20 % and +20 % work on the hotbar too (right-click them).',
+        'Lamps: try a lamp by hand. Brightest and Darkest also limit it in the game.', 'Fine-tuning → Moods: the Ambience lamps in each one; a change shows on the lamps for a few seconds.',
+        'Effects: Try plays one on the Effects lamps; switched off, the game no longer flashes it.'],
+      chars: ['Only you see this.', 'HP and conditions come from the turn order; inspiration, exhaustion and death saves stay with the campaign.',
+        'Extra moves (Cunning Action, Step of the Wind …): a button on the player\'s phone next to Dash, once a turn. Feet add to the speed; no feet: the speed again.'],
+      players: ['A player scans the join code, picks their character and moves its token with a stick on the phone, one square per push.', 'Steps stop at walls, closed doors and other tokens; in a fight only the player whose turn it is moves.',
+        'Pace Movement: everyone walks their speed once; Movement again (or Next round) hands it out anew.', 'Sight, darkvision and light of a player token: click its name on the map.',
+        'Hand a token: any token on the table (a familiar, a summoned beast) for a phone.', 'Right-click a phone: movement again, take the character away.', 'These rules belong to this campaign.', 'Speed: each player\'s character card; a card without one walks 30 ft.',
+        'A phone not moving a token shows the party, and in a fight the turn order. Enemies show as "??" until you right-click them in the turn order.',
+        'Message on the join card: a line or two on the code on the TV, e.g. the Wi-Fi\'s name and password.',
+        'Phones and tablets connect over your home network; Tablescape settings → This screen switches that off.'],
+      remote: ['Your phone or tablet as a deck of buttons: point its camera at the code.', 'Windows may ask once whether Tablescape may use the network: allow it on private networks.', 'A tablet at the table: set its Auto-Lock to Never.', 'Right-click a device in the list to choose which deck it shows.', 'The buttons belong to this campaign; a new campaign starts with those of the one played last. The devices and the layout are the same everywhere.'],
     };
     const defOf = (id) => {
       if (id === 'atlas') return ctx.Atlas.def(); // (Beta 3.12: the Cartographer is a window of its own, the Map table)
@@ -434,7 +447,7 @@ const Toolbox = (() => {
         c().slider({ label: 'Volume', min: 0, max: 1, step: 0.01, get: () => S().settings && S().settings.boardVolume, set: (v) => ts.settings({ boardVolume: v }), fmt: (v) => `${Math.round(v * 100)}%` }),
         search,
         list,
-        c().row(c().btn('Stop all', 'player-stop', () => cmd('sound.stop')), c().btn('Refresh', 'refresh', () => loadLib(true), { tip: 'Look for new files' })));
+        c().row(c().btn('Stop all', 'player-stop', () => cmd('sound.stop')))); // (F5: no Refresh: the list follows the folder)
     }
 
     // =====================================================================
@@ -455,11 +468,17 @@ const Toolbox = (() => {
       const ta = h('textarea', { class: 'notes-text', placeholder: 'What happened, names, loot, ideas for next time …', 'aria-label': 'Session log', spellcheck: 'true' });
       const status = h('span', { class: 'hint grow notes-status' });
       let timer = 0; let dirty = false;
-      const save = () => {
+      let base = notes().text || ''; // (P1: the log as it was when this text was taken; main keeps what was added since)
+      const save = async () => {
         clearTimeout(timer); timer = 0;
         if (!dirty) return;
         dirty = false;
-        cmd('notes.set', { text: ta.value });
+        const sent = ta.value;
+        const r = await cmd('notes.set', { text: sent, base });
+        if (r && r.ok && typeof r.text === 'string') {
+          base = r.text;
+          if (r.text !== sent && ta.value === sent) { const a = ta.selectionStart; const b = ta.selectionEnd; ta.value = r.text; ta.setSelectionRange(a, b); }
+        }
       };
       ta.addEventListener('input', () => { dirty = true; status.textContent = 'Saving …'; clearTimeout(timer); timer = setTimeout(save, 500); });
       ta.addEventListener('blur', save);
@@ -467,7 +486,8 @@ const Toolbox = (() => {
       ta.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') ta.blur(); });
       c().bind(() => {
         const n = notes();
-        if (!dirty && document.activeElement !== ta && ta.value !== n.text) ta.value = n.text;
+        if (!dirty && document.activeElement !== ta && ta.value !== n.text) { ta.value = n.text; base = n.text || ''; }
+        else if (!dirty && document.activeElement !== ta) base = n.text || '';
         if (!dirty && !timer) status.textContent = !n.text ? 'Saved with the campaign as you type' : n.dirty ? 'Saved with the campaign' : 'Saved and exported';
       });
       const stamp = () => {
@@ -489,7 +509,9 @@ const Toolbox = (() => {
         c().row(c().btn('Time stamp', 'clock-edit', stamp, { tip: 'Writes the time, the map and the round where the cursor is' }),
           c().btn('Export', 'file-export', exportIt, { tip: 'Writes it into a text file in the campaign\'s Notes folder' })),
         status,
-        c().toggle({ label: 'Ask to export when closing Tablescape', get: () => !S().settings || S().settings.askNotes !== false, set: (v) => ts.settings({ askNotes: v }) }));
+        c().toggle({ label: 'Ask to export when closing Tablescape', get: () => !S().settings || S().settings.askNotes !== false, set: (v) => ts.settings({ askNotes: v }) }),
+        // E4 (open point): from the Handouts panel: what the log writes by itself belongs with the log
+        c().toggle({ label: 'Write "Handout shown" into the log', get: () => !(S().settings && S().settings.handout && S().settings.handout.log === false), set: (v) => ts.settings({ handout: { log: v } }) }));
     }
 
     // =====================================================================
@@ -529,7 +551,7 @@ const Toolbox = (() => {
     // while you drag. The one you touch lies on top. Spreads keep what lies there, each in its place, under a name.
     const hotDef = () => ({
       id: 'hotable', title: 'Handout table', icon: 'layout-board',
-      tips: ['A picture of the TV: drag a handout to where it should lie; the TV follows as you drag.',
+      tips: ['A picture of the TV: drag a handout to where it should lie; the TV follows as you drag.', 'To put one on the table: click it in the Handouts panel, or drag it here.',
         'Pull a corner to make it bigger or smaller, far bigger than the TV if you like: drag it so the part you want shows. The picture here is cut off where the TV ends.',
         'Turn it with the knob to any angle; the two buttons below turn it a clean quarter.',
         'Mouse wheel: bigger or smaller around the pointer. Ctrl + wheel (or Shift + wheel): turn the picked handout. Delete: put it away.',
@@ -543,7 +565,7 @@ const Toolbox = (() => {
     function buildHotable() {
       loadLib();
       const stage = h('div', { class: 'hot-stage', tabindex: '0' });
-      const empty = h('p', { class: 'hint hot-none' }, 'Nothing on the table. Click a handout in the Handouts panel, or drag one here.');
+      const empty = h('p', { class: 'hint hot-none' }, 'Nothing on the table.');
       stage.append(empty);
       const world = () => (S().view && S().view.world) || { w: 16, h: 9 };
       let width = 720;
@@ -744,7 +766,7 @@ const Toolbox = (() => {
         openMenu(r.left, r.bottom + 4, [{ header: 'Spreads' },
           ...(all.length ? all.map((x) => ({ icon: 'stack-2', label: `${x.name} (${x.count})`, action: async () => say(await cmd('handout.spread.show', { id: x.id })) })) : [{ icon: 'stack-2', label: 'None saved yet', disabled: true }]),
           '-', { icon: 'device-floppy', label: 'Save what lies here …', disabled: !handList().length, action: saveSpread },
-          ...(all.length ? ['-', { header: 'Delete' }, ...all.map((x) => ({ icon: 'trash', label: x.name, danger: true, action: () => cmd('handout.spread.remove', { id: x.id }) }))] : [])]);
+          ...(all.length ? ['-', { header: 'Delete' }, ...all.map((x) => ({ icon: 'trash', label: x.name, danger: true, action: () => cmd('handout.spread.remove', { id: x.id }).then((r) => { if (r && r.ok && r.undo) toast(r.label, { undo: () => cmd(r.undo.type, r.undo.payload) }); }) }))] : [])]);
       }, { kind: 'small', tip: 'What lies on the table, each in its place, kept under a name' });
       const clear = c().btn('Clear the table', 'player-stop', () => cmd('handout.hide', {}), { kind: 'small ghost' });
       // ---------- the bar below: the picked handout ----------
@@ -818,7 +840,7 @@ const Toolbox = (() => {
       c().bind(() => {
         const n = handList().length;
         awayAll.hidden = !n;
-        onNow.textContent = n ? `${n} on the table: ${handList().map((x) => x.name).join(', ')}` : 'Nothing on the table. Click a handout to show it.';
+        onNow.textContent = n ? `${n} on the table: ${handList().map((x) => x.name).join(', ')}` : 'Nothing on the table.'; // (H4: how to show one is behind "?")
         tableBtn.classList.toggle('on', !!ctx.panelOpen('hotable'));
       });
 
@@ -828,7 +850,7 @@ const Toolbox = (() => {
         const ch = ctx.ready.chapter();
         const ready = ch ? ctx.ready.list('handouts') : [];
         const seen = (S().handoutSeen || []).filter((x) => !ready.some((r) => r.path === x.path));
-        const sig = JSON.stringify([ch && ch.id, ready.map((x) => [x.path, x.missing]), seen.map((x) => x.path), handList().map((x) => x.path), (S().handoutShare || []).map((x) => [x.path, x.to, x.sent])]);
+        const sig = JSON.stringify([ch && ch.id, ready.map((x) => [x.path, x.missing]), lib.filter((x) => x.cat === 'handouts').length, seen.map((x) => x.path), handList().map((x) => x.path), (S().handoutShare || []).map((x) => [x.path, x.to, x.sent])]);
         if (strip.dataset.sig === sig) return;
         strip.dataset.sig = sig;
         strip.innerHTML = '';
@@ -845,13 +867,19 @@ const Toolbox = (() => {
             isReady ? h('button', { class: 'icon-btn ready-x', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('handouts', it.path); } }, iconEl('x')) : null].filter(Boolean));
           return it.missing ? el : Hotbar.offer(el, { kind: 'handout', label: it.name, ref: { path: it.path, kind: it.kind || 'image', cat: 'handouts' } });
         };
-        if (ch) {
-          strip.append(h('div', { class: 'tok-group' }, ...[h('span', { class: 'grow ellipsis' }, `Ready · ${ch.name}`),
+        // H1 (open point): nothing ready yet: every handout instead, with the tick that gets one ready (no dead end)
+        const allHo = ch && !ready.length ? lib.filter((x) => x.cat === 'handouts') : [];
+        if (ch && (ready.length || allHo.length)) {
+          strip.append(h('div', { class: 'tok-group' }, ...[h('span', { class: 'grow ellipsis' }, ready.length ? `Ready · ${ch.name}` : 'All handouts'),
             ready.length ? h('button', { class: 'tg-clear', 'data-tip': 'Empty this chapter\'s Ready list', onclick: () => ctx.ready.clear('handouts') }, 'Clear') : null].filter(Boolean)));
-          const row = h('div', { class: 'talk-row ready-row' });
-          if (!ready.length) row.append(h('p', { class: 'hint ready-empty' }, 'Nothing ready yet: tick handouts in List …'));
+          const row = h('div', { class: `talk-row ${ready.length ? 'ready-row' : ''}` });
           ctx.ready.drop(row, 'handouts');
           for (const it of ready.slice(0, 48)) row.append(tile(it, true));
+          for (const it of allHo.slice(0, 48)) {
+            const el = tile(it, false);
+            el.append(h('button', { class: 'pl-tick', 'aria-label': `Ready for ${ch.name}: ${it.name}`, 'data-tip': `Get it ready for ${ch.name}`, onclick: (e) => { e.stopPropagation(); ctx.ready.add('handouts', [{ path: it.path, name: it.name }]); } }, iconEl('check')));
+            row.append(el);
+          }
           strip.append(row);
         }
         if (seen.length) {
@@ -861,13 +889,10 @@ const Toolbox = (() => {
           strip.append(row);
         }
       });
-      const prefs = () => (S().settings && S().settings.handout) || { size: 1, pos: 0.5, log: true };
       const listBtn = c().btn('List …', 'layout-grid', () => ctx.togglePanel(handListDef()), { kind: 'wide', tip: 'All handouts: click one to show it, tick it to have it ready here' });
       c().bind(() => listBtn.classList.toggle('on', !!ctx.panelOpen('handlist')));
-      return h('div', { class: 'stack' },
-        tableBtn, onNow, awayAll, strip, listBtn,
-        c().sep(),
-        c().toggle({ label: 'Write "Handout shown" into the session log', get: () => prefs().log !== false, set: (v) => ts.settings({ handout: { log: v } }) }));
+      return h('div', { class: 'stack' }, // (E4: the log switch is in the Session log panel)
+        tableBtn, onNow, awayAll, strip, listBtn);
     }
 
     // Break
@@ -958,7 +983,7 @@ const Toolbox = (() => {
         top = h('div', { class: 'ini-top' },
           h('span', { class: 'grow ini-status' }, h('b', {}, 'Getting ready'), h('small', {}, missing ? ` · ${missing} without a number` : ` · ${I.entries.length} in the list`)),
           hid, opts,
-          c().btn('Start the fight', 'swords', () => cmd('init.start', {}).then((r) => { if (r && r.ok) toast('Round 1. Next turn: Enter'); else if (r && r.error) toast(r.error, { kind: 'error' }); }), { kind: 'primary', tip: 'Round 1 begins with the first in the list' }));
+          c().btn('Start the fight', 'swords', () => ctx.startFight(), { kind: 'primary', tip: 'Round 1 begins with the first in the list' })); // (D4: asks to roll enemies without a number, gm-play.js)
       } else {
         const u = I.units[I.cur];
         top = h('div', { class: 'ini-top run' },
@@ -1117,7 +1142,7 @@ const Toolbox = (() => {
         items.push(e.tokHidden ? { icon: 'eye-off', label: 'Hidden on the map', disabled: true, action: () => {} }
           : { icon: e.hidden ? 'eye' : 'eye-off', label: e.hidden ? 'Show to the players' : 'Hide from the players', action: () => cmd('init.set', { id: e.id, hidden: !e.hidden }) });
         // 4.1: the player screen shows "??" and a silhouette until the GM names them
-        items.push({ icon: e.shown ? 'user-question' : 'user', label: e.shown ? 'Player screen: back to "??"' : 'Player screen: show name and picture', action: () => cmd('init.set', { id: e.id, shown: !e.shown }) });
+        items.push({ icon: e.shown ? 'user-question' : 'user', label: e.shown ? 'Phones: back to "??"' : 'Phones: show name and picture', action: () => cmd('init.set', { id: e.id, shown: !e.shown }) });
       }
       items.push('-');
       if (e.group) items.push({ icon: 'users-minus', label: 'Leave the group', action: () => cmd('init.ungroup', { id: e.id }) });
@@ -1146,7 +1171,7 @@ const Toolbox = (() => {
         items.push({ icon: 'dice', label: `Initiative bonus: ${sgn(lead.bonus || 0)} …`, action: () => askBonus(u.name, lead.bonus, (b) => cmd('init.set', { gid: u.gid, bonus: b })) });
         items.push({ icon: hidden ? 'eye' : 'eye-off', label: hidden ? 'Show them to the players' : 'Hide them from the players', action: () => cmd('init.set', { gid: u.gid, hidden: !hidden }) });
         const shown = list.some((x) => x.shown);
-        items.push({ icon: shown ? 'user-question' : 'user', label: shown ? 'Player screen: back to "??"' : 'Player screen: show name and picture', action: () => cmd('init.set', { gid: u.gid, shown: !shown }) });
+        items.push({ icon: shown ? 'user-question' : 'user', label: shown ? 'Phones: back to "??"' : 'Phones: show name and picture', action: () => cmd('init.set', { gid: u.gid, shown: !shown }) });
       }
       items.push('-', { icon: 'users-minus', label: 'Split the group', action: () => cmd('init.ungroup', { gid: u.gid }) },
         { icon: 'trash', label: `Take all ${list.length} out`, danger: true, action: () => cmd('init.remove', { gid: u.gid }).then((r) => r && r.ok && toast(r.label, { undo: () => cmd('init.restore') })) });
@@ -1192,7 +1217,7 @@ const Toolbox = (() => {
         { icon: 'chevron-left', label: 'Move left', disabled: i <= 0, action: () => cmd('init.col', { move: { id: col.id, by: -1 } }) },
         { icon: 'chevron-right', label: 'Move right', disabled: i >= I.cols.length - 1, action: () => cmd('init.col', { move: { id: col.id, by: 1 } }) },
         '-',
-        { icon: 'trash', label: 'Remove the column', danger: true, action: () => cmd('init.col', { remove: col.id }) },
+        { icon: 'trash', label: 'Remove the column', danger: true, action: () => cmd('init.col', { remove: col.id }).then((r) => { if (r && r.ok && r.undo) toast(r.label, { undo: () => cmd(r.undo.type, r.undo.payload) }); }) }, // (P5)
       ]);
     }
 

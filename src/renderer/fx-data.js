@@ -276,6 +276,17 @@ const FXDATA = (() => {
     return { x: (A ? A.x : 0) + Math.cos(a) * sp * dt, y: (A ? A.y : 0) + Math.sin(a) * sp * dt, s: (A ? A.s : 0) + sp * dt };
   }
 
+  // M2 (open point): an effect's own clock: the time times its Speed, without a jump when Speed changes. The map keeps
+  // an anchor (panc: { at (ms), p: its clock at that moment }) and the clock runs on from there at the new Speed.
+  // (Time times a Speed that moves jumps by millions of seconds with each step of the slider: animation rule 1.)
+  function phaseT(o, t) {
+    const sp = Number(o && o.speed != null ? o.speed : 1); const v = Number.isFinite(sp) ? sp : 1;
+    const A = o && o.panc && Number.isFinite(o.panc.at) && Number.isFinite(o.panc.p) ? o.panc : null;
+    return A ? A.p + v * (t - (A.at / 1000 - TBASE)) : v * t;
+  }
+  // the anchor to keep when o's Speed changes now (main process: mapstate.js)
+  const phaseAnchor = (o, nowMs) => ({ at: Math.round(nowMs), p: phaseT(o, Math.round(nowMs) / 1000 - TBASE) });
+
   // Beta 3.54: what counts as a light. A light is one effect: a light of the app with its holder (an emitter with
   // .holder), a flame that gives light (Torch, Campfire, Candles), or just light (kind 'light', which a token can carry).
   // lit: false = put out (its holder still shows); hidden = not on the TV. Other emitters (a glow, a light shaft) are not.
@@ -305,6 +316,6 @@ const FXDATA = (() => {
     ['region', 'glow', 'magic'], ['region', 'darkness', 'magic'], ['emitter', 'glow', 'magic'], ['emitter', 'sparkles', 'magic'], ['emitter', 'runes', 'magic'], ['emitter', 'portal', 'magic'], ['emitter', 'arcs', 'magic'], ['region', 'shimmer', 'magic'], ['region', 'pulse', 'magic'], ['region', 'ripple', 'magic'], // (Beta 3.65: the map's own light, drawn by the engine)
     ['region', 'blood', 'battle'], ['region', 'acid', 'battle'], ['region', 'oil', 'battle'], ['region', 'web', 'battle'],
   ].map(([kind, id, family]) => { const d = (kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === id); return { key: `${kind === 'region' ? 'r' : 'e'}:${id}`, kind, id, family, label: d.label, icon: d.icon, tip: d.tip || null, live: d.live || null }; });
-  return { SKINS, SPELLS, SHAPES, EMITTERS, FLAMES, isLight, givesLight, WINDOW_SHAPES, WINDOW_GRIDS, REGIONS, WEATHER, WEATHER_TYPES, LIGHTS, COLORS, TINTS, MOODS, TBASE, SPEED_MAX, wxTravel, FAMILIES, ELEMENTS };
+  return { SKINS, SPELLS, SHAPES, EMITTERS, FLAMES, isLight, givesLight, WINDOW_SHAPES, WINDOW_GRIDS, REGIONS, WEATHER, WEATHER_TYPES, LIGHTS, COLORS, TINTS, MOODS, TBASE, SPEED_MAX, wxTravel, phaseT, phaseAnchor, FAMILIES, ELEMENTS };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = FXDATA;

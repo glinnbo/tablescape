@@ -1,8 +1,8 @@
 {
   "name": "tablescape",
   "productName": "Tablescape",
-  "version": "3.66.0",
-  "releaseLabel": "Beta 3.66",
+  "version": "3.67.0",
+  "releaseLabel": "Beta 3.67",
   "description": "Local tabletop player for TV and projector tables",
   "main": "src/main.js",
   "author": "glinnbo",
@@ -12,7 +12,6 @@
     "start": "electron .",
     "test": "node scripts/run-tests.js",
     "test:deep": "node scripts/run-tests.js --deep",
-    "test:old": "node scripts/run-selftest.js",
     "demo": "python3 scripts/make_demo_assets.py demo && python3 scripts/make_extras.py demo && python3 scripts/make_crypt.py demo && python3 scripts/make_orb.py demo",
     "dist:win": "node scripts/build-win.js --win",
     "dist:mac": "electron-builder --mac",
@@ -31,7 +30,8 @@
       "LICENSE.txt",
       "NOTICE.txt",
       "package.json",
-      "!**/node_modules/node-aead-crypto*/**"
+      "!**/node_modules/node-aead-crypto*/**",
+      "!src/tests/**"
     ],
     "extraResources": [
       {
@@ -116,7 +116,7 @@
         "owner": "glinnbo",
         "repo": "tablescape",
         "private": false,
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ]
   },

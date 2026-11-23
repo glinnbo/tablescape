@@ -94,7 +94,7 @@ module.exports = (area) => {
 
   area.deep('a countdown can be paused, goes on where it stopped, and takes extra time', async (t) => {
     await t.cmd('timer.start', { seconds: 60, mode: 'normal' });
-    await t.sleep(1100);
+    await t.until(() => t.state.timer && t.state.timer.endsAt - Date.now() < 59000, 3000, 'a second to pass'); // (T2: waits for it, not 1.1 s)
     await t.cmd('timer.pause', {});
     const left = t.state.timer.left;
     t.ok(left > 55000 && left < 59500, 'paused with about 59 seconds left', left);

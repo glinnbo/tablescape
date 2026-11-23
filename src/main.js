@@ -47,10 +47,13 @@ let hudSampleTimer = null;
 const store = new CampaignStore();
 // Beta 1: a save that failed is said on the GM screen (once a minute), not only in the log
 let saveErrorAt = 0;
+const saveWhy = (err) => (/ENOSPC/.test(String(err && err.code)) ? 'the disk is full' : /EPERM|EACCES|EBUSY/.test(String(err && err.code)) ? 'the library folder is not writable (a sync tool or an antivirus may hold the file)' : (err && err.message) || 'unknown reason');
+// J1 (open point): what the GM is told when the open campaign can't be closed because its changes don't save
+const saveStuck = () => ({ ok: false, error: `The open campaign couldn't be saved (${saveWhy(store.lastError)}). It stays open so nothing is lost: free the folder or the disk, then try again.` });
 store.onSaveError = (err) => {
   if (Date.now() - saveErrorAt < 60e3) return;
   saveErrorAt = Date.now();
-  const why = /ENOSPC/.test(String(err && err.code)) ? 'the disk is full' : /EPERM|EACCES|EBUSY/.test(String(err && err.code)) ? 'the library folder is not writable (a sync tool or an antivirus may hold the file)' : (err && err.message) || 'unknown reason';
+  const why = saveWhy(err);
   sendEvent({ kind: 'toast', text: `Saving the campaign failed: ${why}. Changes stay in memory; it is tried again with the next change.`, level: 'error', ms: 15000 });
 };
 const trash = new Map(); // undo tokens for deleted campaigns
@@ -97,6 +100,7 @@ function tokenLook(t = settings.tokens || {}) {
     ring: t.ring === 'glow' ? 'glow' : 'thin',
     tagSize: Math.round(num(t.tagSize, 0.5, 2.5, 1) * 100) / 100,
     numbers: t.numbers !== false, turnGlow: t.turnGlow !== false, shadow: !!t.shadow, snap: t.snap !== false,
+    conds: t.conds !== false, // D3: a token's conditions show as small animations on it (TV and GM screen)
   };
 }
 
@@ -105,7 +109,7 @@ function tokenLook(t = settings.tokens || {}) {
 // They are kept in the campaign (meta.table) and travel with it; while it is open they are in `settings`, so all that
 // reads settings stays as it was. A campaign without them takes what is set now: the one played last.
 const CAMP_KEYS = ['tableStyle', 'looks', 'mapTransition', 'initShow', 'initCount', 'initFoes', 'roundMode', 'roundBanner', 'seats'];
-const CAMP_TOKENS = ['tagSize', 'numbers', 'turnGlow', 'shadow'];
+const CAMP_TOKENS = ['tagSize', 'numbers', 'turnGlow', 'shadow', 'conds'];
 const CAMP_PHONES = ['on', 'pace', 'rest', 'pings', 'eyes', 'speed', 'trace'];
 let campTableOf = null; // the campaign whose values are in settings now (none: nothing is written back)
 const jcopy = (v) => JSON.parse(JSON.stringify(v));
@@ -241,6 +245,9 @@ const VIDEO_PATH_NOW = (() => {
 // =====================================================================
 function gmDisplay() { return gm ? screen.getDisplayMatching(gm.getBounds()) : screen.getPrimaryDisplay(); }
 function targetDisplay() {
+  // the self-test: the TV is a window on the GM's screen, as on a test machine with one screen (createGm: a second
+  // screen where there is one) (TS_TV_SCREEN=1: on another screen, as in play)
+  if (TEST_DIR && process.env.TS_TV_SCREEN !== '1') return gmDisplay();
   const all = screen.getAllDisplays();
   const chosen = all.find((d) => d.id === settings.playerDisplayId);
   if (chosen) return chosen;
@@ -792,7 +799,7 @@ function charCards(face = (f) => (f ? pathToFileURL(f).href : null)) {
       ...(() => { const s0 = sightOf(name); return { eye: s0.eye, carry: s0.carry, bright: s0.bright, dim: s0.dim, sight: s0.sight }; })(), // Prototype 17
       senses: ch.senses || '', languages: ch.languages || '', notes: ch.notes || '',
       insp: !!ch.insp, exh: ch.exh || 0, ds: { s: (ch.ds && ch.ds.s) || 0, f: (ch.ds && ch.ds.f) || 0 },
-      cond: e && cdc && Array.isArray(e.vals[cdc.id]) ? e.vals[cdc.id] : [], down: !!(hv && hv.cur != null && hv.cur <= 0), entry: e ? e.id : null,
+      cond: e && cdc ? (entryConds(e, I && store.map(I.mapId)) || (Array.isArray(e.vals[cdc.id]) ? e.vals[cdc.id] : [])) : [], // (D3: from the tokens) down: !!(hv && hv.cur != null && hv.cur <= 0), entry: e ? e.id : null,
     };
   });
 }
@@ -952,7 +959,7 @@ function remoteSpotifyVol() {
 }
 function remoteState(dev) {
   const b = remoteBase();
-  if (dev.role === 'player') { if (!b.player) b.player = remotePlayers(); return dev.local ? b.player : { ...b.player, ctl: Players ? Players.forPhone(dev) : null, handouts: handoutsFor(dev) }; } // (Prototype 1: what this phone may do)
+  if (dev.role === 'player') { if (!b.player) b.player = remotePlayers(); return { ...b.player, ctl: Players ? Players.forPhone(dev) : null, handouts: handoutsFor(dev) }; } // (Prototype 1: what this phone may do)
   return b.dm[deckOf(dev)];
 }
 let remoteSaveT = null;
@@ -1067,7 +1074,7 @@ function remoteCatalog(pc = false) {
   const lean = ({ kind, label, icon, ref }) => ({ kind, label, icon: icon || null, ref: ref ?? null });
   if (c && !pc) add('hotbar', 'On the hotbar', hotbarInfo(c).filter((x) => x && !x.missing && !REMOTE_PC(x)).map(lean));
   if (c && !pc) add('actions', 'Actions', [['send', 'Send to table', 'cast'], ['blackout', 'Blackout', 'screen-share-off'], ['quiet', 'Mute', 'volume-off'], ['next', 'Next turn', 'player-track-next'], ['fight', 'Fight music', 'swords'],
-    ['strike', 'Lightning', 'bolt'], ['storm', 'Storm in the trees', 'tornado'], ['stop-moments', 'Stop effects', 'player-stop'], ['grid', 'Grid on/off', 'grid-4x4'], ['again', 'Movement again', 'refresh'],
+    ['strike', 'Lightning', 'bolt'], ['storm', 'Storm in the trees', 'tornado'], ['stop-moments', 'Stop effects', 'player-stop'], ['grid', 'Grid on/off', 'grid-4x4'], ['again', 'Movement again', 'refresh'], ['join', 'Join code', 'qrcode'],
     ['fight-start', 'Start the fight', 'swords'], ['fight-end', 'End the fight', 'player-stop'], ['prev', 'Previous turn', 'player-skip-back'], ['roll-enemies', 'Roll enemies', 'dice'], ['init-sort', 'Sort initiative', 'sort-descending'],
     ['sp-toggle', 'Spotify play/pause', 'player-play'], ['sp-next', 'Spotify next song', 'player-track-next']].map(([ref, label, icon]) => ({ kind: 'do', ref, label, icon }))); // Prototype 24
   add('moments', 'Screen effects', Moments.LIST.map((d) => ({ kind: 'moment', ref: d.id, label: d.label, icon: d.icon })));
@@ -1114,35 +1121,6 @@ function remoteCatalog(pc = false) {
     }
   }
   return groups;
-}
-// the player screen in a window on another screen of this PC (Toolbox → Phone & tablet); Esc closes it
-let playerScreen = null;
-async function openPlayerScreen(displayId) {
-  const url = await Remote.localUrl();
-  if (!url) return { ok: false, error: 'The player screen could not start (see the log)' };
-  const all = screen.getAllDisplays();
-  const mine = gmDisplay().id;
-  const d = all.find((x) => x.id === displayId) || all.find((x) => x.id !== mine && x.id !== (player ? playerOnDisplay : null)) || all[0];
-  if (playerScreen && !playerScreen.isDestroyed()) { playerScreen.removeAllListeners('closed'); playerScreen.close(); }
-  const windowed = d.id === mine || all.length < 2; // on the GM's own screen: a window to drag where it should be
-  const win = new BrowserWindow({
-    backgroundColor: '#0c0d10', title: 'Tablescape – Players', icon: ICON, show: false, frame: windowed, autoHideMenuBar: true,
-    ...(windowed ? { width: 1280, height: 720 } : { x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height }),
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, partition: 'persist:players' },
-  });
-  playerScreen = win;
-  win.setMenuBarVisibility(false);
-  win.on('page-title-updated', (e) => e.preventDefault());
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('will-navigate', (e, u) => { if (!u.startsWith('http://127.0.0.1:')) e.preventDefault(); });
-  win.webContents.on('before-input-event', (e, input) => { if (input.type === 'keyDown' && input.key === 'Escape') win.close(); });
-  win.once('ready-to-show', () => { win.show(); if (!windowed) win.setFullScreen(true); });
-  win.on('closed', () => { if (playerScreen === win) { playerScreen = null; Remote.localDone(); broadcastGm(); } });
-  win.loadURL(url);
-  settings.remote.screenId = d.id;
-  saveSettings();
-  broadcastGm();
-  return { ok: true, windowed };
 }
 
 // ---------- the campaign's screens on the TV: the title when a session starts, the break, the blackout ----------
@@ -1552,7 +1530,7 @@ function gmState() {
     history: edit ? store.history(edit.id).state : { canUndo: false, canRedo: false },
     combat: combatInfo(),
     lights: RoomLights ? RoomLights.view() : null,
-    remote: Remote ? { ...Remote.view(), decks: settings.remote.decks, presets: DECK_PRESETS, presetLimits: DECK_CUSTOM, screenOpen: !!(playerScreen && !playerScreen.isDestroyed()), screenId: settings.remote.screenId || null } : null,
+    remote: Remote ? { ...Remote.view(), allowed: settings.remote.allowed !== false, decks: settings.remote.decks, presets: DECK_PRESETS, presetLimits: DECK_CUSTOM } : null,
     timer: state.timer,
     talk: talkInfo(),
     show: state.show, // Beta 3.2: tokens shown to the table
@@ -1573,7 +1551,7 @@ function gmState() {
     settings: {
       sfxOn: settings.sfxOn, sfxVolume: settings.sfxVolume, burstSeconds: settings.burstSeconds, sfxMap: sfxNames(),
       seats: settings.seats, handout: handoutPrefs(), talk: { ...settings.talk, look: lookFor('talk').base }, tableStyle: TABLE_STYLES[settings.tableStyle] ? settings.tableStyle : 'ink', looks: Object.fromEntries(LOOK_PARTS.map((k) => [k, (settings.looks || {})[k] || 'style'])), initAuto: settings.initAutoSort !== false, portraitMirror: settings.portraitMirror, portraitSize: settings.portraitSize || {}, portraitOffset: settings.portraitOffset || {}, portraitFx: settings.portraitFx || {}, boardVolume: settings.boardVolume, weatherPresets: settings.weatherPresets,
-      hudScale: settings.hudScale || 1, uiScale: settings.uiScale || 1, askNotes: settings.askNotes !== false,
+      hudScale: settings.hudScale || 1, uiScale: settings.uiScale || 1, askNotes: settings.askNotes !== false, joinMsg: joinMsg(),
       round: roundLook(), mapTransition: transitionOf(), initShow: settings.initShow !== false, initFoes: settings.initFoes === 'enemy' ? 'enemy' : 'names', initCount: Number(settings.initCount) || 0,
       quality: settings.quality || 'high', gmAnim: ['smooth', 'light', 'still'].includes(settings.gmAnim) ? settings.gmAnim : 'light', gmFx: ['smooth', 'light', 'still'].includes(settings.gmFx) ? settings.gmFx : 'light', animDraw: settings.animDraw === 'gpu' ? 'gpu' : 'cpu',
       soundOut: settings.soundOut || '', soundOutLabel: settings.soundOutLabel || '', fxOut: settings.fxOut ?? null, fxOutLabel: settings.fxOutLabel || '',
@@ -1588,8 +1566,25 @@ function gmState() {
     testPicture: state.testPicture || false,
     moments: state.moments,
     dice: state.dice, diceLog: state.diceLog,
-    sound: { quiet: !!state.quiet, fightNow: !!state.fightNow, fighting: !!(player && (fightTrack() || fightMood()) && fighting()) },
+    sound: { quiet: !!state.quiet, fightNow: !!state.fightNow, fighting: !!(player && (fightTrack() || fightMood()) && fighting()), now: tableSoundNow() },
   };
+}
+
+// F6 (open point): what sounds on the table now, for the row under the preview (as soundState decides it): the fight
+// music in a fight; else the live map's own sounds, its video's sound, or the chapter's ambience
+function tableSoundNow() {
+  if (!player) return null;
+  const live = store.map(state.liveMapId);
+  if (!live) return null;
+  const f = fightTrack(); const fm = fightMood();
+  if (fighting() && (f || fm)) return { kind: 'fight', name: f ? f.name : (fm && fm.name) || 'Fight music', volume: f ? f.volume ?? 0.6 : null, byHand: !!state.fightNow && !(state.init && state.init.running) };
+  const own = live.layers.filter((l) => l.role === 'audio' && !l.hidden);
+  const on = own.filter((l) => !l.muted && !l.missing && l.url);
+  if (on.length) return { kind: 'map', name: on.map((l) => l.name).join(', '), volume: on.length === 1 ? on[0].volume ?? 0.6 : null, ids: on.map((l) => l.id), mapId: live.id };
+  if (live.bg && live.bg.kind === 'video' && (live.bg.volume || 0) > 0) return { kind: 'video', name: 'Video sound', volume: live.bg.volume, mapId: live.id };
+  const amb = ambienceFor(live);
+  if (amb) { const ch = store.chapterOf(live.id); return { kind: 'chapter', name: (ch && ch.ambience && ch.ambience.name) || 'Ambience', volume: amb.volume }; }
+  return null;
 }
 
 function ambienceFor(liveMap) {
@@ -1930,6 +1925,17 @@ function rollFor(I, ids) {
   }
 }
 // preparing: the players here today and the tokens on the fight map join, the ones gone leave
+// D3 (open point): a token's conditions are kept on the token (layer.cond, mapstate.js), with or without a fight. A line
+// of the turn order with tokens on its map shows theirs (all of them together); one without tokens keeps its own list
+function entryConds(e, m) {
+  const toks = m && e.tokens.length ? e.tokens.map((id) => m.layers.find((l) => l.id === id)).filter(Boolean) : [];
+  return toks.length ? [...new Set(toks.flatMap((t) => t.cond || []))] : null;
+}
+function withConds(e, m) {
+  const cdc = initCols().find((x) => x.kind === 'cond');
+  const c = cdc ? entryConds(e, m) : null;
+  return c ? { ...e.vals, [cdc.id]: c } : e.vals;
+}
 function syncInit(I) {
   const c = store.cur;
   if (!c) return false;
@@ -1993,7 +1999,7 @@ function initInfo(forGm) {
     const toks = e.tokens.map(tok).filter(Boolean);
     const name = !e.custom && !e.pc && toks.length === 1 ? tokName(toks[0]) : e.name;
     const tokHidden = !e.pc && toks.length > 0 && toks.every((t) => t.hidden);
-    return [e.id, { name, toks, tokHidden, hidden: !e.pc && (e.hidden || tokHidden), down: isDown(e), gone: e.tokens.length > 0 && !toks.length }];
+    return [e.id, { name, toks, tokHidden, hidden: !e.pc && (e.hidden || tokHidden), down: isDown(e), gone: e.tokens.length > 0 && !toks.length, vals: withConds(e, m) }];
   }));
   const L = (e) => ({ ...e, ...look.get(e.id) });
   const units = initUnits(I).map((u) => ({ ...u, list: u.list.map(L) }));
@@ -2024,6 +2030,20 @@ function initInfo(forGm) {
 }
 
 // one-off events for the windows (a sound from the soundboard, a lightning strike)
+// F5 (open point): the Soundboard follows Audio/SFX by itself (no Refresh): a change there, once it has settled,
+// tells the GM screen to read the library again (only the GM screen: the TV has no Soundboard)
+let sfxWatch = null; let sfxT = null;
+function watchSfx(root) {
+  try { if (sfxWatch) sfxWatch.close(); } catch { /* */ }
+  sfxWatch = null;
+  const dir = path.join(root, 'Audio', 'SFX');
+  if (!fs.existsSync(dir)) return;
+  const told = () => { sfxT = null; if (gm && !gm.isDestroyed()) gm.webContents.send('event', { kind: 'library', cat: 'sfx' }); };
+  try {
+    sfxWatch = fs.watch(dir, { recursive: true }, () => { clearTimeout(sfxT); sfxT = setTimeout(told, 600); });
+    sfxWatch.on('error', (err) => { applog.log.warn(`the Sounds folder is not watched: ${err.message}`); try { sfxWatch.close(); } catch { /* */ } sfxWatch = null; });
+  } catch (err) { applog.log.warn(`the Sounds folder is not watched: ${err.message}`); }
+}
 function sendEvent(e) {
   if (e.kind === 'sound' || e.kind === 'stop') { soundEvent(e); return; } // the sound window plays them
   for (const w of [gm, player]) if (w && !w.isDestroyed()) w.webContents.send('event', e);
@@ -2039,6 +2059,7 @@ function broadcast() {
     pendingBroadcast = false;
     if (state.init && !state.init.running && store.cur) syncInit(state.init); // preparing: the list follows the party and the map
     else if (state.init && state.init.running && store.cur) { const m = store.map(state.init.mapId); if (m) linkCharTokens(state.init, m.layers.filter((l) => l.role === 'token'), false); } // (4.2.2) a character's token put down in the fight
+    if (state.init) keepInit(); // (J5: the list followed the party or the map)
     if (gm && !gm.isDestroyed()) gm.webContents.send('gm:state', gmState());
     if (player && !player.isDestroyed()) { player.webContents.send('table:state', tableState()); previewChanged('state'); }
     sendSound();
@@ -2137,11 +2158,16 @@ function applyUiScale() {
   if (gm && !gm.isDestroyed()) gm.webContents.setZoomFactor(Math.min(1.3, Math.max(0.7, Number(settings.uiScale) || 1)));
 }
 function createGm() {
+  // the self-test opens on a second screen where there is one (the TV as a window beside it, targetDisplay), so the main
+  // screen stays free while it runs (TS_TEST_SCREEN=main: on the main screen)
+  const testScreen = TEST_DIR && process.env.TS_TEST_SCREEN !== 'main' ? screen.getAllDisplays().find((d) => d.id !== screen.getPrimaryDisplay().id) : null;
   gm = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1100, minHeight: 680,
+    ...(testScreen ? { x: testScreen.workArea.x + 20, y: testScreen.workArea.y + 20 } : {}),
     backgroundColor: '#121316', title: `Tablescape ${LABEL}`, icon: ICON, show: false, webPreferences,
   });
   gm.on('page-title-updated', (e) => e.preventDefault());
+  gm.on('session-end', () => { saveEverythingNow(); applog.log.info('Windows is shutting down: saved'); }); // (J4: no before-quit on shutdown)
   gm.webContents.on('did-finish-load', applyUiScale);
   logWindow(gm, 'gm');
   gm.loadFile(PAGE, { query: { role: 'gm' } });
@@ -2189,7 +2215,7 @@ function openPlayer() {
   const windowed = isWindowed(d);
   playerOnDisplay = d.id;
   const opts = { backgroundColor: '#000000', title: 'Tablescape – Table', icon: ICON, show: false, webPreferences: { ...webPreferences, partition: 'persist:table' } }; // (its own session: the GM window's zoom stays there)
-  if (windowed) Object.assign(opts, { width: 1280, height: 760 });
+  if (windowed) { const a = d.workArea; Object.assign(opts, { width: 1280, height: 760, x: Math.round(a.x + Math.max(0, a.width - 1280) / 2), y: Math.round(a.y + Math.max(0, a.height - 760) / 2) }); } // (on the GM's screen, not the main one)
   else Object.assign(opts, { x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height, frame: false });
   player = new BrowserWindow(opts);
   player.setMenuBarVisibility(false);
@@ -2323,6 +2349,7 @@ function openCampaign(id, { backup = true } = {}) {
   const c = store.open(id);
   if (!c) return { ok: false, error: String(id).startsWith('broken:') ? 'This campaign\'s file is damaged: use Backups to bring one back.' : 'Campaign not found.' };
   campTableApply(c); // (Beta 3.18: its looks, initiative, seats, phones, tokens on the table, remote buttons)
+  state.init = initFromCampaign(c.meta.init); initUndo = null; // (J5: the fight as it was left)
   const ids = store.allMapIds();
   const broken = ids.filter((mid) => store.map(mid) && store.map(mid).broken);
   if (broken.length) applog.log.warn(`${broken.length} map file(s) of ${c.meta.name} could not be read: ${broken.join(', ')}`);
@@ -2340,8 +2367,8 @@ function openCampaign(id, { backup = true } = {}) {
   return { ok: true };
 }
 
-function goHome() {
-  store.close();
+function goHome({ force = false } = {}) {
+  if (!store.close({ force })) return false; // (J1: unsaved changes: the campaign stays open)
   campTableOf = null;
   state.timer = null;
   state.talk = null; state.handouts = []; state.handoutSeen = []; state.brk = null; state.init = null;
@@ -2513,11 +2540,43 @@ function osKept(mapId) {
   const h = store.history(mapId);
   for (const s of [...h.undo.slice(-24), ...h.redo.slice(-24)]) add(s && s.bg);
   for (const id of store.allMapIds()) { const m = store.map(id); for (const s of (m && m.snaps) || []) add(s.data && s.data.bg); }
+  // J7 (open point): a duplicate of this map shows the same drawn picture (and its undo steps may too): kept while used
+  for (const id of store.everyMapId()) {
+    if (id === mapId) continue;
+    const m = store.map(id); add(m && m.bg);
+    const hh = store.cur && store.cur.history.get(id);
+    if (hh) for (const s of [...hh.undo.slice(-24), ...hh.redo.slice(-24)]) add(s && s.bg);
+  }
   return keep;
 }
 
 const phoneMoves = new Map(); // Prototype 14: mapId → Map(tokenId → when a phone last moved it)
+// J5 (open point): the turn order is kept in the campaign (meta.init), so a crash, Update → Restart or a switch to
+// another campaign mid-fight loses nothing: after every init.* command what changed is written with the campaign
 function handle(type, p = {}) {
+  const r = handleCmd(type, p);
+  if (typeof type === 'string' && type.startsWith('init.')) keepInit();
+  return r;
+}
+function keepInit() {
+  const c = store.cur;
+  if (!c) return;
+  const now = state.init ? JSON.stringify(state.init) : null;
+  if (now === (c.meta.init ? JSON.stringify(c.meta.init) : null)) return;
+  if (now) c.meta.init = JSON.parse(now); else delete c.meta.init;
+  store.touch();
+}
+// the turn order as the campaign kept it, checked (a damaged or hand-edited file gives none)
+function initFromCampaign(v) {
+  if (!v || typeof v !== 'object' || !Array.isArray(v.entries)) return null;
+  const entries = v.entries.filter((e) => e && typeof e.id === 'string' && typeof e.name === 'string')
+    .map((e) => ({ ...e, tokens: Array.isArray(e.tokens) ? e.tokens.filter((t) => typeof t === 'string') : [], vals: e.vals && typeof e.vals === 'object' ? e.vals : {} }));
+  const mapId = typeof v.mapId === 'string' && store.map(v.mapId) ? v.mapId : null;
+  const running = !!v.running && !!mapId && entries.length > 0;
+  return { mapId, running, turn: running && entries.some((e) => e.id === v.turn) ? v.turn : (running ? entries[0].id : null), show: v.show !== false,
+    entries, groups: v.groups && typeof v.groups === 'object' ? v.groups : {}, dropped: Array.isArray(v.dropped) ? v.dropped.filter((x) => typeof x === 'string') : [] };
+}
+function handleCmd(type, p = {}) {
   if (type === 'os.baked') return osBaked(p); // (Beta 3.22) the picture of an Oldschool map's drawing
   // ----- map content -----
   if (MAP_CMD.test(type)) {
@@ -2543,6 +2602,7 @@ function handle(type, p = {}) {
     if (map.light.memory) mapstate.recordSeen(map);
     if (res.fog || res.changed === 'fog') bumpFog(mapId);
     store.touch(mapId);
+    if (type === 'layer.update' && Array.isArray(p.cond) && p.cond.length && state.init && state.init.entries.some((e) => e.tokens.includes(p.id))) needCol('cond'); // (D3: the turn order shows them)
     if (res.changed === 'fog') { sendFogDelta(mapId, res.fogDelta); if (pushed) broadcastHistoryOnly(); }
     else broadcast();
     // what the party sees now goes into the fog (party lights moved, doors opened ...)
@@ -3364,9 +3424,19 @@ function handle(type, p = {}) {
     }
     case 'handout.spread.remove': {
       if (!store.cur) return { ok: false };
-      store.cur.meta.handoutSpreads = hoSpreads().filter((x) => x.id !== p.id);
+      const all = hoSpreads(); const index = all.findIndex((x) => x.id === p.id); const spread = index >= 0 ? all[index] : null;
+      store.cur.meta.handoutSpreads = all.filter((x) => x.id !== p.id);
       store.touch();
       broadcast();
+      // (P5: with an Undo: the spread back in its place)
+      return spread ? { ok: true, label: `${spread.name || 'Spread'} deleted`, undo: { type: 'handout.spread.restore', payload: { spread, index } } } : { ok: true };
+    }
+    case 'handout.spread.restore': {
+      const sp = p.spread && typeof p.spread === 'object' && typeof p.spread.id === 'string' ? p.spread : null;
+      if (!store.cur || !sp || hoSpreads().some((x) => x.id === sp.id)) return { ok: false };
+      const list = [...hoSpreads()]; list.splice(Math.max(0, Math.min(list.length, Number(p.index) || 0)), 0, sp);
+      store.cur.meta.handoutSpreads = list;
+      store.touch(); broadcast();
       return { ok: true };
     }
     case 'handout.share': { // to: 'all', [player names] or nothing (taken back). Beta 3.7: it is on their phones at once, shown on the table or not
@@ -3425,13 +3495,21 @@ function handle(type, p = {}) {
     // ----- initiative -----
     case 'notes.set': {
       if (!store.cur) return { ok: false };
-      const text = String(p.text ?? '').slice(0, 500000);
+      let text = String(p.text ?? '').slice(0, 500000);
       const n = store.cur.meta.notes || {};
-      if (text === (n.text || '')) return { ok: true };
+      // P1 (open point): lines Tablescape added since the panel took its text ("Handout shown") are kept: they are
+      // added to what the GM typed (before, the typed text replaced them)
+      const now = String(n.text || '');
+      if (typeof p.base === 'string' && now !== p.base && now.startsWith(p.base)) {
+        const added = now.slice(p.base.length);
+        const NL = String.fromCharCode(10);
+        text = `${text}${text && !text.endsWith(NL) && !added.startsWith(NL) ? NL : ''}${added}`.slice(-500000);
+      }
+      if (text === now) return { ok: true, text };
       store.cur.meta.notes = { ...n, text, changed: Date.now() };
       store.touch();
       broadcast();
-      return { ok: true };
+      return { ok: true, text };
     }
     case 'notes.export': {
       const r = exportNotes();
@@ -3502,6 +3580,29 @@ function handle(type, p = {}) {
       broadcast();
       return { ok: true, n: toks.length };
     }
+    case 'init.addToken': { // D3 (open point): one token into the turn order, from its wheel (also one taken out before)
+      if (!store.cur) return { ok: false };
+      if (!state.init) handle('init.prepare', {});
+      const I = state.init;
+      const m = store.map(p.mapId || state.editMapId);
+      const t = m && m.layers.find((l) => l.id === p.id && l.role === 'token');
+      if (!I || !t) return { ok: false };
+      if (I.entries.some((e) => e.tokens.includes(t.id))) return { ok: true, label: `${tokName(t)} is in the turn order` };
+      if (I.mapId && I.mapId !== m.id) return { ok: false, error: 'The turn order is for another map' };
+      I.mapId = m.id;
+      I.dropped = I.dropped.filter((k) => k !== t.id);
+      const owner = charTokOwner(t, true);
+      if (owner && (store.cur.meta.party || []).includes(owner)) {
+        I.dropped = I.dropped.filter((k) => k !== `pc:${owner}`);
+        if (!I.entries.some((e) => e.pc && e.name === owner)) I.entries.push(newEntry({ name: owner, pc: true, vals: knownVals(pcStats(owner)) }));
+        linkCharTokens(I, [t]);
+      } else { const foe = foeOf(t.name); I.entries.push(newEntry({ name: tokName(t), tokens: [t.id], bonus: foe && foe.bonus, vals: knownVals(foe) })); }
+      if ((t.cond || []).length) needCol('cond');
+      tidyInit(I);
+      store.touch();
+      broadcast();
+      return { ok: true, label: `${owner || tokName(t)} is in the turn order` };
+    }
     case 'init.addPc': { // Prototype 6: a player who was taken out of the turn order comes back in (also while the fight runs)
       const I = state.init; const c = store.cur;
       if (!I || !c) return { ok: false };
@@ -3528,6 +3629,7 @@ function handle(type, p = {}) {
       if (!list.length) return { ok: false };
       if (p.gid && 'name' in p) I.groups[p.gid] = { ...I.groups[p.gid], name: String(p.name || '').trim().slice(0, 40) };
       const group = list[0].group;
+      const condPatches = [];
       for (const e of list) {
         if (!p.gid && 'name' in p && String(p.name).trim()) {
           if (e.pc && ((store.cur && store.cur.meta.party) || []).includes(e.name)) { const r = renamePc(e.name, p.name); if (!r.ok) return r; continue; } // (4.2.2) a player: renamed everywhere, not cut off from the card
@@ -3547,7 +3649,11 @@ function handle(type, p = {}) {
               e.vals[cid] = cur == null && max == null ? undefined : { cur, max };
               if (!e.vals[cid]) delete e.vals[cid];
             } else if (col.kind === 'ac' || col.kind === 'num') { const n = initNum(v); if (n == null) { delete e.vals[cid]; forgetPcVal(e, cid); } else e.vals[cid] = n; }
-            else if (col.kind === 'cond') e.vals[cid] = [...new Set((Array.isArray(v) ? v : []).map((x) => String(x).slice(0, 24)))].slice(0, 12);
+            else if (col.kind === 'cond') {
+              e.vals[cid] = [...new Set((Array.isArray(v) ? v : []).map((x) => String(x).slice(0, 24)))].slice(0, 12);
+              const m = store.map(I.mapId); // (D3: the tokens keep them; one undo step on their map)
+              for (const id of e.tokens) if (m && m.layers.some((l) => l.id === id)) condPatches.push({ id, cond: e.vals[cid] });
+            }
             else { const t = String(v ?? '').slice(0, 200); if (t) e.vals[cid] = t; else delete e.vals[cid]; }
           }
           rememberPc(e);
@@ -3561,6 +3667,7 @@ function handle(type, p = {}) {
       }
       if ('bonus' in p && !list[0].pc) rememberFoe({ name: list[0].name, bonus: p.bonus });
       const sorted = 'init' in p && autoSort(I, missing);
+      if (condPatches.length) handle('layer.many', { mapId: I.mapId, patches: condPatches, stepLabel: 'Conditions' });
       if (p.vals || 'bonus' in p) store.touch();
       broadcast();
       return { ok: true, sorted };
@@ -3684,6 +3791,13 @@ function handle(type, p = {}) {
       } else handle('init.prepare', {});
       const I = state.init;
       if (!I) return { ok: false };
+      // D4 (open point): enemies still without a number. ask: the GM screen asks first ({ ask: n } and nothing starts);
+      // roll: they are rolled, then the fight starts (players without a number still type their own)
+      if (!p.list) {
+        const npc = I.entries.filter((e) => !e.pc && e.init == null).length;
+        if (npc && p.ask && p.roll == null) return { ok: false, ask: npc };
+        if (npc && p.roll) handle('init.roll', {});
+      }
       const m = store.map(p.mapId) || combatMap();
       if (!m || !I.entries.length) return { ok: false, error: 'Nobody in the turn order yet' };
       I.mapId = m.id;
@@ -3745,7 +3859,12 @@ function handle(type, p = {}) {
         if (state.init) for (const e of state.init.entries) if (e.pc) Object.assign(e.vals, { ...knownVals(pcStats(e.name)), ...e.vals });
       }
       if (p.rename) cols = cols.map((x) => (x.id === p.rename.id ? { ...x, name: String(p.rename.name || x.name).trim().slice(0, 24) || x.name } : x));
+      // P5 (open point): a column taken away can come back (Undo): the fighters keep its values under its id meanwhile
+      const gone = p.remove ? cols.find((x) => x.id === p.remove) : null; const goneAt = gone ? cols.indexOf(gone) : -1;
       if (p.remove) cols = cols.filter((x) => x.id !== p.remove);
+      if (p.restore && p.restore.col && typeof p.restore.col.id === 'string' && INIT_COLS[p.restore.col.kind] && !cols.some((x) => x.id === p.restore.col.id) && cols.length < 8) {
+        cols.splice(Math.max(0, Math.min(cols.length, Number(p.restore.index) || 0)), 0, { id: p.restore.col.id, kind: p.restore.col.kind, name: String(p.restore.col.name || INIT_COLS[p.restore.col.kind]).slice(0, 24) });
+      }
       if (p.move) {
         const i = cols.findIndex((x) => x.id === p.move.id); const j = i + (p.move.by > 0 ? 1 : -1);
         if (i >= 0 && j >= 0 && j < cols.length) [cols[i], cols[j]] = [cols[j], cols[i]];
@@ -3753,7 +3872,7 @@ function handle(type, p = {}) {
       c.meta.initCols = cols;
       store.touch();
       broadcast();
-      return { ok: true };
+      return gone ? { ok: true, label: `${gone.name} column removed`, undo: { type: 'init.col', payload: { restore: { col: gone, index: goneAt } } } } : { ok: true };
     }
     case 'init.forget': {
       // an enemy the campaign remembers
@@ -3825,6 +3944,12 @@ function handle(type, p = {}) {
     case 'campaign.create': {
       const id = store.create(p.name || 'New campaign');
       const r = openCampaign(id, { backup: false });
+      // D9 (open point): page 1 of a new campaign's hotbar says what it is for; any slot can be replaced
+      if (store.cur && !(store.cur.meta.hotbar || []).some(Boolean)) {
+        store.cur.meta.hotbar = [['blackout', 'Blackout', 'screen-share-off'], ['quiet', 'Mute', 'volume-off'], ['fight-start', 'Start the fight', 'swords'], ['next', 'Next turn', 'player-track-next'],
+          ['strike', 'Lightning', 'bolt'], ['break:10', 'Break 10 min', 'coffee'], ['join', 'Join code', 'qrcode']].map(([ref, label, icon]) => cleanHot({ kind: 'do', ref, label, icon }));
+        store.touch();
+      }
       store.structure('map.add', { chapterId: store.cur.meta.chapters[0].id, name: 'First map' });
       const first = store.allMapIds()[0];
       setEdit(first);
@@ -3833,13 +3958,13 @@ function handle(type, p = {}) {
       return r;
     }
     case 'campaign.open': {
-      if (store.cur && store.cur.meta.id !== p.id) goHome(); // (Beta 3.17: from one campaign straight to another: the first one's session ends)
+      if (store.cur && store.cur.meta.id !== p.id && goHome() === false) return saveStuck(); // (Beta 3.17: from one campaign straight to another: the first one's session ends)
       const r = openCampaign(p.id);
       broadcast();
       return r;
     }
     case 'campaign.home':
-      goHome();
+      if (goHome() === false) return saveStuck();
       broadcast();
       return { ok: true };
     // the campaign's page (from the maps: the rail's Campaign button) and back to the maps
@@ -4075,11 +4200,13 @@ ipcMain.handle('sound', async (e, action, arg = {}) => {
 });
 // version, log file, backups, missing files, first steps
 let lastMissingSig = '';
+let spellsGm = 'idle'; // how far the GM screen's spell program is (spell-gl.js): idle, building, ready, slow, off, failed
 ipcMain.handle('app', async (e, action, arg = {}) => {
   switch (action) {
     case 'about': return { version: PKG.version, label: LABEL, electron: process.versions.electron, log: applog.file, update: state.update, test: !!TEST_DIR };
     case 'update.check': return checkUpdates(true); // Prototype 20
     case 'note': applog.log.info(String((arg && arg.text) || '').slice(0, 400)); return true; // Second Builder (second-spell-warmup): a line from a window
+    case 'spells': if (arg && arg.state) spellsGm = String(arg.state).slice(0, 20); return spellsGm; // the GM's spell program: the TV builds its own once this is over (spell-gl.js)
     case 'whatsnew': { // Prototype 21: the first start of a new version (after an update): What's new opens once
       const prev = settings.lastVersion; const cur = PKG.version;
       if (TEST_DIR) return { show: false };
@@ -4133,7 +4260,7 @@ ipcMain.handle('app', async (e, action, arg = {}) => {
     case 'backups.restore': {
       const dir = store.findDir(arg.id);
       if (!dir) return { ok: false, error: 'Campaign not found.' };
-      if (store.cur && store.cur.meta.id === arg.id) goHome();
+      if (store.cur && store.cur.meta.id === arg.id) goHome({ force: true }); // (a backup is brought back: what is open is given up)
       const r = backups.restore(dir, arg.backup);
       applog.log.info(`restored ${arg.backup} of ${arg.id}`, r);
       broadcast();
@@ -4227,6 +4354,7 @@ ipcMain.handle('settings', (e, patch) => {
   if ('boardVolume' in patch) settings.boardVolume = Math.min(1, Math.max(0, Number(patch.boardVolume) || 0));
   if (patch.weatherPresets) settings.weatherPresets = patch.weatherPresets.slice(0, 24);
   if ('askNotes' in patch) settings.askNotes = !!patch.askNotes;
+  if ('joinMsg' in patch) { settings.joinMsg = String(patch.joinMsg || '').replace(/\r/g, '').split('\n').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 3).join('\n').slice(0, 160); if (state.join) state.join = { ...state.join, msg: joinMsg() }; } // (F1: the line on the join card, e.g. the Wi-Fi)
   if (patch.roundPos) settings.roundPos = { x: Math.min(1, Math.max(0, Number(patch.roundPos.x) || 0)), y: Math.min(1, Math.max(0, Number(patch.roundPos.y) || 0)) };
   if ('roundSize' in patch) settings.roundSize = Math.min(3, Math.max(0.6, Number(patch.roundSize) || 1.4));
   if ('roundBanner' in patch) settings.roundBanner = !!patch.roundBanner;
@@ -4395,20 +4523,38 @@ function setCalib(on) {
   if (on) calibT = setTimeout(() => { state.calib = false; calibT = null; broadcast(); }, 45000);
   if (state.calib !== !!on) { state.calib = !!on; broadcast(); }
 }
+// F1 (open point): the phone server starts by itself when something needs it (a QR code shown, players moving their
+// tokens); Tablescape settings → This screen switches phones and tablets off altogether (settings.remote.allowed)
+const PHONES_OFF = 'Phones and tablets are switched off (Tablescape settings → This screen)';
+function wakeRemote() {
+  if (!Remote || settings.remote.allowed === false) return false;
+  if (!Remote.view().on) Remote.action('set', { on: true });
+  return true;
+}
+async function remoteReady(ms = 4000) { // started and listening on the home network (or as far as it gets in ms)
+  if (!wakeRemote()) return false;
+  const end = Date.now() + ms;
+  while (Date.now() < end) { const v = Remote.view(); if ((v.running && v.urls.length) || v.error) return v.running; await new Promise((r) => setTimeout(r, 100)); }
+  return Remote.view().running;
+}
 // Prototype 1: the Players' phones panel
 let joinT = null;
+const joinMsg = () => String(settings.joinMsg || '').slice(0, 160);
 ipcMain.handle('players', async (e, action, p = {}) => {
   if (!Players) return { ok: false };
-  if (action === 'join') { // the players' QR code on the TV for a minute
+  if (action === 'join') { // the players' QR code on the TV for a minute and a half
     clearTimeout(joinT); joinT = null;
-    if (p.on === false || state.join) { state.join = null; broadcast(); return { ok: true, shown: false }; }
+    if (p.on === false || (state.join && p.on !== true)) { state.join = null; broadcast(); return { ok: true, shown: false }; }
+    if (settings.remote.allowed === false) return { ok: false, error: PHONES_OFF };
+    await remoteReady();
     const q = await Remote.action('qr', { role: 'player' });
-    if (!q || !q.ok) return { ok: false, error: q && q.error ? q.error : 'Switch the Remote on first' };
-    state.join = { svg: q.svg, url: q.base.replace('http://', ''), until: Date.now() + 90000 };
+    if (!q || !q.ok) return { ok: false, error: q && q.error ? q.error : 'The phones can\'t connect yet' };
+    state.join = { svg: q.svg, url: q.base.replace('http://', ''), msg: joinMsg(), until: Date.now() + 90000 };
     joinT = setTimeout(() => { state.join = null; joinT = null; broadcast(); }, 90000);
     broadcast();
     return { ok: true, shown: true };
   }
+  if (action === 'set' && p.on === true) { if (settings.remote.allowed === false) return { ok: false, error: PHONES_OFF }; wakeRemote(); } // (F1: no "switch on the Remote first")
   const r = await Players.action(action, p);
   broadcast();
   return r;
@@ -4417,6 +4563,12 @@ ipcMain.handle('remote', async (e, action, p = {}) => {
   if (!Remote) return { ok: false };
   let r;
   switch (action) {
+    case 'wake': r = { ok: await remoteReady(), error: settings.remote.allowed === false ? PHONES_OFF : undefined }; break; // (F1: a panel with a QR code opened)
+    case 'allow': { // (F1: Tablescape settings → This screen)
+      settings.remote.allowed = !!p.on; saveSettings();
+      if (!p.on) { Remote.action('set', { on: false }); if (state.join) { clearTimeout(joinT); joinT = null; state.join = null; } }
+      r = { ok: true }; break;
+    }
     case 'deck.set': { const w = p.which === 'tablet' ? 'tablet' : 'phone'; settings.remote.decks[w] = deckFix(p.deck); saveSettings(); r = { ok: true, deck: settings.remote.decks[w] }; break; }
     case 'deck.preset': {
       const w = p.which === 'tablet' ? 'tablet' : 'phone';
@@ -4428,13 +4580,6 @@ ipcMain.handle('remote', async (e, action, p = {}) => {
       saveSettings(); r = { ok: true, deck: settings.remote.decks[w] }; break;
     }
     case 'catalog': r = { ok: true, groups: remoteCatalog(!!p.pc) }; break;
-    case 'faces': { // the party's pictures on the player screen
-      const c = store.cur;
-      r = { ok: true, list: c ? (c.meta.party || []).map((n) => { const f = faceFor({ name: n, pc: true, tokens: [] }, state.liveMapId); return { name: n, path: f, url: f ? pathToFileURL(f).href : null, own: !!(c.meta.faces && c.meta.faces[n]) }; }) : [] };
-      break;
-    }
-    case 'screen.open': r = await openPlayerScreen(Number(p.displayId) || null); break;
-    case 'screen.close': if (playerScreen && !playerScreen.isDestroyed()) playerScreen.close(); r = { ok: true }; break;
     default: r = await Remote.action(action, p);
   }
   broadcastGm();
@@ -4719,7 +4864,8 @@ ipcMain.handle('bench', (e, action, arg = {}) => {
   if (action === 'start') return benchRun(['compare', 'draw'].includes(arg.mode) ? arg.mode : 'normal', arg.seconds);
   if (action === 'list') return benchList();
   if (action === 'running') return bench ? { ...bench } : null;
-  if (action === 'clear') { benchSave([]); return true; }
+  if (action === 'clear') { const before = benchList(); benchSave([]); return { ok: true, before }; } // (P5: with what was there, for Undo)
+  if (action === 'restore') { if (Array.isArray(arg.list)) benchSave(arg.list.filter((x) => x && typeof x === 'object')); return true; }
   if (action === 'remove') { benchSave(benchList().filter((r) => r.id !== arg.id && (!arg.pair || r.pair !== arg.pair))); return true; }
   return null;
 });
@@ -4844,8 +4990,7 @@ async function moveLibrary() {
     });
     if (r.response !== 0) return { ok: false, canceled: true };
   }
-  if (store.cur) goHome();
-  store.flush();
+  if (store.cur && goHome() === false) return saveStuck(); // (J1: nothing is moved while changes are unsaved)
   try {
     fs.mkdirSync(to, { recursive: true });
     fs.cpSync(from, to, { recursive: true, errorOnExist: false, force: true });
@@ -5003,6 +5148,7 @@ function startApp() {
   try { library.ensureLibrary(root, DEMO_DIR); } catch (err) {
     throw new Error(`The library folder could not be set up at ${root}: ${err.message}. Windows "Controlled folder access" may be blocking it; allow Tablescape there, or move the library.`);
   }
+  watchSfx(root);
 
   if (!settings.demoCreated) {
     firstRun = true; // (Beta 3.1: a brand-new install, so no "Update successful" maid)
@@ -5067,6 +5213,8 @@ function startApp() {
     dir: path.join(__dirname, 'remote'), icons: path.join(__dirname, 'renderer', 'icons.js'), fonts: path.join(__dirname, 'renderer', 'fonts'), appIcon: ICON,
     port: process.env.TS_REMOTE_PORT ? Number(process.env.TS_REMOTE_PORT) : undefined, testIp: TEST_DIR ? process.env.TS_REMOTE_IP || null : null,
     state: (dev) => remoteState(dev), run: (op, arg, dev) => remoteRun(op, arg, dev),
+    // L1 (open point): a phone gets only pictures and videos inside the library (never any other file the PC has)
+    servable: (f) => /\.(png|jpe?g|webp|gif|avif|mp4)$/i.test(String(f)) && !!library.toRef(String(f)).rel,
     onChange: () => broadcastGm(),
   });
   Remote.start(); // listens only when switched on
@@ -5154,9 +5302,11 @@ function startApp() {
 
   if (TEST_DIR) {
     // TS_SCRIPT: a script of your own instead of the self-test (for trying things out)
-    // Prototype 26: the self-test in areas (src/tests); TS_OLD_TEST=1 runs the old one in one piece
-    const runner = process.env.TS_SCRIPT ? require(path.resolve(process.env.TS_SCRIPT)) : process.env.TS_OLD_TEST ? require('./selftest') : require('./tests');
-    runner.run({ app, store, state, handle, getWindows: () => ({ gm, player, sound: soundWin }), library, settings, broadcast });
+    // Prototype 26: the self-test in areas (src/tests) (U4: the old one in one piece is gone)
+    // (S3: the self-test is not in an installed copy: there, nothing runs and the app goes on)
+    let runner = null;
+    try { runner = process.env.TS_SCRIPT ? require(path.resolve(process.env.TS_SCRIPT)) : require('./tests'); } catch (err) { applog.log.warn(`self-test: not part of this copy (${err.message})`); }
+    if (runner) runner.run({ app, store, state, handle, getWindows: () => ({ gm, player, sound: soundWin }), library, settings, broadcast });
   }
 }
 
@@ -5172,7 +5322,27 @@ app.on('second-instance', (e, argv) => { if (gm) { if (gm.isMinimized()) gm.rest
 app.on('open-file', (e, file) => { e.preventDefault(); if (/\.tablescape$/i.test(file)) offerImport(file); }); // (macOS)
 app.on('child-process-gone', (e, d) => { if (d.reason !== 'clean-exit') applog.log.error(`${d.type} process gone: ${d.reason} (${d.name || ''} exit code ${d.exitCode})`); });
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { clearInterval(previewTimer); store.flush(); if (Remote) Remote.stop(); applog.log.info('quit'); });
+// J4 (open point): what waits to be saved (the campaign, settings held back while a slider moves) goes to the disk now:
+// on quit, and when Windows shuts down or logs off (no before-quit then)
+function saveEverythingNow() {
+  const held = [sizeSaveT, remoteSaveT, spVol.saveT].some(Boolean);
+  for (const t of [sizeSaveT, remoteSaveT, spVol.saveT]) clearTimeout(t);
+  sizeSaveT = null; remoteSaveT = null; spVol.saveT = null;
+  if (held) { try { saveSettings(); } catch (err) { applog.log.error('settings not saved', err); } }
+  return store.flush();
+}
+// J1: a quit whose save fails asks first (Try again / Quit anyway) instead of losing the changes
+let quitAnyway = false;
+app.on('before-quit', (e) => {
+  saveEverythingNow();
+  if (!quitAnyway && store.cur && !store.close()) {
+    const r = dialog.showMessageBoxSync({ type: 'warning', buttons: ['Try again', 'Quit anyway'], defaultId: 0, cancelId: 0, noLink: true, title: 'Tablescape',
+      message: "The campaign couldn't be saved", detail: `${saveWhy(store.lastError)[0].toUpperCase()}${saveWhy(store.lastError).slice(1)}. Quitting now loses the changes since the last save.` });
+    if (r === 0) { e.preventDefault(); return; }
+    quitAnyway = true;
+  }
+  clearInterval(previewTimer); if (Remote) Remote.stop(); applog.log.info('quit');
+});
 // Beta 3.3: the room lights go back to how they were before Tablescape (once, waiting at most 2.5 s), then the app ends
 let lightsBack = false;
 app.on('will-quit', (e) => {

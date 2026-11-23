@@ -577,13 +577,21 @@ const LibraryDrawer = (() => {
       if (it.walls) box.append(h('span', { class: 'lt-walls', 'data-tip': 'Comes with walls and doors' }, iconEl('wall')));
       return box;
     }
+    // H1 (open point): the same tick as in the panels' lists: on the chapter's Ready list, or off it again
+    function readyTick(it) {
+      const ch = ctx.ready.chapter();
+      if (!ch) return null;
+      const on = !!ctx.ready.kindWith(it.path);
+      return h('button', { class: `pl-tick lt-tick ${on ? 'on' : ''}`, dataset: { path: it.path }, 'aria-label': `Ready for ${ch.name}: ${it.name}`, 'data-tip': `Ready for ${ch.name}`,
+        onclick: (e) => { e.stopPropagation(); if (ctx.ready.kindWith(it.path)) trayRemove(it.path); else trayAdd(it); } }, iconEl('check'));
+    }
     function tile(it, short) {
       const weather = it.cat === 'overlays' && ctx.anchorFor(it.name) === 'table';
       const el = h('div', { class: `lt lt-${it.cat}`, role: 'button', tabindex: '0', onclick: () => use(it), onkeydown: (e) => { if (e.key === 'Enter') use(it); } },
         thumbBox(it, it.cat === 'assets' || it.cat === 'portraits' || it.cat === 'handouts' ? 'checker' : ''),
         h('span', { class: 'lt-name' }, short ? shortName(it) : it.name), // (4.11: inside its folder, without the folder's name)
         weather ? h('span', { class: 'lt-tag' }, 'Weather') : null,
-        star(it));
+        star(it), readyTick(it));
       return common(el, it);
     }
     function mapCard(st) {
@@ -747,32 +755,35 @@ const LibraryDrawer = (() => {
       const ch = ctx.viewChapter();
       touch(it);
       const back = d.back && d.purpose ? d.back : null; // opened from a menu to pick one thing
+      // P4 (open point): what needs an open map says so (it did nothing); what failed says why (it said "added")
+      const noMap = () => { toast('Open a map first', { ms: 2200 }); };
+      const failed = (r) => { toast((r && r.error) || "That didn't work", { kind: 'error', ms: 3000 }); };
       switch (action) {
         case 'newMap': {
           const r = await cmd('map.add', { chapterId: d.chapterId || (ch && ch.id), path: it.path, index: d.index });
-          if (r.ok) { toast(`${it.name} added as a new map`); done(null); }
+          if (r && r.ok) { toast(`${it.name} added as a new map`); done(null); } else failed(r);
           break;
         }
         case 'atlasMap': { // (Beta 3.11) a world or regional map for the campaign's atlas
           const r = await cmd('atlas.add', { path: it.path });
-          if (r.ok) { toast(`${it.name} added to the atlas`); done(null); }
+          if (r && r.ok) { toast(`${it.name} added to the atlas`); done(null); } else failed(r);
           break;
         }
         case 'atlasAsset': // (Beta 3.12) onto the world map the Map table works on
           await ctx.atlasAsset(it, d.at || null); done(null);
           break;
         case 'replace':
-          if (s.map) { await undoable('bg.set', { path: it.path }, 'Background replaced'); done('bg'); }
+          if (s.map) { await undoable('bg.set', { path: it.path }, 'Background replaced'); done('bg'); } else noMap();
           break;
         case 'token': {
-          if (!s.map) break;
+          if (!s.map) { noMap(); break; }
           const at = (d.purpose === 'place' && d.at) || ctx.viewCenter();
           await ctx.placeToken(it.path, at);
           if (d.purpose === 'place' || back) done(null);
           break;
         }
         case 'assetAt':
-          if (s.map) { await ctx.placeAsset(it, d.at || ctx.viewCenter()); close(); }
+          if (s.map) { await ctx.placeAsset(it, d.at || ctx.viewCenter()); close(); } else noMap();
           break;
         case 'brush':
           done(null);
@@ -797,13 +808,16 @@ const LibraryDrawer = (() => {
           break;
         }
         case 'overlay': {
+          if (!s.map) { noMap(); break; }
           const a = anchor || ctx.anchorFor(it.name);
-          await cmd('layer.add', { path: it.path, role: 'overlay', anchor: a });
-          toast(a === 'table' ? `${it.name} covers the whole table` : `${it.name} added to the map`);
+          const r = await cmd('layer.add', { path: it.path, role: 'overlay', anchor: a });
+          if (r && r.ok) toast(a === 'table' ? `${it.name} covers the whole table` : `${it.name} added to the map`); else failed(r);
           break;
         }
         case 'sound': {
+          if (!s.map) { noMap(); break; }
           const r = await cmd('layer.add', { path: it.path, role: 'audio' });
+          if (!(r && r.ok)) { failed(r); break; }
           toast(`${it.name} plays while this map is on the table`);
           if (back) done(r && r.selected);
           break;
@@ -864,7 +878,9 @@ const LibraryDrawer = (() => {
       const list = trayList();
       traySig = JSON.stringify(list.map((x) => x.path));
       const ch = ctx.ready.chapter();
-      box.append(h('span', { class: 'lib-tray-label', 'data-tip': ch ? `Ready for ${ch.name}` : '' }, iconEl('checklist'), 'Ready'));
+      // H1: the chapter's one Ready list, named so (the panels show their part of it)
+      box.append(h('span', { class: 'lib-tray-label', 'data-tip': 'Tokens, portraits, handouts and the rest, ready for this chapter' }, iconEl('checklist'), ch ? `Ready for ${ch.name}` : 'Ready'));
+      for (const b of D().querySelectorAll('.lt-tick')) b.classList.toggle('on', !!ctx.ready.kindWith(b.dataset.path)); // (the ticks follow the list)
       const strip = h('div', { class: 'lib-tray-strip' });
       for (const t of list) {
         const it = items.find((x) => x.path === t.path) || t;
@@ -875,7 +891,7 @@ const LibraryDrawer = (() => {
         strip.append(el);
       }
       strip.append(h('span', { class: 'tray-slot add' }, iconEl('plus')));
-      box.append(strip, h('span', { class: 'hint' }, list.length ? 'Right-click the map → Ready to drop these in.' : 'Drag things here while you prep.'));
+      box.append(strip); // (H1: how to fill and use it is behind the Library's "?")
     }
     function bindTrayDrop(box) {
       box.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('application/x-ts-asset')) { e.preventDefault(); box.classList.add('drop-ok'); } });

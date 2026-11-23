@@ -13,7 +13,8 @@ module.exports = (area) => {
   const trees = (t) => mapNow(t).layers.filter((l) => l.tree);
   const tv = async (t) => (await t.tvDebug()).trees;
   const gm = (t) => t.g('Play.view().stats.trees');
-  const soft = async (t, on) => { await t.g(`Trees.allowSoft(${on})`); await t.t(`Trees.allowSoft(${on})`); };
+  // as on a PC without a graphics card (true), on any PC: with a real card, refusing software graphics changes nothing
+  const noCard = async (t, on) => { await t.g(`Trees.never(${on})`); await t.t(`Trees.never(${on})`); };
   const clear = async (t) => { const ids = trees(t).map((l) => l.id); if (ids.length) t.handle('layer.removeMany', { ids }); t.handle('wind.set', { auto: true, storm: false }); t.handle('weather.preset', { name: 'None', layers: [] }); await t.settle(); };
   const add = (t, name, at, extra = {}) => t.handle('layer.add', { path: still(name), role: 'asset', x: at.x, y: at.y, w: 3 * mapNow(t).grid.size, ...extra }).selected;
 
@@ -138,8 +139,11 @@ module.exports = (area) => {
       const M = [[0.213 + C * 0.787 - S * 0.213, 0.715 - C * 0.715 - S * 0.715, 0.072 - C * 0.072 + S * 0.928], [0.213 - C * 0.213 + S * 0.143, 0.715 + C * 0.285 + S * 0.140, 0.072 - C * 0.072 - S * 0.283], [0.213 - C * 0.213 - S * 0.787, 0.715 - C * 0.715 + S * 0.715, 0.072 + C * 0.928 + S * 0.072]];
       return M.map((r) => Math.max(0, Math.min(255, r[0] * c[0] + r[1] * c[1] + r[2] * c[2]))); };
     const want = css(p0, -90);
-    const off = Math.max(...want.map((v, i) => Math.abs(v - p1[i])));
-    t.ok(off < 14, 'the turned oak has the colour the browser\'s hue-rotate(-90deg) gives it', { p0, p1, want });
+    // the colour's share of red, green and blue, its brightness left out: the oak sways in the wind, so the two
+    // pictures may catch a lighter or darker leaf at the same spot (with a graphics card it sways faster)
+    const share = (c) => { const s = c[0] + c[1] + c[2] || 1; return [c[0] / s, c[1] / s, c[2] / s]; };
+    const off = Math.max(...share(want).map((v, i) => Math.abs(v - share(p1)[i])));
+    t.ok(off < 0.05, 'the turned oak has the colour the browser\'s hue-rotate(-90deg) gives it', { p0, p1, want, off: Math.round(off * 1000) / 1000 });
     t.ok(p1[0] > p1[2], 'leaf green at -90 degrees turns warm (reddish brown), not teal', p1);
     t.handle('layer.removeMany', { ids: [id] });
   }, { ms: 60000 });
@@ -209,7 +213,10 @@ module.exports = (area) => {
       for (let y = Math.min(a.y, b.y) + g; y < Math.max(a.y, b.y) - g && out.length < 8; y += 5 * g) {
         for (let x = Math.min(a.x, b.x) + g; x < Math.max(a.x, b.x) - g && out.length < 8; x += 5 * g) {
           if (toks.some((k) => Math.hypot(k.x - x, k.y - y) < 2.5 * g)) continue;
-          const c = toClient({ x, y }); if (c.x > pop.right + 30 && c.x < innerWidth - 30 && c.y > 100 && c.y < innerHeight - 160) out.push({ x, y, cx: c.x, cy: c.y });
+          const c = toClient({ x, y }); if (!(c.x > pop.right + 30 && c.x < innerWidth - 30 && c.y > 100 && c.y < innerHeight - 160)) continue;
+          // only where a click reaches the map (on a smaller screen the preview, top right, lies over the map's corner)
+          const hit = document.elementFromPoint(c.x, c.y); if (!hit || !hit.closest('#viewport')) continue;
+          out.push({ x, y, cx: c.x, cy: c.y });
         }
       }
       return out;
@@ -269,13 +276,13 @@ module.exports = (area) => {
     const id = add(t, 'Frosted (white) large', { x: 6, y: 6 });
     await t.send();
     await t.until(async () => (await tv(t)).drawn === 1, 30000, 'drawn by the graphics card first');
-    await soft(t, false);
+    await noCard(t, true);
     try {
       await t.until(async () => { const x = await tv(t); return x && !x.live && x.n === 0; }, 8000, 'no live trees on the TV');
       const img = await t.until(() => t.t(`(() => { const i = document.querySelector('.sv-asset[data-id="${id}"] img'); return i && i.naturalWidth ? { src: i.src, w: i.offsetWidth } : null; })()`), 8000, 'its still picture on the TV');
       t.ok(/trees\/frosted_white\/still-large\.webp$/.test(img.src) && img.w > 20, 'the tree\'s own still picture', img);
       t.ok(await t.g(`!!document.querySelector('.sv-asset[data-id="${id}"] img')`), 'and on your screen');
-    } finally { await soft(t, true); }
+    } finally { await noCard(t, false); }
     await t.until(async () => (await tv(t)).drawn === 1, 30000, 'and live again');
   }, { ms: 90000 });
 
@@ -333,9 +340,9 @@ module.exports = (area) => {
     await t.until(async () => { const d = (await t.tvDebug()).living; return d && !d.on; }, 15000, 'no blades on the TV once hidden');
     t.ok((await t.g('Play.view().stats.living')).on, 'still on your screen');
     // without a graphics card: the waves of light as before
-    await soft(t, false); t.handle('wind.set', { mapId: own, auto: false, dir: 25, strength: 1.6, lean: 0.4 }); await t.settle();
+    await noCard(t, true); t.handle('wind.set', { mapId: own, auto: false, dir: 25, strength: 1.6, lean: 0.4 }); await t.settle();
     await t.until(async () => (await t.g('Play.view().stats.regions')) === 1, 6000, 'the waves without a graphics card');
-    await soft(t, true);
+    await noCard(t, false);
     t.handle('fx.remove', { mapId: own, id: 'grass1' });
     t.handle('edit.open', { id: was }); await t.send(was);
   }, { ms: 120000 }); // (Beta 3.60: Elements draws its picture tiles when it opens, slow on software graphics)
@@ -389,13 +396,13 @@ module.exports = (area) => {
     await t.until(async () => { const x = await t.g('Play.view().stats.living'); return x && x.on && x.whirls === 0; }, 8000, 'not with Swirl the water off');
     t.handle('fx.remove', { mapId: own, id: wh.id });
     // without a graphics card: Water as before (the net of light), the map's own light effects not at all, their tiles gone
-    await soft(t, false); await t.settle();
+    await noCard(t, true); await t.settle();
     await t.until(async () => (await t.g('Play.view().stats.regions')) === 1, 6000, 'the net of light without a graphics card');
     await t.g(`(() => { Play.setTool('fx'); Play.ui.fxFam = 'all'; Play.ui.fxMode = 'paint'; Play.ui.region = 'water'; Play.ui.fxFly = true; Play.openPop('fx'); })()`); await t.sleep(500);
     const plain = await t.g(`[document.querySelectorAll('#pop .fx-gal .fx-t').length, [...document.querySelectorAll('.fx-fly .ctl-label')].map((e) => e.textContent.trim())]`);
     t.ok(plain[0] === 40 && plain[1].includes('Strength') && !plain[1].includes('Transparency'), 'no graphics card: 40 tiles, Water has Strength, Amount and Speed again', plain);
     await t.g(`Play.ui.fxFly = false; Play.closePop(); Play.setTool('select')`);
-    await soft(t, true);
+    await noCard(t, false);
     for (const id of ['w1', 'e1', 'g1', 'g2', 'g3']) t.handle('fx.remove', { mapId: own, id });
     t.handle('edit.open', { id: was }); await t.send(was);
   }, { ms: 180000 });

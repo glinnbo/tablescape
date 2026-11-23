@@ -492,7 +492,7 @@ const AnimPill = (() => {
       el.classList.add('done');
       maid.src = 'maid.webp'; // she has arrived
       text.textContent = failed ? `Animations ready ✓ (${failed} play${failed === 1 ? 's' : ''} as video)` : 'All animations ready ✓';
-      list.replaceChildren(...[h('b', {}, 'All animations ready'), failed ? h('p', { class: 'anim-hint' }, `${failed === 1 ? 'One file' : `${failed} files`} could not be prepared and play${failed === 1 ? 's' : ''} as video: ${st.failed.map((f) => f.name).join(', ')}. Settings → Performance: Prepare now tries again.`) : null].filter(Boolean));
+      list.replaceChildren(...[h('b', {}, 'All animations ready'), failed ? h('p', { class: 'anim-hint' }, `${failed === 1 ? 'One file' : `${failed} files`} could not be prepared and play${failed === 1 ? 's' : ''} as video: ${st.failed.map((f) => f.name).join(', ')}. Tablescape settings → Performance: Prepare now tries again.`) : null].filter(Boolean));
       clearTimeout(hideTimer);
       hideTimer = setTimeout(() => {
         el.classList.add('out');
