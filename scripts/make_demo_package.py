@@ -28,10 +28,14 @@ NAME = "Demo: the maid's cottage"
 MAX_SIDE = 3840  # 4K
 TABLE = (16 * 43 / math.hypot(16, 9), 9 * 43 / math.hypot(16, 9))  # the default table: a 43-inch 16:9 TV, in inches
 TIDY = {'DempCityMap': 'DemoCityMap'}  # file name typos
+# I8 (25 Nov 2026): files that go to another folder of a new user's library (a music track in Audio/SFX would be on the
+# Soundboard)
+MOVE = {'Audio/SFX/Sparse Forest Notes.mp3': 'Audio/Ambience/Sparse Forest Notes.mp3'}
 
 
 def tidy(rel):
-    """the file name without the upscaler's leftovers (and known typos)"""
+    """the file name without the upscaler's leftovers (and known typos), in its folder (MOVE)"""
+    rel = MOVE.get(rel, rel)
     d, _, f = rel.rpartition('/')
     stem, dot, ext = f.rpartition('.')
     stem = re.sub(r'_upscayl_.*$', '', stem)

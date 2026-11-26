@@ -14,7 +14,7 @@ const FxThumbs = (() => {
     'region|water': 'clear_water-small.webp', 'region|ember': 'lava_flow-small.webp', 'region|shimmer': 'glowing_cave-small.webp', 'region|pulse': 'lava_runes-small.webp', 'region|ripple': 'glowing_blue-small.webp' }; // (Beta 3.65: what moves the map's own picture is shown on a picture that has it) // (second-birds: and animals on grass)
   // what makes a faint effect read at this size: [size or strength, strength or amount, amount or colour]
   const E_CELL = { insects: 3.2, bats: 1.8, circling: 1.5 }; // (second-bats-insects) // (Beta 3.66: circling birds too; on a tile they circle close in and slowly, E_BOOST)
-  const R_ZOOM = { batflight: 2.2, critters: 1.8, fish: 1.5 }; // (Beta 3.66: animals that live in a painted area are a few pixels long on a tile: a closer look)
+  const R_ZOOM = { birdflight: 1.6, batflight: 2.2, critters: 1.8, fish: 1.5 }; // (Beta 3.66: animals that live in a painted area are a few pixels long on a tile: a closer look)
   const E_BOOST = { circling: [0.36, 1, 1], bats: [0.9, 1, 1], insects: [0.75, 1, 1], smoke: [1.6, 2.2, 1.5], steam: [1.3, 1.6, 1.3], fireflies: [0.7, 2, 3], sparkles: [1, 1.6, 2], glow: [1.2, 1.5, 1], vent: [1.2, 1.4, 1.4] };
   const R_BOOST = { batflight: [1, 2.5, null], bubbling: [1.5, 1.4, null], dust: [2, 3, '#e8d9b0'], grass: [2, 1, '#8fbf4a'], lava: [1.5, 2, null], swamp: [1.6, 2, null], mist: [1.2, 1, null] };
   // draw one effect on g (w × h dots, ppi dots a square) at time t; look: { color, variant }

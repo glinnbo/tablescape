@@ -51,7 +51,7 @@ const Home = (() => {
         h('div', { class: 'upd-slot' }),
         // (P6: the Tutorial button comes back with the tutorial; it only said "coming soon")
         h('button', { class: 'btn hm-tb', 'data-tip': 'Guide: first evening, keys, what\'s new, report a problem (?)', onclick: () => Guide.open('start') }, iconEl('book'), 'Guide'),
-        h('button', { class: 'btn hm-tb', 'data-tip': 'Open the folder with your maps, tokens and effects', onclick: () => window.ts.library('open') }, iconEl('folder'), 'Library'),
+        h('button', { class: 'btn hm-tb', 'data-tip': 'Open the folder with your maps, tokens and effects', onclick: () => window.ts.library('open') }, iconEl('folder'), 'Library folder'), // (UI audit VJ9, Glinn: the rail's "Library" is the drawer; this one opens the Windows folder)
         h('button', { class: 'btn hm-tb hm-ic', 'aria-label': 'Discord', 'data-tip': 'Tablescape on Discord: help, bug reports, ideas, news', onclick: () => window.ts.app('link.open', { to: 'discord' }) }, iconEl('logo-discord')),
         h('button', { class: 'btn hm-tb hm-ic', 'aria-label': 'Ko-fi', 'data-tip': 'Support Tablescape on Ko-fi', onclick: () => window.ts.app('link.open', { to: 'kofi' }) }, iconEl('logo-kofi'))));
 
@@ -72,18 +72,29 @@ const Home = (() => {
     const foot = h('footer', { class: 'hm-foot' }, el.slots, el.deleted);
 
     el.drawers = h('div', { class: 'hm-drawers' });
-    el.stage = h('div', { class: 'hm-stage' }, top, h('div', { class: 'hm-main' }, left, el.right), foot, el.drawers);
+    el.top = top; el.main = h('div', { class: 'hm-main' }, left, el.right); el.foot = foot;
+    el.stage = h('div', { class: 'hm-stage' }, top, el.main, foot, el.drawers);
     root.append(el.bg, el.shade, el.stage);
     fit();
     window.addEventListener('resize', fit);
     window.addEventListener('keydown', onKey, true);
     window.ts.app('about').then((a) => { about = a; el.release.textContent = a ? a.label : ''; }).catch(() => {});
   }
-  // scaled to the window like a game: drawn for W0 x H0; a wider or taller window gets more room, not bigger type
+  // scaled to the window like a game: drawn for W0 x H0; a wider or taller window gets more room, not bigger type.
+  // The campaign and its menu keep at least AIR above and below: a short window makes it all a bit smaller instead.
+  const AIR = 110;
+  function needH() {
+    const st = el.stage;
+    if (!st || !st.offsetHeight) return H0; // not shown yet
+    const cs = getComputedStyle(st);
+    const n = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + el.top.offsetHeight + el.main.offsetHeight + el.foot.offsetHeight + 2 * AIR;
+    return Math.max(H0, Math.ceil(n));
+  }
   function fit() {
     if (!root) return;
-    const s = Math.min(window.innerWidth / W0, window.innerHeight / H0);
-    root.style.setProperty('--hs', String(Math.max(0.4, s)));
+    const s = Math.min(window.innerWidth / W0, window.innerHeight / needH());
+    const v = String(Math.max(0.4, Math.round(s * 1000) / 1000));
+    if (root.style.getPropertyValue('--hs') !== v) root.style.setProperty('--hs', v);
   }
 
   // =====================================================================
@@ -116,7 +127,7 @@ const Home = (() => {
   function arrive() {
     if (!root) return;
     root.classList.remove('hm-arrive'); void root.offsetWidth; root.classList.add('hm-arrive');
-    setTimeout(fitName, 0);
+    setTimeout(() => { fitName(); fit(); }, 0);
   }
 
   const items = () => (list && list.campaigns) || [];
@@ -151,6 +162,7 @@ const Home = (() => {
     paintSlots(v);
     for (const f of refs) f();
     if (window.App && App.updateSlot) App.updateSlot();
+    fit(); // the party or the menu may have grown
   }
 
   // the cover map behind it all, full size, drifting slowly; a new campaign's fades in over the last
@@ -304,7 +316,7 @@ const Home = (() => {
       const pic = cov(c);
       return h('button', {
         class: `hm-slot ${on ? 'on' : ''} ${c.broken ? 'broken' : ''}`, role: 'option', 'aria-selected': String(on), dataset: { id: c.id },
-        onclick: () => pick(c.id), ondblclick: () => { if (!c.broken) play(); },
+        onclick: () => pick(c.id), ondblclick: () => { if (!c.broken) { const v = view(); if (v && v.session) play(); else prepare(); } }, // (UI audit VJ8, Glinn: a double click opens the maps and starts no session; a session that runs: back to the table)
         oncontextmenu: (e) => { e.preventDefault(); campaignMenu(c, e.clientX, e.clientY); },
       },
       c.broken ? h('div', { class: 'hm-slot-pic hm-nopic' }, iconEl('alert-triangle')) : picEl(pic, 'hm-slot-pic'),
@@ -333,6 +345,8 @@ const Home = (() => {
     if (!v || v.broken) return false;
     if (isOpen(v.id)) return true;
     const ending = S && S.campaign && S.campaign.session ? S.campaign.name : null;
+    // (UI audit VJ6: a look at another campaign ended the running session without a word)
+    if (ending && !(await UI.confirm(`End the session of ${ending}?`, `Opening ${v.name} ends it. The table goes back to its title.`, { ok: 'End it and open', cancel: 'Keep playing', danger: true }))) return false;
     const r = await UI.withLoader('Opening the campaign …', () => cmd('campaign.open', { id: v.id }));
     if (!r || !r.ok) { toast((r && r.error) || 'That campaign could not be opened.', { kind: 'error' }); return false; }
     for (let i = 0; i < 40 && !isOpen(v.id); i++) await new Promise((res) => setTimeout(res, 50)); // (its state is on its way)
@@ -359,7 +373,8 @@ const Home = (() => {
   async function create() {
     const name = await askText('Name your campaign', '', { ok: 'Create campaign', placeholder: 'Curse of the Ashen Crown' });
     if (!name) return;
-    await cmd('campaign.create', { name });
+    const made = await cmd('campaign.create', { name });
+    if (made && made.ok === false) toast(made.error || 'The campaign could not be made.', { kind: 'error' }); // (UI audit VJ7: it said nothing)
     refresh();
   }
 
@@ -397,6 +412,7 @@ const Home = (() => {
       if (selId === c.id) selId = null;
       await refresh();
       if (r.ok) toast(`${c.name} deleted`, { undo: async () => { await cmd(r.undo.type, r.undo.payload); selId = c.id; refresh(); } });
+      else toast((r && r.error) || `${c.name} could not be deleted.`, { kind: 'error' }); // (UI audit VJ7)
     } }, iconEl('trash'), 'Delete');
     const dlg = UI.dialog(`Delete ${c.name}?`, h('div', { class: 'del-ask' },
       h('p', { class: 'del-what' }, `${plural(c.chapters, 'chapter', 'chapters')}, ${plural(c.maps, 'map', 'maps')} · ${c.lastSession ? `last played ${ago(c.lastSession)}` : 'not played yet'}`),
@@ -419,10 +435,11 @@ const Home = (() => {
       if (!rows.length) { dlg.body.append(h('p', { class: 'hint' }, 'Nothing here.')); return; }
       dlg.body.append(h('div', { class: 'del-list' }, ...rows.map((d) => h('div', { class: 'del-row' },
         h('div', { class: 'grow' }, h('b', {}, d.name), h('span', { class: 'faint' }, `${plural(d.chapters, 'chapter', 'chapters')}, ${plural(d.maps, 'map', 'maps')} · deleted ${ago(d.deleted)}`)),
-        h('button', { class: 'btn small primary', onclick: async () => { const x = await cmd('campaign.undelete', { key: d.key }); if (x.ok) { toast(`${d.name} is back`); if (x.id) selId = x.id; } refresh(); fill(); } }, iconEl('restore'), 'Restore'),
+        h('button', { class: 'btn small primary', onclick: async () => { const x = await cmd('campaign.undelete', { key: d.key }); if (x.ok) { toast(`${d.name} is back`); if (x.id) selId = x.id; } else toast((x && x.error) || `${d.name} could not be brought back.`, { kind: 'error' }); refresh(); fill(); } }, iconEl('restore'), 'Restore'),
         h('button', { class: 'btn small danger', 'data-tip': 'Delete it for good: this cannot be undone', onclick: async (e) => {
           const b = e.currentTarget;
-          if (!b.classList.contains('sure')) { b.classList.add('sure'); b.lastChild.textContent = 'Sure? Delete for good'; return; }
+          if (!b.classList.contains('sure')) { b.classList.add('sure'); b.lastChild.textContent = 'Sure? Delete for good'; b.dataset.at = String(performance.now()); return; }
+          if (performance.now() - Number(b.dataset.at || 0) < 800) return; // (UI audit VH8: a double click is not a "yes": this cannot be undone)
           await cmd('campaign.purge', { key: d.key }); refresh(); fill();
         } }, iconEl('trash'), h('span', {}, 'Delete for good'))))),
         h('p', { class: 'hint' }, 'Kept in the library folder under Campaigns/.trash.'));
@@ -433,8 +450,10 @@ const Home = (() => {
   // backups made each time the campaign was opened; restoring keeps a copy of the current state first
   async function earlier(c) {
     const dlg = dialog(`Backups of ${c.name}`, UI.loader('Looking …'), { wide: true });
-    const rows = await window.ts.app('backups.list', { id: c.id });
+    let rows = null;
+    try { rows = await window.ts.app('backups.list', { id: c.id }); } catch { rows = null; }
     dlg.body.innerHTML = '';
+    if (!Array.isArray(rows)) { dlg.body.append(h('div', { class: 'dlg-empty' }, 'The backups could not be read.')); return; } // (UI audit VJ7: it stayed on "Looking …")
     if (!rows.length) { dlg.body.append(h('div', { class: 'dlg-empty' }, 'No backups yet. One is made each time you open the campaign.')); return; }
     // (R8: what is kept and that a restore keeps a copy of now: in the Guide and the tips of Campaign settings)
     for (const b of rows) {
@@ -699,7 +718,8 @@ const Home = (() => {
     const E = ext;
     const sub = h('div', { class: 'hm-dr-sub hm-set-sub' });
     const rowsEl = h('div', { class: 'hm-set' });
-    const row = (id, icon, title, subText, run, danger) => h('button', { class: `hm-set-row ${danger ? 'danger' : ''}`, dataset: { id }, onclick: run },
+    // (UI audit VJ10: tip: what a second line used to explain; a second line is for a value, like the campaign's name)
+    const row = (id, icon, title, subText, run, danger, tip) => h('button', { class: `hm-set-row ${danger ? 'danger' : ''}`, dataset: { id }, 'data-tip': tip || null, onclick: run },
       iconEl(icon), h('span', { class: 'grow hm-set-text' }, h('b', {}, title), subText ? h('span', {}, subText) : null), iconEl('chevron-right'));
     B(() => {
       const c = C(); if (!c) return;
@@ -712,10 +732,10 @@ const Home = (() => {
         row('rename', 'pencil', 'Rename', c.name, () => rename({ id: c.id, name: c.name })),
         row('cover', 'photo', 'Cover picture', coverName, () => { coverOpen = true; E.refill(); }),
         row('folder', 'folder', 'Show in folder', null, () => window.ts.library('open', c.folder)),
-        row('backups', 'history', 'Backups', 'A copy each time it opens; kept for three months', () => earlier({ id: c.id, name: c.name })),
-        row('export', 'file-export', 'Export', 'One file to share or keep', () => TransferUI.exportDialog({ id: c.id, name: c.name })),
+        row('backups', 'history', 'Backups', null, () => earlier({ id: c.id, name: c.name }), false, 'A copy each time it opens; kept for three months'),
+        row('export', 'file-export', 'Export', null, () => TransferUI.exportDialog({ id: c.id, name: c.name }), false, 'One file to share or keep'),
         h('div', { class: 'hm-set-gap' }),
-        row('delete', 'trash', 'Delete campaign…', 'Kept under Recently deleted until you empty it', () => askDelete(it), true));
+        row('delete', 'trash', 'Delete campaign…', null, () => askDelete(it), true, 'Kept under Recently deleted until you empty it'));
     });
     return h('div', { class: 'stack hm-set-wrap' }, sub, rowsEl);
   }
@@ -781,12 +801,12 @@ const Home = (() => {
       let missing = 0;
       for (const ch of c.chapters) { missing += ch.maps.filter((m) => m.missing).length; if (ch.ambience && ch.ambience.missing) missing++; if (ch.fight && ch.fight.missing) missing++; }
       rows.push(missing
-        ? { id: 'files', state: 'warn', text: `${plural(missing, 'file is', 'files are')} missing`, sub: 'Open its map to find it again' }
+        ? { id: 'files', state: 'warn', text: `${plural(missing, 'file is', 'files are')} missing`, sub: 'On the map screen: the chapter\'s menu → Missing files …' }
         : { id: 'files', state: 'ok', text: 'All maps and sounds are there' });
       const here = c.party.filter((n) => !(c.away || []).includes(n)).length;
       rows.push(c.party.length
         ? { id: 'players', state: 'ok', text: `${here} of ${plural(c.party.length, 'player', 'players')} here today` }
-        : { id: 'players', state: 'off', text: 'No players yet', sub: 'Players: add them there', action: s.screen === 'play' ? null : { label: 'Players', icon: 'users', fn: () => { App.closeOptions(); drawer('players', { focusAdd: true }); } } });
+        : { id: 'players', state: 'off', text: 'No players yet', sub: '', action: s.screen === 'play' ? null : { label: 'Players', icon: 'users', fn: () => { App.closeOptions(); drawer('players', { focusAdd: true }); } } });
     }
     return rows;
   }
@@ -830,5 +850,5 @@ const Home = (() => {
     for (const v of el.bg.querySelectorAll('video')) { if (on) v.play().catch(() => {}); else v.pause(); }
   }
 
-  return { mount, update, show, page, earlier, refresh, isDrawerOpen, closeDrawer, drawer, active, see, screensOff, screensSection, campaignSection, campaignSettings, checkSection, coverBack: () => { coverOpen = false; } };
+  return { picked: () => { const v = view(); return v && !v.broken ? v.id : null; }, mount, update, show, page, earlier, refresh, isDrawerOpen, closeDrawer, drawer, active, see, screensOff, screensSection, campaignSection, campaignSettings, checkSection, coverBack: () => { coverOpen = false; } };
 })();

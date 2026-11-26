@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('ts', {
   onFog: on('fog'),
   onView: on('view'), // 4.4: the map moving: only its new place
   onDrag: on('drag'), // Prototype 14: a token dragged: only its new place
+  onPatch: on('patch'), // (Speed 5, WE1) a thing of the map as it is now, while it is moved
   onPing: on('ping'),
   onPreview: on('table:preview'),
   // 4.11.1: the room lights ask the table for a small picture of itself

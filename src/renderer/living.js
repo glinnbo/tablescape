@@ -23,8 +23,15 @@
  */
 'use strict';
 const Living = (() => {
+  // WI2 (26 Nov 2026): the noise repeats every 1000 steps of its grid (hash: mod). Water, lava and grass slide through
+  // it with the time, and the graphics card counts with 32 bits: after an hour the grid numbers were so large that
+  // times 456.21 they had no fraction left, and the fine ripples of water and the heat over lava turned into stripes
+  // (measured: the heat's detail across was 4.0 at the start, 1.8 after two hours, 0 after twelve). 1000 times 123.34
+  // and times 456.21 are whole numbers, so every value is the one it was meant to be: only the rounding is gone. The repeat is
+  // 1000 steps of each layer of the noise: some fifty squares for the finest, hundreds for the others.
+  const CLOCK_MAX = 43200; // seconds
   const NOISE = `
-float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float hash(vec2 p) { p = mod(p, 1000.0); p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }
 float fbm(vec2 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++) { s += a * vn(p); p = p * 2.03 + 17.1; a *= 0.5; } return s / 0.9375; }`;
@@ -206,7 +213,12 @@ void main() {
   vec2 p = aRoot + dir * (u * L) + vec2(-dir.y, dir.x) * (aUV.y * fat + (aRnd.w > 0.5 ? 1.0 : -1.0) * 0.22 * L * u * u);
   vec2 c = p * uMat.x + uMat.zw;
   gl_Position = vec4(c.x / uView.x * 2.0 - 1.0, 1.0 - c.y / uView.y * 2.0, 0.0, 1.0);
-  vCol = aCol.rgb * mix(1.0 - 0.6 * uVary, 1.0 + 0.6 * uVary, aRnd.x) * mix(vec3(1.0), vec3(1.14, 1.0, 0.78), (aRnd.z - 0.5) * 1.6 * uVary); vLean = lean; vUV = aUV; // (Colour variety: lighter and darker, yellower and bluer)
+  // (Colour variety: lighter and darker, yellower and bluer. XA10: up to 100 % as it was; above that the colours swing
+  // four times as far by 200 % and the bright blades get brighter, while the darkest blade stays as dark as at 100 %)
+  float v1 = min(uVary, 1.0), vx = max(uVary - 1.0, 0.0);
+  float br = mix(1.0 - 0.6 * v1, 1.0 + 0.6 * v1 + 0.3 * vx, aRnd.x);
+  vec3 tint = max(vec3(0.15), vec3(1.0) + (vec3(1.14, 1.0, 0.78) - 1.0) * ((aRnd.z - 0.5) * 1.6 * v1 * (1.0 + 3.0 * vx)));
+  vCol = aCol.rgb * br * tint; vLean = lean; vUV = aUV;
   vA = (0.03 + 0.97 * smoothstep(0.04, 0.6, show)) * uMaxA * mix(1.0, keep, 0.6);                // the more wind, the more it shows
 }`;
   const BFS = `#version 300 es
@@ -216,11 +228,29 @@ void main() {
   float a = vA * (1.0 - smoothstep(0.5, 1.0, abs(vUV.y)));
   o = vec4(vCol * mix(0.68, 1.0, vUV.x) * (1.0 + 0.38 * vLean * vUV.x) * a, a);
 }`;
+  // (WC2) is the floor under the grass (md: blue) the same in both pictures? A picture made again differs a little
+  // everywhere (it is packed anew), so a dot counts only when it is clearly another colour, and a few may
+  function sameFloor(a, b, md) {
+    if (!a || !b || a.length !== b.length) return false;
+    let grass = 0; let off = 0;
+    for (let i = 0; i < md.length; i += 4) {
+      if (md[i + 2] <= 40) continue;
+      grass++;
+      if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 36) off++;
+    }
+    return off <= Math.max(4, grass * 0.002);
+  }
+  const stats = { made: 0, kept: 0, grown: 0, bladesKept: 0, ms: {} }; // (for the self-test: living maps read anew or kept, grass grown or kept)
   const SEG = 6; // (a blade: six pieces along it)
   const TALL = 630; const SHORT = 225; const MAX = 600000; // blades a square at the most (Grass at its top; fewer where the grass thins out at a soft edge), and on a map
   const ATTRS = { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' };
   const supported = () => typeof Trees === 'object' && Trees.supported();
   const image = (url) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(`picture ${url}`)); i.src = url; });
+  // (WC2) a drawn map's picture and its living map as the graphics card takes them at once: unpacked beforehand, off
+  // the screen's own thread, with their colours as they are. A picture element was unpacked again at its first use,
+  // on the spot: 30 ms to send it to the card and 30 ms to read its colours, for a 40 x 30 map. The layer lets
+  // them go as soon as it has taken what it needs (source)
+  const bitmap = (url) => image(url).then((i) => (typeof createImageBitmap === 'function' ? createImageBitmap(i, { premultiplyAlpha: 'none' }).catch(() => i) : i));
   // (Beta 3.65: the map picture is asked for again at every stroke painted: the one last loaded is kept, so the layer
   // can tell that it is the same picture and need not send it to the graphics card again)
   let lastPic = null;
@@ -336,10 +366,13 @@ void main() {
       if (!s) { this.want = ''; this.src = null; this.state = 'off'; this.free(); return; }
       if (s.key === this.want) { if (this.src && !s.make) Object.assign(this.src, { x: s.x, y: s.y, w: s.w, h: s.h, g: s.g, P: s.P }); return; }
       this.want = s.key; this.state = 'loading';
-      const got = s.make ? s.make() : Promise.all([image(s.pic), image(s.mask)]).then(([pic, mask]) => ({ pic, mask, P: s.P }));
+      const keeps = !s.make && !!s.maskKey && s.maskKey === this.maskKey && !!this.kept && !!this.tex[1]; // (WC2: the same living map: no need to read its picture again)
+      const got = s.make ? s.make() : Promise.all([bitmap(s.pic), keeps ? null : bitmap(s.mask)]).then(([pic, mask]) => ({ pic, mask, P: s.P }));
       got.then(({ pic, mask, P }) => {
-        if (this.dead || this.want !== s.key || !this.ok) return;
+        const letGo = () => { if (s.make) return; for (const b of [pic, mask]) if (b && typeof b.close === 'function') { if (this.picOf === b) this.picOf = null; b.close(); } }; // (ours alone: what they hold is freed now)
+        if (this.dead || this.want !== s.key || !this.ok) { letGo(); return; }
         try { this.load({ ...s, P }, pic, mask); this.state = 'ready'; } catch (err) { console.error(err); this.src = null; this.state = `failed: ${err && err.message}`; }
+        letGo();
         this.onChange();
       }, (err) => {
         console.error(err); this.state = `failed: ${err && err.message}`;
@@ -352,7 +385,7 @@ void main() {
       const gl = this.gl;
       if (!gl || !this.ok) return;
       for (const t of this.tex || []) if (t) gl.deleteTexture(t);
-      this.tex = [null, null, null, null, null]; this.picOf = null; this.data = null; this.growKey = '';
+      this.tex = [null, null, null, null, null]; this.picOf = null; this.data = null; this.growKey = ''; this.maskKey = null; this.kept = null;
       if (this.blades) { gl.deleteVertexArray(this.blades.vao); gl.deleteBuffer(this.blades.vb); gl.deleteBuffer(this.blades.ib); this.blades = null; }
       this.n = 0;
     }
@@ -368,26 +401,49 @@ void main() {
         if (mips) { gl.generateMipmap(gl.TEXTURE_2D); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); } else gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         return t;
       };
-      // the living map's four parts (a b over c d), each a picture of its own (so that none bleeds into its neighbour)
-      const [mw, mh] = sizeOf(mask); const [pw, ph] = sizeOf(pic);
-      const W = mw >> 1; const H = mh >> 1;
-      if (W < 1 || H < 1) throw new Error('the living map is empty');
-      const part = (n) => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(mask, (n % 2) * W, Math.floor(n / 2) * H, W, H, 0, 0, W, H); return { c, g }; };
-      const A = part(0); const B = part(1); const C = part(2); const D = part(3);
+      const [pw, ph] = sizeOf(pic);
       const same = pic === this.picOf && this.tex[0] && pic.tagName !== 'VIDEO'; // (the same picture as before: it is on the graphics card already)
-      this.tex = [same ? this.tex[0] : up(0, pic, this.tex[0], true), up(1, A.c, this.tex[1], true), up(2, B.c, this.tex[2], true), up(3, C.c, this.tex[3], false), up(4, D.c, this.tex[4], false)];
+      const canvasOf = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return { c, g: c.getContext('2d', { willReadFrequently: true }) }; };
+      // Speed 3 (Open Point WC2): a drawn map's picture is new after every edit, and with it everything here was made
+      // again: four mask pictures sent to the graphics card, three read back, and every blade of grass grown anew
+      // (measured: 150 to 200 ms in each window for a 40 x 30 map, also for a pillar far from the grass). Now, when the
+      // living map is the one this layer has (s.maskKey), only the new picture goes to the card; and the blades stay
+      // where the floor under the grass looks the same as before
+      const keeps = !!s.maskKey && s.maskKey === this.maskKey && !!this.kept && !!this.tex[1];
+      let W; let H; let kinds; let md = null; let td = null;
+      if (keeps) {
+        ({ W, H, kinds } = this.kept); md = this.data && this.data.md; td = this.data && this.data.td;
+        const t0 = performance.now(); this.tex[0] = same ? this.tex[0] : up(0, pic, this.tex[0], true); stats.ms.up = Math.round(performance.now() - t0);
+        stats.kept++;
+      } else {
+        // the living map's four parts (a b over c d), each a picture of its own (so that none bleeds into its neighbour)
+        const [mw, mh] = sizeOf(mask);
+        W = mw >> 1; H = mh >> 1;
+        if (W < 1 || H < 1) throw new Error('the living map is empty');
+        const part = (n) => { const x = canvasOf(W, H); x.g.drawImage(mask, (n % 2) * W, Math.floor(n / 2) * H, W, H, 0, 0, W, H); return x; };
+        const A = part(0); const B = part(1); const C = part(2); const D = part(3);
+        this.tex = [same ? this.tex[0] : up(0, pic, this.tex[0], true), up(1, A.c, this.tex[1], true), up(2, B.c, this.tex[2], true), up(3, C.c, this.tex[3], false), up(4, D.c, this.tex[4], false)];
+        // read once: what kinds there are; kept for the blades (they are grown again when the grass's rule changes)
+        md = A.g.getImageData(0, 0, W, H).data; const bd = B.g.getImageData(0, 0, W, H).data; td = D.g.getImageData(0, 0, W, H).data;
+        for (const x of [A, B, C, D]) x.c.width = x.c.height = 0;
+        kinds = { water: false, lava: false, grass: false, glow: false };
+        for (let i = 0; i < md.length; i += 4 * 7) { if (md[i] > 40) kinds.water = true; if (md[i + 1] > 40) kinds.lava = true; if (md[i + 2] > 40) kinds.grass = true; if (bd[i] > 40) kinds.glow = true; }
+        stats.made++;
+      }
       this.picOf = pic;
-      // read once: what kinds there are; kept for the blades (they are grown again when the grass's rule changes)
-      const md = A.g.getImageData(0, 0, W, H).data; const bd = B.g.getImageData(0, 0, W, H).data; const td = D.g.getImageData(0, 0, W, H).data;
-      A.g.clearRect(0, 0, W, H); A.g.drawImage(pic, 0, 0, W, H); const pd = A.g.getImageData(0, 0, W, H).data;
-      for (const x of [A, B, C, D]) x.c.width = x.c.height = 0;
-      const kinds = { water: false, lava: false, grass: false, glow: false };
-      for (let i = 0; i < md.length; i += 4 * 7) { if (md[i] > 40) kinds.water = true; if (md[i + 1] > 40) kinds.lava = true; if (md[i + 2] > 40) kinds.grass = true; if (bd[i] > 40) kinds.glow = true; }
       const Pm = (s.P * W) / pw; // the map's dots a square
       this.kinds = kinds;
       this.src = { ...s, pw, ph, Pm };
-      this.data = kinds.grass ? { W, H, md, pd, td, Pm } : null;
+      this.maskKey = s.maskKey || null; this.kept = { W, H, kinds };
+      if (!kinds.grass) { this.data = null; this.growKey = ''; this.grow(this.lastGrass || {}); return; }
+      // the floor's colours at the living map's size: what the blades take theirs from
+      const t1 = performance.now(); const F = canvasOf(W, H); F.g.drawImage(pic, 0, 0, W, H); const pd = F.g.getImageData(0, 0, W, H).data; F.c.width = F.c.height = 0; stats.ms.read = Math.round(performance.now() - t1); stats.ms.size = [W, H, pw, ph];
+      const was = this.data;
+      const t2 = performance.now(); const sf = keeps && was && was.Pm === Pm && this.blades && sameFloor(was.pd, pd, md); stats.ms.cmp = Math.round(performance.now() - t2);
+      if (sf) { stats.bladesKept++; return; } // (the blades as they stand)
+      this.data = { W, H, md, pd, td, Pm };
       this.growKey = ''; this.grow(this.lastGrass || {});
+      stats.grown++;
     }
     // The blades. Where they stand and how long they are follows the grass card's "Grows on" (Beta 3.46, Glinn):
     //   all     everywhere the effect was drawn
@@ -483,8 +539,11 @@ void main() {
       const S = set || {}; const num = (o, k, d, a, b) => { const v = o && Number(o[k]); return Number.isFinite(v) && o[k] != null ? Math.min(b, Math.max(a, v)) : d; };
       const G = S.grass || {}; const Wt = S.water || {}; const Lv = S.lava || {};
       const storm = Math.min(1, Math.max(0, ((wind.strength || 0) - 1) / 1.5));
-      this.time += dt; this.gustT += dt * (1 + 0.7 * storm);
-      for (const fx of ['water', 'lava', 'shimmer', 'pulse', 'ripple']) this.clock[fx] += dt * num(S[fx], 'speed', 1, 0.2, 3);
+      // (WI2: the clocks start anew after twelve hours on one map, so they stay exact for the graphics card however
+      // long the app runs: once in that time what moves is, for one picture, somewhere else)
+      const wrap = (v) => (v >= CLOCK_MAX ? v - CLOCK_MAX : v);
+      this.time = wrap(this.time + dt); this.gustT = wrap(this.gustT + dt * (1 + 0.7 * storm));
+      for (const fx of ['water', 'lava', 'shimmer', 'pulse', 'ripple']) this.clock[fx] = wrap(this.clock[fx] + dt * num(S[fx], 'speed', 1, 0.2, 3));
       // the grass's rule changed: it grows again (not at every step of a slider)
       this.lastGrass = G;
       if (s && this.data) { const rule = ['bright', 'dark', 'colour'].includes(G.grow) ? G.grow : 'all'; const key = `${rule}|${rule === 'colour' ? `${G.growColor}|${G.range}` : ''}`; if (key !== this.growKey && performance.now() - this.growAt > 250) this.grow(G); }
@@ -518,8 +577,8 @@ void main() {
         shown = Math.round(this.blades.n * (num(G, 'amount', 1, 0, 1.5) / 1.5) * (few ? 0.5 : 1));
         gl.uniform4f(B.u('uMat'), k, 0, e, f); gl.uniform2f(B.u('uView'), this.el.width, this.el.height); gl.uniform2f(B.u('uWind'), Math.cos(a), Math.sin(a));
         gl.uniform1f(B.u('uG'), s.g); gl.uniform1f(B.u('uT'), this.time); gl.uniform1f(B.u('uGustT'), this.gustT); gl.uniform1f(B.u('uWindS'), wind.strength || 0);
-        gl.uniform1f(B.u('uLen'), 0.3 * s.g * num(G, 'length', 1, 0.2, 3)); gl.uniform1f(B.u('uWide'), 0.013 * s.g * num(G, 'thick', 1, 0.5, 3)); // (Beta 3.58: Thickness)
-        gl.uniform1f(B.u('uCalm'), num(G, 'calm', 0.35, 0, 1)); gl.uniform1f(B.u('uVary'), num(G, 'vary', 0.3, 0, 1)); gl.uniform1f(B.u('uMaxA'), 0.8); gl.uniform1f(B.u('uDot'), 1 / k);
+        gl.uniform1f(B.u('uLen'), 0.3 * s.g * num(G, 'length', 1, 0.2, 5)); gl.uniform1f(B.u('uWide'), 0.013 * s.g * num(G, 'thick', 1, 0.5, 6)); // (Beta 3.58: Thickness)
+        gl.uniform1f(B.u('uCalm'), num(G, 'calm', 0.35, 0, 1)); gl.uniform1f(B.u('uVary'), num(G, 'vary', 0.3, 0, 2)); gl.uniform1f(B.u('uMaxA'), 0.8); gl.uniform1f(B.u('uDot'), 1 / k);
         if (shown) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, (SEG + 1) * 2, shown);
       }
       gl.bindVertexArray(null); gl.disable(gl.BLEND);
@@ -537,5 +596,5 @@ void main() {
   }
   // null where it cannot be drawn (the map then shows as it is)
   function layer(el, onChange) { if (!supported()) return null; try { return new Layer(el, onChange); } catch (err) { console.error(err); return null; } }
-  return { supported, layer, paint };
+  return { supported, layer, paint, stats, NOISE, CLOCK_MAX }; // (NOISE, CLOCK_MAX: for the self-test)
 })();

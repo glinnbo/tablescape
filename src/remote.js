@@ -203,7 +203,7 @@ function createRemote(o) {
     const role = b.key && safeEq(b.key, cfg().key) ? 'dm' : b.key && safeEq(b.key, cfg().playerKey) ? 'player' : null;
     if (!role) {
       f.push(now); fails.set(addr, f);
-      send(res, 403, { ok: false, error: 'This code is old: scan the QR code in Tablescape again (Toolbox → Remote)' });
+      send(res, 403, { ok: false, error: 'This code is old. Players: ask the GM for the join code. The GM\'s own: Toolbox → Gamemaster remote.' }); // (UI audit VE11: no panel is called "Remote")
       return;
     }
     const id = `${String(b.id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || newToken()}${role === 'player' ? '-p' : ''}`;
@@ -218,7 +218,7 @@ function createRemote(o) {
         // full: the one that makes room is not connected, and a player's code never pushes out a DM's device
         const live = (x) => [...clients].some((c) => c.dev === x);
         const gone = devs().filter((x) => !live(x) && (role === 'dm' || x.role === 'player')).sort((x, y) => (x.seen || 0) - (y.seen || 0))[0];
-        if (!gone) { send(res, 429, { ok: false, error: 'Tablescape has all its devices connected: the DM can forget one (Toolbox → Remote)' }); return; }
+        if (!gone) { send(res, 429, { ok: false, error: role === 'player' ? 'Tablescape has all its devices connected: ask the GM to forget one' : 'Tablescape has all its devices connected: forget one under Toolbox → Gamemaster remote' }); return; }
         drop(gone); cfg().devices = devs().filter((x) => x !== gone);
       }
       d = { id, token: newToken(), name: String(b.name || (kind === 'tablet' ? 'Tablet' : 'Phone')).slice(0, 40), kind, role, added: now, seen: now };
@@ -259,7 +259,7 @@ function createRemote(o) {
       if (!clients.size) { clearInterval(tickT); tickT = null; return; }
       ticks += 1;
       pushAll();
-      if (ticks % 15 === 0) for (const c of clients) c.res.write('event: ping\ndata: 1\n\n'); // moments end on their own; the ping keeps routers from closing the line, and tells the page the line still works
+      if (ticks % 5 === 0) for (const c of clients) c.res.write('event: ping\ndata: 1\n\n'); // moments end on their own; the ping keeps routers from closing the line, and tells the page the line still works
     }, 1000);
   }
   function events(req, res, u) {
@@ -274,7 +274,7 @@ function createRemote(o) {
     res.write('retry: 1500\n\n');
     res.write(`event: hello\ndata: ${JSON.stringify({ role: d.role, device: { id: d.id, name: d.name, kind: d.kind }, label: o.label })}\n\n`);
     pushOne(c);
-    req.on('close', () => { clients.delete(c); d.seen = Date.now(); o.onChange(); }); // (seen: when it left; players.js keeps its character for a minute)
+    req.on('close', () => { clients.delete(c); d.seen = Date.now(); o.onChange(); }); // (seen: when it left; it keeps its character until another phone picks it)
     o.onChange(); // the panel shows it connected
     tick();
   }
@@ -291,10 +291,13 @@ function createRemote(o) {
   }
 
   // ------------------------------------------------------------------ the Toolbox panel
+  // UI audit VE11: the network the GM picked ("Doesn't open? Another network of this PC") comes first for every code:
+  // the GM's own, the players', the join card on the TV. (Only the GM's card used it; the TV kept the first address.)
+  const order = () => { const l = ips(); const i = l.findIndex((x) => x.ip === cfg().addr); return i > 0 ? [l[i], ...l.slice(0, i), ...l.slice(i + 1)] : l; };
   function view() {
     return {
       on: !!cfg().on, running: !!(server && port), error: err, port,
-      urls: port ? ips().map((x) => `http://${x.ip}:${port}`) : [],
+      urls: port ? order().map((x) => `http://${x.ip}:${port}`) : [],
       keyRev: `${String(cfg().key || '').slice(0, 4)}${String(cfg().playerKey || '').slice(0, 4)}`,
       devices: devs().map((d) => ({ id: d.id, name: d.name, kind: d.kind, deck: d.deck || null, role: d.role || 'dm', added: d.added, seen: d.seen, connected: [...clients].some((c) => c.dev === d) })),
     };
@@ -318,6 +321,12 @@ function createRemote(o) {
         const url = `${base}/#k=${p.role === 'player' ? cfg().playerKey : cfg().key}`;
         return { ok: true, url, base, svg: qrSvg(url) };
       }
+      case 'addr': { // which of this PC's networks the codes point at
+        const x = ips().find((y) => p.url === `http://${y.ip}:${port}`);
+        if (!x) return { ok: false };
+        cfg().addr = x.ip; o.save();
+        return { ok: true };
+      }
       case 'newKey':
         if (p.role === 'player') cfg().playerKey = newToken(); else cfg().key = newToken();
         o.save();
@@ -340,7 +349,7 @@ function createRemote(o) {
       }
       case 'rename': {
         const d = devs().find((x) => x.id === p.id);
-        if (d && String(p.name || '').trim()) { d.name = String(p.name).trim().slice(0, 40); o.save(); }
+        if (d && String(p.name || '').trim()) { d.name = String(p.name).trim().slice(0, 40); d.named = true; o.save(); changed(); } // (named: the GM's own word for it, UI audit VE6)
         return { ok: true };
       }
       default: return { ok: false };

@@ -60,7 +60,8 @@ module.exports = (area) => {
   area.deep('while a Soundboard sound plays the ambience dips, and comes back afterwards', async (t) => {
     await t.until(async () => { const a = amb(await t.sound()); return a && a.playing; }, 10000, 'the ambience');
     const sfx = t.lib('sfx')[0] || t.library.listLibrary().find((x) => /SFX/.test(x.path));
-    t.near((await t.sound()).gains.duck, 1, 0.05, 'the ambience at full before');
+    // (the spell cast two checks earlier may still be fading back: wait for it, it failed one run in three here)
+    await t.until(async () => (await t.sound()).gains.duck > 0.95, 8000, 'the ambience at full before');
     t.handle('sound.play', { path: sfx.path });
     await t.until(async () => { const d = await t.sound(); return d.ducking || d.gains.duck < 0.9; }, 4000, 'the ambience to dip');
     await t.until(async () => { const d = await t.sound(); return !d.ducking && d.gains.duck > 0.95; }, 20000, 'the ambience to come back');
@@ -125,5 +126,53 @@ module.exports = (area) => {
     await t.cmd('chapter.ambience', { id: ch.id, volume: 0.1 });
     await t.until(async () => Math.abs((await read()) - 0.1) < 0.06, 6000, 'the ambience to get quieter').catch(async (e) => { throw new Error(`${e.message} (the track says ${JSON.stringify(amb(await t.sound()))})`); });
     await t.cmd('chapter.ambience', { id: ch.id, volume: v0 });
+  });
+  // I8 (Glinn): Soundboard pads. Files named alike with a number are one pad that plays one of them at random, never
+  // the same twice in a row; Loop plays on until the pad is clicked again; each pad has its own volume
+  area.quick('Soundboard pads: numbered files are one pad, one at random; Loop plays on until clicked again; its own volume', async (t) => {
+    const fs = require('fs'); const path = require('path');
+    const src = t.lib('sfx')[0] || t.library.listLibrary().find((x) => /SFX/.test(x.path));
+    const dir = path.join(t.library.root, 'Audio', 'SFX');
+    const made = [1, 2, 3].map((i) => path.join(dir, `Pad test hit ${i}${path.extname(src.path)}`));
+    const pad = `Play.TB.boardPads().find((p) => p.name === 'Pad test hit')`;
+    let key = null;
+    try {
+      for (const f of made) fs.copyFileSync(src.path, f);
+      await t.g(`Play.TB.openPanel('sound')`);
+      await t.until(() => t.g(`[...document.querySelectorAll('.fp[data-id="sound"] .pad b')].some((b) => b.textContent === 'Pad test hit')`), 6000, 'one pad for the three files');
+      key = await t.g(`${pad}.key`);
+      t.eq(await t.g(`${pad}.files.length`), 3, 'with its three files');
+      const played = [];
+      for (let i = 0; i < 3; i++) { await t.g(`Play.TB.playPad(${pad})`); await t.until(() => t.state.board.filter((b) => b.key === key).length === i + 1, 3000, 'it plays'); played.push(t.state.board.filter((b) => b.key === key).pop().path); }
+      t.ok(played[0] !== played[1] && played[1] !== played[2], 'never the same file twice in a row', played.map((x) => path.basename(x)));
+      await t.cmd('sound.stop');
+      await t.g(`ts.settings({ soundPad: { key: ${JSON.stringify(key)}, pad: { loop: true, vol: 0.5 } } })`);
+      await t.until(() => ((t.settings.soundPads || {})[key] || {}).loop, 3000, 'Loop kept');
+      await t.g(`Play.TB.playPad(${pad})`);
+      await t.until(async () => (await t.sound()).boardNow.some((b) => b.key === key && b.loop), 4000, 'it loops on the table');
+      const vol = (await t.sound()).boardNow.find((b) => b.key === key && b.loop).vol; // (not one still fading out from Stop all)
+      t.ok(Math.abs(vol - (t.settings.boardVolume ?? 0.8) * 0.5) < 0.03, 'at its own volume (half of the Soundboard\'s)', vol);
+      await t.until(() => t.g(`[...document.querySelectorAll('.fp[data-id="sound"] .pad')].some((x) => x.dataset.key === ${JSON.stringify(key)} && x.classList.contains('on'))`), 3000, 'its pad shows it plays');
+      // (Glinn: set back to Once while it loops, a click still stops it)
+      await t.g(`ts.settings({ soundPad: { key: ${JSON.stringify(key)}, pad: { vol: 0.5 } } })`);
+      await t.until(() => !((t.settings.soundPads || {})[key] || {}).loop, 3000, 'back to Once');
+      await t.sleep(200);
+      await t.g(`Play.TB.playPad(${pad})`);
+      await t.until(async () => !(await t.sound()).boardNow.some((b) => b.key === key), 4000, 'a click stops the loop, also once it is set back to Once');
+      t.ok(!t.state.board.some((b) => b.key === key), 'and its pad knows');
+    } finally {
+      for (const f of made) fs.rmSync(f, { force: true });
+      if (key) await t.g(`ts.settings({ soundPad: { key: ${JSON.stringify(key)}, pad: null } })`);
+      await t.cmd('sound.stop');
+      await t.g(`Play.Floats.hide('sound')`);
+    }
+  });
+  // (Glinn) Dread's sound loops while Dread is on and stops with it
+  area.quick('the sound of Dread loops while it is on and stops with it', async (t) => {
+    await t.cmd('moment.stop', {});
+    await t.cmd('moment.play', { id: 'dread' });
+    await t.until(async () => (await t.sound()).boardNow.some((b) => /^mo:/.test(b.key || '') && b.loop), 4000, 'its sound, looping');
+    await t.cmd('moment.stop', {});
+    await t.until(async () => !(await t.sound()).boardNow.some((b) => /^mo:/.test(b.key || '')), 4000, 'it stops with Dread');
   });
 };

@@ -170,6 +170,30 @@ module.exports = (area) => {
     t.handle('init.end', {});
   });
 
+  // UI audit VB2 (Open Points): the second fighter got "-512/20" and −99 HP
+  area.deep('HP column: damage typed down the column (-7, Enter, -5, Enter) lands on each fighter', async (t) => {
+    await fresh(t);
+    fight(t, [{ name: 'Mira', init: 15, pc: true }, { name: 'Goblin', init: 12 }, { name: 'Ogre', init: 7 }]);
+    await t.settle();
+    const col = await hpCol(t);
+    for (const n of ['Goblin', 'Ogre']) t.handle('init.set', { id: E(t, n).id, vals: { [col.id]: { cur: 20, max: 20 } } });
+    await t.g(`Play.TB.openPanel('init')`);
+    const f = (n) => `col:${E(t, n).id}:${col.id}`;
+    await t.until(() => t.g(`!!document.querySelector('.fp[data-id="init"] input[data-f=${JSON.stringify(f('Goblin'))}]')`), 4000, 'the Goblin\'s HP field');
+    await t.sleep(300);
+    t.gm().webContents.focus();
+    await t.clickSel(`.fp[data-id="init"] input[data-f=${JSON.stringify(f('Goblin'))}]`);
+    await t.type('-7'); await t.key('Enter');
+    await t.until(() => (E(t, 'Goblin').vals[col.id] || {}).cur === 13, 3000, 'the Goblin at 13');
+    await t.sleep(500); // (the list is drawn again with the change)
+    t.eq(await t.g(`(document.activeElement.dataset || {}).f || null`), f('Ogre'), 'the keyboard is in the Ogre\'s HP');
+    await t.type('-5'); await t.key('Enter');
+    await t.until(() => (E(t, 'Ogre').vals[col.id] || {}).cur !== 20, 3000, 'the Ogre\'s HP to change');
+    t.eq(E(t, 'Ogre').vals[col.id].cur, 15, 'the Ogre at 15');
+    t.handle('init.end', {});
+    await t.g(`Play.Floats.hide('init')`);
+  });
+
   area.deep('Make group: its members share one turn and one number', async (t) => {
     await fresh(t);
     fight(t, [{ name: 'Mira', init: 15, pc: true }, { name: 'Skeleton 1', init: 12 }, { name: 'Skeleton 2', init: 9 }, { name: 'Ogre', init: 4 }]);

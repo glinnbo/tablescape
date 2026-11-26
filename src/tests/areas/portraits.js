@@ -50,11 +50,14 @@ module.exports = (area) => {
       await t.sleep(900); // (it glides there)
       const m = await look();
       t.ok(m.hs.every((hh) => hh > m.H * 0.87), 'in the middle too: as tall (the near and the far copy may cover each other)', m);
-      // never below its band: a nudge down is kept at 0
+      // (Glinn) down too: a nudge down sinks it behind its band, on the TV as well; up to 500 %
+      const before = (await look()).bottoms[0];
       const o = await t.cmd('talk.offset', { path: p.path, x: 0, y: -0.3 });
-      t.eq(o.y, 0, 'a nudge down is not kept');
-      await t.cmd('talk.size', { path: p.path, scale: 4.5 });
-      t.eq(t.settings.portraitSize[p.path], 4, 'up to 400 %');
+      t.eq(o.y, -0.3, 'a nudge down is kept');
+      await t.until(async () => (await look()).bottoms[0] > before + 20, 3000, 'the TV shows it lower');
+      t.eq((await t.cmd('talk.offset', { path: p.path, x: 0, y: -2 })).y, -0.8, 'down to 80 % of its height');
+      await t.cmd('talk.size', { path: p.path, scale: 5.5 });
+      t.eq(t.settings.portraitSize[p.path], 5, 'up to 500 %');
     } finally {
       await t.cmd('talk.off', {});
       await t.cmd('talk.size', { path: p.path, scale: 1 });
@@ -365,16 +368,16 @@ module.exports = (area) => {
         let y0 = -1; for (let y = 0; y < c.height && y0 < 0; y++) for (let x = 0; x < c.width; x += 2) if (d[(y * c.width + x) * 4 + 3] > 200) { y0 = y; break; }
         let max = 0; const y1 = y0 + Math.round(c.height * 0.12); for (let y = y0; y < y1; y++) for (let x = 0; x < c.width; x++) { const k = (y * c.width + x) * 4; if (d[k + 3] > 200) max = Math.max(max, d[k], d[k + 1], d[k + 2]); } return max; })()`);
       t.ok(top <= 6, 'the head black at 100 %', top);
-      // Height: raised half way (40 %); Size: 200 % (finer near 100 %)
+      // Height: raised 40 % (the slider's middle is where it stands); Size: 200 % (finer near 100 %)
       const frameBottom = () => t.g(`document.querySelector('${W} .cs-frame').getBoundingClientRect().bottom`);
       const b0 = await frameBottom();
-      await move('.cs-height', 500);
+      await move('.cs-height', 750);
       await t.sleep(300);
       t.ok((await frameBottom()) < b0 - 10, 'Height moving: the small TV raises it');
       t.ok(!((t.settings.portraitOffset || {})[p.path]), 'the TV not yet');
       await letGo('.cs-height');
       await t.until(() => ((t.settings.portraitOffset || {})[p.path] || {}).y === 0.4, 3000, 'let go: raised 40 % on the TV');
-      const u2 = Math.round((Math.log(2 / 0.3) / Math.log(4 / 0.3)) * 1000);
+      const u2 = Math.round((Math.log(2 / 0.3) / Math.log(5 / 0.3)) * 1000);
       await move('.cs-size-s', u2);
       await t.until(async () => /200 %/.test(await t.g(`(document.querySelector('${W} .cs-frame .cs-size:not([hidden])') || {}).textContent || ''`)), 2000, '200 % shown on the small TV');
       t.eq(((t.settings.portraitSize || {})[p.path]) || 1, 1, 'the TV not yet');
@@ -392,7 +395,7 @@ module.exports = (area) => {
       await t.until(async () => /115 %/.test(await t.g(`(document.querySelector('${W} .cs-frame .cs-size:not([hidden])') || {}).textContent || ''`)), 2000, 'the size shown on the small TV');
       t.eq(((t.settings.portraitSize || {})[p.path]) || 1, sz0, 'the TV not yet');
       await t.until(() => Math.abs((((t.settings.portraitSize || {})[p.path]) || 1) - (sz0 + 0.15)) < 0.001, 3000, 'once it rests: 115 % on the TV');
-      const uWant = Math.round((Math.log(1.15 / 0.3) / Math.log(4 / 0.3)) * 1000);
+      const uWant = Math.round((Math.log(1.15 / 0.3) / Math.log(5 / 0.3)) * 1000);
       await t.until(async () => Math.abs(Number(await t.g(`document.querySelector('${W} .cs-size-s input').value`)) - uWant) <= 2, 3000, 'the Size slider follows');
     } finally {
       await t.cmd('talk.off', {});

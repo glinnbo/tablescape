@@ -163,8 +163,8 @@ const DeckEditor = (() => {
         h('button', { class: 'icon-btn', 'aria-label': 'Page down', disabled: page >= pages.length - 1, onclick: () => { page += 1; sel = 0; draw(); } }, iconEl('chevron-down')));
       const pageBtns = hot ? null : h('div', { class: 'dk-pagebtns' },
         h('button', { class: 'btn small', disabled: D.pages.length >= 20, onclick: () => { D.pages.splice(page + 1, 0, Array(n()).fill(null)); page += 1; sel = 0; save(); draw(); } }, iconEl('plus'), 'New page'),
-        h('button', { class: 'btn small ghost', disabled: D.pages.length < 2, onclick: () => { D.pages.splice(page, 1); page = Math.max(0, page - 1); sel = 0; save(); draw(); } }, iconEl('trash'), 'Delete this page'),
-        h('button', { class: 'btn small ghost', onclick: () => { D.pages[page] = Array(n()).fill(null); sel = 0; save(); draw(); } }, iconEl('x'), 'Empty it'));
+        h('button', { class: 'btn small ghost', disabled: D.pages.length < 2, onclick: () => { const at = page; const [old] = D.pages.splice(page, 1); page = Math.max(0, page - 1); sel = 0; save(); draw(); toast('Page deleted', { undo: () => { D.pages.splice(at, 0, old); page = at; sel = 0; save(); draw(); } }); } }, iconEl('trash'), 'Delete this page'), // (UI audit VH5: Undo)
+        h('button', { class: 'btn small ghost', onclick: () => { const at = page; const old = D.pages[page]; D.pages[page] = Array(n()).fill(null); sel = 0; save(); draw(); toast('Page emptied', { undo: () => { D.pages[at] = old; page = at; sel = 0; save(); draw(); } }); } }, iconEl('x'), 'Empty it'));
       return h('div', { class: 'dk-deck' },
         h('div', { class: `dk-phone ${which}` }, D.top === 'turn' ? stripEl() : null, D.info ? infoEl() : null, h('div', { class: 'dk-row' }, grid, pager)),
         hot ? null : colorsEl(),

@@ -149,7 +149,7 @@ module.exports = (area) => {
     const btns = () => t.g(`[...document.querySelectorAll('#pop .btn')].map((b) => b.textContent.trim())`);
     await pop(null, 'layers');
     const lay = await btns();
-    for (const l of ['+ Token', '+ Effect', 'Ambience …']) t.ok(lay.includes(l), `Layers has "${l}"`, lay);
+    for (const l of ['+ Token', '+ Effect', 'Ambience …']) t.ok(!lay.includes(l), `Layers no longer has "${l}" (Beta 3.68, Glinn: the rail has them)`, lay);
     await pop('map', 'map');
     const mp = await btns();
     t.ok(mp.includes('Squares 1 inch') && !mp.includes('Grid squares = 1 inch'), 'the Map panel names 1 inch as the Grid panel does', mp);
@@ -232,8 +232,16 @@ module.exports = (area) => {
     const rows = await t.g(`[...document.querySelectorAll('#pop .mk-row .mk-text')].map((b) => b.textContent)`);
     for (const r of ['Old well', 'Silver key opens this door', 'The Sunken Hall']) t.ok(rows.includes(r), `the list has "${r}"`, rows);
     t.ok(rows.some((x) => / · Trap$/.test(x)), 'and the number that says Trap', rows);
+    // (UI audit VF6: Clear takes what is on the table; what only you see stays and goes with a second Clear)
     await t.clickText('#pop .btn', 'Clear');
-    await t.until(() => !E().marks.some((m) => ['pin', 'x', 'dot', 'counter', 'note'].includes(m.kind)) && !E().draw.some((d) => d.kind === 'text'), 3000, 'Clear takes every mark and label');
+    await t.until(() => !E().marks.some((m) => ['pin', 'x', 'dot', 'counter'].includes(m.kind) && !m.hidden) && !E().draw.some((d) => d.kind === 'text' && !d.hidden), 3000, 'Clear takes every mark and label on the table');
+    if (E().marks.some((m) => m.hidden || m.kind === 'note') || E().draw.some((d) => d.kind === 'text' && d.hidden)) {
+      await t.sleep(300);
+      await t.clickText('#pop .btn', 'Clear');
+      await t.until(() => !E().marks.some((m) => ['pin', 'x', 'dot', 'counter', 'note'].includes(m.kind)) && !E().draw.some((d) => d.kind === 'text'), 3000, 'a second Clear takes your own notes too');
+      await t.key('Z', ['control']);
+      await t.sleep(300);
+    }
     await t.key('Z', ['control']);
     await t.until(() => E().draw.filter((d) => d.kind === 'text').length === n0.texts + 1 && E().marks.length === n0.marks + 3, 3000, 'Ctrl + Z brings them back');
     // an old hotbar item for Draw → Text opens Marks → Label

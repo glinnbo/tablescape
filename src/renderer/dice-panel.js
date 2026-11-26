@@ -177,7 +177,7 @@ const DicePanel = (() => {
             h('button', { class: 'wheel-weight', 'data-tip': `How likely: ${Math.round((e.weight / sum) * 100)}% (click for more, right-click for less)`, 'aria-label': `Weight of ${e.label}`,
               onclick: () => edit(w, { update: { entryId: e.id, patch: { weight: Math.min(100, e.weight + 1) } } }),
               oncontextmenu: (ev) => { ev.preventDefault(); edit(w, { update: { entryId: e.id, patch: { weight: Math.max(1, e.weight - 1) } } }); } }, `×${e.weight}`),
-            h('button', { class: 'icon-btn', 'aria-label': `Delete ${e.label}`, 'data-tip': 'Delete', onclick: () => edit(w, { remove: e.id }) }, iconEl('x'))));
+            h('button', { class: 'icon-btn', 'aria-label': `Delete ${e.label}`, 'data-tip': 'Delete', onclick: async () => { await edit(w, { remove: e.id }); toast(`${e.label} deleted`, { undo: () => edit(w, { add: { label: e.label, weight: e.weight, color: e.color } }) }); } }, iconEl('x')))); // (UI audit VH5: Undo; it comes back at the end of the list)
         });
         const add = h('input', { type: 'text', class: 'wheel-add', placeholder: w.entries.length ? 'New entry, Enter' : 'First entry, Enter', 'aria-label': 'New entry', spellcheck: 'false',
           onkeydown: (ev) => { if (ev.key === 'Enter' && ev.target.value.trim()) { edit(w, { add: { label: ev.target.value.trim() } }); ev.target.value = ''; } } });
@@ -207,7 +207,7 @@ const DicePanel = (() => {
     // paste a table (from a book, a website, a spreadsheet); the preview shows what each entry's chance will be
     function pasteDialog() {
       const w = wheel();
-      const area = h('textarea', { class: 'tp-text', spellcheck: 'false', 'aria-label': 'The table',
+      const area = h('textarea', { class: 'tpd-text', spellcheck: 'false', 'aria-label': 'The table', // (UI audit VM1: tpd-: the TV's test picture has tp-text and tp-row)
         placeholder: 'One entry per line, or a table:\n01–40  Goblins\n41–75  Wolves\n76–00  A dragon\n\nWeights work too:  Gold ×3  or  Gold, 3\nMarkdown and spreadsheet rows are fine.' });
       const name = h('input', { type: 'text', placeholder: 'Name of the wheel', 'aria-label': 'Name of the wheel', spellcheck: 'false' });
       let named = false; // the GM typed a name: it stays
@@ -234,7 +234,7 @@ const DicePanel = (() => {
         info.textContent = !res.entries.length ? 'The entries and their chances show up here.'
           : `${res.entries.length} entr${res.entries.length === 1 ? 'y' : 'ies'}${res.die ? `, a ${res.die} table` : ''}${res.skipped ? ` · ${res.skipped} line${res.skipped > 1 ? 's' : ''} left out` : ''}${res.more ? ` · only the first 100 (${res.more} more)` : ''}`;
         list.innerHTML = '';
-        res.entries.forEach((e, i) => list.append(h('div', { class: 'tp-row' },
+        res.entries.forEach((e, i) => list.append(h('div', { class: 'tpd-row' },
           h('i', { class: 'tp-dot', style: `background:${COLORS[i % COLORS.length]}` }), h('span', { class: 'ellipsis grow' }, e.label),
           e.weight > 1 ? h('small', {}, `×${e.weight}`) : null, h('b', {}, `${Math.round((e.weight / total) * 1000) / 10}%`))));
       }
@@ -258,7 +258,7 @@ const DicePanel = (() => {
         h('div', { class: 'tp-in' }, area, where, name),
         h('div', { class: 'tp-out' }, info, list),
         h('div', { class: 'modal-actions tp-actions' }, h('button', { type: 'button', class: 'btn ghost', onclick: () => dlg.close() }, 'Cancel'), go));
-      const dlg = UI.dialog('Paste a table', body, { wide: true });
+      const dlg = UI.dialog('Paste a table', body, { wide: true, keep: () => !!area.value.trim() }); // (UI audit VH7: a click beside it no longer throws the pasted table away)
       dlg.el.classList.add('tp-dlg');
       paint();
       area.focus();

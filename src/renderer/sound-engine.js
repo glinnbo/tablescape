@@ -131,14 +131,15 @@ const SoundEngine = (() => {
 
   // ---------- sounds played once: soundboard, spells, thunder ----------
   const board = new Set();
-  function playOnce(url, volume, { onPlaying, isBoard = false } = {}) {
+  function playOnce(url, volume, { onPlaying, isBoard = false, loop = false, key = null } = {}) {
     wake();
     const el = new Audio();
     el.src = url;
+    el.loop = !!loop; // (I8: a Soundboard pad set to Loop plays on until it is clicked again)
     const g = fxCtx.createGain();
     g.gain.value = clamp(volume);
     fxCtx.createMediaElementSource(el).connect(g).connect(sfxBus);
-    const it = { el, g };
+    const it = { el, g, key };
     let release = null;
     let ended = false;
     const end = () => {
@@ -148,7 +149,7 @@ const SoundEngine = (() => {
       board.delete(it);
       setTimeout(() => { el.removeAttribute('src'); el.load(); g.disconnect(); }, 100);
     };
-    el.addEventListener('playing', () => { release = duckStart(); if (onPlaying) onPlaying(el); }, { once: true });
+    el.addEventListener('playing', () => { if (!loop) release = duckStart(); if (onPlaying) onPlaying(el); }, { once: true }); // (a looping pad is part of the scene: no dip)
     el.addEventListener('ended', end, { once: true });
     el.addEventListener('error', () => { errors.push(nameOf(url)); end(); }, { once: true });
     if (isBoard) board.add(it);
@@ -156,8 +157,8 @@ const SoundEngine = (() => {
     it.end = end;
     return it;
   }
-  function stopBoard() {
-    for (const it of [...board]) { ramp(it.g.gain, 0, 0.25, fxCtx); setTimeout(() => { it.el.pause(); it.end(); }, 300); }
+  function stopBoard(key = null) {
+    for (const it of [...board]) { if (key && it.key !== key) continue; ramp(it.g.gain, 0, 0.25, fxCtx); setTimeout(() => { it.el.pause(); it.end(); }, 300); }
   }
 
   // a short sound when a spell is cast (or cast again) on the live map
@@ -173,7 +174,7 @@ const SoundEngine = (() => {
       heard.set(sp.id, sp.t0);
       if (fresh || !s.open || sp.hidden || sp.muted || s.blackout || !s.sfx || !s.sfx.on || now - sp.t0 > 2500) continue;
       const skin = FXDATA.SKINS[sp.skin] ? sp.skin : 'arcane';
-      const url = (s.sfx.map && s.sfx.map[skin]) || `sfx/${skin}.ogg`; // the GM can give a look its own sound file
+      const url = (s.sfx.map && s.sfx.map[skin]) || FXDATA.spellSound(skin); // the GM can give a look its own sound file
       played.spells.push(sp.skin);
       playOnce(url, s.sfx.volume ?? 0.7, { onPlaying: () => { played.spellsOk.push(sp.skin); played.src.push(nameOf(url)); } });
     }
@@ -243,9 +244,10 @@ const SoundEngine = (() => {
   }
   function onEvent(e) {
     if (!e) return;
-    if (e.kind === 'sound') playOnce(e.url, e.volume ?? 0.8, { isBoard: true, onPlaying: () => played.board.push(e.name) });
+    if (e.kind === 'sound') playOnce(e.url, e.volume ?? 0.8, { isBoard: true, loop: !!e.loop, key: e.key || null, onPlaying: () => played.board.push(e.name) });
     else if (e.kind === 'stop') stopBoard();
-    else if (e.kind === 'thunder') setTimeout(() => playOnce('sfx/thunder-roll.ogg', e.volume ?? 0.7, { onPlaying: () => { played.thunders++; } }), clamp(e.delay, 0, 5) * 1000);
+    else if (e.kind === 'stopone') { if (e.key) stopBoard(e.key); } // (I8: one pad's sound)
+    else if (e.kind === 'thunder') setTimeout(() => playOnce('sfx/thunder-roll.wav', e.volume ?? 0.7, { onPlaying: () => { played.thunders++; } }), clamp(e.delay, 0, 5) * 1000);
     else if (e.kind === 'test') { // Test: a chime on one of the two speakers
       const which = e.which === 'fx' ? 'fx' : 'music';
       wake();
@@ -266,7 +268,7 @@ const SoundEngine = (() => {
       device: outs.music.now, deviceError: outs.music.error, fxDevice: outs.fx.now, fxDeviceError: outs.fx.error,
       gains: { master: r2(master.gain.value), fx: r2(fxMaster.gain.value), duck: r2(duck.gain.value), music: r2(music.gain.value), fight: r2(fightBus.gain.value) },
       tracks: [...tracks.values()].map((t) => t.info()),
-      board: played.board.slice(), spells: played.spells.slice(), spellsOk: played.spellsOk.slice(), src: played.src.slice(), thunders: played.thunders, synth: { ...played.synth }, ducks: played.ducks, tests: { ...played.tests },
+      board: played.board.slice(), boardNow: [...board].map((it) => ({ key: it.key, loop: it.el.loop, vol: r2(it.g.gain.value) })), spells: played.spells.slice(), spellsOk: played.spellsOk.slice(), src: played.src.slice(), thunders: played.thunders, synth: { ...played.synth }, ducks: played.ducks, tests: { ...played.tests },
       errors: errors.slice(),
     };
   }

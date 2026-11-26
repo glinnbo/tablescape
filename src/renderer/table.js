@@ -10,6 +10,7 @@ const Table = (() => {
   // for thunder after a lightning flash and for the countdown's pulses and chimes.
   const events = { strikes: 0, thunders: 0 };
   const views = new Map(); // mapId -> { view, layer }
+  const prepStats = { prepKept: 0, prepSet: 0, patches: 0, states: 0 }; // (WE3: states that left the hidden map as it was, and ones that set it up)
   let liveId = null;
   let last = null;
 
@@ -31,6 +32,7 @@ const Table = (() => {
     window.ts.onTableState(apply);
     window.ts.onFog((d) => SceneView.fogDelta(d, [...views.values()].map((x) => x.view)));
     window.ts.onDrag((d) => { const v = views.get(d.mapId); if (v) v.view.dragLive(d.id, d.x, d.y); }); // Prototype 14
+    window.ts.onPatch((d) => { const v = d.mapId === liveId ? views.get(d.mapId) : null; if (v) { v.view.patch(d.kind, d.items, d.value, d); prepStats.patches++; } }); // (Speed 5, WE1: a thing moved, alone)
     window.ts.onView((d) => { const v = views.get(d.mapId); if (v) v.view.setViewLive(d.view); if (atlas) atlas.viewLive(d); }); // 4.4: the map moving
     window.ts.onPing((p) => { const v = views.get(liveId); if (v && p.mapId === liveId) v.view.ping(p); });
     // 4.11.1: the room lights' picture of the table, drawn here when main asks (a capture of the window made it flicker)
@@ -89,7 +91,7 @@ const Table = (() => {
   }
 
   async function apply(s) {
-    last = s;
+    last = s; prepStats.states++;
     applyStyles(s.styles); // (Prototype 10: first: a map change and Talk below are drawn in them; before, they used the style picked before)
     // ---- live map ----
     if (s.live) {
@@ -209,8 +211,12 @@ const Table = (() => {
 
   function finishApply(s) {
     // ---- preload the map the GM is preparing (hidden and paused) ----
-    if (s.prep) {
+    // (Speed 5, WE3: "same": its files are as they were, so the hidden view stays as it is. Without a view to keep
+    // (it should not happen) the whole state is asked for.)
+    if (s.prep && s.prep.same) { if (!views.has(s.prep.id)) SceneView.needResync(); else prepStats.prepKept++; }
+    else if (s.prep) {
       const v = ensureView(s.prep, s.view, false);
+      prepStats.prepSet++;
       if (s.prep.id !== liveId) { v.view.setPlaying(false); v.layer.classList.remove('shown'); }
     }
 
@@ -224,6 +230,9 @@ const Table = (() => {
     }
 
     black.classList.toggle('on', !!s.blackout);
+    // (Speed 6, WF6: under a blackout the maps rest once the black has faded in (0.4 s), and go on the moment it lifts)
+    if (!!s.blackout !== darkWant) { darkWant = !!s.blackout; clearTimeout(darkT); if (darkWant) darkT = setTimeout(() => { darkNow = true; for (const v of views.values()) v.view.setDark(true); }, 700); else darkNow = false; }
+    for (const v of views.values()) v.view.setDark(darkNow);
     black.classList.toggle('one-side', s.seats === 'one');
     setBlackLook(s.blackoutLook || null);
     const k = Math.min(innerWidth / s.view.world.w, innerHeight / s.view.world.h);
@@ -519,12 +528,16 @@ const Table = (() => {
   }
 
   // Read-only snapshot for the self-test.
+  let darkWant = false; let darkNow = false; let darkT = 0;
   function debug() {
     if (!black) return null; // not started yet
     const lv = views.get(liveId);
     const media = (v) => v && { t: v.currentTime, paused: v.paused, readyState: v.readyState };
     return {
       liveId,
+      dark: !!(lv && lv.view.dark), // (WF6: the live map rests under a blackout)
+      prep: { ...prepStats }, frames: lv ? lv.view.stats.frames : 0, // (WE3: for the self-test)
+      ink: lv ? { counted: lv.view.osInkShown ? lv.view.osInkShown.size : 0, inked: lv.view.osInk ? lv.view.osInk.size : 0 } : null, // (WI4: drawn things counted as in the picture, and inked)
       dice: dice ? dice.debug() : null,
       views: [...views.keys()],
       shown: [...views.entries()].filter(([, v]) => v.layer.classList.contains('shown')).map(([id]) => id),
@@ -628,6 +641,6 @@ const Table = (() => {
 
   // self-test: whether the TV shows an effect or light of the live map
   function fxShown(id) { const lv = views.get(liveId); const f = lv && lv.view.map && lv.view.map.fx.find((x) => x.id === id); return f ? lv.view.shown(f) : null; }
-  return { start, debug, probe, probeMap, coverage, sees, fogAt, fxShown, treeProbe: (p) => { const lv = views.get(liveId); if (lv) { lv.view.treeProbe = p; lv.view.redrawSoon(); } return !!lv; }, burn: (on) => overlays && overlays.burn(on), atlasProject: (x, y) => (atlas ? atlas.project(x, y) : null), atlasUnproject: (x, y) => (atlas ? atlas.unproject(x, y) : null) };
+  return { start, debug, mapOf: (id) => { const v = views.get(id || liveId); return v ? v.view.map : null; }, probe, probeMap, coverage, sees, fogAt, fxShown, treeProbe: (p) => { const lv = views.get(liveId); if (lv) { lv.view.treeProbe = p; lv.view.redrawSoon(); } return !!lv; }, burn: (on) => overlays && overlays.burn(on), atlasProject: (x, y) => (atlas ? atlas.project(x, y) : null), atlasUnproject: (x, y) => (atlas ? atlas.unproject(x, y) : null) };
 })();
-window.__table = { treeProbe: (p) => Table.treeProbe(p), atlasProject: (x, y) => Table.atlasProject(x, y), atlasUnproject: (x, y) => Table.atlasUnproject(x, y), burn: (on) => Table.burn(on), debug: () => Table.debug(), probe: (l, x, y) => Table.probe(l, x, y), probeMap: (l, x, y) => Table.probeMap(l, x, y), coverage: (l) => Table.coverage(l), sees: (x, y) => Table.sees(x, y), fogAt: (x, y) => Table.fogAt(x, y), fxShown: (id) => Table.fxShown(id) };
+window.__table = { mapOf: (id) => Table.mapOf(id), /* (for the self-test: the map a view holds) */ treeProbe: (p) => Table.treeProbe(p), atlasProject: (x, y) => Table.atlasProject(x, y), atlasUnproject: (x, y) => Table.atlasUnproject(x, y), burn: (on) => Table.burn(on), debug: () => Table.debug(), probe: (l, x, y) => Table.probe(l, x, y), probeMap: (l, x, y) => Table.probeMap(l, x, y), coverage: (l) => Table.coverage(l), sees: (x, y) => Table.sees(x, y), fogAt: (x, y) => Table.fogAt(x, y), fxShown: (id) => Table.fxShown(id) };

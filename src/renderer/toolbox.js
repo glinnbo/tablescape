@@ -193,7 +193,7 @@ const Toolbox = (() => {
       gearEl = h('div', { class: 'cs-gear-box stack', hidden: !gearOpen },
         // (Second Builder (second-conversation-rework): the small TV follows the slider at once, the TV once it rests)
         c().slider({ label: 'Size', min: 0.1, max: 0.7, step: 0.01, get: () => TalkStage.shownSize() ?? prefs().size, set: (v) => { TalkStage.size(v); clearTimeout(sizeT); sizeT = setTimeout(() => set({ size: v }), 300); }, fmt: (v) => `${Math.round(v * 100)}% of the TV height` }),
-        c().slider({ label: 'Blur the map behind', min: 0, max: 1, step: 0.05, get: () => prefs().blur, set: (v) => set({ blur: v }), fmt: (v) => (v < 0.05 ? 'Off' : `${Math.round(v * 100)}%`) }),
+        c().slider({ label: 'Blur the map behind', min: 0, max: 1, step: 0.05, get: () => prefs().blur, set: (v) => UI.settingsSoon('talk.blur', { talk: { blur: v } }), fmt: (v) => (v < 0.05 ? 'Off' : `${Math.round(v * 100)}%`) }),
         c().toggle({ label: 'The speaker\'s name on the band', get: () => !!prefs().names, set: (v) => set({ names: v }) }),
         c().btn('The band\'s look …', 'sparkles', () => { if (window.App && App.openOptions) App.openOptions('looks'); }, { kind: 'small ghost' }));
       // the chips and Library
@@ -223,7 +223,7 @@ const Toolbox = (() => {
         chips.replaceChildren(h('div', { class: 'cs-chip-list' }, ...opts.map(([v, label]) => h('button', { class: `cs-chip ${v === cur ? 'on' : ''}`, dataset: { v }, 'data-tip': v === 'ready' ? `Ready for ${ch.name}` : v === 'all' ? 'All your portraits' : `The folder ${label}`, onclick: () => { setChip(v); strip.dataset.sig = ''; ctx.refreshPop(); } }, label))), libBtn); // (Second Builder (second-conversation-sliders): the chips in their own block, Library as tall as it)
         row.replaceChildren();
         row.classList.toggle('ready-row', cur === 'ready');
-        if (!list.length) { row.append(c().hint('No portraits yet: Library → From this PC.')); return; }
+        if (!list.length) { row.append(c().hint('No portraits yet: Library → Add from PC.')); return; }
         for (const it of list.slice(0, 200)) {
           const i = onStage(it.path);
           const use = () => (it.missing ? toast(`${it.name} is no longer in the library: ✕ takes it off the Ready list`, { ms: 3500 }) : bringIn(it));
@@ -257,6 +257,7 @@ const Toolbox = (() => {
       { id: 'sound', label: 'Soundboard', icon: 'speakerphone', tip: 'Sounds from Audio/SFX, played once on the table' },
       { id: 'moments', label: 'Screen effects', icon: 'flare', tip: 'Earthquake, poison gas, blood, an explosion … over the whole table' },
       { id: 'snaps', label: 'Snapshots', short: 'Snaps', icon: 'camera', tip: 'Saved states of a map, played back with F1 to F8' },
+      { id: 'triggers', label: 'Triggers', icon: 'bolt', tip: 'One click runs a list of steps: a conversation, handouts, lights, doors, a fight …' }, // I7 (Glinn)
       { id: 'spotify', label: 'Spotify', icon: 'brand-spotify', tip: 'Your Spotify: moods, playlists and the volume' },
       { id: 'dice', label: 'Dice', icon: 'dice', tip: 'A dramatic roll, the wheel of luck and death saves on the table' },
       { id: 'handouts', label: 'Handouts', icon: 'script', tip: 'Letters, maps and pictures shown big on the table' }, // Prototype 25
@@ -270,7 +271,7 @@ const Toolbox = (() => {
       { id: 'mapnotes', label: 'Map notes', short: 'Notes', icon: 'note', tool: true, tip: 'Marks only you see (J)' }, // Prototype 14: from the rail; Third Builder (third-marks-tool): not in the grid any more, kept for a rail or hotbar that has it: it opens Marks with Only me
     ];
     // Prototype 14: one grid in a fixed order (no groups); the favourites (a star) above it
-    const ORDER = ['init', 'chars', 'timer', 'dice', 'moments', 'snaps', 'sound', 'spotify', 'handouts', 'atlas', 'notes', 'break', 'lights', 'players', 'remote']; // (Third Builder (third-marks-tool): Map notes are in Marks)
+    const ORDER = ['init', 'chars', 'timer', 'dice', 'moments', 'snaps', 'triggers', 'sound', 'spotify', 'handouts', 'atlas', 'notes', 'break', 'lights', 'players', 'remote']; // (Third Builder (third-marks-tool): Map notes are in Marks)
     let favs = [];
     try { const v = JSON.parse(localStorage.getItem('toolboxFavs') || 'null'); if (Array.isArray(v)) favs = v.filter((x) => typeof x === 'string'); } catch {}
     function toggleFav(id) {
@@ -318,7 +319,7 @@ const Toolbox = (() => {
       // a panel's tile: right-click pins it to the rail (one click away) or puts it on the hotbar
       const tile = (p) => {
         const item = { kind: 'panel', ref: p.id, label: p.label, icon: p.icon };
-        const b = h('button', { class: 'tb-tile', dataset: { id: p.id }, 'data-tip': p.tip, onclick: () => { if (p.tool) { openPanel(p.id); return; } openPanel(p.id); ctx.closePop(); } },
+        const b = h('button', { class: 'tb-tile', dataset: { id: p.id }, 'data-tip': p.tip, onclick: () => { togglePanel(p.id); ctx.refreshPop(); } }, // (Glinn: the Toolbox stays open until another button of Build or Play is picked; UI audit VH1: the tile closes its panel again, as its pin and its key do)
           iconEl(p.icon), h('span', {}, p.label), h('i', { class: 'tb-live' }), h('i', { class: 'tb-pin' }, iconEl('pinned')), starOf(p.id));
         b.addEventListener('contextmenu', (e) => {
           e.preventDefault();
@@ -353,9 +354,9 @@ const Toolbox = (() => {
         'Roll enemies: d20 + bonus for every enemy without a number (a group rolls once).', 'HP: type 12, 12/20, −7 or +5.', 'Column adds HP, AC, conditions, notes or your own.',
         'The gear opens Campaign settings → Initiative.'],
       timer: ['Normal: a round dial at a short end or in the middle of the TV.', 'Dramatic: a big number in the middle, pulsing darker towards zero.', 'A running dial can still move to another end.'],
-      sound: ['Each sound plays once on the sound effects speaker (Tablescape settings → Sound).', 
-        'Star a sound to keep it at the top.', 'Drag a sound onto the hotbar to play it with a number key.', 'Subfolders of Audio/SFX become groups.'],
-      moments: ['Click to play one on the table.', 'Their sounds follow the volume of the Soundboard.', 'Gas, dread, frost, madness and time stop stay until you click them again.', 'Shift + 1 to 9 play the starred ones.', 'The target button puts one where you click on the map.'],
+      sound: ['Sounds play on the sound effects speaker (Tablescape settings → Sound).',
+        'Right-click a sound: once or loop, its volume, star it (Ctrl + Shift + 1 to 9).', 'Sword hit 1, 2, 3 … are one pad: it plays one of them at random.', 'Subfolders of Audio/SFX become chips at the top.'],
+      moments: ['Click to play one over the whole table.', 'Drag one with a target onto the map: it plays there.', 'Right-click: how strong, its colour, how long, its sound.', 'Until stopped: they stay until you click them again.', 'Shift + 1 to 9 play the starred ones.'],
       spotify: ['Music plays in the Spotify app, through its speaker.', 'Ctrl + 1 to 9 play the first nine moods.', 'A chapter\'s fight music can be a mood (Ambience → Combat), and so can a snapshot\'s transition.',
         'A mood plays its songs, or one of its playlists or albums.', 'Smooth changes between songs: turn on Crossfade in the Spotify app (Settings → Playback).'],
       dice: ['Dice: click a die to add it, right-click to take one out.', 'Wheel: more weight puts an entry on the reel more often.',
@@ -382,6 +383,7 @@ const Toolbox = (() => {
       remote: ['Your phone or tablet as a deck of buttons: point its camera at the code.', 'Windows may ask once whether Tablescape may use the network: allow it on private networks.', 'A tablet at the table: set its Auto-Lock to Never.', 'Right-click a device in the list to choose which deck it shows.', 'The buttons belong to this campaign; a new campaign starts with those of the one played last. The devices and the layout are the same everywhere.'],
     };
     const defOf = (id) => {
+      if (id === 'triggers') return ctx.Trig.def(); // I7
       if (id === 'atlas') return ctx.Atlas.def(); // (Beta 3.12: the Cartographer is a window of its own, the Map table)
       if (id === 'talk') return talkDef(); // (Second Builder, second-conversation-stage: Conversation is a window of its own)
       const p = PANELS.find((x) => x.id === id) || PANELS[0];
@@ -400,54 +402,185 @@ const Toolbox = (() => {
     }
 
     // =====================================================================
-    // Soundboard
+    // Soundboard: I8 (Glinn) pads. Files named alike with a number (Sword hit 1, 2, 3) are one pad that plays one of
+    // them at random, never the same twice in a row; the folders are chips; a pad plays once or loops (a looping one
+    // stops with a click), at its own volume; it fills up while it plays. Starred ones on top and on Ctrl + Shift + 1 to 9
+    // (Ctrl + 1 to 9 are the Spotify moods, Alt + 1 to 9 a map of the chapter). A right-click sets it up.
     // =====================================================================
-    // one sound per row with its whole name ("Enemy_Wave-02" reads "Enemy Wave 02"), starred ones on top,
-    // a search box once the list gets long
     const niceName = (n) => String(n).replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
-    let boardQuery = '';
+    let boardQuery = ''; let boardChip = 'all'; let boardSearch = false;
+    const padSet = () => (S().settings && S().settings.soundPads) || {};
+    const boardNow = () => S().board || [];
+    // what a sound looks like on its pad, guessed from its name
+    const SOUND_ICONS = [[/door|gate|creak|hinge/, 'door'], [/sword|blade|slash|hit|clash|steel/, 'swords'], [/arrow|bow|volley/, 'target-arrow'], [/shield|bash|block/, 'shield'],
+      [/roar|growl|monster|beast|howl|snarl/, 'paw'], [/thunder|storm|lightning/, 'bolt'], [/fire|flame|burn|torch/, 'flame'], [/water|splash|drip|rain|river/, 'droplet'],
+      [/wind|gust|breeze/, 'wind'], [/crowd|tavern|chatter|people|cheer/, 'users'], [/mug|beer|glass|clink|cheers/, 'beer'], [/music|lute|song|harp|drum|horn/, 'music'],
+      [/magic|spell|arcane|sparkle|chime/, 'sparkles'], [/bell|gong/, 'speakerphone'], [/step|walk|foot/, 'shoe'], [/heart|beat/, 'activity-heartbeat']];
+    const soundIcon = (name) => { const n = name.toLowerCase(); const hit = SOUND_ICONS.find(([re]) => re.test(n)); return hit && ICON_OK(hit[1]) ? hit[1] : 'volume'; };
+    const ICON_OK = (n) => typeof ICON_PATHS === 'object' && !!ICON_PATHS[n];
+    // the pads: Audio/SFX's sounds, numbered ones together
+    function boardPads() {
+      const all = lib.filter((x) => x.cat === 'sounds' && (/^Audio\/SFX\//i.test(x.rel) || /\bsfx\b/i.test(x.rel)));
+      const pads = new Map();
+      for (const x of all) {
+        const dir = x.rel.split('/').slice(0, -1).join('/');
+        const nice = niceName(x.name); const base = nice.replace(/\s*\d+$/, '').trim() || nice;
+        const key = `${dir}/${base}`;
+        let p = pads.get(key);
+        if (!p) { p = { key, name: base, folder: x.rel.split('/').slice(2, -1).join(' / ') || 'Sounds', files: [], fav: false }; pads.set(key, p); }
+        p.files.push(x); if (x.fav) p.fav = true;
+      }
+      const list = [...pads.values()];
+      for (const p of list) { p.files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })); if (p.files.length === 1) p.name = niceName(p.files[0].name); }
+      return list;
+    }
+    const starredPads = () => boardPads().filter((p) => p.fav && !(padSet()[p.key] || {}).hidden);
+    const lastFile = new Map(); // pad → the file it played last (the next one is another)
+    function playPad(p, file) {
+      const set = padSet()[p.key] || {};
+      const on = boardNow().some((b) => b.key === p.key && b.loop);
+      if (!file && on) return cmd('sound.stopone', { key: p.key }); // (Glinn: also when it was set back to Once while it looped)
+      let f = file;
+      if (!f) {
+        const pool = p.files.length > 1 ? p.files.filter((x) => x.path !== lastFile.get(p.key)) : p.files;
+        f = pool[Math.floor(Math.random() * pool.length)];
+      }
+      lastFile.set(p.key, f.path);
+      return cmd('sound.play', { path: f.path, key: p.key, loop: !!set.loop && !file, vol: set.vol ?? 1 });
+    }
+    function playStarredSound(n) {
+      const p = starredPads()[n - 1];
+      if (p) playPad(p); else toast('Star Soundboard sounds to play them with Ctrl + Shift + a number', { ms: 2600 });
+    }
+    // how long a sound is (the pad fills up as it plays); found out once per file
+    const lens = new Map();
+    function lenOf(path) {
+      if (lens.has(path)) return lens.get(path);
+      lens.set(path, null);
+      const a = new Audio(); a.preload = 'metadata';
+      a.addEventListener('loadedmetadata', () => lens.set(path, Number.isFinite(a.duration) ? a.duration : null), { once: true });
+      a.src = UI.pathToUrl(path);
+      return null;
+    }
+    const playingOf = (key) => {
+      const now = Date.now();
+      return boardNow().filter((b) => b.key === key).filter((b) => { if (b.loop) return true; const L = lenOf(b.path); return L == null ? now - b.t0 < 4000 : now - b.t0 < L * 1000; }).pop() || null;
+    };
+    function soundPad(p, key) {
+      const set = padSet()[p.key] || {};
+      const el = h('div', { class: `pad ${set.hidden ? 'hid' : ''}`, role: 'button', tabindex: '0', dataset: { key: p.key }, 'aria-label': p.name,
+        'data-tip': `${p.name}: ${set.loop ? 'loops until clicked again' : 'plays once'}${p.files.length > 1 ? `, one of ${p.files.length} at random` : ''}`,
+        onclick: () => playPad(p), onkeydown: (e) => { if (e.key === 'Enter') playPad(p); } },
+      h('span', { class: 'pad-fill' }), iconEl(soundIcon(p.name)), h('b', {}, p.name), key ? h('span', { class: 'pad-k' }, key) : null,
+      (set.loop || p.files.length > 1) ? h('span', { class: 'pad-tag' }, set.loop ? iconEl('repeat') : null, p.files.length > 1 ? iconEl('arrows-shuffle') : null, p.files.length > 1 ? String(p.files.length) : null) : null);
+      el.addEventListener('contextmenu', (e) => { e.preventDefault(); openSoundSheet(p, el); });
+      return Hotbar.offer(el, { kind: 'sound', ref: { path: p.files[0].path, kind: 'audio', cat: 'sounds' }, label: p.name, icon: 'volume' }, { menu: false });
+    }
+    function tickSounds(box) {
+      const step = () => {
+        if (!box.isConnected) return;
+        const now = Date.now();
+        for (const el of box.querySelectorAll('.pad[data-key]')) {
+          const b = playingOf(el.dataset.key);
+          el.classList.toggle('on', !!b);
+          const fill = el.querySelector('.pad-fill');
+          let u = 0;
+          if (b) { if (b.loop) u = 1; else { const L = lenOf(b.path); u = L ? Math.min(1, (now - b.t0) / (L * 1000)) : 0.5; } }
+          fill.style.width = `${u * 100}%`;
+        }
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
     function buildSound() {
       loadLib();
-      const list = h('div', { class: 'sb-list' });
+      const box = h('div', { class: 'sb-pads' });
+      const chips = h('div', { class: 'sb-chips' });
       const search = h('input', { type: 'search', class: 'sb-search', placeholder: 'Find a sound', value: boardQuery, 'aria-label': 'Find a sound', spellcheck: 'false' });
-      search.addEventListener('input', () => { boardQuery = search.value; list.dataset.sig = ''; ctx.refreshPop(); });
+      search.addEventListener('input', () => { boardQuery = search.value; box.dataset.sig = ''; ctx.refreshPop(); });
       c().bind(() => {
-        const all = lib.filter((x) => x.cat === 'sounds' && (/^Audio\/SFX\//i.test(x.rel) || /\bsfx\b/i.test(x.rel)));
-        search.hidden = all.length <= 12;
+        const pads = boardPads(); const set = padSet();
         const q = boardQuery.trim().toLowerCase();
-        const sounds = q && !search.hidden ? all.filter((x) => niceName(x.name).toLowerCase().includes(q) || x.rel.toLowerCase().includes(q)) : all;
-        const sig = JSON.stringify([sounds.map((x) => [x.path, x.fav]), q]);
-        if (list.dataset.sig === sig) return;
-        list.dataset.sig = sig;
-        list.innerHTML = '';
-        if (!all.length) { list.append(c().hint('No sounds yet. Put short sound files into Audio/SFX in your library.')); return; }
-        if (!sounds.length) { list.append(c().hint(`Nothing called "${boardQuery}".`)); return; }
+        search.hidden = !boardSearch;
+        const folders = [...new Set(pads.map((p) => p.folder))];
+        const anyHidden = pads.some((p) => (set[p.key] || {}).hidden);
+        if (boardChip !== 'all' && boardChip !== 'starred' && boardChip !== 'hidden' && !folders.includes(boardChip)) boardChip = 'all';
+        const sig = JSON.stringify([pads.map((p) => [p.key, p.fav, p.files.length]), set, q, boardChip, boardSearch]);
+        if (box.dataset.sig === sig) return;
+        box.dataset.sig = sig;
+        const chip = (id, label, icon) => h('button', { class: boardChip === id ? 'on' : '', onclick: () => { boardChip = id; box.dataset.sig = ''; ctx.refreshPop(); } }, icon ? iconEl(icon) : null, label);
+        chips.replaceChildren(chip('all', 'All'), pads.some((p) => p.fav) ? chip('starred', 'Starred', 'star') : '', ...(folders.length > 1 ? folders.map((f) => chip(f, f)) : []), anyHidden ? chip('hidden', 'Hidden', 'eye-off') : '',
+          h('button', { class: boardSearch ? 'on' : '', 'aria-label': 'Find a sound', 'data-tip': 'Find a sound', onclick: () => { boardSearch = !boardSearch; if (!boardSearch) boardQuery = ''; box.dataset.sig = ''; ctx.refreshPop(); if (boardSearch) setTimeout(() => search.focus(), 30); } }, iconEl('search')));
+        box.innerHTML = '';
+        if (!pads.length) { box.append(c().hint('No sounds yet. Put short sound files into Audio/SFX in your library.')); return; }
+        let show = pads.filter((p) => (boardChip === 'hidden' ? (set[p.key] || {}).hidden : !(set[p.key] || {}).hidden));
+        if (q) show = show.filter((p) => p.name.toLowerCase().includes(q) || p.files.some((f) => f.rel.toLowerCase().includes(q)));
+        if (boardChip === 'starred') show = show.filter((p) => p.fav);
+        else if (boardChip !== 'all' && boardChip !== 'hidden') show = show.filter((p) => p.folder === boardChip);
+        if (!show.length) { box.append(c().hint(q ? `Nothing called "${boardQuery}".` : 'Nothing here.')); return; }
+        const starred = starredPads();
         const groups = new Map();
-        const starred = sounds.filter((x) => x.fav);
-        if (starred.length) groups.set('Starred', starred);
-        for (const x of sounds) {
-          if (x.fav) continue; // already at the top
-          const g = x.rel.split('/').slice(2, -1).join(' / ') || 'Sounds';
-          if (!groups.has(g)) groups.set(g, []);
-          groups.get(g).push(x);
+        const st = show.filter((p) => p.fav && boardChip !== 'hidden');
+        if (st.length && boardChip === 'all') groups.set('Starred', st);
+        for (const p of show) {
+          if (p.fav && boardChip === 'all') continue;
+          if (!groups.has(p.folder)) groups.set(p.folder, []);
+          groups.get(p.folder).push(p);
         }
         for (const [g, items] of groups) {
-          list.append(h('div', { class: 'tok-group' }, g));
-          for (const it of items) {
-            const name = niceName(it.name);
-            list.append(Hotbar.offer(h('div', { class: 'sb-btn', role: 'button', tabindex: '0', 'data-tip': `${name}: play once on the table`, 'aria-label': name, onclick: () => cmd('sound.play', { path: it.path }), onkeydown: (e) => { if (e.key === 'Enter') cmd('sound.play', { path: it.path }); } },
-              iconEl('player-play'), h('span', { class: 'sb-name' }, name),
-              h('button', { class: `sb-star ${it.fav ? 'on' : ''}`, 'aria-label': it.fav ? `Unstar ${name}` : `Star ${name}`, 'data-tip': it.fav ? 'Starred: always at the top' : 'Star it to keep it at the top',
-                onclick: async (e) => { e.stopPropagation(); await ts.library('fav', { path: it.path, on: !it.fav }); it.fav = !it.fav; list.dataset.sig = ''; ctx.refreshPop(); } }, iconEl('star', it.fav ? 'fill' : ''))),
-              { kind: 'sound', ref: { path: it.path, kind: 'audio', cat: 'sounds' }, label: name, icon: 'volume' }));
-          }
+          box.append(h('div', { class: 'tok-group' }, g), h('div', { class: 'pads snd' }, ...items.map((p) => { const i = starred.indexOf(p) >= 0 ? starred.findIndex((x) => x.key === p.key) : -1; return soundPad(p, i >= 0 && i < 9 ? `⌃⇧${i + 1}` : null); })));
         }
       });
+      tickSounds(box);
+      const stopAll = c().btn('Stop all', 'player-stop', () => cmd('sound.stop'));
+      const count = h('span', { class: 'n' }); stopAll.append(count);
+      c().bind(() => { const keys = new Set(boardNow().map((b) => b.key)); const n = [...keys].filter((k) => playingOf(k)).length; count.textContent = n ? `${n} playing` : ''; });
       return h('div', { class: 'stack' },
-        c().slider({ label: 'Volume', min: 0, max: 1, step: 0.01, get: () => S().settings && S().settings.boardVolume, set: (v) => ts.settings({ boardVolume: v }), fmt: (v) => `${Math.round(v * 100)}%` }),
-        search,
-        list,
-        c().row(c().btn('Stop all', 'player-stop', () => cmd('sound.stop')))); // (F5: no Refresh: the list follows the folder)
+        c().slider({ label: 'Volume', min: 0, max: 1, step: 0.01, get: () => S().settings && S().settings.boardVolume, set: (v) => UI.settingsSoon('boardVolume', { boardVolume: v }), fmt: (v) => `${Math.round(v * 100)}%` }), // (UI audit VI2)
+        chips, search, box,
+        c().row(stopAll)); // (F5: no Refresh: the list follows the folder)
+    }
+    // a sound pad's sheet (right-click): Once or Loop, its volume, its files, hidden
+    let sSheet = null;
+    const sOutside = (e) => { if (sSheet && !sSheet.el.contains(e.target)) closeSoundSheet(); };
+    const sKey = (e) => { if (e.key === 'Escape' && sSheet) { e.stopPropagation(); closeSoundSheet(); } };
+    function closeSoundSheet() { if (sSheet) { sSheet.el.remove(); sSheet = null; document.removeEventListener('pointerdown', sOutside, true); document.removeEventListener('keydown', sKey, true); } }
+    function openSoundSheet(p, pad) {
+      closeSoundSheet();
+      const el = h('div', { class: 'pad-sheet sb-sheet', role: 'dialog', 'aria-label': `${p.name}: how it plays` });
+      document.body.append(el);
+      sSheet = { el, key: p.key };
+      fillSoundSheet();
+      const r = pad.getBoundingClientRect(); const sw = el.offsetWidth; const sh = el.offsetHeight;
+      el.style.left = `${r.right + 8 + sw < window.innerWidth ? r.right + 8 : Math.max(8, r.left - sw - 8)}px`;
+      el.style.top = `${Math.max(8, Math.min(window.innerHeight - sh - 8, r.top))}px`;
+      document.addEventListener('pointerdown', sOutside, true);
+      document.addEventListener('keydown', sKey, true);
+    }
+    function fillSoundSheet() {
+      if (!sSheet) return;
+      const p = boardPads().find((x) => x.key === sSheet.key);
+      if (!p) { closeSoundSheet(); return; }
+      const set = padSet()[p.key] || {};
+      const put = (patch) => { ts.settings({ soundPad: { key: p.key, pad: { ...set, ...patch } } }); setTimeout(fillSoundSheet, 60); };
+      const si = starredPads().findIndex((x) => x.key === p.key);
+      const vol = h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: set.vol ?? 1, 'aria-label': 'Its volume' });
+      const out = h('output', {}, `${Math.round((set.vol ?? 1) * 100)}%`);
+      vol.addEventListener('input', () => { out.textContent = `${Math.round(Number(vol.value) * 100)}%`; });
+      vol.addEventListener('change', () => put({ vol: Number(vol.value) }));
+      sSheet.el.replaceChildren(
+        h('div', { class: 'ps-head' }, iconEl(soundIcon(p.name)), h('b', {}, p.name),
+          h('button', { class: `ps-star ${p.fav ? 'on' : ''}`, 'aria-label': p.fav ? `Unstar ${p.name}` : `Star ${p.name}`, 'data-tip': p.fav ? 'Starred: on top, and on Ctrl + Shift + a number' : 'Star it: on top, and on Ctrl + Shift + a number',
+            onclick: async () => { for (const f of p.files) await ts.library('fav', { path: f.path, on: !p.fav }); for (const f of p.files) f.fav = !p.fav; await loadLib(true); setTimeout(fillSoundSheet, 60); } }, iconEl('star', p.fav ? 'fill' : ''), p.fav && si >= 0 && si < 9 ? `⌃⇧${si + 1}` : null)),
+        h('div', { class: 'ps-body' },
+          h('div', { class: 'ps-row' }, h('label', {}, 'Plays'), h('div', { class: 'seg' },
+            h('button', { class: `seg-btn ${set.loop ? '' : 'on'}`, onclick: () => { put({ loop: false }); if (boardNow().some((b) => b.key === p.key && b.loop)) cmd('sound.stopone', { key: p.key }); } }, h('span', {}, 'Once')), // (a loop that plays stops)
+            h('button', { class: `seg-btn ${set.loop ? 'on' : ''}`, onclick: () => put({ loop: true }) }, h('span', {}, 'Loop')))),
+          h('div', { class: 'ps-vol' }, iconEl('volume'), vol, out),
+          p.files.length > 1 ? h('div', { class: 'ps-row' }, h('label', {}, 'One of these, at random'), h('div', { class: 'ps-files' }, ...p.files.map((f) => h('button', { 'data-tip': 'Play this one on the table', onclick: () => playPad(p, f) }, iconEl('player-play'), niceName(f.name))))) : null),
+        h('div', { class: 'ps-foot' },
+          h('button', { onclick: () => put({ hidden: !set.hidden }) }, iconEl(set.hidden ? 'eye' : 'eye-off'), set.hidden ? 'Show on the board' : 'Hide from the board'),
+          h('button', { onclick: () => { Hotbar.add({ kind: 'sound', ref: { path: p.files[0].path, kind: 'audio', cat: 'sounds' }, label: p.name, icon: 'volume' }); closeSoundSheet(); } }, iconEl('layout-grid'), 'Hotbar')));
     }
 
     // =====================================================================
@@ -950,7 +1083,9 @@ const Toolbox = (() => {
         sig = nsig;
         // a field being typed in keeps the keyboard and what was typed
         const a = document.activeElement;
-        if (!iniFocus && a && box.contains(a) && a.dataset.f) iniFocus = { f: a.dataset.f, value: a.value !== a.defaultValue ? a.value : undefined, pos: a.selectionStart };
+        // (UI audit VB2: what was selected stays selected. Enter in the HP column moves on to the next fighter with its text
+        // selected; drawn again with only a caret, "-5" was typed in front of "12/20" and that fighter got −99 HP)
+        if (!iniFocus && a && box.contains(a) && a.dataset.f) iniFocus = { f: a.dataset.f, value: a.value !== a.defaultValue ? a.value : undefined, pos: a.selectionStart, end: a.selectionEnd };
         box.innerHTML = '';
         if (!I) { box.append(UI.loader('Getting the fighters …')); return; }
         renderInit(box, I, s);
@@ -959,7 +1094,7 @@ const Toolbox = (() => {
           if (f) {
             if (iniFocus.value !== undefined) f.value = iniFocus.value;
             f.focus();
-            try { if (iniFocus.pos != null) f.setSelectionRange(iniFocus.pos, iniFocus.pos); else f.select(); } catch {}
+            try { if (iniFocus.pos != null) f.setSelectionRange(iniFocus.pos, iniFocus.end ?? iniFocus.pos); else f.select(); } catch {}
           }
           iniFocus = null;
         }
@@ -1296,17 +1431,21 @@ const Toolbox = (() => {
         removeEventListener('pointermove', move, true);
         removeEventListener('pointerup', up, true);
         removeEventListener('pointercancel', up, true);
+        removeEventListener('keydown', esc, true);
         for (const r of moving) r.classList.remove('dragging');
         line.remove();
         if (!moved || e.type === 'pointercancel') return;
         cmd('init.move', what.gid ? { gid: what.gid, before } : { id: what.id, before });
       };
+      // (UI audit VH10) Esc cancels the drag: the row stays where it was (letting go anywhere moved it)
+      const esc = (e) => { if (e.key !== 'Escape') return; e.preventDefault(); e.stopImmediatePropagation(); up({ type: 'pointercancel' }); };
+      addEventListener('keydown', esc, true);
       addEventListener('pointermove', move, true);
       addEventListener('pointerup', up, true);
       addEventListener('pointercancel', up, true);
     }
 
-    return { buildTalkPop, buildToolbox, openPanel, togglePanel, talkToggle, strikeNow, loadLib, PANELS, PANEL_TIPS, panelInfo, running };
+    return { buildTalkPop, buildToolbox, openPanel, togglePanel, talkToggle, hasAlpha, strikeNow, loadLib, PANELS, PANEL_TIPS, panelInfo, running, playStarredSound, boardPads, playPad, closeSoundSheet };
   }
 
   return { create };

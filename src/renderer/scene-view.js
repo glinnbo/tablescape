@@ -86,8 +86,11 @@ const OsLeaves = (() => {
   return { ready, parts, KIND };
 })();
 
+const TV_GAP = 13; // (ms between two drawings of the effects on the TV: see loop)
 class SceneView {
+  static alive = new Set(); // (Speed 9, WI7) the views that are not closed
   constructor(host, { gm = false } = {}) {
+    SceneView.alive.add(this); // (Speed 9, WI7)
     this.gm = gm;
     this.root = div('sv');
     this.world = div('sv-world');
@@ -296,8 +299,17 @@ class SceneView {
     if (this.map) { this.renderGrid(true); this.redrawSoon(); }
   }
   redrawSoon() {
-    if (this.redrawRaf) return;
-    this.redrawRaf = requestAnimationFrame(() => { this.redrawRaf = 0; if (this.map) this.drawFrame(); });
+    if (this.redrawRaf || this.dead) return;
+    // (WE3: not a second picture in a moment the view's own loop has just drawn; and the loop counts this one as its
+    // own, so it does not draw another right after)
+    // (WE1: on the TV not sooner after the last picture than its own loop would draw, see TV_GAP: a thing dragged
+    // made it draw as often as the screen shows a picture, twice as often as it draws when left alone)
+    this.redrawRaf = requestAnimationFrame((ms) => {
+      this.redrawRaf = 0;
+      if (!this.map || this.lastFrame === ms) return;
+      if (!this.gm && ms - this.lastFrame < (this.frameGap || TV_GAP) - 1) { this.redrawSoon(); return; }
+      this.lastFrame = ms; this.drawFrame();
+    });
   }
   // the rectangle the layers cover, in map inches
   layerRectInMap() {
@@ -333,7 +345,7 @@ class SceneView {
     FogCache.set(map.id, map.fog);
     const switched = !this.map || this.map.id !== map.id;
     this.map = map;
-    if (switched) { this.fogSig = ''; this.gridSig = ''; this.geoCache.clear(); this.pinned = null; const keep = new Set((map.fx || []).map((f) => f.id)); FX.forget(keep); if (typeof Creatures === 'object' && Creatures.forget) Creatures.forget(keep); } // (Q3)
+    if (switched) { this.fogSig = ''; this.gridSig = ''; this.geoCache.clear(); this.pinned = null; const keep = new Set(); for (const v of SceneView.alive) for (const f of (v.map && v.map.fx) || []) keep.add(f.id); /* (Speed 9, WI7: every view's map counts: the hidden view of the map you edit threw away the picture copies of the live map's Sway and Swirl, which were then made anew) */ FX.forget(keep); if (typeof Creatures === 'object' && Creatures.forget) Creatures.forget(keep); } // (Q3)
     if (this.live) this.endLive(); // 4.4: the map stopped moving: everything is drawn anew for where it is
     const t = `translate(${this.v.x * this.ppi}px, ${this.v.y * this.ppi}px) scale(${this.v.zoom})`;
     this.tagSize();
@@ -350,6 +362,12 @@ class SceneView {
     this.renderBg();
     this.renderLook();
     this.renderLayers();
+    this.renderRest();
+  }
+  // everything a state sets up after the picture and the layers; each part knows by itself whether its own changed
+  // draw: false: nothing on the canvases changed (a picture moved, which is an element of its own)
+  renderRest(draw = true) {
+    const map = this.map;
     this.renderGrid();
     this.renderFog();
     for (const id of this.geoCache.keys()) if (!map.spells.some((s) => s.id === id)) this.geoCache.delete(id);
@@ -365,9 +383,71 @@ class SceneView {
     this.renderOsDoors();
     this.renderAreas();
     this.renderTrails();
-    this.drawFrame();
+    // Speed 5 (WE3, stage 1 of the plan of 26 Nov): a state that arrived drew a picture of every moving layer at once,
+    // on top of the ones the view draws anyway: 190 states in a three second drag meant 190 extra pictures (3 to 10 ms
+    // each on a big map: all painted areas, and all lights for a slider). The picture now comes with the next one the
+    // screen shows, one however many states came in between, and it counts as the view's own picture of that moment.
+    if (draw) this.redrawSoon();
     this.updateAnimation();
     this.emit('render');
+  }
+  // Speed 5 (WE1): a thing of the map as it is now, sent alone while it is moved (main.js softLive). It takes the place
+  // of the one this view has. For a layer only its own node is laid out (a state lays out every one of them: 2 ms on a
+  // map of 400 assets); the rest is what a state does. → false: not known here (the whole state brings it)
+  // value: a part of the map as it is now (its light, weather, wind, grid …: the map's own sliders)
+  // more.add: a thing this view does not have yet is added at the end (a stroke just begun);
+  // more.grow: { id, sid, pts }: the new piece of a stroke being painted (sid: which stroke of the area) or drawn
+  patch(kind, items, value, more = {}) {
+    const m = this.map;
+    if (m && more.grow && Array.isArray(m[kind])) {
+      const it = m[kind].find((q) => q.id === more.grow.id);
+      const st = it && (more.grow.sid != null ? (it.strokes || []).find((x) => x.sid === more.grow.sid) : it);
+      if (!st || !Array.isArray(st.pts)) return false;
+      st.pts.push(...more.grow.pts);
+      this.mapRev = (this.mapRev || 0) + 1;
+      this.stats.patched = (this.stats.patched || 0) + 1;
+      this.renderRest();
+      return true;
+    }
+    if (m && more.add && Array.isArray(m[kind]) && Array.isArray(items)) for (const it of items) if (!m[kind].some((q) => q.id === it.id)) m[kind].push(it);
+    if (m && value && typeof value === 'object' && !Array.isArray(m[kind]) && kind in m) {
+      m[kind] = value;
+      this.mapRev = (this.mapRev || 0) + 1;
+      this.stats.patched = (this.stats.patched || 0) + 1;
+      if (kind === 'grid') { this.gridSig = ''; this.renderLayers(); } // (a token is as large as its squares)
+      this.renderRest();
+      return true;
+    }
+    if (!m || !Array.isArray(m[kind]) || !Array.isArray(items)) return false;
+    const done = [];
+    for (const it of items) {
+      const i = m[kind].findIndex((q) => q.id === it.id);
+      if (i < 0) continue;
+      done.push([m[kind][i], it]); m[kind][i] = it;
+    }
+    if (!done.length) return false;
+    this.mapRev = (this.mapRev || 0) + 1;
+    this.stats.patched = (this.stats.patched || 0) + 1;
+    if (kind === 'layers') {
+      let all = false;
+      for (const [was, l] of done) {
+        const n = this.nodes.get(l.id);
+        const parent = l.role === 'overlay' ? (l.anchor === 'table' ? this.tableOv : this.overlaysEl) : l.role === 'asset' ? this.assetParent(l) : null;
+        // (anything that makes a state build the node anew, or changes where it stands among the others: as a state does it)
+        if (!n || n.url !== l.url || n.role !== l.role || (parent && n.el.parentNode !== parent) || (l.role === 'asset' && !!n.tree !== this.liveTree(l)) || !!was.front !== !!l.front || !!was.over !== !!l.over) { all = true; break; }
+      }
+      if (all) this.renderLayers();
+      else {
+        for (const [, l] of done) this.updateNode(l, this.nodes.get(l.id));
+        this.canopiesSoon();
+        if (this.treeN || Object.keys(this.tcv).length) this.redrawSoon();
+      }
+    } else if (kind === 'fx' && done.some(([was, f]) => was.holder || f.holder)) this.renderLayers(); // (a light's holder stands among the layers)
+    // a layer is an element of its own: the canvases (effects, light, spells) are only drawn anew when one of them
+    // hangs on it (a light or a spell that goes with it) or it is a living tree
+    const draw = kind !== 'layers' || done.some(([, l]) => this.liveTree(l) || m.fx.some((x) => x.attachTo === l.id) || (m.spells || []).some((x) => x.attachTo === l.id));
+    this.renderRest(draw);
+    return done.length === items.length;
   }
 
   // ---------- 4.4: the map moving (a drag, Alt + wheel, the size slider) ----------
@@ -439,7 +519,7 @@ class SceneView {
   clear() {
     this.live = null;
     this.map = null;
-    if (this.bgNode) { this.bgNode.el.remove(); this.bgNode = null; }
+    if (this.bgNode) { freeBg(this.bgNode); this.bgNode = null; }
     this.dropOldBg();
     if (this.sharpEl) { this.sharpEl.remove(); this.sharpEl = null; this.sharpTiles = null; }
     if (this.osDoorSvg) { this.osDoorSvg.remove(); this.osDoorSvg = null; this.osDoorEls = null; }
@@ -481,6 +561,14 @@ class SceneView {
     for (const n of this.nodes.values()) { this.dropSheet(n); if (n.media) { n.media.removeAttribute('src'); n.media.load?.(); } }
     if (this.bgNode && this.bgNode.kind === 'video') { this.bgNode.el.removeAttribute('src'); this.bgNode.el.load(); }
     this.root.remove();
+    // Speed 9 (WI7): a closed view kept the memory of its canvases (up to 3840 dots wide each) until the browser
+    // tidied up some time later, and a redraw still waiting could draw on it once more. It draws no more, and its
+    // canvases are emptied at once.
+    SceneView.alive.delete(this);
+    cancelAnimationFrame(this.redrawRaf); this.redrawRaf = 0;
+    cancelAnimationFrame(this.raf); this.raf = 0;
+    for (const c of Object.values(this.cv)) { c.el.width = 0; c.el.height = 0; }
+    for (const el of this.root.querySelectorAll('canvas')) { el.width = 0; el.height = 0; }
   }
 
   // videos play while the view plays, unless the GM screen shows them as still pictures (Effects quality: Low)
@@ -583,18 +671,18 @@ class SceneView {
   // ---------- background (map space) ----------
   renderBg() {
     const bg = this.map.bg;
-    if (!bg) { if (this.bgNode) { this.bgNode.el.remove(); this.bgNode = null; } this.dropOldBg(); this.renderSharp(); this.osInkPictured([]); this.broken.delete('bg'); return; }
+    if (!bg) { if (this.bgNode) { freeBg(this.bgNode); this.bgNode = null; } this.dropOldBg(); this.renderSharp(); this.osInkSync(); this.broken.delete('bg'); return; }
     if (!this.bgNode || this.bgNode.url !== bg.url) {
       // Beta 3.22: a picture that follows a picture stays until the new one is there (a drawn map gets a new one with
       // every change: no blink in between)
       const old = this.bgNode;
-      if (old && !old.nw && this.bgOld && bg.kind === 'image') old.el.remove(); // (one that never showed: the one on screen stays)
+      if (old && !old.nw && this.bgOld && bg.kind === 'image') freeBg(old); // (one that never showed: the one on screen stays)
       else {
         this.dropOldBg();
-        if (old && old.kind === 'image' && bg.kind === 'image' && old.nw) this.bgOld = old; else if (old) old.el.remove();
+        if (old && old.kind === 'image' && bg.kind === 'image' && old.nw) this.bgOld = old; else if (old) freeBg(old);
       }
       const el = makeMedia(bg.kind, bg.url, bg.kind === 'video' ? this.videoOn() : this.playing);
-      const node = { el, url: bg.url, kind: bg.kind, nw: 0, nh: 0, osIds: bg.osIds || null };
+      const node = { el, url: bg.url, kind: bg.kind, nw: 0, nh: 0 };
       if (bg.kind !== 'video') el.style.visibility = 'hidden'; // (until it is decoded and in its place)
       this.bgNode = node;
       this.pinned = null; // a new background is fitted (and fixed) again
@@ -611,7 +699,7 @@ class SceneView {
         if (this.bgNode === node) {
           const old = this.bgOld;
           if (old) requestAnimationFrame(() => requestAnimationFrame(() => { if (this.bgOld === old) this.dropOldBg(); }));
-          this.osInkPictured(node.osIds);
+          this.osInkPictured();
         }
         this.layoutOverlays();
         this.emit('broken');
@@ -705,7 +793,10 @@ class SceneView {
       seen.add(d.id);
       const len = Math.hypot(d.x2 - d.x1, d.y2 - d.y1); if (len < 1e-3) continue;
       // where the door is: on the wall's middle (as the picture, made for the same drawing)
-      const pk = `${m.bg.os || ''}|${d.x1},${d.y1},${d.x2},${d.y2},${sq}`;
+      // (Speed 2, WB9: a new picture of the same floors and wall lines keeps every door's place. The key was the
+      // picture's own name, so every edit of anything made both screens place every door again)
+      if (this.osShapeFor !== (m.bg.os || '')) { this.osShapeFor = m.bg.os || ''; this.osShape = Oldschool.shapeSig ? Oldschool.shapeSig(os) : this.osShapeFor; }
+      const pk = `${this.osShape}|${d.x1},${d.y1},${d.x2},${d.y2},${sq}`;
       let pl = this.osDoorPl.get(d.id);
       if (!pl || pl.key !== pk) { try { pl = { key: pk, ...Oldschool.doorPlace(os, d, sq) }; } catch { pl = { key: pk, off: 0, side: 0 }; } this.osDoorPl.set(d.id, pl); }
       const win = d.kind === 'window'; const leaf = d.leaf || (win ? 'clear' : 'wood');
@@ -810,10 +901,10 @@ class SceneView {
   // What the GM draws reaches the TV as a drawing first: a pen traces its outline (a corridor, a wall line is painted
   // along), then its tile fills in. When the new picture is there and the pen has finished, the ink fades and the
   // picture shows it. Under the fog like the picture. The GM screen has its own preview (oldschool-tool.js).
-  osInkPictured(ids) {
+  // the map's picture is on the screen now: what it shows needs no ink any more
+  osInkPictured() {
     if (this.gm) return;
-    const os = this.map && this.map.os;
-    this.osInkShown = new Set(ids || (os ? [...os.items, ...os.doors].map((x) => x.id) : [])); // (a picture from before 3.23: all of it)
+    this.osInkLoaded = true;
     this.osInkSync();
   }
   osInkClear() {
@@ -824,11 +915,20 @@ class SceneView {
     if (this.gm) return;
     const m = this.map; const os = m && m.os;
     if (!os || typeof Oldschool !== 'object') { if (this.osInkSvg) this.osInkClear(); return; }
-    if (this.osInkMap !== m.id) {
-      this.osInkClear(); this.osInkMap = m.id;
-      // first sight of this map: what its picture shows (or, without a picture yet, nothing) counts as drawn
-      const all = [...os.items, ...os.doors].map((x) => x.id);
-      this.osInkShown = new Set(m.bg ? m.bg.osIds || all : []);
+    // Speed 9 (WI4): the state says which things the map's picture does not show yet (bg.osNew, from main), not which
+    // it shows (that list was cut at 5000). Counted as drawn, and so not inked: without a picture, nothing; at the
+    // first sight of a map and when its picture has come onto the screen, all but those; while that picture is on the
+    // screen, the same with every state. While a new picture is still loading the old count stays, as the old
+    // picture does. A picture from before 3.23 says nothing (no osNew): all of it, at first sight and when it comes.
+    const first = this.osInkMap !== m.id;
+    if (first) { this.osInkClear(); this.osInkMap = m.id; }
+    const loaded = !!this.osInkLoaded; this.osInkLoaded = false;
+    const told = !!(m.bg && Array.isArray(m.bg.osNew));
+    const onScreen = !!(m.bg && this.bgNode && this.bgNode.nw && this.bgNode.url === m.bg.url);
+    if (!m.bg) this.osInkShown = new Set();
+    else if (first || loaded || !this.osInkShown || (told && onScreen)) {
+      const fresh = new Set(told ? m.bg.osNew : []);
+      this.osInkShown = new Set(); for (const x of os.items) if (!fresh.has(x.id)) this.osInkShown.add(x.id); for (const x of os.doors) if (!fresh.has(x.id)) this.osInkShown.add(x.id);
     }
     if (!this.osInk) this.osInk = new Map();
     const NS = 'http://www.w3.org/2000/svg';
@@ -1306,7 +1406,8 @@ class SceneView {
     if (!show) { if (this.gizmoEl.firstChild) this.gizmoEl.innerHTML = ''; this.gizmoSig = ''; return; }
     const n = this.nodes.get(id); if (n && n.el) n.el.classList.add('has-gizmo');
     const at = this.mapToPx(b.x, b.y); const s = this.ppi * this.v.zoom;
-    const sig = [id, round3(at.x), round3(at.y), round3(b.w * s), round3(b.h * s), b.rot, b.fixed ? 1 : 0].join('|');
+    const small = Math.min(b.w, b.h) * s * ((this.cam && this.cam.s) || 1) < 44; // (UI audit VK11: on a small asset the side grips covered it: corners and the knob only)
+    const sig = [id, round3(at.x), round3(at.y), round3(b.w * s), round3(b.h * s), b.rot, b.fixed ? 1 : 0, small ? 1 : 0].join('|');
     if (sig === this.gizmoSig && this.gizmoEl.firstChild) return;
     this.gizmoSig = sig;
     let f = this.gizmoEl.firstChild;
@@ -1318,7 +1419,7 @@ class SceneView {
       this.gizmoEl.append(f);
     }
     f.dataset.id = id;
-    f.classList.toggle('no-sides', !!b.fixed); // (a living tree keeps its shape: corners and the knob only)
+    f.classList.toggle('no-sides', !!b.fixed || small); // (a living tree keeps its shape: corners and the knob only; VK11: a small asset too)
     Object.assign(f.style, { left: `${at.x}px`, top: `${at.y}px`, width: `${b.w * s}px`, height: `${b.h * s}px`, transform: `translate(-50%, -50%) rotate(${b.rot}deg)` });
     // the pointer over a dot shows which way it pulls, as the asset lies now
     const CUR = ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize'];
@@ -2020,9 +2121,17 @@ class SceneView {
     };
   }
 
+  // (Speed 6, WF6) the map cannot be seen (a blackout on the TV): nothing of it is drawn until it can. Sounds and
+  // videos go on: only the drawing rests.
+  setDark(on) {
+    on = !!on; if (!!this.dark === on) return;
+    this.dark = on;
+    this.updateAnimation();
+    if (!on) this.redrawSoon();
+  }
   hasAnimation() {
     const m = this.map;
-    if (!m || !this.playing) return false;
+    if (!m || !this.playing || this.dark) return false;
     if (this.gm && this.fxMode === 'still') return false; // (Prototype 19: standing still on the GM screen)
     if (this.momentsOn()) return true;
     if (FX.weatherOn(m.weather)) return true;
@@ -2035,7 +2144,7 @@ class SceneView {
   }
   updateAnimation() {
     this.updateTreeLoop();
-    const on = this.hasAnimation();
+    const on = !this.dead && this.hasAnimation();
     if (on && !this.raf) this.raf = requestAnimationFrame(this.loop);
     if (!on && this.raf) { cancelAnimationFrame(this.raf); this.raf = 0; if (this.map) this.drawMoments(Date.now()); }
   }
@@ -2044,7 +2153,10 @@ class SceneView {
     if (!this.hasAnimation()) { this.drawMoments(Date.now()); return; } // a moment that just ended lets go of the picture
     this.raf = requestAnimationFrame(this.loop);
     const base = this.gm ? (this.fxMode === 'smooth' ? 0 : 80) : 0; // (Prototype 19: Full speed, or about 12 a second on the GM screen)
-    const gap = this.gm ? (this.wideOn ? Math.min(500, Math.max(base || 16, (this.wideMs || 0) * 2.5)) : base) : this.frameGap || 0;
+    // (Speed 6, WF1: on the TV at most about 60 a second. It drew as often as the screen shows a picture: 144 times a
+    // second was measured, for no gain. TV_GAP lets every frame of a 60 Hz screen through and every second one of a
+    // 120 or 144 Hz screen.)
+    const gap = this.gm ? (this.wideOn ? Math.min(500, Math.max(base || 16, (this.wideMs || 0) * 2.5)) : base) : this.frameGap || TV_GAP;
     if (ms - this.lastFrame < gap) return;
     this.lastFrame = ms;
     if (!this.wideOn) { this.drawFrame(); return; }
@@ -2054,7 +2166,7 @@ class SceneView {
   }
 
   drawFrame() {
-    if (!this.map) return;
+    if (!this.map || this.dead) return;
     const real = Date.now();
     // Time stop: every effect stands still where it was
     const ms = this.freezeAt || real;
@@ -2079,7 +2191,7 @@ class SceneView {
   // Living trees never stand still, but they must not make the rest draw: a map with trees and nothing else that moves
   // (its light, its mist, its weather all still) would otherwise draw every layer sixty times a second. So the trees
   // have a loop of their own that draws only them; the other layers keep drawing only when something of theirs moves.
-  treesMove() { return (this.treeN > 0 || this.livingOn()) && this.playing && !!this.map && !(this.gm && this.fxMode === 'still'); }
+  treesMove() { return (this.treeN > 0 || this.livingOn()) && this.playing && !this.dark && !!this.map && !(this.gm && this.fxMode === 'still'); }
   updateTreeLoop() {
     const on = this.treesMove();
     if (on && !this.treeRaf) this.treeRaf = requestAnimationFrame(this.treeLoop);
@@ -2091,7 +2203,7 @@ class SceneView {
     if (this.dead) return;
     if (!this.treesMove()) { if (this.lcv && !this.livingOn()) this.drawLiving(0); return; }
     this.treeRaf = requestAnimationFrame(this.treeLoop);
-    const gap = this.gm ? (this.fxMode === 'smooth' ? 0 : 80) : this.frameGap || 0; // (as the effects: about 12 a second on your screen unless set to full speed; 30 on the TV on Low)
+    const gap = this.gm ? (this.fxMode === 'smooth' ? 0 : 80) : this.frameGap || TV_GAP; // (as the effects: about 12 a second on your screen unless set to full speed; 30 on the TV on Low, about 60 otherwise)
     if (ms - (this.treeFrame || 0) < gap) return;
     this.treeFrame = ms;
     this.drawTrees();
@@ -2128,7 +2240,9 @@ class SceneView {
   livingSource(c, m, p, g) {
     const P = g / (m.bg.scale || 1); const baked = m.bg.os && m.bg.live && m.bg.live.url ? m.bg.live.url : null;
     const areas = this.livingAreas();
-    if (!areas.length) return { key: `${m.bg.url}|${baked}`, pic: m.bg.url, mask: baked, x: p.x, y: p.y, w: p.w, h: p.h, g, P };
+    // (WC2: maskKey: the living map by what is in it and where it lies. The same as before: the layer takes the new
+    // picture and keeps its masks and, where the floor under the grass is the same, its blades)
+    if (!areas.length) return { key: `${m.bg.url}|${baked}`, pic: m.bg.url, mask: baked, maskKey: baked && m.bg.live.key ? `${m.bg.live.key}|${[p.x, p.y, p.w, p.h, g, P].map((n) => Math.round(n * 1000)).join(',')}` : null, x: p.x, y: p.y, w: p.w, h: p.h, g, P };
     const key = `${m.bg.url}|${baked || ''}|${areas.map((f) => `${f.id}:${f.preset}:${FX.strokeSig(f)}:${f.color || ''}`).join(';')}|${[p.x, p.y, p.w, p.h, g].map((n) => Math.round(n * 1000)).join(',')}`;
     if (c.src && c.src.key === key) return c.src;
     // (while a stroke is being painted: grown again at most every 300 ms)
@@ -2143,7 +2257,10 @@ class SceneView {
   drawLiving(dt) {
     const st = { on: false, blades: 0, kinds: null }; this.stats.living = st;
     const on = this.livingOn(); const p = on ? this.bgPlacement() : null;
-    if (!on || !p || !this.bgNode) { if (this.lcv) { this.lcv.L.clear(); this.lcv.L.source(null); } return; }
+    if (!on) { if (this.lcv) { this.lcv.L.clear(); this.lcv.L.source(null); } return; }
+    // (WC2: wanted, but the map picture is being changed for a new one: nothing to draw on for a moment. What the
+    // layer holds stays: letting it go here made the TV read the living map and grow the grass again at every edit)
+    if (!p || !this.bgNode) { if (this.lcv) this.lcv.L.clear(); return; }
     if (!this.lcv) {
       const el = document.createElement('canvas'); el.className = 'sv-canvas sv-living';
       const L = Living.layer(el, () => { if (!this.dead) { this.redrawSoon(); this.updateTreeLoop(); } });
@@ -2296,7 +2413,7 @@ class SceneView {
     ctx.setTransform(k, 0, 0, k, 0, 0);
     const at = (m) => this.mapToTable(m.x, m.y);
     if (typeof Creatures === 'object') Creatures.scene({ dark: Vision.lightNow(this.map.light).darkness, cell: this.cellK() }); // (second-birds: Birds take flight)
-    Moments.draw(ctx, this.W / this.ppi, this.H / this.ppi, list, now, at, { gm: this.gm, sq: this.cellK() * this.v.zoom });
+    Moments.draw(ctx, this.W / this.ppi, this.H / this.ppi, list, now, at, { gm: this.gm, sq: this.cellK() * this.v.zoom, lights: () => (this.map.fx || []).filter((f) => FXDATA.isLight(f) && f.x != null).map((f) => this.mapToTable(f.x, f.y)) }); // (I8: Lights out, smoke from each flame)
     if (typeof Creatures === 'object') Creatures.scene(null);
   }
   // videos and effects stand still while time stops; they go on from there afterwards
@@ -2430,7 +2547,24 @@ class SceneView {
     // magical darkness goes on its own layer above the grid, so grid lines don't show through it
     const veil = all.filter((f) => f.kind === 'region' && f.preset === 'darkness');
     this.stats.veil = veil.length;
-    const layers = [[this.cv.atmo, all.filter((f) => !veil.includes(f))], [this.cv.veil, veil]];
+    // (Speed 6, WF5: on the TV, what lies far outside the table is not drawn at all. Every fire, smoke and painted area
+    // of the whole map was worked out for every frame, also on a map many times the table's size. Far: more than six
+    // times its own size and eight squares outside for a thing with a place; for a painted area, no point of it within
+    // its brush and four squares of the table.)
+    let seen = all;
+    if (!this.gm) {
+      const tr = this.tableRectInMap(); const cell = this.cellK();
+      if (tr && tr.w > 0 && tr.h > 0 && cell > 0) {
+        const inside = (x, y, pad) => x > tr.x - pad && x < tr.x + tr.w + pad && y > tr.y - pad && y < tr.y + tr.h + pad;
+        seen = all.filter((f) => {
+          if (f.kind !== 'region') { const p = this.fxPos(f); return inside(p.x, p.y, (f.r || 1) * 6 + cell * 8); }
+          for (const st of f.strokes || []) { const q = st.pts || []; const pad = (st.r || 0) + cell * 4; for (let i = 0; i + 1 < q.length; i += 2) if (inside(q[i], q[i + 1], pad)) return true; }
+          return !(f.strokes && f.strokes.length); // (an area without strokes: left to the drawing, as before)
+        });
+      }
+    }
+    this.stats.offTable = all.length - seen.length;
+    const layers = [[this.cv.atmo, seen.filter((f) => !veil.includes(f))], [this.cv.veil, seen.filter((f) => veil.includes(f))]];
     const one = (ctx, f) => {
       let fx = f.hidden ? { ...f, intensity: (f.intensity ?? 1) * 0.35 } : f;
       if (this._lo && f.kind === 'emitter' && (f.bright > 0 || f.preset === 'shaft' || f.preset === 'window')) fx = { ...fx, outK: this.outK(f) }; // a flame (a beam) goes out with the lights
@@ -2509,7 +2643,7 @@ class SceneView {
       const D = Math.max(0.05, Geom.ftToIn(g, Math.max(f.dim || 0, f.bright || 0)));
       const color = f.color || (f.kind === 'light' ? '#ffcf8a' : '#ffb45a');
       // with line of sight the light stops at walls and closed doors
-      const poly = Vision.lightPoly(this.map, p.x, p.y, D * 1.04);
+      const poly = Vision.lightPoly(this.map, p.x, p.y, D * 1.04, f); // (Beta 3.68: one on a wall lights only its own side)
       // (Beta 3.51: own: a colour picked away from the light's own. A light in its own colour throws no colour by day)
       const L = { x: p.x, y: p.y, B: Geom.ftToIn(g, f.bright || 0), D, color, sat: f.eye ? 0 : lightSat(f), own: ownColour(f, this.map), flicker: f.flicker, strength: (f.intensity ?? 1) * FX.waveOf(f, t) * this.outK(f), s: FX.seedOf(f.id), poly };
       // Beta 2: a bullseye lantern lights a cone, the way it faces (carried: the way the token faces)
@@ -2597,7 +2731,10 @@ class SceneView {
   // Explored ground as a soft mask in canvas pixels (only redrawn when it changes).
   seenMask(c) {
     const seen = this.map.light.seen;
-    const sig = `${this.map.id}|${seen.length}|${c.el.width}x${c.el.height}|${this.v.x},${this.v.y},${this.v.zoom}|${this.rectSig}`;
+    // (Speed 9, WI3: by its newest record too. At its limit of 3000 the number of records stops changing: the oldest
+    // goes for each new one, and the picture of the explored ground stopped following)
+    const last = seen[seen.length - 1];
+    const sig = `${this.map.id}|${seen.length}:${last ? `${last.x},${last.y},${last.r}` : ''}|${c.el.width}x${c.el.height}|${this.v.x},${this.v.y},${this.v.zoom}|${this.rectSig}`;
     if (this._seen && this._seen.sig === sig) return this._seen.el;
     // K3 (open point): both canvases are kept and only resized when the layer's size changes (a map dragged with
     // explored ground made a new one and reallocated the other at every frame)
@@ -2893,7 +3030,7 @@ class SceneView {
     if (pv) {
       for (const sg of pv.segs || []) {
         const a = P(sg[0], sg[1]); const b = P(sg[2], sg[3]);
-        parts.push(`<line class="w preview ${pv.door ? 'door' : pv.kind || ''}" x1="${round3(a.x)}" y1="${round3(a.y)}" x2="${round3(b.x)}" y2="${round3(b.y)}"/>`);
+        parts.push(`<line class="w preview ${pv.door ? 'door' : pv.kind || ''} ${pv.hot ? `hot hot-${pv.hot}` : ''}" x1="${round3(a.x)}" y1="${round3(a.y)}" x2="${round3(b.x)}" y2="${round3(b.y)}"/>`); // (hot: UI audit VG6, the wall a click would take)
       }
       if (pv.at) { const q = P(pv.at.x, pv.at.y); parts.push(`<circle class="snap ${pv.snapped ? 'on' : ''} ${pv.onWall ? 'wall' : ''}" cx="${round3(q.x)}" cy="${round3(q.y)}" r="${pv.onWall ? 6 : 5}"/>`); }
       if (pv.box) {
@@ -3500,7 +3637,7 @@ function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 const FLY = new Set(FXDATA.EMITTERS.filter((d) => d.fly).map((d) => d.id));
 // Beta 3.65: painted areas the engine draws (living.js), and as what. They have no drawing in fx.js
 const LIVE_FX = { water: 'water', ember: 'lava', shimmer: 'shimmer', pulse: 'pulse', ripple: 'ripple' };
-const FLY_AREAS = new Set(['batflight']); // (Beta 3.66) painted areas drawn on the fly layer
+const FLY_AREAS = new Set(['batflight', 'birdflight']); // (Beta 3.66) painted areas drawn on the fly layer
 const LIVE_ONLY = new Set(['ember', 'shimmer', 'pulse', 'ripple']); // (these light up the map picture itself: without the engine there is nothing to draw)
 function layerCanvas(cls, maxW) {
   const el = document.createElement('canvas');
@@ -3518,6 +3655,13 @@ function sizeCanvas(c, W, H) {
 // (Beta 3.63) a layer with nothing on it is taken out of the picture, so the screen has one layer less to put together
 // (the fly and the critters layer are empty on most maps)
 function showLayer(c, on) { if (c.shown === on) return; c.shown = on; c.el.style.display = on ? '' : 'none'; }
+// Speed 9 (WI7): a map picture taken off the map. A video gives its player and its decoded pictures back at once
+// (it was only taken out of the page, and kept them until the browser tidied up).
+function freeBg(n) {
+  if (!n || !n.el) return;
+  if (n.kind === 'video') { try { n.el.pause(); n.el.removeAttribute('src'); n.el.load(); } catch {} }
+  n.el.remove();
+}
 function clearCanvas(c) {
   if (c.empty) return;
   c.ctx.setTransform(1, 0, 0, 1, 0, 0);

@@ -91,6 +91,12 @@ function carveDoors(walls, doors, tol) {
 // ---------- Universal VTT ----------
 function readVtt(file, { image = false } = {}) {
   const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const out = vttNeutral(j, file);
+  if (image && out.hasImage) out.image = j.image;
+  return out;
+}
+// (Speed 4, WD6) the same from a file that is already read: its walls, doors and lights, without its picture
+function vttNeutral(j, file) {
   const res = j.resolution || {};
   const o = res.map_origin || { x: 0, y: 0 };
   const size = res.map_size || {};
@@ -116,12 +122,18 @@ function readVtt(file, { image = false } = {}) {
     ppg: num(res.pixels_per_grid, 0), walls: [...walls, ...doors], lights,
     baked: !!(j.environment && j.environment.baked_lighting), hasImage: typeof j.image === 'string' && j.image.length > 100,
   };
-  if (image && out.hasImage) out.image = j.image;
   return out;
 }
 // the map picture inside a Universal VTT file
-function vttImage(file) {
+function vttImage(file) { return vttImageOf(JSON.parse(fs.readFileSync(file, 'utf8'))); }
+// (Speed 4, WD6) the picture and the walls from one reading of the file (20 to 60 MB): { img, neutral }
+function vttBoth(file) {
   const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+  let neutral = null;
+  try { neutral = vttNeutral(j, file); } catch { /* (no map size: a picture without walls) */ }
+  return { img: vttImageOf(j), neutral };
+}
+function vttImageOf(j) {
   if (typeof j.image !== 'string' || j.image.length < 100) return null;
   const b64 = j.image.replace(/^data:[^,]+,/, '');
   const head = b64.slice(0, 8);
@@ -217,4 +229,4 @@ function place(n, rect) {
 // how many squares the picture is wide and high
 const squares = (n) => ({ w: n.w / n.perSquare, h: n.h / n.perSquare });
 
-module.exports = { isVtt, isFoundry, read, readVtt, readFoundry, vttImage, sidecar, place, squares, VTT_EXT, hexColor };
+module.exports = { isVtt, isFoundry, read, readVtt, readFoundry, vttImage, vttBoth, sidecar, place, squares, VTT_EXT, hexColor };

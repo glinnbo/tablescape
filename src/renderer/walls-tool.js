@@ -33,6 +33,7 @@ const WallsTool = (() => {
     const c = () => ctx.ctl;
     const prefs = { mode: 'wall', snap: true, door: 1, kind: 'wall' }; // (Prototype 14: kind: wall | window | invisible)
     try { Object.assign(prefs, JSON.parse(localStorage.getItem('wallPrefs') || '{}')); } catch {}
+    if (prefs.mode === 'erase') prefs.mode = 'wall'; // (UI audit VG5: never start in Erase: W opened in it and the first click removed a wall)
     ui.walls = { ...prefs, chain: null, sel: null, hover: null };
     const W = ui.walls;
     const save = () => { try { localStorage.setItem('wallPrefs', JSON.stringify({ mode: W.mode, snap: W.snap, door: W.door, kind: W.kind })); } catch {} };
@@ -97,6 +98,19 @@ const WallsTool = (() => {
       return true;
     }
     const chainActive = () => !!W.chain;
+    // UI audit VG1: the last corner of the line goes (Backspace, Delete, Ctrl Z) and the line stays open. Each click's
+    // wall is a step of its own (they were one step when clicked within 2.5 s, so Undo took one, some or all of them).
+    let lastHover = null;
+    function back() {
+      const C = W.chain;
+      if (!C) return false;
+      if (C.pts.length <= 1) { endChain(); return true; }
+      C.pts.pop();
+      const key = (C.segs || []).pop();
+      if (key) cmd('history.cancel', { key });
+      if (lastHover) hover(lastHover.e, lastHover.pt); else view().setWallPreview(null);
+      return true;
+    }
     function addSeg(a, b, extra = {}) {
       if (Math.hypot(b.x - a.x, b.y - a.y) < 0.02) return null;
       return cmd('wall.add', { segs: [[a.x, a.y, b.x, b.y]], coalesce: W.chain ? W.chain.key : null, ...kindArg(), ...extra });
@@ -127,6 +141,7 @@ const WallsTool = (() => {
       return { t0: c0 / L, t1: (c0 + size) / L };
     }
     function toggleDoor(id) { return cmd('wall.door', { id }); }
+    const onTable = () => { const s = S(); return !!(s && s.table && s.editMapId && s.table.liveMapId === s.editMapId); };
     // Prototype 4: a click on a lock in a Play tool asks first (a slip of the mouse shows the players the next room)
     let ask = null;
     function closeAsk() {
@@ -202,7 +217,8 @@ const WallsTool = (() => {
       const m = map();
       if (!m) return null;
       const doorEl = e.target.closest && e.target.closest('.sv-door');
-      if (doorEl && W.mode !== 'edit' && W.mode !== 'erase') { toggleDoor(doorEl.dataset.id); return null; }
+      // (UI audit VG4, Glinn: ask first) while the map is on the table a door's marker asks before it opens, as in the Play tools
+      if (doorEl && W.mode !== 'edit' && W.mode !== 'erase') { if (onTable()) askDoor(doorEl.dataset.id); else toggleDoor(doorEl.dataset.id); return null; }
       switch (W.mode) {
         case 'wall': {
           if (e.detail >= 2 && W.chain) { endChain(); return null; } // double-click ends the line
@@ -213,8 +229,10 @@ const WallsTool = (() => {
             W.chain = { pts: [p], key: `chain-${Date.now()}` };
           } else {
             const last = W.chain.pts[W.chain.pts.length - 1];
-            addSeg(last, p);
+            const segKey = `${W.chain.key}-${W.chain.pts.length}`; // (VG1: a step of its own)
+            const made = addSeg(last, p, { coalesce: segKey });
             W.chain.pts.push(p);
+            (W.chain.segs = W.chain.segs || []).push(made ? segKey : null);
             const first = W.chain.pts[0];
             if (W.chain.pts.length > 2 && Math.hypot(p.x - first.x, p.y - first.y) < 1e-3) { endChain(); return null; } // closed a loop
           }
@@ -233,7 +251,7 @@ const WallsTool = (() => {
             return null;
           }
           const d = view().wallAtScreen(e.clientX, e.clientY, 10, (x) => x.door);
-          if (d) { toggleDoor(d.id); return null; }
+          if (d) { if (onTable() && document.querySelector(`.sv-door[data-id="${d.id}"]`)) askDoor(d.id); else toggleDoor(d.id); return null; } // (VG4)
           const p = snapPt(pt, e);
           return { kind: 'walldoor', a: p, b: p };
         }
@@ -265,7 +283,8 @@ const WallsTool = (() => {
         d.b = snapPt(pt, e);
         view().setWallPreview({ segs: d.kind === 'wallroom' ? roomSegs(d.a, d.b) : [[d.a.x, d.a.y, d.b.x, d.b.y]], door: d.kind === 'walldoor', kind: d.kind === 'wallroom' ? kindArg().kind : null, at: d.b, snapped: d.b.snapped, onWall: !!d.b.wall });
       } else if (d.kind === 'wallend') {
-        if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 3) d.moved = true;
+        // (UI audit VG5: with the Walls tool a corner needs a real pull, 7 px: a shaky click moved it and snapped it to the grid)
+        if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > (d.fallback === 'wall' ? 7 : 3)) d.moved = true;
         if (!d.moved) return;
         const p = snapPt(pt, e, d.skip);
         d.to = p;
@@ -320,17 +339,29 @@ const WallsTool = (() => {
     }
     function hover(e, pt) {
       if (ui.tool !== 'walls' || !map()) return;
+      lastHover = { e, pt };
       // over a corner it can be grabbed
       document.body.classList.toggle('wall-grab', !W.chain && (W.mode === 'wall' || W.mode === 'edit') && !!cornerAt(pt));
+      if (W.mode === 'wall' || W.mode === 'room' || W.mode === 'door') hot = '';
       if (W.mode === 'wall') {
         const p = snapPt(pt, e);
         const last = W.chain && W.chain.pts[W.chain.pts.length - 1];
         view().setWallPreview({ segs: last ? [[last.x, last.y, p.x, p.y]] : [], at: p, snapped: p.snapped, onWall: !!p.wall, kind: kindArg().kind });
       } else if (W.mode === 'room' || W.mode === 'door') {
         const p = snapPt(pt, e);
-        view().setWallPreview({ at: p, snapped: p.snapped, onWall: !!p.wall });
-      } else if (view().wallPreview) view().setWallPreview(null);
+        // (UI audit VG6) Door: the door a click would make shows on the wall under the pointer
+        const w = W.mode === 'door' ? view().wallAtScreen(e.clientX, e.clientY, 10, (x) => !x.door) : null;
+        const sp = w ? doorSpan(w, pt) : null;
+        const seg = sp ? [[w.x1 + (w.x2 - w.x1) * sp.t0, w.y1 + (w.y2 - w.y1) * sp.t0, w.x1 + (w.x2 - w.x1) * sp.t1, w.y1 + (w.y2 - w.y1) * sp.t1]] : [];
+        view().setWallPreview({ segs: seg, door: !!sp, at: p, snapped: p.snapped, onWall: !!p.wall });
+      } else {
+        // (UI audit VG6) Erase and Edit: the wall a click would take lights up
+        const w = view().wallAtScreen(e.clientX, e.clientY, W.mode === 'erase' ? 10 : 9);
+        const key = w ? `${W.mode}:${w.id}` : '';
+        if (key !== hot || !!w !== !!view().wallPreview) { hot = key; view().setWallPreview(w ? { segs: [[w.x1, w.y1, w.x2, w.y2]], hot: W.mode } : null); }
+      }
     }
+    let hot = '';
     function leave() { document.body.classList.remove('wall-grab'); if (!W.chain && view().wallPreview) view().setWallPreview(null); }
     function toolChanged(t) {
       if (t !== 'walls') { endChain(); select(null); document.body.classList.remove('wall-grab'); if (view().wallPreview) view().setWallPreview(null); }
@@ -363,6 +394,7 @@ const WallsTool = (() => {
     // Enter / Esc while drawing end the line of walls
     function key(k) {
       if ((k === 'enter' || k === 'escape') && W.chain) { endChain(); return true; }
+      if ((k === 'delete' || k === 'backspace') && W.chain) return back(); // (VG1)
       if ((k === 'delete' || k === 'backspace') && ui.tool === 'walls') return removeSelected();
       return false;
     }
@@ -446,7 +478,7 @@ const WallsTool = (() => {
       return h('div', { class: 'stack walls-pop' }, ...out);
     }
     return {
-      pointerDown, pointerMove, pointerUp, hover, leave, toolChanged, owns: (k) => OWN.has(k), buildPop, around: () => sides, cycle, key, radial,
+      pointerDown, pointerMove, pointerUp, hover, leave, toolChanged, owns: (k) => OWN.has(k), cancelDrag: (d) => { if (OWN.has(d.kind)) view().setWallPreview(null); }, back, buildPop, around: () => sides, cycle, key, radial,
       endChain, chainActive, toggleDoor, askDoor, closeAsk, loadFile, select, removeSelected, MODES,
     };
   }

@@ -92,6 +92,14 @@ const FloatPanels = (() => {
       p.el.style.left = `${x}px`;
       p.el.style.top = `${y}px`;
       besidePreview(p);
+      // UI audit VH1: never on top of another panel's title bar (each remembers its own place, and those were often
+      // the same corner): a step down and to the left until its title bar is free
+      for (let i = 0; i < 10; i++) {
+        const px = parseFloat(p.el.style.left) || 0; const py = parseFloat(p.el.style.top) || 0;
+        const hit = [...open.values()].some((q) => q !== p && Math.abs((parseFloat(q.el.style.left) || 0) - px) < 30 && Math.abs((parseFloat(q.el.style.top) || 0) - py) < 30);
+        if (!hit) break;
+        p.el.style.left = `${Math.max(0, px - 30)}px`; p.el.style.top = `${py + 34}px`;
+      }
       keepInside(p);
     }
     // B2: the preview of the TV (the table controls, top right) is never covered by a panel. One that would lie on it
@@ -113,11 +121,20 @@ const FloatPanels = (() => {
     }
     // the preview was made bigger: the open panels it now reaches move aside
     function avoidPreview() { for (const p of open.values()) if (besidePreview(p)) { keepInside(p); remember(p); } }
+    // UI audit VC1: the search line at the top lies over the panels: a panel that reaches under it starts below it
+    // (the Conversation panel's title bar, its gear and its "?" were hidden; a panel dragged there could not be closed)
+    function belowSearch(r, x, w) {
+      const bar = document.querySelector('#cmdk .ck-bar');
+      if (!bar || !bar.offsetWidth) return 0;
+      const b = bar.getBoundingClientRect();
+      return x < b.right - r.left && x + w > b.left - r.left ? Math.max(0, Math.round(b.bottom - r.top + 6)) : 0;
+    }
     function keepInside(p) {
       const r = host().getBoundingClientRect();
       const w = p.el.offsetWidth || 300; const hh = p.el.querySelector('.fp-head').offsetHeight || 40;
       const x = clamp(parseFloat(p.el.style.left) || 0, 0, Math.max(0, r.width - w));
-      const y = clamp(parseFloat(p.el.style.top) || 0, 0, Math.max(0, r.height - hh));
+      const top = belowSearch(r, x, w);
+      const y = clamp(parseFloat(p.el.style.top) || 0, top, Math.max(top, r.height - hh));
       p.el.style.left = `${Math.round(x)}px`;
       p.el.style.top = `${Math.round(y)}px`;
     }
@@ -135,6 +152,7 @@ const FloatPanels = (() => {
           head.removeEventListener('pointerup', up);
           head.removeEventListener('pointercancel', up);
           p.el.classList.remove('dragging');
+          if (besidePreview(p)) keepInside(p); // (VH1: dropped on the TV preview it moves aside now, not at its next change of size)
           remember(p);
         };
         head.addEventListener('pointermove', move);
@@ -156,6 +174,8 @@ const FloatPanels = (() => {
       isOpen: (id) => open.has(id),
       ids: () => [...open.keys()],
       closeAll: () => { for (const id of [...open.keys()]) hide(id); },
+      // (UI audit VH1, Glinn: Esc closes a panel only while the mouse is over it) the panel at a point of the window
+      at: (x, y) => { const el = document.elementFromPoint(x, y); const f = el && el.closest ? el.closest('.fp') : null; return f && open.has(f.dataset.id) ? f.dataset.id : null; },
     };
   }
 

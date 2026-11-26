@@ -3,7 +3,7 @@
 
 // Beta 3.18: two panels, Tablescape settings (for every campaign) and Campaign settings (kept in the campaign)
 const SECTIONS = [['check', 'Table check'], ['tv', 'TV'], ['picture', 'Picture'], ['tokens', 'Tokens'], ['sound', 'Sound'], ['perf', 'Performance'], ['screen', 'This screen'], ['library', 'Library']];
-const CAMP = [['campaign', 'Campaign'], ['screens', 'Screens'], ['looks', 'Looks'], ['init', 'Initiative'], ['players', 'Players'], ['tabletok', 'Tokens']];
+const CAMP = [['campaign', 'Campaign'], ['screens', 'Screens'], ['looks', 'Looks'], ['init', 'Initiative'], ['players', 'Seating'], ['tabletok', 'Tokens']];
 
 module.exports = (area) => {
   area.title('Options');
@@ -210,5 +210,38 @@ module.exports = (area) => {
     t.ok(adv && !adv.open, 'the video choices are folded under Advanced', adv);
     t.eq(adv && adv.opts, ['Best picture', 'Smoothest', 'Safest'], 'named by what they do');
     await t.g('App.closeOptions()');
+  });
+  // Beta 3.68 (Glinn): This screen → Corners: Sharp: square boxes, the panel and menus with cut corners; round things stay round
+  area.quick('This screen → Corners: Sharp makes the GM window square; dots and faces stay round; Round brings it back', async (t) => {
+    // every round thing of the stylesheet (50 %) is on the Sharp list, else Sharp would square it (the switch's knob on purpose)
+    const css = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'renderer', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const cut = css.indexOf('body.corners-sharp *:not(');
+    const before = css.slice(0, cut); const sharp = css.slice(cut);
+    const round = new Set(); const re = /([^{}]+)\{([^{}]*)\}/g; let m;
+    while ((m = re.exec(before))) { if (!/border-radius\s*:\s*(50|100)%/.test(m[2])) continue; for (const x of m[1].split(',')) { const q = x.trim().replace(/\s+/g, ' '); if (q && !q.startsWith('@') && q !== '.switch::after') round.add(q.replace(/::?(before|after)$/, '')); } }
+    const missing = [...round].filter((q) => !sharp.includes(q));
+    t.eq(missing, [], 'every round thing is on the Sharp list (styles.css, the block at the end)');
+    t.ok(await t.g(`document.body.classList.contains('corners-sharp')`), 'Sharp is the default (Beta 3.68)');
+    await t.g(`window.ts.settings({ corners: 'round' })`);
+    await t.until(() => t.g(`!document.body.classList.contains('corners-sharp')`), 3000, 'Round first');
+    await t.g(`App.openOptions('screen')`);
+    await t.until(() => t.g(`!!document.querySelector('.opt-body .seg[aria-label="Corners"]')`), 3000, 'Corners in This screen');
+    await t.g(`document.querySelector('.opt-body .seg[aria-label="Corners"] .seg-btn[data-v="sharp"]').click()`);
+    await t.until(() => t.g(`document.body.classList.contains('corners-sharp')`), 3000, 'Sharp on the GM window');
+    t.eq(t.settings.corners, 'sharp', 'kept in the settings');
+    await t.g('App.closeOptions()');
+    await t.g(`Play.setTool('select'); Play.openPop('toolbox')`);
+    await t.until(() => t.g(`!!document.querySelector('#pop.on .help-q')`), 3000, 'the Toolbox');
+    const look = () => t.g(`(() => { const r = (sel) => { const e = document.querySelector(sel); return e ? getComputedStyle(e).borderTopLeftRadius : null; };
+      return { pop: getComputedStyle(document.getElementById('pop')).borderTopRightRadius, tile: r('#pop .tb-tile'), help: r('#pop .help-q'), clip: getComputedStyle(document.getElementById('pop')).clipPath !== 'none' }; })()`);
+    let L = await look();
+    t.ok(L.pop === '0px' && L.tile === '0px' && !L.clip, 'the panel and its tiles square, no cut corners (Glinn, 24 Nov)', L);
+    t.eq(L.help, '50%', 'the round ? stays round');
+    await t.g(`window.ts.settings({ corners: 'round' })`);
+    await t.until(() => t.g(`!document.body.classList.contains('corners-sharp')`), 3000, 'Round again');
+    L = await look();
+    t.ok(L.pop !== '0px' && !L.clip, 'round again, no cut corners (Beta 3.68: the left edge of the panel lies against the rail, square in both)', L);
+    await t.g(`Play.closePop()`);
+    await t.g(`window.ts.settings({ corners: 'sharp' })`); // (back to the default for the checks after this one)
   });
 };

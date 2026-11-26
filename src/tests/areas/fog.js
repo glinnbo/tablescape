@@ -161,4 +161,54 @@ module.exports = (area) => {
     await t.sleep(1000);
     t.eq(await read(), before, 'the same holes and ground after folding');
   }, { ms: 60000 });
+
+  // Speed 5 (Open Point WE6, first half): player steps keep the fog small
+  area.quick('WE6: on a dark map one player\'s step records only what changed: the other tokens, standing still and seeing the same, add nothing; after the GM covers something they record again', async (t) => {
+    const MS = require('../../mapstate'); const V = require('../../renderer/vision');
+    const id = await t.newMap('WE6 (test)', { blank: true });
+    const M = () => t.store.map(id);
+    const k = M().grid.size;
+    try {
+      t.handle('light.update', { mapId: id, darkness: 0.9 });
+      t.handle('fog.enabled', { mapId: id, enabled: true });
+      // four player tokens far apart, each seeing for itself, with a candle (light for two squares)
+      const at = [[2, 2], [2, 14], [24, 2], [13, 8]];
+      const toks = at.map(([x, y]) => t.handle('layer.add', { mapId: id, path: t.pic('tokens'), role: 'token', x: (x + 0.5) * k, y: (y + 0.5) * k, size: 1 }).selected);
+      for (const tok of toks) t.handle('fx.add', { mapId: id, kind: 'light', preset: 'party', attachTo: tok, carry: 'candle' }); // (a party light on the token: the app takes a player's eye away from a token that is no player's)
+      await t.settle();
+      const sights = () => M().fog.ops.filter((o) => o.shape === 'sight');
+      const eyeOf = (tok) => M().fx.find((x) => x.attachTo === tok && x.preset === 'party').id;
+      t.eq([V.eyes(M()).length, V.isDark(M())], [4, true], 'eyes on the map; the map is dark');
+      t.ok(toks.every((tok) => sights().some((o) => o.eye === eyeOf(tok))), 'each of them has a record of what it sees', sights().length);
+      // twenty steps of the fourth, a square to and fro
+      const n0 = sights().length; const s0 = { ...MS.sightStats }; const bytes0 = JSON.stringify(M().fog.ops).length;
+      for (let i = 0; i < 20; i++) t.handle('layer.update', { mapId: id, id: toks[3], x: (13.5 + (i % 2 ? 0 : 1)) * k, final: true });
+      const made = sights().slice(n0);
+      t.eq([made.length, made.every((o) => o.eye === eyeOf(toks[3])), MS.sightStats.made - s0.made, MS.sightStats.same - s0.same], [20, true, 20, 60], 'records for 20 steps: all of the token that stepped; made; left out because they said nothing new');
+      t.note('20 steps with four tokens: ' + made.length + ' records, ' + Math.round((JSON.stringify(M().fog.ops).length - bytes0) / 1024) + ' KB more fog (before: 80 records)');
+      // every eye's newest record still says what it sees now
+      const rnd = (pts) => pts.map((v) => Math.round(v * 100) / 100);
+      const walled = V.on(M()); const sig = walled ? V.wallSig(M()) : 'open';
+      const right = V.eyes(M()).every((e) => { const o = sights().filter((x) => x.eye === e.id).pop(); const now = V.sight(M(), e, sig, walled); return JSON.stringify([o.pts, o.lit]) === JSON.stringify([rnd(now.pts), now.lit ? now.lit.map(rnd) : null]); });
+      t.ok(right, 'the newest record of each token is what it sees now');
+      // the GM covers what the first token sees: with the next step it is recorded again (the fog as it always came out)
+      t.handle('fog.op', { mapId: id, mode: 'cover', shape: 'circle', x: 2.5 * k, y: 2.5 * k, r: 3 * k });
+      const n1 = sights().length;
+      t.handle('layer.update', { mapId: id, id: toks[3], x: 14.5 * k, final: true });
+      const after = sights().slice(n1).map((o) => o.eye).sort();
+      t.eq(after, [eyeOf(toks[3]), ...toks.slice(0, 3).map(eyeOf)].sort(), 'after a cover: every token records what it sees once more');
+      const n2 = sights().length;
+      t.handle('layer.update', { mapId: id, id: toks[3], x: 13.5 * k, final: true });
+      t.eq(sights().slice(n2).map((o) => o.eye), [eyeOf(toks[3])], 'and with the step after that, only the one that stepped again');
+      // a token that comes near another: its candle lights what the other sees, so the other records too
+      const n3 = sights().length;
+      t.handle('layer.update', { mapId: id, id: toks[3], x: 4.5 * k, y: 2.5 * k, final: true });
+      const near = sights().slice(n3).map((o) => o.eye);
+      t.ok(near.includes(eyeOf(toks[3])) && near.includes(eyeOf(toks[0])) && !near.includes(eyeOf(toks[1])) && !near.includes(eyeOf(toks[2])), 'next to the first token: the two of them record, the two far away do not', near.length);
+    } finally {
+      for (const l of M().layers.filter((x) => x.role === 'token')) t.handle('layer.remove', { mapId: id, id: l.id });
+      t.handle('fog.enabled', { mapId: id, enabled: false });
+      await t.settle();
+    }
+  });
 };

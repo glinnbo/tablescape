@@ -604,16 +604,18 @@ module.exports = (area) => {
     const R = d.ed.surface.rect; const at = (fx, fy) => ({ x: R.x + R.w * fx, y: R.y + R.h * fy });
     const before = JSON.stringify([M(t, world).marks, M(t, world).draw]);
     // How far from here: right-click, then the pointer shows the distance; a click adds a bend; Esc ends it, nothing kept
-    const a0 = await scr(t, at(0.3, 0.6));
+    // (the middle of a cell: the points snap to cells, and a start 4 px from a cell's edge made this count depend on the panel's layout)
+    const c0 = { x: Math.floor(at(0.3, 0.6).x) + 0.5, y: Math.floor(at(0.3, 0.6).y) + 0.5 };
+    const a0 = await scr(t, c0);
     await t.click(a0.x, a0.y, 'right');
     await t.until(() => t.findText('.radial-item', 'How far from here'), 3000, 'the round menu');
     await t.clickText('.radial-item', 'How far from here');
-    const a1 = await scr(t, { x: at(0.3, 0.6).x + 5, y: at(0.3, 0.6).y });
+    const a1 = await scr(t, { x: c0.x + 5, y: c0.y });
     await t.mouse('mouseMove', a1.x, a1.y);
     const say = await t.until(async () => { const x = await t.text('.mt-count'); return x && /days? of travel/.test(x) && x; }, 3000, 'how far it is, next to the pointer');
     t.eq(say, '5 days of travel', 'five cells to the right');
     await t.click(a1.x, a1.y);
-    const a2 = await scr(t, { x: at(0.3, 0.6).x + 5, y: at(0.3, 0.6).y - 3 });
+    const a2 = await scr(t, { x: c0.x + 5, y: c0.y - 3 });
     await t.mouse('mouseMove', a2.x, a2.y);
     await t.until(async () => (await t.text('.mt-count')) === '8 days of travel', 3000, 'a bend and three more cells');
     await t.key('Escape');

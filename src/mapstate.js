@@ -34,7 +34,7 @@ function defaultWind() { return { auto: true, storm: false, dir: 30, strength: 1
 // Beta 3.46: what moves on an Oldschool map (living.js), set for the map and for each kind of effect on its own card.
 // [what a new map has, the least, the most]
 const LIVE_SPEC = {
-  grass: { amount: [1, 0, 1.5], length: [1, 0.3, 2.5], thick: [1, 0.5, 3], calm: [0.35, 0, 1], range: [0.5, 0.05, 1], vary: [0.3, 0, 1] }, // (Beta 3.58: thick, the blades' thickness)
+  grass: { amount: [1, 0, 1.5], length: [1, 0.3, 5], thick: [1, 0.5, 6], calm: [0.35, 0, 1], range: [0.5, 0.05, 1], vary: [0.3, 0, 2] }, // (Beta 3.58: thick, the blades' thickness; XA10, Glinn 26 Nov 2026: Length, Thickness and Colour variety go twice as far, for a comic look if wanted)
   water: { clear: [0.25, 0, 1], speed: [1, 0.3, 2.5] },
   lava: { glow: [1, 0, 2], embers: [1, 0, 2], heat: [0.5, 0, 1], speed: [1, 0.3, 2.5], range: [0.5, 0, 1] },
   shimmer: { power: [1, 0, 2], speed: [1, 0.3, 2.5], range: [0.5, 0, 1] },
@@ -108,6 +108,65 @@ const SHADOW_LEN = { short: 0.35, long: 0.75, off: 0 }; // (Beta 3.35: what shor
 const osNum = (v, d, a, b) => { const x = Number(v); return Number.isFinite(x) ? Math.min(b, Math.max(a, x)) : d; };
 const ptsOf = (pts) => (Array.isArray(pts) ? pts.filter((q) => Array.isArray(q) && Number.isFinite(Number(q[0])) && Number.isFinite(Number(q[1]))).slice(0, 4000).map((q) => [r3(Number(q[0])), r3(Number(q[1]))]) : []);
 const refOf = (t) => (t && (t.rel || t.path) ? { ...(t.rel ? { rel: String(t.rel) } : {}), ...(t.path ? { path: String(t.path) } : {}) } : null);
+// a thing's furthest reach as a box: its points, wider by its own width (a passage's mitred bends reach far: ten
+// times its half width, to be on the safe side)
+function osBox(it) {
+  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+  for (const [x, y] of it.pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+  const pad = it.kind === 'line' ? (it.w || 0) : it.kind === 'pillar' ? (it.r || 0) * 1.5 : it.shape === 'path' ? 10 * (it.r || 0) : it.shape === 'brush' ? (it.r || 0) : 0;
+  return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
+}
+// 26 Nov 2026 (Glinn: "let's make a maximum size"): a drawn map is OS_MAX squares across and down at most. Its picture
+// has at least 16 dots a square, so its size grows with the drawing's outline, not with what is in it: one room
+// drawn a thousand squares away from another asked for a picture of 225 million dots, and past 1024 squares a side
+// the graphics card cannot make it at all (the picture stood at "Painting the map 94 %"). What would make the
+// outline larger than OS_MAX is not added. A drawing that is already larger (from before this) can be worked on inside
+// its outline, and cannot grow. Erasing and effects on floors never count (they make no picture of their own).
+const OS_MAX = 300;
+const osCounts = (it) => it && it.kind !== 'cut' && it.kind !== 'live';
+function osSpan(items) { // the outline the picture is made for, as the engine measures it (oldschool.js: itemBox)
+  let b = null;
+  for (const it of items) {
+    if (!osCounts(it) || !it.pts || !it.pts.length) continue;
+    const pad = it.kind === 'line' ? (it.w || 0) / 2 : it.kind === 'pillar' ? (it.r || 0) : it.shape === 'path' || it.shape === 'brush' ? (it.r || 0) : 0;
+    for (const [x, y] of it.pts) {
+      if (!b) b = [x - pad, y - pad, x + pad, y + pad];
+      else { if (x - pad < b[0]) b[0] = x - pad; if (y - pad < b[1]) b[1] = y - pad; if (x + pad > b[2]) b[2] = x + pad; if (y + pad > b[3]) b[3] = y + pad; }
+    }
+  }
+  return b;
+}
+// would the drawing, with these things as they are to be, be too large, and larger than it is now?
+function osTooBig(map, next) {
+  const now = osSpan(next); if (!now) return false;
+  const g = (map.grid && map.grid.size) || 1; const E = 1e-6;
+  if ((now[2] - now[0]) / g <= OS_MAX + E && (now[3] - now[1]) / g <= OS_MAX + E) return false;
+  const was = osSpan(map.os.items);
+  return !was || now[0] < was[0] - E || now[1] < was[1] - E || now[2] > was[2] + E || now[3] > was[3] + E;
+}
+const osTouch = (it, cut) => { const a = osBox(it); const b = osBox(cut); return a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]; };
+// the things an erasing box or circle covers wholly are left out (a poured effect is not: it runs where its floor does)
+function dropCovered(items, cut, g = 1) {
+  if (cut.kind !== 'cut' || !(cut.shape === 'rect' || cut.shape === 'round') || cut.pts.length < 2) return items;
+  const [[ax, ay], [bx, by]] = cut.pts; const x0 = Math.min(ax, bx); const x1 = Math.max(ax, bx); const y0 = Math.min(ay, by); const y1 = Math.max(ay, by);
+  const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2; const rx = (x1 - x0) / 2; const ry = (y1 - y0) / 2;
+  if (!(rx > 0 && ry > 0)) return items;
+  const inside = (x, y) => (cut.shape === 'rect' ? x >= x0 && x <= x1 && y >= y0 && y <= y1 : ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1);
+  // (a floor that mixes into its neighbours has a soft line that reaches past its own shape, and a mixing floor's line
+  // is shaped by the floors around it: with such a pair near, a thing must lie three squares inside the hole)
+  const mixes = (it) => (it.kind === 'area' && it.mixW > 0) || it.kind === 'paint';
+  const floorish = (it) => it.kind === 'area' || it.kind === 'paint';
+  const PAD = 3 * g;
+  const padOf = (it, q) => (items.some((o) => o !== it && floorish(o) && (mixes(o) || (floorish(it) && mixes(it))) && (() => { const b = osBox(o); return b[0] - PAD < q[2] && b[2] + PAD > q[0] && b[1] - PAD < q[3] && b[3] + PAD > q[1]; })()) ? PAD : 0);
+  const covered = (it) => {
+    if (it.kind === 'live' && it.shape === 'fill') return false;
+    const q = osBox(it); const all = (p) => inside(q[0] - p, q[1] - p) && inside(q[2] + p, q[1] - p) && inside(q[0] - p, q[3] + p) && inside(q[2] + p, q[3] + p);
+    if (!all(0)) return false;
+    const p = padOf(it, q); return p ? all(p) : true;
+  };
+  const out = items.filter((it) => !covered(it));
+  return out.length === items.length ? items : out;
+}
 function cleanOsItem(it) {
   if (!it || typeof it !== 'object') return null;
   const id = typeof it.id === 'string' && it.id ? it.id : newId('o');
@@ -136,6 +195,7 @@ function cleanOsItem(it) {
     const need = shape === 'poly' ? 3 : shape === 'path' || shape === 'brush' ? 1 : 2;
     if (pts.length < need) return null;
     const out = { id, kind, shape, pts, r: r3(osNum(it.r, 0.5, 0.05, 50)) };
+    if (shape === 'brush' && Number(it.rough) > 0) out.rough = r3(osNum(it.rough, 0, 0, 1)); // (XA4: a jagged edge; none is kept as nothing, so old drawings stay as they are)
     if (kind === 'area') {
       Object.assign(out, { tile: refOf(it.tile), edge: OS_EDGES.includes(it.edge) ? it.edge : 'walls', mat: typeof it.mat === 'string' ? it.mat : 'stone_wall', level: Math.round(osNum(it.level, 0, -3, 3)) });
       Object.assign(out, mixOf(it)); // (Beta 3.27)
@@ -439,6 +499,13 @@ function updateLayer(l, p) {
   if ('player' in p) { if (p.player === false) l.player = false; else if (p.player) l.player = String(p.player).slice(0, 40); else delete l.player; } // (Prototype 17: a player token by the DM's word)
   if ('name' in p) l.name = String(l.name ?? '').trim().slice(0, 60) || 'Token';
   if ('cond' in p) { const c = [...new Set((Array.isArray(p.cond) ? p.cond : []).map((x) => String(x).trim().slice(0, 24)).filter(Boolean))].slice(0, 12); if (c.length) l.cond = c; else delete l.cond; } // D3: a token's conditions (Poisoned, Prone …)
+  // Beta 3.68 (Glinn, the token sheet): a token's own HP { cur, max } and AC (a monster's; a player's are on the character card)
+  if ('hp' in p) {
+    const n = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) ? null : Math.round(Math.min(9999, Math.max(-999, Number(v)))));
+    const max = p.hp ? n(p.hp.max) : null; const cur = p.hp ? n(p.hp.cur) : null;
+    if (max == null && cur == null) delete l.hp; else l.hp = { cur: cur ?? max, max };
+  }
+  if ('ac' in p) { const k = Number(p.ac); if (p.ac == null || p.ac === '' || !Number.isFinite(k)) delete l.ac; else l.ac = Math.round(Math.min(40, Math.max(0, k))); }
   if ('pic' in p) { const k = Number(p.pic); if (p.pic == null || !Number.isFinite(k) || Math.abs(k - 1) < 0.001) delete l.pic; else l.pic = Math.round(Math.min(2, Math.max(0.5, k)) * 100) / 100; }
   if ('front' in p) { if (p.front) l.front = true; else delete l.front; } // (Prototype 18: an asset in front of the effects)
   if ('over' in p) { if (p.over) { l.over = true; delete l.front; } else delete l.over; } // (Prototype 23: above the tokens: tree tops, roofs)
@@ -531,9 +598,10 @@ function turnMap(map, p) {
 const WX_SNAP = ['type', ...WEATHER_KEYS];
 const tokenIds = (map) => new Set(map.layers.filter((l) => l.role === 'token').map((l) => l.id));
 const sceneryFx = (f, tok) => f.preset !== 'party' && !(f.attachTo && tok.has(f.attachTo));
-function sceneOf(map) {
+// (Speed 5, WE5) sceneLook: the same, but sharing the map's own layers and effects: only to be read, never kept
+function sceneLook(map) {
   const tok = tokenIds(map);
-  return structuredClone({
+  return {
     bg: map.bg ? pick(map.bg, ['path', 'rel', 'name', 'kind', 'volume', 'rate', 'x', 'y', 'scale', 'span', 'rotation', 'nw', 'nh']) : null,
     // 2.3: the grid and where the map lies on the TV come back when the snapshot brings another picture
     grid: { ...map.grid }, view: { x: map.view.x, y: map.view.y, zoom: map.view.zoom },
@@ -543,8 +611,9 @@ function sceneOf(map) {
     light: { darkness: map.light.darkness, tint: map.light.tint, mood: map.light.mood || null },
     frame: { ...FRAME0, ...map.frame }, pframe: { ...FRAME0, ...map.pframe },
     look: map.look || null, // 4.5: the map's colours (Build → Map)
-  });
+  };
 }
+const sceneOf = (map) => structuredClone(sceneLook(map));
 // from where things lay when the snapshot was saved to where they lie now (the map may have been turned since)
 function frameShift(f1, f2) {
   const A = { ...FRAME0, ...f1 }; const B = { ...FRAME0, ...f2 };
@@ -599,7 +668,17 @@ function sceneSig(D) {
     D.weather ? D.weather.layers.map((l) => [l.type, r(l.amount), !!l.hidden]) : [], D.light ? [r(D.light.darkness), D.light.tint] : null,
     'look' in D ? JSON.stringify(D.look || null) : '-']);
 }
-const sceneMatches = (map, D) => { const cur = sceneOf(map); if (!('look' in D)) delete cur.look; return sceneSig(cur) === sceneSig(placeScene(D, map)); }; // (a snapshot from before 4.5 has no colours)
+// Speed 5 (WE5): asked after every change of a map that stands at a snapshot. It copied the whole scenery twice
+// (every asset, every painted area with all its points) only to read a few numbers of each: now it reads them where
+// they are, and the snapshot is only copied when the map was turned or moved since (then its things must be placed).
+const sceneStats = { asked: 0, placed: 0 }; // (for the self-test)
+const sceneMatches = (map, D) => {
+  sceneStats.asked++;
+  const cur = sceneLook(map); if (!('look' in D)) delete cur.look; // (a snapshot from before 4.5 has no colours)
+  const moved = frameShift(D.frame, map.frame) || frameShift(D.pframe || D.frame, map.pframe);
+  if (moved) sceneStats.placed++;
+  return sceneSig(cur) === sceneSig(moved ? placeScene(D, map) : D);
+};
 
 // media(path) is injected by the caller: turns a file path into {path, rel, name, url}
 // Beta 3.49 made a light of the app two things: a picture (an asset with .fixture) and its flame (an effect with
@@ -673,6 +752,38 @@ function wallLightsFollow(map) {
     if (w) f.wall = w.id; else if (f.wall) gone.add(f.id);
   }
   if (gone.size) map.fx = map.fx.filter((f) => !gone.has(f.id));
+}
+// I7: a trigger's steps, cleaned: what each kind keeps (unknown kinds and fields go)
+// (Glinn: the same every time) a portrait's look and a handout's place on the table, as the step keeps them (main.js withLook)
+const tNum = (v, lo, hi, d) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Number(v))) : d);
+function cleanLook(L) {
+  if (!L || typeof L !== 'object') return null;
+  const fx = L.fx && typeof L.fx === 'object' ? Object.fromEntries(Object.entries(L.fx).filter(([k]) => ['bloodOn', 'blood', 'shadeOn', 'shade', 'hidden'].includes(k))
+    .map(([k, v]) => [k, typeof v === 'boolean' ? v : tNum(v, 0, 1, 0)])) : null;
+  return { size: tNum(L.size, 0.3, 5, 1), x: tNum(L.x, -1, 1, 0), y: tNum(L.y, -0.8, 0.8, 0), fx: fx && Object.keys(fx).length ? fx : null, mirror: !!L.mirror };
+}
+const cleanLay = (L) => (L && typeof L === 'object' && Number.isFinite(Number(L.x)) ? { x: tNum(L.x, -3, 4, 0.5), y: tNum(L.y, -3, 4, 0.5), size: tNum(L.size, 0.12, 6, 0.7), rot: tNum(L.rot, 0, 360, 0) } : null);
+const STEP_KINDS = {
+  talk: (s) => ({ cast: (Array.isArray(s.cast) ? s.cast : []).filter((c) => c && c.path).slice(0, 5).map((c) => ({ path: String(c.path).slice(0, 1000), name: String(c.name || '').slice(0, 80), ...(c.alpha === false ? { alpha: false } : {}), ...(cleanLook(c.look) ? { look: cleanLook(c.look) } : {}) })), mode: s.mode === 'add' ? 'add' : 'replace' }),
+  handout: (s) => ({ path: s.path ? String(s.path).slice(0, 1000) : null, name: String(s.name || '').slice(0, 80), to: s.to === 'phones' ? 'phones' : 'table', ...(cleanLay(s.lay) ? { lay: cleanLay(s.lay) } : {}) }),
+  snap: (s) => ({ snap: s.snap ? String(s.snap).slice(0, 40) : null, name: String(s.name || '').slice(0, 80) }),
+  mood: (s) => ({ mood: String(s.mood || 'day').slice(0, 20) }),
+  weather: (s) => ({ name: String(s.name || 'None').slice(0, 60) }),
+  moment: (s) => ({ id: s.id ? String(s.id).slice(0, 40) : null }),
+  lights: (s) => ({ group: String(s.group || '').slice(0, 40), on: s.on === false ? false : s.on === 'toggle' ? 'toggle' : true }),
+  room: (s) => ({ scene: s.scene ? String(s.scene).slice(0, 40) : null, name: String(s.name || '').slice(0, 80) }),
+  sound: (s) => ({ path: s.path ? String(s.path).slice(0, 1000) : null, name: String(s.name || '').slice(0, 80) }),
+  music: (s) => ({ on: s.on !== false }),
+  spotify: (s) => ({ mood: s.mood ? String(s.mood).slice(0, 40) : null, name: String(s.name || '').slice(0, 80) }),
+  doors: (s) => ({ ids: (Array.isArray(s.ids) ? s.ids : []).map(String).slice(0, 40), open: s.open !== false }),
+  reveal: (s) => ({ rings: Array.isArray(s.rings) ? s.rings.slice(0, 20) : [], name: String(s.name || '').slice(0, 80) }),
+  tokens: (s) => ({ ids: (Array.isArray(s.ids) ? s.ids : []).map(String).slice(0, 40), hidden: s.hidden === true }),
+  fight: (s) => ({ ids: (Array.isArray(s.ids) ? s.ids : []).map(String).slice(0, 40) }),
+  timer: (s) => ({ seconds: Math.min(5999, Math.max(5, Math.round(Number(s.seconds) || 60))) }),
+  wait: (s) => ({ s: Math.min(30, Math.max(0.5, Math.round((Number(s.s) || 2) * 2) / 2)) }),
+};
+function cleanSteps(list) {
+  return (Array.isArray(list) ? list : []).filter((s) => s && STEP_KINDS[s.kind]).slice(0, 30).map((s) => ({ kind: s.kind, ...STEP_KINDS[s.kind](s) }));
 }
 function apply(map, type, p, media) {
   const r = applyRaw(map, type, p, media);
@@ -826,6 +937,14 @@ function applyRaw(map, type, p, media) {
       for (const q of p.patches || []) { const l = map.layers.find((x) => x.id === q.id); if (l) { updateLayer(l, q); n++; } }
       return n ? { changed: 'all' } : { changed: null };
     }
+    // XA7 (Glinn, 26 Nov 2026: 79 lights, one colour for all): several effects or lights changed alike, one undo step.
+    // p.cmd: what is done to each ('fx.update', 'fx.lightSet' or 'fx.lit'), p.ids: to which, p.patch: with what
+    case 'fx.many': {
+      if (!['fx.update', 'fx.lightSet', 'fx.lit'].includes(p.cmd) || !Array.isArray(p.ids) || !p.patch || typeof p.patch !== 'object') return { changed: null };
+      let n = 0; let all = false;
+      for (const id of p.ids) { const r = applyRaw(map, p.cmd, { ...p.patch, id }, media); if (r && r.changed) { n++; if (r.changed === 'all') all = true; } }
+      return n ? { changed: all ? 'all' : 'fx', label: `${n} changed` } : { changed: null };
+    }
     case 'layer.removeMany': {
       const ids = new Set(p.ids || []);
       const gone = map.layers.filter((l) => ids.has(l.id));
@@ -945,6 +1064,7 @@ function applyRaw(map, type, p, media) {
       if (!op) {
         op = { id: p.id, mode: p.mode === 'cover' ? 'cover' : 'reveal', shape: 'brush', r: p.r, pts: [] };
         map.fog.ops.push(op);
+        if (!map.fog.enabled) map.fog.enabled = true; // (UI audit VF4: the brush turns the fog on, as a box or a room does; its strokes were stored unseen)
       }
       const prev = op.pts.length ? op.pts.slice(-2) : null;
       op.pts.push(...p.pts);
@@ -969,6 +1089,8 @@ function applyRaw(map, type, p, media) {
       if (p.wave) fx.wave = ['pulse', 'sputter'].includes(p.wave) ? p.wave : null;
       if (p.cone) fx.cone = Math.min(180, Math.max(10, Number(p.cone) || 53));
       if (p.dust != null) fx.dust = Math.min(12, Math.max(0.05, Number(p.dust) || 1)); // 4.3.2: the dust in a light shaft
+      if (p.critter != null) fx.critter = Math.min(2.5, Math.max(0.4, Number(p.critter) || 1)); // C14: Size of the animals
+      if (p.height != null) fx.height = Math.min(1, Math.max(0, Number(p.height) || 0)); // C14: how high birds fly
       // 4.9: a window light: the window's shape, its bars, how far it reaches
       if (p.shape) fx.shape = String(p.shape).slice(0, 20);
       if (p.grid) fx.grid = String(p.grid).slice(0, 20);
@@ -982,6 +1104,35 @@ function applyRaw(map, type, p, media) {
       if (p.byPhone) fx.eye = true; // (Prototype 14: a player's eye: it sits on the token and can't be grabbed off it)
       map.fx.push(fx);
       return { changed: 'all', selected: fx.id, label: FXDATA.isLight(fx) ? `${lightName(fx)} placed` : 'Effect added' };
+    }
+    // ---------- I7 (Glinn): triggers, a named list of steps run with one click (main.js trigger.run) ----------
+    case 'trigger.add': {
+      map.triggers = map.triggers || [];
+      const tr = { id: newId('t'), name: String(p.name || 'Trigger').trim().slice(0, 60) || 'Trigger', steps: cleanSteps(p.steps) };
+      map.triggers.push(tr);
+      return { changed: 'all', selected: tr.id, label: `${tr.name} made` };
+    }
+    case 'trigger.update': {
+      const tr = (map.triggers || []).find((x) => x.id === p.id);
+      if (!tr) return { changed: null };
+      if ('name' in p) tr.name = String(p.name || '').trim().slice(0, 60) || tr.name;
+      if ('steps' in p) tr.steps = cleanSteps(p.steps);
+      if ('at' in p) { if (p.at && Number.isFinite(Number(p.at.x)) && Number.isFinite(Number(p.at.y))) tr.at = { x: r3(Number(p.at.x)), y: r3(Number(p.at.y)) }; else delete tr.at; } // its mark on the map
+      return { changed: 'all' };
+    }
+    case 'trigger.remove': {
+      const tr = (map.triggers || []).find((x) => x.id === p.id);
+      if (!tr) return { changed: null };
+      map.triggers = map.triggers.filter((x) => x !== tr);
+      return { changed: 'all', label: `${tr.name} removed` };
+    }
+    case 'trigger.duplicate': {
+      const tr = (map.triggers || []).find((x) => x.id === p.id);
+      if (!tr) return { changed: null };
+      const copy = { ...structuredClone(tr), id: newId('t'), name: `${tr.name} (copy)`.slice(0, 60) };
+      delete copy.at;
+      map.triggers.splice(map.triggers.indexOf(tr) + 1, 0, copy);
+      return { changed: 'all', selected: copy.id, label: 'Duplicated' };
     }
     case 'fx.update': {
       const fx = map.fx.find((x) => x.id === p.id);
@@ -998,6 +1149,9 @@ function applyRaw(map, type, p, media) {
       if ('spin' in p) { if (p.spin === -1) fx.spin = -1; else delete fx.spin; } // Second Builder (second-water-works)
       if ('swirl' in p) { if (p.swirl === false) fx.swirl = false; else delete fx.swirl; } // (second-water-works)
       if ('dust' in p) fx.dust = Math.min(12, Math.max(0.05, Number(p.dust) || 1));
+      if ('group' in p) { const g = String(p.group || '').trim().slice(0, 40); if (g) fx.group = g; else delete fx.group; } // I7: a light's group (Hall torches), switched by a trigger
+      if ('critter' in p) { if (p.critter == null || Math.abs(Number(p.critter) - 1) < 0.001) delete fx.critter; else fx.critter = Math.min(2.5, Math.max(0.4, Number(p.critter) || 1)); } // C14
+      if ('height' in p) { if (p.height == null) delete fx.height; else fx.height = Math.min(1, Math.max(0, Number(p.height) || 0)); } // C14
       if (p.shape) fx.shape = String(p.shape).slice(0, 20);
       if (p.grid) fx.grid = String(p.grid).slice(0, 20);
       if ('stretch' in p) fx.stretch = Math.min(3, Math.max(1, Number(p.stretch) || 1.5));
@@ -1010,6 +1164,8 @@ function applyRaw(map, type, p, media) {
         fx = { id: p.id, kind: 'region', preset: String(p.preset || 'mist'), strokes: [], intensity: p.intensity ?? 1, hidden: false, color: p.color || null, density: p.density ?? 1, speed: p.speed ?? 1 };
         if (p.variant) fx.variant = String(p.variant).slice(0, 20); // Second Builder (second-water-works): a painted kind (Bubbling pool)
         if (p.spin === -1) fx.spin = -1; // Second Builder (second-sun-sand-gears): Turning parts the other way round
+        if (p.critter != null) fx.critter = Math.min(2.5, Math.max(0.4, Number(p.critter) || 1)); // C14: Size of the animals
+        if (p.height != null) fx.height = Math.min(1, Math.max(0, Number(p.height) || 0)); // C14: how high birds fly
         map.fx.push(fx);
       }
       let s = fx.strokes.find((x) => x.sid === p.sid);
@@ -1025,6 +1181,8 @@ function applyRaw(map, type, p, media) {
         fx = { id: p.id, kind: 'region', preset: String(p.preset || 'mist'), strokes: [], intensity: p.intensity ?? 1, hidden: false, color: p.color || null, density: p.density ?? 1, speed: p.speed ?? 1 };
         if (p.variant) fx.variant = String(p.variant).slice(0, 20); // (second-water-works)
         if (p.spin === -1) fx.spin = -1; // (second-sun-sand-gears)
+        if (p.critter != null) fx.critter = Math.min(2.5, Math.max(0.4, Number(p.critter) || 1)); // C14
+        if (p.height != null) fx.height = Math.min(1, Math.max(0, Number(p.height) || 0)); // C14
         map.fx.push(fx);
       }
       if (fx.kind !== 'region') return { changed: null };
@@ -1364,16 +1522,26 @@ function applyRaw(map, type, p, media) {
     case 'mark.clear': {
       const kinds = new Set(p.kinds || MARK_KINDS);
       const before = map.marks.length + map.draw.length;
-      map.marks = map.marks.filter((m) => !kinds.has(m.kind));
-      if (p.labels) map.draw = map.draw.filter((d) => d.kind !== 'text'); // (Third Builder (third-marks-tool): the Marks tool's one Clear takes the labels too)
+      // (UI audit VF6: p.shown: only what is on the table goes; the GM's own notes and "Only me" marks stay)
+      map.marks = map.marks.filter((m) => !(kinds.has(m.kind) && !(p.shown && (m.kind === 'note' || m.hidden))));
+      if (p.labels) map.draw = map.draw.filter((d) => !(d.kind === 'text' && !(p.shown && d.hidden))); // (Third Builder (third-marks-tool): the Marks tool's one Clear takes the labels too)
       return map.marks.length + map.draw.length === before ? { changed: null } : { changed: 'all', label: p.labels ? 'Marks cleared' : 'Markers cleared' };
     }
 
     // ---------- Beta 3.22: Oldschool maps: the drawing ----------
     case 'os.add': { // one thing drawn (or erased): p.item, or several: p.items (Beta 3.23: with doors, a ready-made piece)
       if (!map.os) return { changed: null };
-      const list = (p.items || [p.item]).map(cleanOsItem).filter(Boolean);
+      let list = (p.items || [p.item]).map(cleanOsItem).filter(Boolean);
       if (!list.length) return { changed: null };
+      if (list.some(osCounts) && osTooBig(map, [...map.os.items, ...list])) return { changed: null, tooBig: OS_MAX }; // (a drawn map's maximum size)
+      // Speed 3 (WC7): Erase only added a hole on top, so a room drawn, erased and drawn again stayed in the drawing
+      // three times, for good. What lies wholly inside an erasing box or circle shows nowhere: it leaves the drawing,
+      // and a hole that then has nothing left to erase is not kept either.
+      const n0 = map.os.items.length;
+      for (const cut of list) if (cut.kind === 'cut') map.os.items = dropCovered(map.os.items, cut, (map.grid && map.grid.size) || 1);
+      const gone = n0 - map.os.items.length;
+      if (gone) list = list.filter((cut) => cut.kind !== 'cut' || !(cut.shape === 'rect' || cut.shape === 'round') || map.os.items.some((it) => osTouch(it, cut)));
+      if (!list.length) { syncGround(map); return { changed: 'all', label: 'Erased' }; }
       map.os.items.push(...list);
       if (Array.isArray(p.doors) && p.doors.length) map.os.doors.push(...cleanOs({ doors: p.doors.slice(0, 200).map((d) => ({ ...d, id: newId('od') })) }).doors);
       const k = list[list.length - 1].kind;
@@ -1387,6 +1555,7 @@ function applyRaw(map, type, p, media) {
       const mixing = 'mixW' in p || 'mixU' in p || 'mixT' in p ? { mix: undefined } : {}; // (a 3.26 floor set anew)
       const next = cleanOsItem({ ...map.os.items[i], ...mixing, ...pick(p, ['tile', 'edge', 'mat', 'level', 'pts', 'r', 'w', 'h', 'round', 'dir', 'preset', 'mixW', 'mixU', 'mixT']), id: p.id });
       if (!next) return { changed: null };
+      if (('pts' in p || 'r' in p || 'w' in p) && osTooBig(map, map.os.items.map((x, n) => (n === i ? next : x)))) return { changed: null, tooBig: OS_MAX }; // (a drawn map's maximum size)
       map.os.items[i] = next;
       syncGround(map);
       return { changed: 'all', label: p.label || null };
@@ -1410,11 +1579,13 @@ function applyRaw(map, type, p, media) {
     }
     case 'os.set': { // the map's sun (where the light comes from), and whether walls for sight follow the drawing
       if (!map.os) return { changed: null };
+      const was = JSON.stringify([map.os.sun, map.os.sight, map.os.shadowLen, map.os.shadowAll]);
       if ('sun' in p) map.os.sun = Math.round(osNum(p.sun, 135, 0, 359));
       if ('sight' in p) map.os.sight = !!p.sight;
       if ('shadows' in p) map.os.shadowLen = SHADOW_LEN[p.shadows] ?? 0.35; // (Beta 3.25; 3.35: a length now)
       if ('shadowLen' in p) map.os.shadowLen = r3(osNum(p.shadowLen, 0.35, 0, 1));
       if ('shadowAll' in p) map.os.shadowAll = r3(osNum(p.shadowAll, 0, 0, 1));
+      if (was === JSON.stringify([map.os.sun, map.os.sight, map.os.shadowLen, map.os.shadowAll])) return { changed: null }; // (Speed 1, WA6: the same value again is no change: no state, no undo step)
       return { changed: 'all' };
     }
     case 'os.clear': {
@@ -1429,10 +1600,10 @@ function applyRaw(map, type, p, media) {
       if (!map.os) return { changed: null };
       if (p.bg) {
         map.bg = { ...media(p.bg.path), kind: 'image', x: r4g(p.bg.x), y: r4g(p.bg.y), scale: p.bg.scale, nw: p.bg.nw, nh: p.bg.nh, volume: 0, rate: 1, os: String(p.hash || '') };
-        if (Array.isArray(p.ids)) map.bg.osIds = p.ids.map(String).slice(0, 5000); // (Beta 3.23) what the picture already shows (the TV inks the rest)
+        if (Array.isArray(p.ids)) map.bg.osIds = p.ids.map(String).slice(0, 200000); // (Beta 3.23) what the picture already shows (the TV inks the rest). (Speed 9, WI4: it was cut at 5000, and the windows now get only what it does not show: main, bgForWindow)
         // (Beta 3.25) the sharp tiles on top of the picture: P dots a square, ts squares across, at whole squares from
         // the grid's origin (c, r)
-        if (p.bg.live) map.bg.live = media(p.bg.live); // (Beta 3.42) where its living tiles lie
+        if (p.bg.live) map.bg.live = { ...media(p.bg.live), ...(p.bg.liveKey ? { key: String(p.bg.liveKey).slice(0, 40) } : {}) }; // (Beta 3.42) where its living tiles lie; (WC2) key: what is in it
         if (p.bg.sharp && p.bg.sharp.P > 0 && p.bg.sharp.ts > 0 && Array.isArray(p.bg.sharp.tiles)) map.bg.sharp = { P: p.bg.sharp.P, ts: p.bg.sharp.ts, tiles: p.bg.sharp.tiles.map((t) => ({ c: t.c, r: t.r, h: t.h, ...media(t.path) })) };
       }
       else if (p.empty) map.bg = null;
@@ -1444,6 +1615,7 @@ function applyRaw(map, type, p, media) {
             const w = wallOf(q.c || q, q.door || 0, q.kind);
             if (!w) continue;
             w.os = String(q.key || w.id);
+            if (Array.isArray(q.bk) && q.bk.length === 2 && !w.door) w.bk = q.bk.map((v) => r3(Math.min(1000, Math.max(0, Number(v) || 0)))); // (how deep what is built lies behind it, left and right: the fog can uncover that, vision.js)
             const old = was.get(w.os);
             if (old) { w.id = old.id; if (w.door || w.kind === 'window') { w.open = !!old.open; if (old.shut) w.shut = true; } }
             map.walls.push(w);
@@ -1526,9 +1698,10 @@ function applyRaw(map, type, p, media) {
       map.vision.on = true;
       return { changed: 'all', label: p.label || `${(p.walls || []).length} walls loaded` };
     case 'vision.update':
-      Object.assign(map.vision, pick(p, ['on', 'dim']));
+      Object.assign(map.vision, pick(p, ['on', 'dim', 'rock']));
       map.vision.on = !!map.vision.on;
       map.vision.dim = Math.min(0.95, Math.max(0, num(map.vision.dim, 0.5)));
+      if (map.vision.rock != null) map.vision.rock = Math.round(Math.min(4, Math.max(0, num(map.vision.rock, 2.5))) * 4) / 4; // (squares of rock uncovered behind a wall in sight; 0: none; not set: 2.5)
       return { changed: 'all' };
 
     // ---------- rounds ----------
@@ -1600,12 +1773,13 @@ function updateWall(w, p) {
 // What the party sees goes into the fog for good ("reveal and remember").
 // Called after every map change: an eye that moved far enough, a door that opened,
 // a light that came on (on dark maps) records the view again. last: Map eyeId -> what was recorded.
+const sightStats = { made: 0, same: 0 }; // (for the self-test: records made; left out because they said nothing new)
 function recordSight(map, last, force, stepK = 0.75) { // (Prototype 23: stepK, how far in squares an eye moves before it sees anew)
   if (!map.fog.enabled) return [];
   const eyes = Vision.eyes(map);
   if (!eyes.length) return [];
   const walled = Vision.on(map);
-  const sig = walled ? Vision.wallSig(map) : 'open';
+  const sig = walled ? `${Vision.wallSig(map)}|${Vision.rockOf(map)}` : 'open'; // (with how deep the fog looks behind walls: a change of that is another sight)
   const dark = Vision.isDark(map);
   const litSig = dark ? JSON.stringify(Vision.lights(map, false).map((L) => [Math.round(L.x * 4), Math.round(L.y * 4), Math.round(L.D * 4)])) : '';
   const step = Math.max(0.2, (map.grid.size || 1) * stepK);
@@ -1619,10 +1793,24 @@ function recordSight(map, last, force, stepK = 0.75) { // (Prototype 23: stepK, 
     if (prev && kept && !moved && prev.sig === sig && prev.lit === litSig && prev.eye === eyeSig) continue;
     const s = Vision.sight(map, e, sig, walled);
     const rnd = (pts) => pts.map((v) => Math.round(v * 100) / 100);
-    const op = { id: newId('v'), mode: 'reveal', shape: 'sight', pts: rnd(s.pts), lit: s.lit ? s.lit.map(rnd) : null, eye: e.id }; // (Prototype 14: whose sight)
+    const pts = rnd(s.pts); const lit = s.lit ? s.lit.map(rnd) : null;
+    // Speed 5 (WE6, first half): on a dark map one player's step made every player token record what it sees again,
+    // because the list of lights had changed (the stepping token carries one): with four tokens, four records a step,
+    // three of them the very same shape as before. An eye that stands still and sees exactly what its last record
+    // says adds nothing to the fog, so it records nothing: as long as only reveals came after that record (after the
+    // GM covered something it is recorded again, as before, so the fog comes out the same in every case).
+    const shape = `${pts.join()}|${lit ? lit.map((q) => q.join()).join(';') : '-'}`;
+    if (prev && kept && !moved && prev.eye === eyeSig && prev.shape === shape) {
+      const at = map.fog.ops.findIndex((o) => o.id === prev.op);
+      let onlyReveals = at >= 0;
+      for (let i = at + 1; onlyReveals && i < map.fog.ops.length; i++) if (map.fog.ops[i].mode !== 'reveal') onlyReveals = false;
+      if (onlyReveals) { last.set(e.id, { ...prev, sig, lit: litSig }); sightStats.same++; continue; }
+    }
+    const op = { id: newId('v'), mode: 'reveal', shape: 'sight', pts, lit, eye: e.id }; // (Prototype 14: whose sight)
     map.fog.ops.push(op);
     ops.push(op);
-    last.set(e.id, { x: e.x, y: e.y, sig, lit: litSig, eye: eyeSig, op: op.id });
+    sightStats.made++;
+    last.set(e.id, { x: e.x, y: e.y, sig, lit: litSig, eye: eyeSig, op: op.id, shape });
   }
   return ops;
 }
@@ -1721,6 +1909,7 @@ class History {
   constructor(pool = null) {
     this.undo = []; this.redo = []; this.ul = []; this.rl = []; this.ut = []; this.rt = []; this.lastKey = null; this.lastTime = 0; // (Prototype 14: ut / rt: when each copy was taken)
     this.us = []; this.rs = []; this.bytes = 0; this.pool = pool; // (Q1: each step's size)
+    this.keyOf = new WeakMap(); // (UI audit VD1, VG1: the gesture each undo step was taken for, by its copy)
     if (pool) pool.list.add(this);
   }
   grow(n) { this.bytes += n; if (this.pool) this.pool.bytes += n; }
@@ -1746,7 +1935,8 @@ class History {
     if (NO_HISTORY.has(type)) return false;
     const now = Date.now();
     if (key && key === this.lastKey && (hold || now - this.lastTime < 2500)) { this.lastTime = now; return false; }
-    const snap = snapshot(map); const size = sizeOf(snap);
+    const snap = snapshot(map); const size = stepSize(snap, this.undo[this.undo.length - 1]);
+    if (key) this.keyOf.set(snap, key);
     this.undo.push(snap); this.us.push(size); this.grow(size);
     this.ul.push(label || stepWords(type)); this.ut.push(now);
     if (this.undo.length > 80) this.dropOldest();
@@ -1759,6 +1949,10 @@ class History {
   }
   // a step that changed nothing is taken back
   drop() { if (!this.undo.length) return; this.undo.pop(); this.ul.pop(); this.ut.pop(); this.grow(-(this.us.pop() || 0)); }
+  // the gesture the newest undo step was taken for (null: none, or a step without a key)
+  topKey() { const s = this.undo[this.undo.length - 1]; return (s && this.keyOf.get(s)) || null; }
+  // (UI audit VD1) the step just undone is not kept for Redo: a drag that was cancelled never happened
+  forget() { if (!this.redo.length) return; this.redo.pop(); this.rl.pop(); this.rt.pop(); this.grow(-(this.rs.pop() || 0)); }
   step(map, dir) {
     const from = dir === 'undo' ? this.undo : this.redo;
     const to = dir === 'undo' ? this.redo : this.undo;
@@ -1769,7 +1963,7 @@ class History {
     const fs_ = dir === 'undo' ? this.us : this.rs;
     const ts_ = dir === 'undo' ? this.rs : this.us;
     if (!from.length) return false;
-    const now = snapshot(map); const size = sizeOf(now);
+    const now = snapshot(map); const size = stepSize(now, to[to.length - 1]);
     to.push(now); ts_.push(size); this.grow(size);
     tl.push(fl.pop() || 'Last change');
     const when = ft.pop() || 1; tt.push(Date.now());
@@ -1783,8 +1977,49 @@ class History {
   }
 }
 
-const SNAP_KEYS = ['bg', 'view', 'layers', 'grid', 'fog', 'fx', 'spells', 'weather', 'light', 'draw', 'marks', 'round', 'walls', 'vision', 'areas', 'frame', 'pframe', 'atlas', 'os']; // (Beta 3.12: atlas, a world map's mist and weather; Beta 3.22: os, an Oldschool map's drawing)
-function snapshot(map) { return structuredClone(Object.fromEntries(SNAP_KEYS.map((k) => [k, map[k]]))); }
+// (UI audit VI3: 'look', the map's colours: Ctrl Z took a step for them and then put nothing back)
+const SNAP_KEYS = ['look', 'bg', 'view', 'layers', 'grid', 'fog', 'fx', 'spells', 'weather', 'light', 'draw', 'marks', 'round', 'walls', 'vision', 'areas', 'frame', 'pframe', 'atlas', 'os']; // (Beta 3.12: atlas, a world map's mist and weather; Beta 3.22: os, an Oldschool map's drawing)
+// Speed 3 (WC5): an undo step was a copy of the whole map, the drawing of an Oldschool map included: a big drawing
+// left 6 to 17 steps of its 80, and every command copied all of it before it was known to change anything. The
+// things and doors of a drawing are never changed in place (a command puts a new one in the old one's place), so a
+// step now shares them with the map and with the steps beside it: it holds its own list, not its own copies.
+// In the self-test every shared thing is frozen, so a change in place would fail there.
+const OS_SHARED = new Set(['items', 'doors']);
+const FREEZE_SHARED = !!process.env.TS_TEST_DIR;
+const deepFreeze = (o) => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); for (const v of Object.values(o)) deepFreeze(v); } return o; };
+function snapshot(map) {
+  const snap = {};
+  for (const k of SNAP_KEYS) {
+    const os = k === 'os' ? map.os : null;
+    if (os && Array.isArray(os.items) && Array.isArray(os.doors)) {
+      const copy = {};
+      for (const key of Object.keys(os)) {
+        if (OS_SHARED.has(key)) { if (FREEZE_SHARED) os[key].forEach(deepFreeze); copy[key] = os[key].slice(); } else copy[key] = structuredClone(os[key]);
+      }
+      snap.os = copy;
+    } else snap[k] = structuredClone(map[k]);
+  }
+  return snap;
+}
+// what a step holds on top of the step under it: a shared thing it has in common with that one counts as a pointer
+const sharedSize = new WeakMap();
+function stepSize(snap, under) {
+  let n = 32;
+  for (const k of Object.keys(snap)) {
+    const os = k === 'os' ? snap.os : null;
+    if (os && Array.isArray(os.items) && Array.isArray(os.doors)) {
+      const had = new Set(under && under.os ? [...(under.os.items || []), ...(under.os.doors || [])] : []);
+      n += 2 * k.length + 32;
+      for (const key of Object.keys(os)) {
+        n += 2 * key.length;
+        if (!OS_SHARED.has(key)) { n += sizeOf(os[key]); continue; }
+        n += 32;
+        for (const x of os[key]) { if (had.has(x)) { n += 8; continue; } let z = sharedSize.get(x); if (z === undefined) { z = sizeOf(x); sharedSize.set(x, z); } n += z; }
+      }
+    } else n += 2 * k.length + sizeOf(snap[k]);
+  }
+  return n;
+}
 function restore(map, snap) { for (const k of SNAP_KEYS) if (k in snap) map[k] = snap[k]; }
 
-module.exports = { defaultOs, cleanOs, emptyMap, normalize, apply, expire, recordSeen, recordSight, newId, History, defaultGrid, sceneOf, sceneMatches, sizeOf, HIST_MAP_MAX, HIST_POOL_MAX };
+module.exports = { dropCovered, defaultOs, cleanOs, emptyMap, normalize, apply, expire, recordSeen, recordSight, newId, History, defaultGrid, sceneOf, sceneMatches, sceneStats, sightStats, sizeOf, OS_MAX, HIST_MAP_MAX, HIST_POOL_MAX };

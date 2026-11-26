@@ -15,7 +15,7 @@ const Hotbar = (() => {
   const ICON = {
     token: 'user', asset: 'trees', portrait: 'user-circle', handout: 'script', overlay: 'sparkles', sound: 'volume', mood: 'brand-spotify',
     moment: 'flare', cue: 'keyframes', wheel: 'chart-pie', roll: 'dice', death: 'heart-broken', spell: 'flame', weather: 'cloud-rain',
-    light: 'sun-moon', map: 'map-2', panel: 'briefcase', snap: 'camera', fog: 'cloud-fog', lights: 'bulb', tool: 'pointer', do: 'bolt', door: 'door',
+    light: 'sun-moon', map: 'map-2', panel: 'briefcase', snap: 'camera', fog: 'cloud-fog', lights: 'bulb', tool: 'pointer', do: 'bolt', door: 'door', trigger: 'bolt',
   };
   let active = null; // the GM screen's bar
 
@@ -27,6 +27,7 @@ const Hotbar = (() => {
     return { kind, label: a.name, ref: { path: a.path, kind: a.kind, cat: a.cat } };
   }
   // an element that can go on the hotbar: drag it there, or right-click → Put on the hotbar
+  let lastDrop = 0; // (VK6) when something was last dropped on the bar
   function offer(el, item, { menu = true } = {}) {
     if (!el) return el;
     const get = () => (typeof item === 'function' ? item() : item);
@@ -39,6 +40,15 @@ const Hotbar = (() => {
       document.body.classList.add('dragging-hot');
     });
     el.addEventListener('dragend', () => document.body.classList.remove('dragging-hot'));
+    // UI audit VK6: a hurried click with a few pixels of movement became a drag and did nothing. A drag that ends where
+    // it began (within 20 px) and was not dropped on the bar is the click it was meant to be.
+    let from = null;
+    el.addEventListener('dragstart', (e) => { from = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+    el.addEventListener('dragend', (e) => {
+      const f = from; from = null;
+      if (!f || performance.now() - lastDrop < 400 || (!e.clientX && !e.clientY)) return;
+      if (Math.hypot(e.clientX - f.x, e.clientY - f.y) < 20 && performance.now() - f.t < 1200) el.click();
+    });
     if (menu) {
       el.addEventListener('contextmenu', (e) => {
         if (e.defaultPrevented) return;
@@ -168,6 +178,17 @@ const Hotbar = (() => {
       } else {
         Object.assign(root.style, { left: '', top: '', bottom: '', transform: '' });
         root.classList.remove('moved');
+        // UI audit VH2: an open rail panel covered the first slots in a small window: the bar moves right, just as
+        // far as it has to (a place you gave it yourself is left alone)
+        const pop = document.querySelector('#pop.on');
+        if (pop && host && pop.offsetParent === root.offsetParent) {
+          const right = pop.offsetLeft + Math.max(pop.offsetWidth, ...[...pop.children].map((c) => c.offsetLeft + c.offsetWidth));
+          const w = root.offsetWidth || 700;
+          const at = host.clientWidth / 2 - w / 2;
+          const need = right + 10 - at;
+          const room = host.clientWidth - 8 - (at + w);
+          if (need > 0 && pop.offsetTop + pop.offsetHeight > root.offsetTop) root.style.left = `calc(50% + ${Math.round(Math.max(0, Math.min(need, room)))}px)`;
+        }
       }
       toastsHere();
     }
@@ -223,7 +244,9 @@ const Hotbar = (() => {
       pageOut.textContent = `${page + 1}/${PAGES}`;
       mine.forEach((it, i) => {
         const el = slotEls[i];
-        el.className = `hb-slot ${it ? 'full' : 'empty'} ${live[i] ? 'live' : ''} ${it && it.missing ? 'missing' : ''}`;
+        // (UI audit VM4: "run": it runs on the table (green); a token, asset, spell or tool in hand and an open panel stay amber)
+        const hand = it && (['token', 'asset', 'spell', 'tool', 'panel'].includes(it.kind) || (it.kind === 'fog' && it.ref !== 'toggle'));
+        el.className = `hb-slot ${it ? 'full' : 'empty'} ${live[i] ? (hand ? 'live' : 'live run') : ''} ${it && it.missing ? 'missing' : ''}`;
         el.innerHTML = '';
         el.removeAttribute('data-tip');
         if (it) {
@@ -253,6 +276,7 @@ const Hotbar = (() => {
       let it = null;
       try {
         const raw = dt.getData(TYPE);
+        if (raw) lastDrop = performance.now(); // (VK6)
         if (raw) {
           const o = JSON.parse(raw);
           if (o && Number.isInteger(o.from)) { // a slot onto another: they swap

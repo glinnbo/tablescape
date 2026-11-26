@@ -21,7 +21,11 @@ const Oldschool = (() => {
   const EDGE_CODE = { ledge: 1, walls: 2, rock: 3, cliff: 4, fade: 5 };
   const DEFAULT_MAT = { walls: 'stone_wall', rock: 'rock', cliff: 'cliff', ledge: 'stone_wall', fade: 'stone_wall' };
   const relOf = (t) => `Tiles/Tablescape/${t.label}.webp`;
-  const builtinByRel = new Map(DATA.tiles.map((t) => [relOf(t), t]));
+  const builtinByRel = new Map(DATA.tiles.filter((t) => t.kind === 'floor' || t.kind === 'material').map((t) => [relOf(t), t])); // (not the wall kits: one may be named as a floor is)
+  // (25 Nov 2026) wall materials that are only a kit (tiles/walls/<id>/): no square picture, none of the light step's
+  // five material places. gain: how much darker than rendered they are painted (scripts/make_tiles.py)
+  const WALLKITS = DATA.tiles.filter((t) => t.kind === 'wallkit');
+  const KIT_ONLY = new Map(WALLKITS.map((t) => [t.id, t]));
   const PX = 80; // dots per square in the picture (the TV shows about this many per inch)
   const MAX_PX = 12e6; // dots in the picture at most (a huge map gets fewer per square)
   const MARGIN = 3; // squares around what was drawn (rock and cliffs reach out)
@@ -33,9 +37,25 @@ const Oldschool = (() => {
   // for every floor); a door: the wall line it opens
   const HALO_SOLID = 3.4;
   const REACH = 3.4; // squares: how far what is drawn shows beyond itself (a tile further away is empty)
-  const VERSION = 28; // (28: Beta 3.46, an effect can be poured over one height (Fill), water has a colour of its own, Glow is Shimmer; 27: Beta 3.43, effects are drawn over the floors, no tile moves by itself; 26: Beta 3.42, living tiles: the picture comes with a map of where water, lava and grass lie; 25: Beta 3.40, stairs climb all the levels between their floors, floors blend at any height; 24: Beta 3.39, steps between floors of different height show on every side; 23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
+  const VERSION = 31; // (31: 26 Nov 2026, the walls for sight know how deep the rock lies behind them (bk), so every drawn map gets them; 30: 26 Nov 2026, stairs climb in the sharp tiles as in the base; 29: 25 Nov 2026, a pillar on a wall corner covers it, and the wall kits; 28: Beta 3.46, an effect can be poured over one height (Fill), water has a colour of its own, Glow is Shimmer; 27: Beta 3.43, effects are drawn over the floors, no tile moves by itself; 26: Beta 3.42, living tiles: the picture comes with a map of where water, lava and grass lie; 25: Beta 3.40, stairs climb all the levels between their floors, floors blend at any height; 24: Beta 3.39, steps between floors of different height show on every side; 23: Beta 3.37, stairs: the lowest step blends into the floor, stronger shadows; 22: Beta 3.36.1, a soft shadow at the foot of wall lines and pillars, the walls for sight snapped; 21: Beta 3.36, the walls' details; 20: Beta 3.35, shadow length and shadows all around, thicker window stops; 19: Beta 3.34, no frames: doorways through the wall, windows in a niche; 18: Beta 3.33, door and window frames of the wall's material, on the wall band; 17: Beta 3.31, the base at half size under sharp tiles, tiles of 1000 dots; 16: Beta 3.30, each square its own soft patch of the old floor, the new floor along the joints; 15: Beta 3.29, Fade outward, squares and joints, stairs; 14: Beta 3.28, cliffs that show, Fade, joints; 13: Beta 3.27, floors mix by opacity; 12: 3.26; 11: Beta 3.25, sharp tiles, the 2D look)
   let sharpWant = 0; // dots a square for the sharp tiles (0: none); the Draw tool sets it from the TV
-  function setSharp(p) { const v = p > 0 && !api.noSharp ? Math.round(Math.min(200, Math.max(100, p))) : 0; const ch = v !== sharpWant; sharpWant = v; return ch; }
+  // Speed 1 (WA3): the wish comes from the TV's zoom and size and used to be any whole number from 100 to 200, part of
+  // every tile's key: a zoom step of under a percent, or another TV, made every tile again. Now it moves in steps of
+  // about 15 %, and stays where the picture's tiles are (has) while the wish is not more than 15 % below or 8 % above.
+  const SHARP_STEPS = [100, 115, 130, 150, 170, 200];
+  function setSharp(p, has) {
+    let v = 0;
+    if (p > 0 && !api.noSharp) {
+      const w = Math.min(200, Math.max(100, p));
+      const cur = has > 0 ? has : sharpWant;
+      v = cur && w >= cur * 0.85 && w <= cur * 1.08 ? cur : SHARP_STEPS.find((s) => s >= w * 0.95) || 200;
+    }
+    const ch = v !== sharpWant; sharpWant = v; return ch;
+  }
+  // Speed 1 (WA2): the dots a square of the picture the map has now ({ P, sharpP }; the Draw tool sets it from the
+  // state, null: none). boxOf stays with them while they are near enough to what it would pick afresh.
+  let densHas = null;
+  function setHas(h) { densHas = h && h.P > 0 ? { P: h.P, sharpP: h.sharpP > 0 ? h.sharpP : 0 } : null; }
 
   // ---------- tiles ----------
   // a tile reference ({ rel, path }) → what to paint with: url, squares (null: not set yet)
@@ -75,12 +95,46 @@ const Oldschool = (() => {
     }
     return out;
   }
-  const matInfo = (id) => { const t = byId.get(id) || byId.get('stone_wall'); return t ? { url: DIR + t.file, squares: t.squares, id: t.id } : null; };
+  const matInfo = (id) => { const t0 = byId.get(id); const t = t0 && t0.kind === 'material' ? t0 : byId.get('stone_wall'); return t ? { url: DIR + t.file, squares: t.squares, id: t.id } : null; };
   const images = new Map(); // url → Promise<Image>
   function image(url) {
     if (!images.has(url)) images.set(url, new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => { images.delete(url); rej(new Error(`tile picture ${url}`)); }; i.src = url; }));
     return images.get(url);
   }
+  // Speed 2 (WB4): scaled pictures stay at hand between two pictures of a drawing. Every edit scaled every floor the
+  // map uses down from 2048 dots, twice (for the base and for the sharp tiles; a third time for a doorway), and every
+  // wall piece, and threw them away. Those used longest ago are let go above SCALED_MAX bytes; never one the picture
+  // being made has used (bakeNo).
+  const SCALED = new Map(); let scaledBytes = 0; const SCALED_MAX = 160e6; let bakeNo = 0;
+  const kept = { scaled: 0, scaledMade: 0, mats: 0, matsMade: 0 }; // (counted for the self-test)
+  function keptScaled(key, make) {
+    let e = SCALED.get(key);
+    if (e) { SCALED.delete(key); SCALED.set(key, e); e.use = bakeNo; kept.scaled++; return e.cv; }
+    const cv = make(); e = { cv, bytes: cv.width * cv.height * 4, use: bakeNo }; SCALED.set(key, e); scaledBytes += e.bytes; kept.scaledMade++;
+    if (scaledBytes > SCALED_MAX) {
+      for (const [k2, o] of SCALED) {
+        if (scaledBytes <= SCALED_MAX) break;
+        if (o.use === bakeNo) continue;
+        SCALED.delete(k2); scaledBytes -= o.bytes; o.cv.width = o.cv.height = 0;
+      }
+    }
+    return cv;
+  }
+  const pxOf = (px) => Math.max(8, Math.round(px));
+  const scaledAt = (url, img, px) => keptScaled(`${url}@${pxOf(px)}`, () => scaled(img, px));
+  // A wall material's picture halved once (2048 → 1024) is kept as well: every size up to 975 dots is made from it,
+  // dot for dot as from the picture itself (the first halving step is the same), and the 16 MB of the unpacked picture
+  // are not needed again.
+  const halfKey = (url) => `${url}@half`;
+  function halfOf(url, img) {
+    return keptScaled(halfKey(url), () => {
+      const w = Math.round((img.naturalWidth || img.width) / 2);
+      const c = document.createElement('canvas'); c.width = c.height = w;
+      const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, w, w);
+      return c;
+    });
+  }
+  const scaledMat = (url, img, px) => ((img.naturalWidth || img.width) / 2 >= pxOf(px) * 1.05 ? scaled(halfOf(url, img), px) : scaled(img, px));
   // a tile scaled down well (halving steps) to the size it is painted at
   function scaled(img, px) {
     px = Math.max(8, Math.round(px));
@@ -101,7 +155,7 @@ const Oldschool = (() => {
   function itemBox(it) {
     let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
     for (const [x, y] of it.pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
-    const pad = it.kind === 'line' ? it.w / 2 : it.kind === 'pillar' ? it.r : it.shape === 'path' || it.shape === 'brush' ? it.r : 0;
+    const pad = it.kind === 'line' ? it.w / 2 : it.kind === 'pillar' ? it.r : it.shape === 'path' || it.shape === 'brush' ? it.r + roughReach(it) : 0; // (XA4: a jagged stroke reaches further than its radius)
     return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
   }
   function bounds(os) {
@@ -122,8 +176,65 @@ const Oldschool = (() => {
     else if (it.shape === 'poly') { P.forEach(([x, y], i) => (i ? p.lineTo(x, y) : p.moveTo(x, y))); p.closePath(); }
     return p;
   }
+  // XA4 (Glinn, 26 Nov 2026: cave walls should not look so smooth): a brush stroke with a jagged edge (it.rough, 0 to
+  // 1). Its outline is pushed in and out by a noise of the place on the map, so the same spot is jagged the same way
+  // in every picture made of it (the floor, its shadows, its walls, an effect over it) and nothing crawls when
+  // something else changes. The stroke is laid out as many-cornered dabs along its line; each corner stands where the
+  // noise at that spot of the smooth outline says. Straight pieces between the corners: hewn, not wobbly.
+  // Second go (Glinn's reference picture, 26 Nov): much harder. Two things move the outline: lobes about two squares
+  // across, which grow with the setting and with the brush (a brush of 5 squares: over a square in or out at 80 %),
+  // and teeth of two sizes that are there from the first step of the slider (5 %: a sixth of a square). The walls
+  // for sight follow the jagged line, since it can now lie a square from the smooth one.
+  // how far the outline may move, in squares: [the lobes, the teeth]
+  const roughAmps = (it, G) => { const q = Math.min(1, it.rough); const rs = (it.rr ?? it.r) / G; return [Math.min(1.5, 0.6 * rs) * q ** 1.2, Math.min(0.45 * rs, 0.16 + 0.2 * q)]; };
+  const roughReach = (it) => { if (!(it.shape === 'brush' && it.rough > 0)) return 0; const G = gridG || 1; const [a, b] = roughAmps(it, G); return (a + b) * G; }; // (map inches: how far beyond its radius a jagged stroke can reach)
+  let gridG = 1; // (the grid's size of the map being painted, in map inches: boxOf sets it)
+  const rhash = (ix, iy) => { let h = (Math.imul(ix, 374761393) + Math.imul(iy, 668265263)) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967295; };
+  const rnoise = (px, py) => { const ix = Math.floor(px); const iy = Math.floor(py); const fx = px - ix; const fy = py - iy; const a = rhash(ix, iy); const b = rhash(ix + 1, iy); const c = rhash(ix, iy + 1); const d = rhash(ix + 1, iy + 1); return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy; };
+  // (x, y in squares; the answer in squares. This noise keeps to its middle, so each part is stretched until it
+  // reaches its ends: the lobes of two sizes, about two squares and one square across, and the teeth of two sizes)
+  const rclamp = (v) => Math.max(-1, Math.min(1, v));
+  // coarse: without the small teeth (the walls for sight: a wall for every small tooth would be four times as many
+  // walls to look through; they then lie at most a tenth of a square beside the picture's line)
+  const roughAt = (x, y, aB, aF, coarse) => aB * rclamp(((rnoise(x / 2.3 + 7.1, y / 2.3 + 3.9) * 0.65 + rnoise(x / 1.05 + 17.3, y / 1.05 + 5.2) * 0.35) * 2 - 1) * 2.4) + aF * rclamp(((rnoise(x / 0.6, y / 0.6) * 0.6 + (coarse ? 0.2 : rnoise(x / 0.2 + 31.7, y / 0.2 + 11.3) * 0.4)) * 2 - 1) * 3);
+  // Kept by what the stroke is (its points, radius, setting), not by the object: every picture is made from a fresh
+  // copy of the drawing. (Glinn's cave of 26 Nov, 18 jagged strokes: each edit took 4 to 5 s, because every stroke was
+  // worked out anew for every picture and then drawn corner by corner into every mask and every one of 61 tiles.)
+  const roughKept = new Map(); // key → Path2D in map inches (the last 80 used)
+  const roughPts = new WeakMap(); // a stroke's points → their text, made once
+  function roughPath(it) {
+    const G = gridG || 1; const r = it.r; const rN = it.rr ?? it.r; const [aB, aF] = roughAmps(it, G);
+    let pk = roughPts.get(it.pts); if (!pk) { pk = JSON.stringify(it.pts); roughPts.set(it.pts, pk); }
+    const key = `${pk}|${r}|${rN}|${it.rough}|${G}|${it.coarse ? 1 : 0}`;
+    const was = roughKept.get(key); if (was) { roughKept.delete(key); roughKept.set(key, was); return was; }
+    const step = 0.2 * G; const C = [it.pts[0]]; // (a dab every fifth of a square: the teeth are no smaller)
+    for (let i = 1; i < it.pts.length; i++) { const [x0, y0] = it.pts[i - 1]; const [x1, y1] = it.pts[i]; const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / step)); for (let j = 1; j <= n; j++) C.push([x0 + ((x1 - x0) * j) / n, y0 + ((y1 - y0) * j) / n]); }
+    const N = Math.max(12, Math.min(200, Math.ceil((2 * Math.PI * rN) / ((it.coarse ? 0.2 : 0.1) * G))));
+    const cs = new Float64Array(N); const sn = new Float64Array(N); for (let j = 0; j < N; j++) { cs[j] = Math.cos((j / N) * Math.PI * 2); sn[j] = Math.sin((j / N) * Math.PI * 2); }
+    const p = new Path2D();
+    for (const [cx, cy] of C) {
+      for (let j = 0; j < N; j++) {
+        const rr = Math.max(r * 0.3, r + G * roughAt((cx + cs[j] * rN) / G, (cy + sn[j] * rN) / G, aB, aF, !!it.coarse)); // (the noise where the stroke's own outline is, also for a halo drawn wider)
+        if (j) p.lineTo(cx + cs[j] * rr, cy + sn[j] * rr); else p.moveTo(cx + cs[j] * rr, cy + sn[j] * rr);
+      }
+      p.closePath();
+    }
+    roughKept.set(key, p);
+    if (roughKept.size > 80) roughKept.delete(roughKept.keys().next().value);
+    return p;
+  }
+  // (T is a shift and a size, never a turn: the kept path is laid into the picture's dots as a whole. A copy of the
+  // path is moved, not the canvas, so a floor's tile pattern used as the paint stays where it lies)
+  function roughStroke(g, it, T, style) {
+    const o = T(0, 0); const ux = T(1, 0); const uy = T(0, 1);
+    const q = new Path2D(); q.addPath(roughPath(it), new DOMMatrix([ux[0] - o[0], ux[1] - o[1], uy[0] - o[0], uy[1] - o[1], o[0], o[1]]));
+    g.save(); g.fillStyle = style;
+    g.fill(q, 'nonzero'); // (every dab goes round the same way: together they are one area)
+    g.restore();
+  }
   // corridors and brush strokes are drawn as thick lines
   function stroke(g, it, T, k, style) {
+    if (it.shape === 'brush' && it.rough > 0) { roughStroke(g, it, T, style); return; }
     const P = it.pts.map(([x, y]) => T(x, y));
     g.save();
     g.lineWidth = Math.max(1, it.r * 2 * k);
@@ -157,7 +268,7 @@ const Oldschool = (() => {
   const RIPPLE_MAX = 16; // squares: how far from its middle a ripple's rings are told apart
   function paintHalo(g, it, T, k, style, R) {
     g.save();
-    if (it.shape === 'path' || it.shape === 'brush') stroke(g, { ...it, shape: 'brush', r: it.r + R / k }, T, k, style);
+    if (it.shape === 'path' || it.shape === 'brush') stroke(g, { ...it, shape: 'brush', r: it.r + R / k, rr: it.r, rough: it.shape === 'brush' ? it.rough : 0 }, T, k, style); // (rr: a jagged stroke's halo follows its teeth)
     else { const p = shapePath(it, T); g.fillStyle = style; g.strokeStyle = style; g.lineWidth = 2 * R; g.lineJoin = 'round'; g.fill(p); g.stroke(p); }
     g.restore();
   }
@@ -210,7 +321,7 @@ const Oldschool = (() => {
     }
     for (const d of os.doors) {
       if (d.door === 2) continue;
-      const pl = doorPlace(os, d, g); if (!pl.line && (!pl.side || pl.bandFloor)) continue;
+      const pl = placeOf(os, d, g); if (!pl.line && (!pl.side || pl.bandFloor)) continue;
       const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1); if (!L) continue;
       const ux = (d.x2 - d.x1) / L; const uy = (d.y2 - d.y1) / L; const nx = -uy; const ny = ux;
       const cx = (d.x1 + d.x2) / 2 + nx * pl.off; const cy = (d.y1 + d.y2) / 2 + ny * pl.off;
@@ -224,13 +335,38 @@ const Oldschool = (() => {
       const ja = 0.11 * g; // (half the block, along)
       for (const sd of [-1, 1]) add({ kind: 'block', c: [cx + ux * sd * (L / 2 + ja), cy + uy * sd * (L / 2 + ja)], u: [ux, uy], a: ja, b: pl.thick / 2 + 0.08 * g, mat: pl.mat, h: 1.1, piece: 'jamb' });
     }
+    // (25 Nov 2026, Glinn) a pillar placed on a wall corner covers it entirely: the corner's own piece, which is
+    // painted after everything drawn, lay on top of the pillar. It is left out where its middle is under a pillar.
+    const posts = os.items.filter((it) => it.kind === 'pillar');
+    if (posts.length) {
+      const under = (b) => posts.some((p) => { const dx = Math.abs(b.c[0] - p.pts[0][0]); const dy = Math.abs(b.c[1] - p.pts[0][1]); return p.round ? Math.hypot(dx, dy) <= p.r : dx <= p.r && dy <= p.r; });
+      for (let i = out.length - 1; i >= 0; i--) if (out[i].piece === 'cap' && under(out[i])) out.splice(i, 1);
+    }
     return out;
   }
   // Beta 3.36: wall kits (tiles/walls/<material>/, made with Higgsfield from one layout sheet a material, so the pieces
   // match): pieces made for walls, laid along them instead of the material's square picture. run: capstones end to end
   // (4 × ½ squares, seamless), cap: a corner pillar's stone, jamb: a door block, end: a wall line's end, sill: a window's.
   // At 512 dots a square, lit evenly; the map's light and each stone's relief come from the picture's light.
-  const KITS = new Set(['stone_wall', 'dark_stone_wall']);
+  const KITS = new Set(['stone_wall', 'dark_stone_wall', ...WALLKITS.map((t) => t.id)]);
+  // (25 Nov 2026) Rock and cliffs made of a wall kit. Rock and cliffs are painted from a material's square picture,
+  // and the light step has five of those by their place (mtl0 to mtl4). The kits get a stack of pictures of their own
+  // beside them (kitA, one layer for each kit this drawing uses on rock or a cliff, up to fifteen): a kit's square is
+  // its run laid as courses a square high (kitSquare). A material's number in the paintings: 40 to 200 for the five,
+  // 208 and up in steps of 3 for a kit's layer. A drawing without a kit on rock or a cliff has no number above 200
+  // and is painted as before. Which layer a kit has changes no picture, so a tile's key need not know.
+  function slotsOf(os) {
+    const kits = [];
+    for (const it of (os && os.items) || []) {
+      if (it.kind === 'area' && (it.edge === 'rock' || it.edge === 'cliff') && KIT_ONLY.has(it.mat) && !kits.includes(it.mat) && kits.length < 15) kits.push(it.mat);
+    }
+    return { kits, sig: kits.join(',') };
+  }
+  let slotNow = slotsOf(null); // (the drawing whose picture is being made)
+  const matCodeOf = (id) => {
+    const k = slotNow.kits.indexOf(id); if (k >= 0) return 208 + 3 * k;
+    const i = MATERIALS.findIndex((m) => m.id === id); return (i < 0 ? 1 : i + 1) * 40; // (unknown, or a kit that is only walls here: Stone's)
+  };
   const kitUrl = (mat, piece) => `${DIR}walls/${mat}/${piece}.webp`;
   const KIT_PIECES = ['run', 'cap', 'jamb', 'end', 'sill'];
   function kitsOf(os) {
@@ -255,11 +391,32 @@ const Oldschool = (() => {
     if (src !== img) src.width = src.height = 0;
     return c;
   }
+  const kitKept = new Set(); // (wall pieces that were scaled once: their pictures need not be unpacked before a bake)
   function kitImg(loaded, pats, mat, piece, w, h) {
     const url = kitUrl(mat, piece); const im = loaded.get(url); if (!im) return null;
     w = Math.max(2, Math.round(w)); h = Math.max(2, Math.round(h));
-    const key = `${url}@${w}x${h}`;
-    if (!pats.has(key)) pats.set(key, { cv: scaledTo(im, w, h) });
+    const gain = kitGain(mat);
+    const key = `${url}@${w}x${h}${gain < 1 ? `*${gain}` : ''}`;
+    if (!pats.has(key)) { pats.set(key, { cv: keptScaled(key, () => dimmed(scaledTo(im, w, h), gain)) }); kitKept.add(url); }
+    return pats.get(key).cv;
+  }
+  const kitGain = (mat) => { const t = KIT_ONLY.get(mat); return t && t.gain > 0 && t.gain < 1 && !api.kitsAsRendered ? t.gain : 1; };
+  const dimmed = (c, gain) => {
+    if (gain < 1) { const q = c.getContext('2d'); q.globalCompositeOperation = 'source-atop'; q.fillStyle = `rgba(0,0,0,${(1 - gain).toFixed(3)})`; q.fillRect(0, 0, c.width, c.height); q.globalCompositeOperation = 'source-over'; }
+    return c;
+  };
+  // a kit's run laid as a bond (two courses, the second moved by half a run): what a kit-only material shows where no
+  // piece lies (a passage's or a brushed floor's walls, the corner of a slanted room)
+  function kitBond(loaded, pats, mat, th) {
+    const run = kitImg(loaded, pats, mat, 'run', th * 8, th); if (!run) return null;
+    const key = `${kitUrl(mat, 'run')}@bond@${run.width}x${run.height}${kitGain(mat) < 1 ? `*${kitGain(mat)}` : ''}`;
+    if (!pats.has(key)) {
+      pats.set(key, { cv: keptScaled(key, () => {
+        const c = document.createElement('canvas'); c.width = run.width; c.height = 2 * run.height; const q = c.getContext('2d');
+        q.drawImage(run, 0, 0); q.drawImage(run, -run.width / 2, run.height); q.drawImage(run, run.width / 2, run.height);
+        return c;
+      }) });
+    }
     return pats.get(key).cv;
   }
   // the outline of a room drawn as a rectangle, a shape or a round room (as corners, in map inches)
@@ -274,7 +431,8 @@ const Oldschool = (() => {
     return null;
   }
   // the kits painted where their walls are (the light pass uses them for walls of those materials; others as before)
-  function paintKit(kg, os, T, k, loaded, pats, g) {
+  const KIT_SEAM = 0.1; // (of the wall's width, at the floor)
+  function paintKit(kg, os, T, k, loaded, pats, g, clip) {
     const hash = (a, b) => { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); };
     // a run of capstones from a to b, its outer face toward n (or centred on the line), `extra` longer at both ends
     const strip = (mat, a, b, nx, ny, thick, centred, shift, extra = 0, piece = 'run', ratio = 8) => {
@@ -289,6 +447,15 @@ const Oldschool = (() => {
       const y0 = centred ? -th / 2 : 0;
       const pat = kg.createPattern(im, 'repeat-x'); pat.setTransform(new DOMMatrix().translate(-(shift % 1) * im.width, y0));
       kg.fillStyle = pat; kg.fillRect(0, y0, len, th);
+      // (25 Nov 2026, Glinn: the dwarven walls of a room did not show all of their bronze) Where a room's wall meets
+      // its floor the light draws a dark seam over the first tenth of the wall, and a rail along the run's edge was
+      // lost in it (a wall line shows both of its rails). For the kits of 25 Nov the run is laid a second time from
+      // there outward, a little narrower. Stone and Dark stone stay as they were.
+      if (!centred && piece === 'run' && KIT_ONLY.has(mat)) {
+        const y1 = KIT_SEAM * th; const p2 = kg.createPattern(im, 'repeat-x');
+        p2.setTransform(new DOMMatrix().translate(-(shift % 1) * im.width, y1).scale(1, (th - y1) / im.height));
+        kg.fillStyle = p2; kg.fillRect(0, y1, len, th - y1);
+      }
       kg.restore();
     };
     // a piece over a block (half a along u, half b across)
@@ -300,6 +467,11 @@ const Oldschool = (() => {
     };
     const off = (it) => paintSolid(kg, it, T, k, '#000', true); // (another material: no kit under it)
     for (const it of os.items) {
+      if (clip && !clip.only.has(it)) continue;
+      if (it.kind === 'area' && it.edge === 'walls' && KIT_ONLY.has(it.mat)) { // (the bond under the pieces, half a square around the floor)
+        const bond = kitBond(loaded, pats, it.mat, Math.max(2, Math.round(0.45 * g * k)));
+        if (bond) { const [gx, gy] = T(0, 0); const pat = kg.createPattern(bond, 'repeat'); pat.setTransform(new DOMMatrix().translate(gx, gy)); paintHalo(kg, it, T, k, pat, 0.5 * g * k); }
+      }
       if (it.kind === 'area' && it.edge === 'walls' && KITS.has(it.mat || 'stone_wall')) {
         const poly = outlineOf(it, g); if (!poly || poly.length < 3) continue;
         let A2 = 0; poly.forEach((p, i) => { const q = poly[(i + 1) % poly.length]; A2 += p[0] * q[1] - q[0] * p[1]; });
@@ -325,6 +497,7 @@ const Oldschool = (() => {
       }
     }
     for (const b of wallDecor(os, g)) {
+      if (clip && !blockNear(b, clip)) continue;
       if (!KITS.has(b.mat)) { off(b); continue; }
       if (b.piece === 'sill') { const [ux, uy] = b.u; strip(b.mat, [b.c[0] - ux * b.a, b.c[1] - uy * b.a], [b.c[0] + ux * b.a, b.c[1] + uy * b.a], -uy, ux, 2 * b.b, true, 0, 0, 'sill', 768 / 72); }
       else block(b.mat, b.piece, b.c, b.u, b.a, b.b);
@@ -333,7 +506,11 @@ const Oldschool = (() => {
   const stairsBox = (it, T) => { const [a, b] = it.pts.map(([x, y]) => T(x, y)); return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])]; };
 
   // ---------- the picture's box: whole squares around what was drawn, plus a margin; its dots a square ----------
+  const DENS_BLOCK = 8; // (squares)
+  const DOTS_MAX = 30e6; const SIDE_MAX = 8192; // (what a picture may be at the very most: see the end of boxOf)
+  const DENS_LADDER = [200, 176, 155, 136, 120, 106, 93, 82, 80, 72, 63, 56, 49, 43, 38, 33, 29, 26, 23, 20, 18, 16];
   function boxOf(map) {
+    gridG = (map && map.grid && map.grid.size) || 1; // (XA4: a jagged stroke's teeth are measured in squares)
     const os = map.os; const grid = map.grid;
     const g = grid.size || 1; const ox = grid.ox || 0; const oy = grid.oy || 0;
     const b = bounds(os);
@@ -341,16 +518,39 @@ const Oldschool = (() => {
     const sx0 = Math.floor((b[0] - ox) / g) - MARGIN; const sy0 = Math.floor((b[1] - oy) / g) - MARGIN;
     const sx1 = Math.ceil((b[2] - ox) / g) + MARGIN; const sy1 = Math.ceil((b[3] - oy) / g) + MARGIN;
     const nsx = sx1 - sx0; const nsy = sy1 - sy0;
-    const P = Math.max(16, Math.min(PX, Math.floor(Math.sqrt(MAX_PX / (nsx * nsy)))));
+    // Speed 1 (WA2): the dots a square of a big drawing follow its outline, and they are part of every tile's key. They
+    // were worked out to the last dot, so on a drawing over about 44 x 31 squares every room at the edge changed them
+    // and with them every tile (measured: 45 of 45 made again). Now the outline counts in blocks of 8 squares and the
+    // dots a square come from a ladder with steps of about 12 %: a drawing has to grow by about a quarter before they
+    // change. And the picture the map has keeps its own (densHas) while they are not more than 12 % over what fits
+    // (a quarter more dots than the limit at most) and not more than a quarter under it: a drawing grows by a quarter
+    // to a half before every tile is made again, once.
+    const area = Math.ceil(nsx / DENS_BLOCK) * DENS_BLOCK * Math.ceil(nsy / DENS_BLOCK) * DENS_BLOCK;
+    const rung = (v) => DENS_LADDER.find((x) => x <= v) || 16;
+    const fits = Math.sqrt(MAX_PX / (nsx * nsy)); const fitsSharp = Math.sqrt(SHARP_MAX / (nsx * nsy));
+    const stays = (has, fit, top) => has >= 16 && has <= top && has <= fit * 1.12 && has >= fit * 0.75;
+    const P = Math.max(16, Math.min(PX, rung(Math.sqrt(MAX_PX / area))));
     let sharp = null;
     if (sharpWant) {
-      const PH = Math.min(sharpWant, Math.floor(Math.sqrt(SHARP_MAX / (nsx * nsy))));
+      let PH = Math.min(sharpWant, rung(Math.sqrt(SHARP_MAX / area)));
+      if (PH < sharpWant && densHas && stays(densHas.sharpP, fitsSharp, sharpWant)) PH = densHas.sharpP; // (only where the limit decides, not the wish)
       // (a tile: at most 1000 dots across. Beta 3.31, was 1600: a change re-makes fewer dots)
       if (PH >= P * 1.2) sharp = { P: PH, ts: Math.max(4, Math.floor(1000 / PH)) };
     }
     // Beta 3.31: with sharp tiles on top the base is only the light, the distances and the picture shown while they
     // come: it is made with half the dots a square from the start (it was made in full and then halved)
-    return { g, ox, oy, sx0, sy0, sx1, sy1, nsx, nsy, P: sharp ? Math.max(16, Math.round(P / 2)) : P, sharp };
+    let PB = sharp ? Math.max(16, Math.round(P / 2)) : P;
+    if (densHas && stays(densHas.P, sharp ? fits / 2 : fits, sharp ? PX / 2 : PX)) PB = densHas.P;
+    // 26 Nov 2026: a drawing from before the maximum size (mapstate OS_MAX: 300 squares a side) can be far larger than
+    // any picture the graphics card or the memory can hold at 16 dots a square (1032 x 838 squares: 225 million dots,
+    // and 16608 across where the card ends at 16384). Such a drawing gets fewer dots a square, so its picture stays
+    // under DOTS_MAX and SIDE_MAX: coarse, but there. A drawing of the maximum size needs 24 million dots and 4896
+    // across, so nothing changes for it.
+    if (nsx * nsy * PB * PB > DOTS_MAX || Math.max(nsx, nsy) * PB > SIDE_MAX) {
+      PB = Math.max(2, Math.floor(Math.min(Math.sqrt(DOTS_MAX / (nsx * nsy)), SIDE_MAX / Math.max(nsx, nsy))));
+      sharp = null;
+    }
+    return { g, ox, oy, sx0, sy0, sx1, sy1, nsx, nsy, P: PB, sharp };
   }
 
   // ---------- a fingerprint of what the picture depends on ----------
@@ -365,6 +565,7 @@ const Oldschool = (() => {
     return [...tiles].sort();
   };
   function hash(map, lib) {
+    api.hashCount++; // (for the self-test)
     const os = map.os; const bx = boxOf(map);
     const sharp = bx && bx.sharp ? [bx.sharp.P, bx.sharp.ts] : 0;
     return fingerprint(JSON.stringify([os.items, os.doors.map(noLeaf), os.sun, shadowKey(os), os.sight, map.grid.size, map.grid.ox, map.grid.oy, tileKeys(os.items, lib), sharp, VERSION]));
@@ -377,7 +578,18 @@ const Oldschool = (() => {
   const mixes = (it) => (it.kind === 'area' && it.mixW > 0) || it.kind === 'paint'; // (Beta 3.40: at any height, with the floors at the same one)
   function reaches(os, g) {
     const S = shadowOf(os); const light = Math.max(0.7, S.tan ? 2.2 / S.tan : 0, S.all > 0 ? 2.7 : 0);
-    let edge = 0; for (const it of os.items) if (it.kind === 'area') edge = Math.max(edge, EDGE_REACH[it.edge] ?? 3.2);
+    // Speed 1 (WA7): the widest edge among the floors near a thing counts (within twice that edge and the shadows), not
+    // the widest on the whole map: one rock or cliff floor in a corner made every edit anywhere reach 4 to 6 squares
+    const areas = os.items.filter((it) => it.kind === 'area').map((it) => ({ it, box: itemBox(it), e: EDGE_REACH[it.edge] ?? 3.2 }));
+    const edgeNear = (it, b) => {
+      let e = 0;
+      for (const a of areas) {
+        if (a.e <= e) continue;
+        const p = (2 * a.e + light + 0.3) * g;
+        if (a.it === it || (a.box[0] - p < b[2] && a.box[2] + p > b[0] && a.box[1] - p < b[3] && a.box[3] + p > b[1])) e = a.e;
+      }
+      return e;
+    };
     const mixers = []; os.items.forEach((it, n) => { if (mixes(it)) mixers.push({ n, box: itemBox(it), pad: (it.kind === 'paint' ? 1.2 * (it.mixW != null ? it.mixW : it.r / g) : 1.35 * it.mixW) + 0.85 }); });
     const out = new Map();
     os.items.forEach((it, n) => {
@@ -385,7 +597,7 @@ const Oldschool = (() => {
       if (it.kind === 'live') { out.set(it, 0); return; }
       const b = itemBox(it); let mix = 0;
       for (const m of mixers) { const p = m.pad * g; if (m.n >= n && m.pad > mix && m.box[0] - p < b[2] && m.box[2] + p > b[0] && m.box[1] - p < b[3] && m.box[3] + p > b[1]) mix = m.pad; }
-      out.set(it, Math.max(edge + light, mix) + 0.3);
+      out.set(it, Math.max(edgeNear(it, b) + light, mix) + 0.3);
     });
     return out;
   }
@@ -394,14 +606,23 @@ const Oldschool = (() => {
   // one sharp tile's key: what lies near it (in drawing order), the light, the grid, the dots a square
   const shadowKey = (os) => { const S = shadowOf(os); return [S.len, S.all]; };
   const noLeaf = (d) => { const { leaf, ...rest } = d; return rest; }; // (Beta 3.33: the leaf is drawn live)
-  function tileKey(map, lib, bx, c, r) {
+  // the things and doors that can change one tile's picture. Speed 2 (WB3): they are also the only ones painted for it
+  // (every tile painted every thing of the whole map)
+  function tileNear(map, bx, c, r) {
     const os = map.os; const { g, ox, oy, sharp } = bx;
     if (!bx.reach) { bx.reach = reaches(os, g); bx.boxes = new Map(os.items.map((it) => [it, itemBox(it)])); }
     const x0 = ox + c * sharp.ts * g; const y0 = oy + r * sharp.ts * g; const x1 = x0 + sharp.ts * g; const y1 = y0 + sharp.ts * g;
     const near = (q, m) => q[0] < x1 + m && q[2] > x0 - m && q[1] < y1 + m && q[3] > y0 - m;
     const items = os.items.filter((it) => it.kind !== 'live' && near(bx.boxes.get(it), bx.reach.get(it) * g)); // (Beta 3.43: an effect drawn changes no tile's picture)
-    if (!items.some((it) => it.kind !== 'cut' && near(bx.boxes.get(it), REACH * g))) return null; // (nothing shows here)
-    const doors = os.doors.map(noLeaf).filter((d) => near([Math.min(d.x1, d.x2), Math.min(d.y1, d.y2), Math.max(d.x1, d.x2), Math.max(d.y1, d.y2)], HALO_SOLID * g)); // (a door opens a wall line)
+    const shows = items.some((it) => it.kind !== 'cut' && near(bx.boxes.get(it), REACH * g));
+    const doors = os.doors.filter((d) => near([Math.min(d.x1, d.x2), Math.min(d.y1, d.y2), Math.max(d.x1, d.x2), Math.max(d.y1, d.y2)], HALO_SOLID * g)); // (a door opens a wall line)
+    return { items, doors, shows, box: [x0, y0, x1, y1] };
+  }
+  function tileKey(map, lib, bx, c, r) {
+    const os = map.os; const { g, ox, oy, sharp } = bx;
+    const nr = tileNear(map, bx, c, r);
+    if (!nr.shows) return null; // (nothing shows here)
+    const items = nr.items; const doors = nr.doors.map(noLeaf);
     return fingerprint(JSON.stringify([items.map(itemKey), doors, os.sun, shadowKey(os), g, ox, oy, tileKeys(items, lib), bx.P, sharp.P, sharp.ts, c, r, VERSION]));
   }
 
@@ -423,16 +644,46 @@ const Oldschool = (() => {
   }
   const VS = `#version 300 es
 in vec2 a; out vec2 v_uv; void main(){ v_uv = a * 0.5 + 0.5; gl_Position = vec4(a, 0.0, 1.0); }`;
-  function prog(C, name, fs) {
+  // Speed 2 (WB6): a program is handed to the graphics card (progStart: nothing waits) and asked for when it is first
+  // used (prog: this waits if it is not built yet). warm() hands all of them over when a drawn map is opened, so the
+  // first picture of the evening does not wait for them (measured: its light step took 0.74 s against 0.07 s after).
+  function progStart(C, name, fs) {
     if (C.progs.has(name)) return C.progs.get(name);
     const { gl } = C;
-    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(`oldschool shader ${name}: ${gl.getShaderInfoLog(s)}`); return s; };
-    const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    const vs = sh(gl.VERTEX_SHADER, VS); const f = sh(gl.FRAGMENT_SHADER, fs);
+    const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, f);
     gl.bindAttribLocation(p, 0, 'a'); gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(`oldschool program ${name}: ${gl.getProgramInfoLog(p)}`);
+    const out = { p, u: null, vs, f }; C.progs.set(name, out); return out;
+  }
+  function prog(C, name, fs) {
+    const out = progStart(C, name, fs);
+    if (out.u) return out;
+    const { gl } = C; const { p } = out;
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      const why = [gl.getShaderInfoLog(out.vs), gl.getShaderInfoLog(out.f), gl.getProgramInfoLog(p)].filter(Boolean).join(' | ');
+      C.progs.delete(name);
+      throw new Error(`oldschool program ${name}: ${why}`);
+    }
     const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
     for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name.replace(/\[0\]$/, '')] = gl.getUniformLocation(p, info.name); }
-    const out = { p, u }; C.progs.set(name, out); return out;
+    out.u = u; return out;
+  }
+  // every program by its name (filled in below, where they are written)
+  const PROGS = {};
+  function warm() {
+    const C = gl2(); if (!C) return [];
+    try { for (const [name, fs] of Object.entries(PROGS)) progStart(C, name, fs); C.gl.flush(); } catch (err) { console.error(err); }
+    // (the materials' pictures are read, unpacked and halved meanwhile, one after the other)
+    (async () => { for (const m of MATERIALS) { const url = DIR + m.file; const i = await image(url); if (SCALED.has(halfKey(url))) continue; if (i.decode) await i.decode(); halfOf(url, i); await new Promise((r) => setTimeout(r, 30)); } })().catch(() => {});
+    return [...C.progs.keys()];
+  }
+  // (for the self-test) each program: 'ready', or 'started' while the graphics card still builds it
+  function progsState() {
+    const C = gl2(); if (!C) return null;
+    const ext = C.gl.getExtension('KHR_parallel_shader_compile'); const out = {};
+    for (const [name, o] of C.progs) out[name] = o.u || !ext || C.gl.getProgramParameter(o.p, ext.COMPLETION_STATUS_KHR) ? 'ready' : 'started';
+    return out;
   }
   function tex(gl, w, h, src, { repeat = false, mip = false, nearest = false } = {}) {
     const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
@@ -458,7 +709,7 @@ in vec2 a; out vec2 v_uv; void main(){ v_uv = a * 0.5 + 0.5; gl_Position = vec4(
     gl.useProgram(P.p);
     gl.bindBuffer(gl.ARRAY_BUFFER, C.buf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     let unit = 0;
-    for (const [name, t] of Object.entries(textures || {})) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); if (P.u[name]) gl.uniform1i(P.u[name], unit); unit++; }
+    for (const [name, t] of Object.entries(textures || {})) { gl.activeTexture(gl.TEXTURE0 + unit); if (t && t.array) gl.bindTexture(gl.TEXTURE_2D_ARRAY, t.array); else gl.bindTexture(gl.TEXTURE_2D, t); if (P.u[name]) gl.uniform1i(P.u[name], unit); unit++; } // ({ array }: a stack of pictures, the kits')
     for (const [name, v] of Object.entries(uniforms || {})) {
       const loc = P.u[name]; if (!loc) continue;
       if (Array.isArray(v)) { if (v.length === 2) gl.uniform2f(loc, v[0], v[1]); else if (v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]); else if (v.length === 4) gl.uniform4f(loc, v[0], v[1], v[2], v[3]); else gl.uniform1fv(loc, v); } else gl.uniform1f(loc, v);
@@ -566,10 +817,13 @@ void main(){
   const FS_HEIGHT = `#version 300 es
 precision highp float; in vec2 v_uv; out vec4 o;
 uniform sampler2D floorT, attrT, solidT, stairsT, outJ, inJ, solJ, kitT, mtl0, mtl1, mtl2, mtl3, mtl4;
+uniform highp sampler2DArray kitA; uniform float kitSq;
 uniform vec2 size; uniform float P; uniform vec2 org; uniform float matSq[5]; uniform float hasKit;
+int matIx(float b){ float v = b * 255.0; if (v > 204.0) return 5 + int(floor((v - 208.0) / 3.0 + 0.5)); return clamp(int(floor(v / 40.0 + 0.5)) - 1, 0, 4); } // (5 and up: a kit's layer)
 vec2 dec(vec4 c){ c = floor(c * 255.0 + 0.5); return vec2(c.r*256.0 + c.g, c.b*256.0 + c.a); }
 float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
-vec3 matCol(int i, vec2 px){ vec2 uv = (px - org) / (matSq[i] * P);
+vec3 matCol(int i, vec2 px){ if (i >= 5) return texture(kitA, vec3((px - org) / (kitSq * P), float(i - 5))).rgb;
+  vec2 uv = (px - org) / (matSq[i] * P);
   if (i == 0) return texture(mtl0, uv).rgb; if (i == 1) return texture(mtl1, uv).rgb; if (i == 2) return texture(mtl2, uv).rgb; if (i == 3) return texture(mtl3, uv).rgb; return texture(mtl4, uv).rgb; }
 vec4 encH(float h, float kind, float m){ float v = clamp(h + 32768.0, 0.0, 65535.0); return vec4(floor(v/256.0)/255.0, mod(floor(v),256.0)/255.0, kind/255.0, m/255.0); }
 float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -586,7 +840,7 @@ void main(){
   // what the nearest area is: its edge, material and level
   vec4 na = inside >= 0.5 || so2.x > 65000.0 ? at : texelFetch(attrT, ivec2(so2), 0);
   int edge = int(floor(na.r * 255.0 / 40.0 + 0.5));
-  int mi = int(floor(na.b * 255.0 / 40.0 + 0.5)); mi = clamp(mi - 1, 0, 4);
+  int mi = matIx(na.b);
   float level = (na.g * 255.0 - 128.0) / 30.0;
   float base = level * LV;
   float h; float kind; float m = float(mi);
@@ -629,7 +883,7 @@ void main(){
     float bev = smoothstep(0.0, 0.07 * P, ds);
     float sh = so.g * 255.0 / 100.0; // its height (1 = a full wall)
     h = max(h, (inside >= 0.5 ? (at.g * 255.0 - 128.0) / 30.0 * LV : base) + 1.6 * P * sh * (0.82 + 0.18 * bev)); kind = 5.0;
-    m = clamp(floor(so.b * 255.0 / 40.0 + 0.5) - 1.0, 0.0, 4.0);
+    m = float(matIx(so.b));
   }
   // (Beta 3.36) a wall kit's stones: their joints and worn edges lie lower
   if (hasKit > 0.5 && (kind == 2.0 || kind == 5.0)) { vec4 kt = texelFetch(kitT, ip, 0); if (kt.a > 0.5) h += (lum(kt.rgb) - 0.42) * 0.2 * P; }
@@ -682,6 +936,7 @@ float fadeOut(vec2 q, float dOut, float P){
   const FS_SHADE = `#version 300 es
 precision highp float; in vec2 v_uv; layout(location = 0) out vec4 o; layout(location = 1) out vec4 o2;
 uniform sampler2D hT, floorT, attrT, haloT, outJ, inJ, nearS, kitT, mtl0, mtl1, mtl2, mtl3, mtl4;
+uniform highp sampler2DArray kitA; uniform float kitSq;
 uniform float hasKit;
 uniform vec2 size; uniform float P; uniform vec2 org; uniform float matSq[5]; uniform vec3 L; uniform vec3 voidC; uniform float shT; uniform float shK; uniform float shA;
 vec2 dec(vec4 c){ c = floor(c * 255.0 + 0.5); return vec2(c.r*256.0 + c.g, c.b*256.0 + c.a); }
@@ -689,7 +944,8 @@ ${LOOK}
 float K(vec2 p){ p = clamp(p, vec2(0.0), size - 1.0); return floor(texelFetch(hT, ivec2(p), 0).b * 255.0 + 0.5); }
 float H(vec2 p){ p = clamp(p, vec2(0.0), size - 1.0); vec4 c = texelFetch(hT, ivec2(p), 0); return floor(c.r*255.0+0.5)*256.0 + floor(c.g*255.0+0.5) - 32768.0; }
 float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
-vec3 matCol(int i, vec2 px){ vec2 uv = (px - org) / (matSq[i] * P);
+vec3 matCol(int i, vec2 px){ if (i >= 5) return texture(kitA, vec3((px - org) / (kitSq * P), float(i - 5))).rgb;
+  vec2 uv = (px - org) / (matSq[i] * P);
   if (i == 0) return texture(mtl0, uv).rgb; if (i == 1) return texture(mtl1, uv).rgb; if (i == 2) return texture(mtl2, uv).rgb; if (i == 3) return texture(mtl3, uv).rgb; return texture(mtl4, uv).rgb; }
 void main(){
   vec2 px = floor(v_uv * size); ivec2 ip = ivec2(px);
@@ -790,7 +1046,9 @@ void main(){
   const FS_SHARP = `#version 300 es
 precision highp float; in vec2 v_uv; out vec4 o;
 uniform sampler2D floorH, solidH, haloH, outJ, inJ, attrT, lightT, kitH, mtl0, mtl1, mtl2, mtl3, mtl4;
+uniform highp sampler2DArray kitA; uniform float kitSq;
 uniform float hasKit;
+int matIx(float b){ float v = b * 255.0; if (v > 204.0) return 5 + int(floor((v - 208.0) / 3.0 + 0.5)); return clamp(int(floor(v / 40.0 + 0.5)) - 1, 0, 4); } // (5 and up: a kit's layer)
 uniform vec2 size; uniform vec2 tileO; uniform vec2 loSize; uniform vec2 orgLo; uniform float s; uniform float P; uniform float matSq[5]; uniform vec3 voidC; uniform vec3 L;
 vec2 dec(vec4 c){ c = floor(c * 255.0 + 0.5); return vec2(c.r*256.0 + c.g, c.b*256.0 + c.a); }
 ${LOOK}
@@ -802,7 +1060,8 @@ float kitRel(vec2 px, float P, vec3 L){
   float sx = 0.16 * (KL(px + vec2(e, 0.0)) - KL(px - vec2(e, 0.0))) / d; float sy = 0.16 * (KL(px + vec2(0.0, e)) - KL(px - vec2(0.0, e))) / d;
   vec3 n = normalize(vec3(-sx, -sy, 1.0 / 0.9)); return mix(1.0, 0.5 + 0.5 * max(dot(n, L), 0.0) / L.z, 0.35);
 }
-vec3 matCol(int i, vec2 q){ vec2 uv = q / matSq[i];
+vec3 matCol(int i, vec2 q){ if (i >= 5) return texture(kitA, vec3(q / kitSq, float(i - 5))).rgb;
+  vec2 uv = q / matSq[i];
   if (i == 0) return texture(mtl0, uv).rgb; if (i == 1) return texture(mtl1, uv).rgb; if (i == 2) return texture(mtl2, uv).rgb; if (i == 3) return texture(mtl3, uv).rgb; return texture(mtl4, uv).rgb; }
 void main(){
   vec2 px = floor(v_uv * size); ivec2 ip = ivec2(px);
@@ -822,7 +1081,7 @@ void main(){
   vec4 here = texelFetch(attrT, clamp(ivec2(floor(lo)), ivec2(0), lim), 0);
   vec4 na = (fl.a >= 0.5 && here.a >= 0.5) || sOut.x < 0.0 ? here : texelFetch(attrT, ivec2(sOut), 0);
   int edge = int(floor(na.r * 255.0 / 40.0 + 0.5));
-  int mi = clamp(int(floor(na.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
+  int mi = matIx(na.b);
   // outside the floors: what the edge makes of it (as in the heights)
   vec3 cOut = voidC; float aOut = 0.0; float rel = 1.0;
   vec4 kt = hasKit > 0.5 ? texelFetch(kitH, ip, 0) : vec4(0.0);
@@ -854,7 +1113,7 @@ void main(){
   cOut = edge == 4 ? cliffCol(cOut, q, dOut, P, li, voidC) : cOut * li * rel;
   vec3 col = mix(cOut, cIn * li, fl.a); float a = mix(aOut, 1.0, fl.a);
   // wall lines and pillars: a dark edge, and a shadow at their foot
-  int ms = clamp(int(floor(so.b * 255.0 / 40.0 + 0.5)) - 1, 0, 4);
+  int ms = matIx(so.b);
   float r1 = max(1.5, 0.025 * P); float r2 = max(2.0, 0.08 * P);
   float nIn = min(min(SA(px + vec2(r1, 0.0)), SA(px - vec2(r1, 0.0))), min(SA(px + vec2(0.0, r1)), SA(px - vec2(0.0, r1))));
   // (Beta 3.36: soft, round at the corners: how much of what lies around is wall; before, a hard band 0.08 squares wide
@@ -953,7 +1212,7 @@ void main(){
   // mixing, and the shapes of the floors drawn before it that it touches.
   const MASKS = new Map(); let maskPx = 0; const MASK_MAX = 24e6; // (dots kept in all; the oldest go first)
   const shapeKeys = new WeakMap(); const maskNow = new WeakMap();
-  const shapeKey = (o) => { let h = shapeKeys.get(o); if (!h) { h = fingerprint(JSON.stringify([o.kind, o.shape, o.pts, o.r, o.mixW, o.mixU, o.mixT])); shapeKeys.set(o, h); } return h; };
+  const shapeKey = (o) => { let h = shapeKeys.get(o); if (!h) { h = fingerprint(JSON.stringify([o.kind, o.shape, o.pts, o.r, o.mixW, o.mixU, o.mixT, o.rough || 0])); shapeKeys.set(o, h); } return h; };
   function mixArea(fg, it, T, k, P, org, pat, w, paintOnly, before) {
     const tm0 = performance.now();
     try {
@@ -1127,7 +1386,19 @@ void main(){
   // The drawing painted flat: floors with their tiles (fg), what each area is (ag: edge, level, material), wall lines and
   // pillars (sg), stairs (tg). T: map inches → dots, k: dots an inch, P: dots a square, org: the grid's origin in dots.
   // ag and tg may be left out (the sharp tiles need only the floors and the solids).
-  function paint(os, lib, T, k, P, org, loaded, cx, pats) {
+  // clip (Speed 2, WB3; a sharp tile): { only: the things near it, doors: the doors near it, box: its box in map inches,
+  // g }. The others are left out; what a thing is mixed with (before) is still the whole drawing.
+  const blockNear = (b, clip) => { const R = Math.hypot(b.a, b.b) + 0.1 * clip.g; const q = clip.box; return b.c[0] + R > q[0] && b.c[0] - R < q[2] && b.c[1] + R > q[1] && b.c[1] - R < q[3]; };
+  // Speed 2 (WB1): the painting of a picture ran in one unbroken block, 0.1 s for an edit of a large map and 0.4 to
+  // 0.6 s for a first picture: the freeze one felt with every edit. It paints the same things in the same order as
+  // before, but lets the screen breathe every few milliseconds (nextTask: the next turn of the app's loop, without a
+  // timer's wait). Nothing else touches these paintings meanwhile.
+  const breatheCh = new MessageChannel(); const breatheQ = [];
+  breatheCh.port1.onmessage = () => { const r = breatheQ.shift(); if (r) r(); };
+  const nextTask = () => new Promise((r) => { breatheQ.push(r); breatheCh.port2.postMessage(0); });
+  const SLICE_MS = 6;
+  async function paint(os, lib, T, k, P, org, loaded, cx, pats, clip) {
+    let sliceAt = performance.now();
     const { fg, ag, sg, tg, hg, lv } = cx; // (hg: the Fade floors' tiles beyond their edge, Beta 3.29; lv: the living map, Beta 3.43)
     // Beta 3.43, effects drawn over the floors (kind 'live'): grass, water, lava, glow, pulse, ripple. They paint
     // nothing into the picture; beside it, at half its size, four small paintings say what lies where:
@@ -1226,15 +1497,17 @@ void main(){
       if (!t || !loaded.has(t.url)) return '#5a5650';
       const off = t.off || [0, 0];
       const key = `${t.url}@${t.squares || 4}@${off}@${P}`;
-      if (!pats.has(key)) pats.set(key, { cv: scaled(loaded.get(t.url), (t.squares || 4) * P), off });
+      if (!pats.has(key)) pats.set(key, { cv: scaledAt(t.url, loaded.get(t.url), (t.squares || 4) * P), off });
       const e = pats.get(key);
       const pat = fg.createPattern(e.cv, 'repeat');
       pat.setTransform(new DOMMatrix().translate(org[0] - e.off[0] * P, org[1] - e.off[1] * P)); // (its joints on the grid)
       return pat;
     };
-    const matCode = (id) => { const i = MATERIALS.findIndex((m) => m.id === id); return (i < 0 ? 1 : i + 1) * 40; };
+    const matCode = matCodeOf; // (25 Nov 2026: by the place the material has in this drawing, see slotsOf)
     for (let n = 0; n < os.items.length; n++) {
+      if (!api.noBreathe && performance.now() - sliceAt > SLICE_MS) { await nextTask(); sliceAt = performance.now(); prof.breaths++; }
       const it = os.items[n]; const before = { items: os.items, n }; // (what was drawn before it: for mixing)
+      if (clip) { if (!clip.only.has(it)) continue; prof.tThings++; }
       if (it.kind === 'area') {
         const t = tileInfo(it.tile, lib) || tileInfo({ rel: relOf(FLOORS[0]) });
         if (it.mixW > 0) mixArea(fg, it, T, k, P, org, patOf(t), it.mixW * P, false, before); // (Beta 3.27; 3.40: at any height)
@@ -1265,13 +1538,19 @@ void main(){
         // Beta 3.40: they climb as many levels as lie between the floor at their foot and the floor beyond their top
         // (one, as before, where no higher floor is there). Read from what is drawn so far: the floor's edge, level
         // and material under a dot
-        const attrAt = (px2, py2) => { if (!ag) return null; const W = ag.canvas.width; const Hh = ag.canvas.height; if (px2 < 0 || py2 < 0 || px2 >= W || py2 >= Hh) return null; const d = ag.getImageData(Math.round(px2), Math.round(py2), 1, 1).data; return d[3] > 128 ? d : null; };
+        // (Speed 9, WI5: a sharp tile has no such painting, so stairs always climbed one level there and could show
+        // another number of steps close up than from afar. There the floor under a spot is found from the drawing:
+        // the last floor drawn before the stairs that holds it)
+        const [ox0, oy0] = T(0, 0);
+        const floorAt = (px2, py2) => { const a = areaAt({ items: os.items.slice(0, n), doors: [] }, (px2 - ox0) / k, (py2 - oy0) / k); return a ? [0, 128 + (a.level || 0) * 30, 0, 255] : null; };
+        const attrAt = (px2, py2) => { if (!ag) return floorAt(px2, py2); const W = ag.canvas.width; const Hh = ag.canvas.height; if (px2 < 0 || py2 < 0 || px2 >= W || py2 >= Hh) return null; const d = ag.getImageData(Math.round(px2), Math.round(py2), 1, 1).data; return d[3] > 128 ? d : null; };
         const along2 = (a) => (it.dir === 0 ? [x + a, y + h / 2] : it.dir === 2 ? [x + w - a, y + h / 2] : it.dir === 1 ? [x + w / 2, y + a] : [x + w / 2, y + h - a]);
         const foot = attrAt(...along2(Math.min(len * 0.25, P * 0.2))) || attrAt(x + w / 2, y + h / 2);
         const top = attrAt(...along2(len + P * 0.3));
         const lv = (d) => Math.round((d[1] - 128) / 30);
         const rise = foot && top ? Math.max(1, Math.min(6, lv(top) - lv(foot))) : 1;
         const steps = Math.min(120, Math.max(2, Math.round((len / P) * 2), rise * 3)); // (Beta 3.29: two steps a square; 3.40: at least three a level)
+        prof.rises.push([ag ? 'base' : 'tile', it.id || n, rise, steps]); // (for the self-test)
         if (tg) {
           // (whole dots, so that no dot at its rim carries half a number)
           const bx = Math.round(x); const by = Math.round(y); const bw = Math.max(1, Math.round(x + w) - bx); const bh = Math.max(1, Math.round(y + h) - by);
@@ -1332,11 +1611,12 @@ void main(){
     // in a niche of the wall) nor a secret door (the wall shows whole)
     for (const d of os.doors) {
       if (d.kind === 'window' || d.door === 2) continue;
+      if (clip && !clip.doors.has(d)) continue;
       const [x1, y1] = T(d.x1, d.y1); const [x2, y2] = T(d.x2, d.y2);
       sg.save(); sg.globalCompositeOperation = 'destination-out'; sg.lineWidth = P * 1.2; sg.lineCap = 'butt'; sg.beginPath(); sg.moveTo(x1, y1); sg.lineTo(x2, y2); sg.stroke(); sg.restore();
     }
-    for (const b of wallDecor(os, P / k)) paintSolid(sg, b, T, k, `rgb(255,${Math.round(b.h * 100)},${matCode(b.mat)})`, false); // (Beta 3.36: the walls' details)
-    if (cx.kg) paintKit(cx.kg, os, T, k, loaded, pats, P / k); // (Beta 3.36: the wall kits)
+    for (const b of wallDecor(os, P / k)) if (!clip || blockNear(b, clip)) paintSolid(sg, b, T, k, `rgb(255,${Math.round(b.h * 100)},${matCode(b.mat)})`, false); // (Beta 3.36: the walls' details)
+    if (cx.kg) paintKit(cx.kg, os, T, k, loaded, pats, P / k, clip); // (Beta 3.36: the wall kits)
   }
   const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
   const CPU = { willReadFrequently: true }; // (read back: kept in memory)
@@ -1347,17 +1627,33 @@ void main(){
   // ({ P, ts, tiles: [{ c, r, h }] }): those whose key is the same are kept. Resolves to { empty } or
   // { blob, x, y, scale, nw, nh, walls, sharp: { P, ts, tiles: [{ c, r, h, blob? }] } | null }.
   const stats = { last: null }; // (how long the last picture took, and its tiles: for the self-test and the log)
-  const prof = { mix: 0, mixN: 0, maskMade: 0, maskKept: 0, tPaint: 0, tGl: 0, tEnc: 0 }; // (Beta 3.31: where the time goes, in ms)
-  async function bake(map, lib, prev, onProgress) {
+  const prof = { mix: 0, mixN: 0, maskMade: 0, maskKept: 0, tPaint: 0, tGl: 0, tEnc: 0, tThings: 0, rises: [], breaths: 0 }; // (Beta 3.31: where the time goes, in ms)
+  // Speed 1 (WA1): how long the screen stood still while the picture was made: the longest gap between two of its frames
+  // (stats.last.gap, ms). opt.stale: asked between the steps; true: the drawing has changed meanwhile and this picture
+  // is given up (WA5: it was always finished, saved and shown first). opt.have: keys of tiles still on the disk (WA8).
+  async function bake(map, lib, prev, onProgress, opt) {
+    let worst = 0; let at = performance.now(); let on = true;
+    const tick = (n) => { if (!on) return; worst = Math.max(worst, n - at); at = n; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+    const was = stats.last;
+    try {
+      const r = await bakeNow(map, lib, prev, onProgress, opt || {});
+      if (stats.last && stats.last !== was) stats.last.gap = Math.round(Math.max(worst, performance.now() - at));
+      return r;
+    } finally { on = false; }
+  }
+  async function bakeNow(map, lib, prev, onProgress, opt) {
+    const check = () => { if (opt.stale && opt.stale()) { const e = new Error('the drawing changed meanwhile'); e.stale = true; throw e; } };
     decorMemo = new WeakMap();
     const os = map.os;
+    slotNow = slotsOf(os);
     const bx = boxOf(map);
     if (!bx) return { empty: true, walls: [] };
     // (Beta 3.32) how far along it is, 0 to 1, for the GM's progress pill: painting, light and shade, the sharp tiles
     const ph = bx.sharp ? [0.08, 0.3, 0.97] : [0.2, 0.95, 0.95];
     const say = (k) => { if (onProgress) try { onProgress(Math.min(1, Math.max(0, k))); } catch { /* */ } };
     say(0.01);
-    const t0 = performance.now(); Object.assign(prof, { mix: 0, mixN: 0, maskMade: 0, maskKept: 0, tPaint: 0, tGl: 0, tEnc: 0 });
+    const t0 = performance.now(); Object.assign(prof, { mix: 0, mixN: 0, maskMade: 0, maskKept: 0, tPaint: 0, tGl: 0, tEnc: 0, tThings: 0, rises: [], breaths: 0 }); bakeNo++; const kept0 = { ...kept };
     const { g, ox, oy, sx0, sy0, sx1, sy1, nsx, nsy, P } = bx;
     const W = nsx * P; const Hh = nsy * P;
     const X0 = ox + sx0 * g; const Y0 = oy + sy0 * g; const k = P / g;
@@ -1369,12 +1665,16 @@ void main(){
       if ((it.kind === 'area' || it.kind === 'paint') && it.tile) { const t = tileInfo(it.tile, lib); if (t && t.url) want.set(t.url, t); } // (Beta 3.37: a painted tile's picture too; it came out grey when no floor used it)
       if (it.kind === 'stairs') { const t = it.tile ? tileInfo(it.tile, lib) : matInfo(it.mat); if (t && t.url) want.set(t.url, t); }
     }
-    const kits = kitsOf(os); for (const m of kits) for (const p of KIT_PIECES) want.set(kitUrl(m, p), { url: kitUrl(m, p) }); // (Beta 3.36)
+    const kits = kitsOf(os); for (const m of kits) for (const p of KIT_PIECES) want.set(kitUrl(m, p), { url: kitUrl(m, p), kit: true }); // (Beta 3.36)
     const loaded = new Map();
     await Promise.all([...want.values()].map(async (t) => { try { loaded.set(t.url, await image(t.url)); } catch (err) { console.error(err); } }));
     // (Beta 3.31) their dots are unpacked now, all at once and off the drawing thread (after a pause they would be
     // unpacked one by one while painting)
-    await Promise.all([...loaded.values()].map((i) => (i.decode ? i.decode().catch(() => {}) : null)));
+    // Speed 2 (WB4): only those whose scaled pictures are not at hand yet (a 2048 picture unpacked is 16 MB)
+    const sizes = [bx.P, bx.sharp ? bx.sharp.P : 0].filter(Boolean);
+    const fresh = [...loaded].filter(([url]) => { const t = want.get(url); return t.kit ? !kitKept.has(url) : sizes.some((p) => !SCALED.has(`${url}@${pxOf((t.squares || 4) * p)}`)); }).map(([, i]) => i);
+    await Promise.all(fresh.map((i) => (i.decode ? i.decode().catch(() => {}) : null)));
+    check();
     const pats = new Map(); // tile at a size → its scaled painting
     const floorC = canvas(W, Hh); const attrC = canvas(W, Hh); const solidC = canvas(W, Hh); const stairsC = canvas(W, Hh);
     const anyFade = os.items.some((it) => it.kind === 'area' && it.edge === 'fade');
@@ -1383,32 +1683,53 @@ void main(){
     // (Beta 3.43) the living map: four small paintings at half the picture's size; only made when an effect is drawn
     const LS = 0.5; const anyLive = os.items.some((it) => it.kind === 'live' && it.fx !== 'none');
     const lw = Math.max(1, Math.round(W * LS)); const lh = Math.max(1, Math.round(Hh * LS));
+    // Speed 2 (WB11): the living map (four half-size paintings joined and saved as an exact picture) was painted and
+    // packed again with every picture of the drawing, also for a room drawn at the other end of the map. It depends
+    // on the effects and on the shapes of what lies near them (all shapes, where an effect is poured: it runs over
+    // every floor joined to its spot): with those unchanged, the bytes of the last one are handed on.
+    const liveKey = anyLive ? liveKeyOf(os, [X0, Y0, nsx, nsy, g, P, LS]) : null;
+    const liveWas = liveKey && liveMemo && liveMemo.key === liveKey ? liveMemo : null;
     let lv = null;
-    if (anyLive) {
+    if (anyLive && !liveWas) {
       lv = { any: false, cvs: [] };
       for (const n of ['a', 'b', 'c', 'd']) { const c2 = canvas(lw, lh); const g2 = c2.getContext('2d'); g2.fillStyle = '#000000'; g2.fillRect(0, 0, lw, lh); g2.setTransform(LS, 0, 0, LS, 0, 0); lv[n] = g2; lv.cvs.push(c2); }
     }
-    paint(os, lib, T, k, P, org, loaded, { lv, fg: floorC.getContext('2d'), ag: attrC.getContext('2d', CPU), sg: solidC.getContext('2d'), tg: stairsC.getContext('2d'), hg: anyFade ? haloC.getContext('2d') : null, kg: kits.size ? kitC.getContext('2d') : null }, pats);
+    await paint(os, lib, T, k, P, org, loaded, { lv, fg: floorC.getContext('2d'), ag: attrC.getContext('2d', CPU), sg: solidC.getContext('2d'), tg: stairsC.getContext('2d'), hg: anyFade ? haloC.getContext('2d') : null, kg: kits.size ? kitC.getContext('2d') : null }, pats);
     const tm = { paint: Math.round(performance.now() - t0), mixBase: Math.round(prof.mix) }; let tl = performance.now();
     say(ph[0]);
     // ---- light and shadow (WebGL 2) ----
     const C = gl2();
-    let out = null; let sharp = null; let saved = null;
+    let out = null; let sharp = null; let saved = null; let flat = false;
     if (C) {
       try {
+        if (api.failNext) { api.failNext = false; throw new Error('test: the graphics card failed'); } // (for the self-test)
         const r = await shade(C, W, Hh, P, org, os, { floorC, attrC, solidC, stairsC, haloC, kitC, say: (f) => say(ph[0] + (ph[1] - ph[0]) * f) }, async (R) => {
           for (const c of [floorC, attrC, solidC, stairsC, haloC, kitC]) c.width = c.height = 0; // (let go before the tiles)
           tm.light = Math.round(performance.now() - tl); tl = performance.now();
           // (Beta 3.31) the base's file is made while the tiles are painted
           drawDoors(R.outC.getContext('2d'), os, T, P, doorPaints(os, lib, P, org, loaded, pats, g)); saved = { cv: R.outC, blob: encode(R.outC) };
-          if (bx.sharp) sharp = await sharpTiles(C, R, { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade, say: (f) => say(ph[1] + (ph[2] - ph[1]) * f) });
+          if (bx.sharp) sharp = await sharpTiles(C, R, { map, lib, bx, loaded, pats, W, Hh, org, prev, anyFade, stale: check, have: opt.have, say: (f) => say(ph[1] + (ph[2] - ph[1]) * f) });
           tm.tiles = Math.round(performance.now() - tl); tl = performance.now();
         });
         out = r;
-      } catch (err) { console.error(err); out = null; sharp = null; }
+      } catch (err) {
+        if (err && err.stale) { // (given up: the big paintings are let go, nothing falls back to the flat picture)
+          for (const c of [floorC, attrC, solidC, stairsC, haloC, kitC]) c.width = c.height = 0;
+          if (lv) for (const c2 of lv.cvs) c2.width = c2.height = 0;
+          throw err;
+        }
+        console.error(err); out = null; sharp = null;
+        // Speed 3 (WC10): the graphics card failed while the picture was made. The flat painting below stands in, and
+        // is marked (flat): the Draw tool makes the picture once more before it keeps one. The context is let go, so
+        // what the failed picture left on the card goes with it and the next one starts afresh (a failed picture left
+        // six or more textures as big as the picture behind, and one failure could leave a map flat until its next edit).
+        flat = true;
+        try { const lose = C.gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); } catch { /* */ }
+        GLC = null;
+      }
     }
     if (!out) { // no graphics card: the flat painting with simple dark edges
-      if (!floorC.width) { floorC.width = W; floorC.height = Hh; solidC.width = W; solidC.height = Hh; paint(os, lib, T, k, P, org, loaded, { fg: floorC.getContext('2d'), sg: solidC.getContext('2d') }, pats); }
+      if (!floorC.width) { floorC.width = W; floorC.height = Hh; solidC.width = W; solidC.height = Hh; await paint(os, lib, T, k, P, org, loaded, { fg: floorC.getContext('2d'), sg: solidC.getContext('2d') }, pats); }
       out = canvas(W, Hh); const o = out.getContext('2d', CPU);
       o.save(); o.shadowColor = 'rgba(0,0,0,0.9)'; o.shadowBlur = P * 0.25; o.drawImage(floorC, 0, 0); o.restore();
       o.drawImage(solidC, 0, 0);
@@ -1421,14 +1742,17 @@ void main(){
     // the big paintings are let go at once: canvases can hold memory of the graphics card until they are collected,
     // and a drawing session makes many pictures
     for (const c of [floorC, attrC, solidC, stairsC, haloC, kitC, out, base]) c.width = c.height = 0;
-    for (const p of pats.values()) if (p && p.cv) p.cv.width = p.cv.height = 0;
     say(ph[2]);
+    if (opt.stale && opt.stale()) { if (lv) for (const c2 of lv.cvs) c2.width = c2.height = 0; check(); }
+    if (api.slowBy) await new Promise((res) => setTimeout(res, api.slowBy)); // (the self-test: a picture that takes its time, as a big one does)
     const tw0 = performance.now();
-    const walls = sightWalls(os, map, lib, { X0, Y0, nsx, nsy, g });
-    tm.sight = Math.round(performance.now() - tw0);
-    stats.last = { ms: Math.round(performance.now() - t0), ...tm, mix: Math.round(prof.mix), mixN: prof.mixN, maskMade: prof.maskMade, maskKept: prof.maskKept, tilePaint: Math.round(prof.tPaint), tileGl: Math.round(prof.tGl), tileEnc: Math.round(prof.tEnc), dots: W * Hh, P, sharpP: sharp ? sharp.P : 0, made: sharp ? sharp.tiles.filter((x) => x.blob).length : 0, kept: sharp ? sharp.tiles.filter((x) => !x.blob).length : 0 };
+    const sw = await sightKept(os, map, lib, { X0, Y0, nsx, nsy, g }); const walls = sw.walls;
+    say((ph[2] + 1) / 2); // (the walls for sight are found: the pill stood still at its last number through this)
+    tm.sight = Math.round(performance.now() - tw0); tm.sightKept = sw.kept;
+    stats.last = { ms: Math.round(performance.now() - t0), ...tm, mix: Math.round(prof.mix), mixN: prof.mixN, maskMade: prof.maskMade, maskKept: prof.maskKept, tilePaint: Math.round(prof.tPaint), tileGl: Math.round(prof.tGl), tileEnc: Math.round(prof.tEnc), dots: W * Hh, P, sharpP: sharp ? sharp.P : 0, made: sharp ? sharp.tiles.filter((x) => x.blob).length : 0, kept: sharp ? sharp.tiles.filter((x) => !x.blob).length : 0, tileThings: prof.tThings, scaledMade: kept.scaledMade - kept0.scaledMade, scaledKept: kept.scaled - kept0.scaled, matsMade: kept.matsMade - kept0.matsMade, matsKept: kept.mats - kept0.mats };
     // (Beta 3.43) the living map goes along as a file of its own (exact, not squeezed with losses): a b over c d
     let live = null;
+    if (liveWas) live = liveWas.blob;
     if (lv) {
       if (lv.any) {
         const all = canvas(lw * 2, lh * 2); const g2 = all.getContext('2d');
@@ -1437,8 +1761,11 @@ void main(){
         all.width = all.height = 0;
       }
       for (const c2 of lv.cvs) c2.width = c2.height = 0;
+      liveMemo = { key: liveKey, blob: live };
     }
-    return { blob, x: X0, y: Y0, scale: (g / P) * bk, nw: Math.round(W / bk), nh: Math.round(Hh / bk), walls, sharp, live };
+    if (stats.last) stats.last.liveKept = !!liveWas;
+    if (stats.last) { stats.last.flat = flat; stats.last.rises = prof.rises; stats.last.breaths = prof.breaths; }
+    return { blob, x: X0, y: Y0, scale: (g / P) * bk, nw: Math.round(W / bk), nh: Math.round(Hh / bk), walls, sharp, live, flat };
   }
 
   // the base's light and shadow; then (more) is given what the sharp tiles need while it is still on the card
@@ -1453,12 +1780,10 @@ void main(){
     const tStairs = tex(gl, W, Hh, cv.stairsC, { nearest: true });
     const tHalo = tex(gl, cv.haloC.width, cv.haloC.height, cv.haloC, { nearest: true });
     const tKit = tex(gl, cv.kitC.width, cv.kitC.height, cv.kitC, { nearest: true }); const hasKit = cv.kitC.width > 1 ? 1 : 0;
-    const M = await matTextures(C, P);
+    const M = await matTextures(C, P); const KA = await kitLayers(C, P);
     // floors (and stairs) are inside; distances both ways, and inside wall lines
     const merged = target(gl, W, Hh);
-    run(C, prog(C, 'inside', `#version 300 es
-precision highp float; in vec2 v_uv; out vec4 o; uniform sampler2D a, s; uniform vec2 size;
-void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p, 0).a, texelFetch(s, p, 0).g); o = vec4(0.0, 0.0, 0.0, f >= 0.5 ? 1.0 : 0.0); }`), W, Hh, merged.fb, { size: [W, Hh] }, { a: tFloor, s: tStairs });
+    run(C, prog(C, 'inside', FS_INSIDE), W, Hh, merged.fb, { size: [W, Hh] }, { a: tFloor, s: tStairs });
     const pace = pacer(gl);
     const say = cv.say || (() => {});
     const outJ = await flood(C, W, Hh, merged.t, 0, 0, pace); // seeds: inside → for outside dots, the nearest floor
@@ -1470,7 +1795,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     say(0.4);
     gl.deleteTexture(merged.t); gl.deleteFramebuffer(merged.fb); // (what is no longer needed goes at once: a big map needs the room)
     const Ht = target(gl, W, Hh);
-    await runBands(C, prog(C, 'height', FS_HEIGHT), W, Hh, Ht.fb, { size: [W, Hh], P, org, matSq: M.sq, hasKit }, { floorT: tFloor, attrT: tAttr, solidT: tSolid, stairsT: tStairs, outJ, inJ, solJ, kitT: tKit, ...M.t }, pace);
+    await runBands(C, prog(C, 'height', FS_HEIGHT), W, Hh, Ht.fb, { size: [W, Hh], P, org, matSq: M.sq, kitSq: KA.sq, hasKit }, { floorT: tFloor, attrT: tAttr, solidT: tSolid, stairsT: tStairs, outJ, inJ, solJ, kitT: tKit, kitA: KA, ...M.t }, pace);
     for (const t of [tSolid, tStairs, solJ]) gl.deleteTexture(t);
     say(0.6);
     const a = ((os.sun ?? 135) * Math.PI) / 180; const el = (40 * Math.PI) / 180;
@@ -1480,7 +1805,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const Sh = target(gl, W, Hh); const Lt = tex(gl, W, Hh, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, Sh.fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, Lt, 0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq: M.sq, L, voidC: VOID, shT: S.tan, shK: S.k, shA: S.all, hasKit }, { hT: Ht.t, floorT: tFloor, attrT: tAttr, haloT: tHalo, outJ, inJ, nearS: nearS || outJ, kitT: tKit, ...M.t }, pace);
+    await runBands(C, prog(C, 'shade', FS_SHADE), W, Hh, Sh.fb, { size: [W, Hh], P, org, matSq: M.sq, L, voidC: VOID, shT: S.tan, shK: S.k, shA: S.all, hasKit, kitSq: KA.sq }, { hT: Ht.t, floorT: tFloor, attrT: tAttr, haloT: tHalo, outJ, inJ, nearS: nearS || outJ, kitT: tKit, kitA: KA, ...M.t }, pace);
     if (nearS) gl.deleteTexture(nearS);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     say(1);
@@ -1493,7 +1818,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
       outC.getContext('2d', CPU).putImageData(new ImageData(new Uint8ClampedArray(px.buffer), W, Hh), 0, 0);
     }
     gl.deleteTexture(Sh.t); gl.deleteFramebuffer(Sh.fb);
-    for (const t of [tFloor, tHalo, tKit, Ht.t, ...M.list]) gl.deleteTexture(t);
+    for (const t of [tFloor, tHalo, tKit, Ht.t]) gl.deleteTexture(t);
     gl.deleteFramebuffer(Ht.fb);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     // the light is stretched smoothly on the tiles
@@ -1512,13 +1837,68 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     return { len, all, tan: len > 0 ? 1 / (1.55 * len) : 0, k: len > 0 ? 0.4 + 0.12 * len : 0 };
   }
   // the materials (repeating, at their own squares), painted at P dots a square
+  // Speed 2 (WB4): kept with the graphics context for the three sizes used last (every picture made all five anew,
+  // for the base and again for the tiles, from 2048 dots each)
+  // (25 Nov 2026) a wall kit as a square picture, for rock and cliffs made of it: its run laid as eight courses, each
+  // th dots high and a square on the map, every other one moved by half a run (eight squares across: stones about as
+  // big as Stone's on a cliff. At a wall's own size, 0.45 squares a course, a rock face looked studded)
+  const KIT_SQ = 8; // (squares the picture spans)
+  async function kitSquare(id, th) {
+    const url = kitUrl(id, 'run'); const img = await image(url);
+    const w = th * 8; const gain = kitGain(id);
+    const key = `${url}@square@${th}${gain < 1 ? `*${gain}` : ''}`;
+    if (!SCALED.has(key) && img.decode) await img.decode().catch(() => {});
+    return keptScaled(key, () => {
+      const run = dimmed(scaledTo(img, w, th), gain);
+      const c = document.createElement('canvas'); c.width = c.height = w; const q = c.getContext('2d');
+      for (let r = 0; r < 8; r++) { if (r % 2) { q.drawImage(run, -w / 2, r * th); q.drawImage(run, w / 2, r * th); } else q.drawImage(run, 0, r * th); }
+      run.width = run.height = 0;
+      return c;
+    });
+  }
+  // the kits this drawing uses on rock and cliffs (slotNow.kits), as one stack of pictures; none: a stack of one dot
+  // (the light step must have one to look at). Kept with the graphics context for the four used last.
+  async function kitLayers(C, P) {
+    const kits = slotNow.kits; const th = Math.max(4, Math.min(128, Math.round(P))); // (at most 1024 dots across)
+    const key = kits.length ? `${th}|${slotNow.sig}` : 'none';
+    C.kitA = C.kitA || new Map();
+    const was = C.kitA.get(key); if (was) { C.kitA.delete(key); C.kitA.set(key, was); return was; }
+    const cvs = []; for (const id of kits) cvs.push(await kitSquare(id, th));
+    const { gl } = C; const w = kits.length ? th * 8 : 1; const T3 = gl.TEXTURE_2D_ARRAY;
+    const t = gl.createTexture(); gl.bindTexture(T3, t);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texImage3D(T3, 0, gl.RGBA8, w, w, Math.max(1, kits.length), 0, gl.RGBA, gl.UNSIGNED_BYTE, kits.length ? null : new Uint8Array(4));
+    cvs.forEach((cv, k) => gl.texSubImage3D(T3, 0, 0, 0, k, w, w, 1, gl.RGBA, gl.UNSIGNED_BYTE, cv));
+    gl.texParameteri(T3, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(T3, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    if (kits.length) gl.generateMipmap(T3);
+    gl.texParameteri(T3, gl.TEXTURE_MIN_FILTER, kits.length ? gl.LINEAR_MIPMAP_LINEAR : gl.NEAREST); gl.texParameteri(T3, gl.TEXTURE_MAG_FILTER, kits.length ? gl.LINEAR : gl.NEAREST);
+    gl.bindTexture(T3, null);
+    const A = { array: t, sq: KIT_SQ };
+    C.kitA.set(key, A);
+    while (C.kitA.size > 4) { const [k0, old] = C.kitA.entries().next().value; C.kitA.delete(k0); gl.deleteTexture(old.array); }
+    return A;
+  }
+  // the five materials (repeating, at their own squares), painted at P dots a square
   async function matTextures(C, P) {
+    C.mats = C.mats || new Map();
+    const was = C.mats.get(P); if (was) { C.mats.delete(P); C.mats.set(P, was); kept.mats++; return was; }
     const { gl } = C; const list = [];
-    for (const m of MATERIALS) { const img = await image(DIR + m.file); const sc = scaled(img, m.squares * P); list.push(tex(gl, 0, 0, sc, { repeat: true, mip: true })); sc.width = sc.height = 0; }
+    // (those not halved yet are unpacked first, all at once and off the drawing thread: 2048 x 2048 each)
+    const imgs = await Promise.all(MATERIALS.map((m) => image(DIR + m.file)));
+    await Promise.all(imgs.map((i, n) => (i.decode && !SCALED.has(halfKey(DIR + MATERIALS[n].file)) ? i.decode().catch(() => {}) : null)));
+    for (const m of MATERIALS) { const img = await image(DIR + m.file); const sc = scaledMat(DIR + m.file, img, m.squares * P); list.push(tex(gl, 0, 0, sc, { repeat: true, mip: true })); sc.width = sc.height = 0; }
     const ts = list.slice(); while (ts.length < 5) ts.push(ts[0]);
     const sq = MATERIALS.slice(0, 5).map((m) => m.squares); while (sq.length < 5) sq.push(4);
-    return { list, sq, t: { mtl0: ts[0], mtl1: ts[1], mtl2: ts[2], mtl3: ts[3], mtl4: ts[4] } };
+    const M = { list, sq, t: { mtl0: ts[0], mtl1: ts[1], mtl2: ts[2], mtl3: ts[3], mtl4: ts[4] } };
+    C.mats.set(P, M); kept.matsMade++;
+    while (C.mats.size > 3) { const [p0, old] = C.mats.entries().next().value; C.mats.delete(p0); for (const t of old.list) gl.deleteTexture(t); }
+    return M;
   }
+
+  const FS_INSIDE = `#version 300 es
+precision highp float; in vec2 v_uv; out vec4 o; uniform sampler2D a, s; uniform vec2 size;
+void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p, 0).a, texelFetch(s, p, 0).g); o = vec4(0.0, 0.0, 0.0, f >= 0.5 ? 1.0 : 0.0); }`;
+  Object.assign(PROGS, { seed: FS_SEED, jfa: FS_JFA, inside: FS_INSIDE, height: FS_HEIGHT, shade: FS_SHADE, sharp: FS_SHARP });
 
   // Beta 3.25: the sharp tiles. Tiles lie on whole squares from the grid's origin (ts squares across), so they stay
   // where they are when the drawing grows. A tile whose key is unchanged is kept as it is.
@@ -1528,7 +1908,8 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const TD = ts * PH; const kH = PH / g; const s = PH / bx.P;
     const sunA = ((os.sun ?? 135) * Math.PI) / 180; const sunE = (40 * Math.PI) / 180; const L = [Math.cos(sunA) * Math.cos(sunE), -Math.sin(sunA) * Math.cos(sunE), Math.sin(sunE)];
     const keep = new Set(prev && prev.P === PH && prev.ts === ts ? (prev.tiles || []).map((t) => t.h) : []);
-    const tiles = []; let M = null; const saving = [];
+    if (a.have) for (const h of a.have) keep.add(h); // (Speed 1, WA8: a tile of an earlier state of the drawing that is still on the disk: its key says it is the same picture)
+    const tiles = []; let M = null; let KA = null; const saving = [];
     // the tiles there are, and which of them must be made (for how far along it is)
     const all = [];
     for (let r = Math.floor(sy0 / ts); r <= Math.floor((sy1 - 1) / ts); r++) {
@@ -1542,23 +1923,26 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
       for (const { c, r, h } of all) {
         {
           if (keep.has(h)) { tiles.push({ c, r, h }); continue; }
-          M = M || await matTextures(C, PH);
+          if (a.stale) a.stale(); // (Speed 1, WA5: between two tiles nothing is half made)
+          M = M || await matTextures(C, PH); KA = KA || await kitLayers(C, PH);
           const tx0 = ox + c * ts * g; const ty0 = oy + r * ts * g;
           const T = (x, y) => [(x - tx0) * kH, (y - ty0) * kH];
           const tp0 = performance.now();
           const fc = canvas(TD, TD); const sc = canvas(TD, TD); const hc = anyFade ? canvas(TD, TD) : canvas(1, 1); const kc = kits ? canvas(TD, TD) : canvas(1, 1);
-          paint(os, lib, T, kH, PH, [(ox - tx0) * kH, (oy - ty0) * kH], loaded, { fg: fc.getContext('2d'), sg: sc.getContext('2d'), hg: anyFade ? hc.getContext('2d') : null, kg: kits ? kc.getContext('2d') : null }, pats);
+          const nr = tileNear(map, bx, c, r);
+          const clip = api.noCull ? null : { only: new Set(nr.items), doors: new Set(nr.doors), box: nr.box, g };
+          await paint(os, lib, T, kH, PH, [(ox - tx0) * kH, (oy - ty0) * kH], loaded, { fg: fc.getContext('2d'), sg: sc.getContext('2d'), hg: anyFade ? hc.getContext('2d') : null, kg: kits ? kc.getContext('2d') : null }, pats, clip);
           const tF = tex(gl, TD, TD, fc, { nearest: true }); const tS = tex(gl, TD, TD, sc, { nearest: true }); const tH = tex(gl, hc.width, hc.height, hc, { nearest: true }); const tK = tex(gl, kc.width, kc.height, kc, { nearest: true });
           fc.width = fc.height = 0; sc.width = sc.height = 0; hc.width = hc.height = 0; kc.width = kc.height = 0;
           const tp1 = performance.now(); prof.tPaint += tp1 - tp0;
           const O = target(gl, TD, TD);
-          await runBands(C, prog(C, 'sharp', FS_SHARP), TD, TD, O.fb, { size: [TD, TD], tileO: [c * ts * PH, r * ts * PH], loSize: [W, Hh], orgLo: org, s, P: PH, matSq: M.sq, voidC: VOID, L, hasKit: kits ? 1 : 0 }, { floorH: tF, solidH: tS, haloH: tH, kitH: tK, outJ: R.outJ, inJ: R.inJ, attrT: R.attrT, lightT: R.lightT, ...M.t }, R.pace);
+          await runBands(C, prog(C, 'sharp', FS_SHARP), TD, TD, O.fb, { size: [TD, TD], tileO: [c * ts * PH, r * ts * PH], loSize: [W, Hh], orgLo: org, s, P: PH, matSq: M.sq, kitSq: KA.sq, voidC: VOID, L, hasKit: kits ? 1 : 0 }, { floorH: tF, solidH: tS, haloH: tH, kitH: tK, kitA: KA, outJ: R.outJ, inJ: R.inJ, attrT: R.attrT, lightT: R.lightT, ...M.t }, R.pace);
           const px = new Uint8Array(TD * TD * 4);
           gl.bindFramebuffer(gl.FRAMEBUFFER, O.fb); gl.readPixels(0, 0, TD, TD, gl.RGBA, gl.UNSIGNED_BYTE, px);
           gl.deleteTexture(tF); gl.deleteTexture(tS); gl.deleteTexture(tH); gl.deleteTexture(tK); gl.deleteTexture(O.t); gl.deleteFramebuffer(O.fb);
           const oc = canvas(TD, TD); const o = oc.getContext('2d', CPU);
           o.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), TD, TD), 0, 0);
-          drawDoors(o, os, T, PH, doorPaints(os, lib, PH, [(ox - tx0) * kH, (oy - ty0) * kH], loaded, pats, g));
+          drawDoors(o, os, T, PH, doorPaints(os, lib, PH, [(ox - tx0) * kH, (oy - ty0) * kH], loaded, pats, g), clip && clip.box);
           let jpg = true; for (let i = 3; i < px.length; i += 4) if (px[i] !== 255) { jpg = false; break; }
           const tp2 = performance.now(); prof.tGl += tp2 - tp1;
           // (Beta 3.31) its file is made while the next tiles are painted, a few at a time
@@ -1571,7 +1955,6 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
         }
       }
     } finally {
-      if (M) for (const t of M.list) gl.deleteTexture(t);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
     const te = performance.now(); await Promise.all(saving); prof.tEnc += performance.now() - te;
@@ -1615,15 +1998,20 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
   // sun). A window sits in a niche: the wall's own stone, the part the window sits in shaded as if deeper down, with a
   // stop at each end holding it. Secret doors show nothing. The leaves are drawn live on both screens (scene-view.js).
   const NICHE = { stop: 0.1, stopW: 0.33 }; // (squares: how far a window's stops reach along it, and across; Beta 3.35: wider, for the thicker glass)
-  function drawDoors(o, os, T, P, dc) {
+  // Speed 2 (WB3): where each door sits is worked out once for a picture and all its tiles (it was done for every door
+  // of the map in every tile: up to nine looks at all floors each). box: only the doors that reach into it.
+  const placeMemo = new WeakMap();
+  const placeOf = (os, d, g) => { let m = placeMemo.get(d); if (!m || m.os !== os || m.g !== g) { m = { os, g, pl: doorPlace(os, d, g) }; placeMemo.set(d, m); } return m.pl; };
+  function drawDoors(o, os, T, P, dc, box) {
     if (!dc) return;
     const { g, org, floorPat } = dc;
     const sun = (((os.sun ?? 135) * Math.PI) / 180); const sx = Math.cos(sun); const sy = -Math.sin(sun); // (toward the light)
     const k = P / g;
     for (const d of os.doors) {
       if (d.door === 2) continue;
-      const pl = doorPlace(os, d, g); const win = d.kind === 'window';
+      const pl = placeOf(os, d, g); const win = d.kind === 'window';
       if (!pl.line && (!pl.side || pl.bandFloor)) continue; // (no wall here: floor on both sides, or another floor over it)
+      if (box) { const m = Math.abs(pl.off) + pl.thick / 2 + 0.4 * g; if (Math.max(d.x1, d.x2) + m < box[0] || Math.min(d.x1, d.x2) - m > box[2] || Math.max(d.y1, d.y2) + m < box[1] || Math.min(d.y1, d.y2) - m > box[3]) continue; }
       const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1); if (L * k < 2) continue;
       const ux = (d.x2 - d.x1) / L; const uy = (d.y2 - d.y1) / L;
       const [ax, ay] = T(d.x1 - uy * pl.off, d.y1 + ux * pl.off);
@@ -1674,7 +2062,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
   function doorPaints(os, lib, P, org, loaded, pats, g) {
     const scaledOf = (url, squares) => {
       const key = `${url}@${squares}@door@${P}`;
-      if (!pats.has(key)) { const im = loaded.get(url); if (!im) return null; pats.set(key, { cv: scaled(im, squares * P) }); }
+      if (!pats.has(key)) { const im = loaded.get(url); if (!im) return null; pats.set(key, { cv: scaledAt(url, im, squares * P) }); }
       return pats.get(key).cv;
     };
     return {
@@ -1691,7 +2079,43 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
   // Where floors meet built walls or rock, the outline blocks sight; wall lines and pillars do too. Ledges and cliffs
   // do not (one sees across a drop). Doors sit in the walls as doors. Worked out on a small painting (12 dots a square):
   // its outlines, straightened.
-  function sightWalls(os, map, lib, box) {
+  // Speed 2 (WB11): what the living map depends on. An effect's own data; and, in drawing order with them, the shape
+  // of every thing whose box comes within a square and a half of an effect's box (a floor's edge reaches a square, a
+  // soft rim a fifth). With a poured effect on the map: every shape.
+  let liveMemo = null; // { key, blob }: the last one made
+  function liveKeyOf(os, box) {
+    const fx = os.items.filter((it) => it.kind === 'live');
+    const all = fx.some((it) => it.shape === 'fill'); const pad = 1.6 * box[4];
+    const fb = fx.map(itemBox);
+    const near = (it) => { const b = itemBox(it); return fb.some((q) => b[0] - pad < q[2] && b[2] + pad > q[0] && b[1] - pad < q[3] && b[3] + pad > q[1]); };
+    const list = [];
+    for (const it of os.items) {
+      if (it.kind === 'live') list.push(it);
+      else if (it.kind === 'ground') continue; // (it paints nothing into the living map)
+      else if (all || near(it)) list.push([it.kind, it.shape, it.pts, it.r, it.w, it.round, it.edge, it.level, it.mixW > 0, it.rough || 0]);
+    }
+    return fingerprint(JSON.stringify([VERSION, box, list]));
+  }
+  // Speed 2 (WB2): the walls for sight were worked out over the whole map after every edit, in one unbroken block
+  // (measured 60 to 195 ms on a large map), also for an edit that cannot change a wall: a texture stroke, an effect,
+  // a floor's tile or height. They depend only on the shapes (floors with their edges, cuts, wall lines, pillars,
+  // stairs), the doors and the picture's box: the last few results are kept by those.
+  const SIGHT = new Map(); const SIGHT_KINDS = new Set(['area', 'cut', 'line', 'pillar', 'stairs']);
+  async function sightKept(os, map, lib, box) {
+    const shapes = os.items.filter((it) => SIGHT_KINDS.has(it.kind)).map((it) => [it.kind, it.shape, it.pts, it.r, it.w, it.round, it.edge, it.mat, it.rough || 0]);
+    const key = fingerprint(JSON.stringify([VERSION, box, shapes, os.doors]));
+    const was = SIGHT.get(key);
+    if (was) { SIGHT.delete(key); SIGHT.set(key, was); return { walls: structuredClone(was), kept: true }; }
+    const walls = await sightWalls(os, map, lib, box);
+    SIGHT.set(key, structuredClone(walls));
+    while (SIGHT.size > 4) SIGHT.delete(SIGHT.keys().next().value);
+    return { walls, kept: false };
+  }
+  // (Speed 2, WB1: it runs in steps and lets the screen breathe between them, as the painting does. It was one block
+  // of 60 to 190 ms on a large map. Its work and its answer are the same.)
+  async function sightWalls(os, map, lib, box) {
+    let sliceAt = performance.now();
+    const rest = async () => { if (!api.noBreathe && performance.now() - sliceAt > SLICE_MS) { await nextTask(); sliceAt = performance.now(); prof.breaths++; } };
     const Q = 12; const { X0, Y0, nsx, nsy, g } = box; const k = Q / g;
     const W = nsx * Q; const H = nsy * Q;
     const T = (x, y) => [(x - X0) * k, (y - Y0) * k];
@@ -1699,14 +2123,17 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const fl = document.createElement('canvas'); fl.width = W; fl.height = H; const fg = fl.getContext('2d', { willReadFrequently: true });
     const at = document.createElement('canvas'); at.width = W; at.height = H; const ag = at.getContext('2d', { willReadFrequently: true });
     const so = document.createElement('canvas'); so.width = W; so.height = H; const sg = so.getContext('2d', { willReadFrequently: true });
-    for (const it of os.items) {
+    for (const raw of os.items) {
+      const it = raw.rough ? { ...raw, coarse: true } : raw; // (XA4: a jagged stroke's walls follow its lobes and large teeth, not every small tooth)
       if (it.kind === 'area') { paintArea(fg, it, T, k, '#fff', false); paintArea(ag, it, T, k, `rgb(${EDGE_CODE[it.edge] * 40},0,0)`, false); }
       else if (it.kind === 'cut') { paintArea(fg, it, T, k, null, true); paintArea(ag, it, T, k, null, true); sg.save(); sg.globalCompositeOperation = 'destination-out'; if (it.shape === 'path' || it.shape === 'brush') stroke(sg, it, T, k, '#000'); else sg.fill(shapePath(it, T)); sg.restore(); }
       else if (it.kind === 'line' || it.kind === 'pillar') paintSolid(sg, it, T, k, '#fff', false);
       else if (it.kind === 'stairs') { const [x, y, w, h] = stairsBox(it, T); fg.fillStyle = '#fff'; fg.fillRect(x, y, w, h); }
     }
     for (const d of os.doors) { const [x1, y1] = T(d.x1, d.y1); const [x2, y2] = T(d.x2, d.y2); sg.save(); sg.globalCompositeOperation = 'destination-out'; sg.lineWidth = Q * 1.2; sg.beginPath(); sg.moveTo(x1, y1); sg.lineTo(x2, y2); sg.stroke(); sg.restore(); }
+    await rest();
     const F = fg.getImageData(0, 0, W, H).data; const A = ag.getImageData(0, 0, W, H).data; const S = sg.getImageData(0, 0, W, H).data;
+    await rest();
     // Beta 3.25: the walls for sight lie in the middle of what is built, so the players see the near half of the walls
     // (and not only darkness under the fog; the fog's soft edge shows a little more): the middle of a wall band (rock:
     // of its first half square), between two floors the middle of the band that parts them, wall lines along their middle.
@@ -1735,6 +2162,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     }
     const BAND = { [EDGE_CODE.walls]: 0.225 * Q + 0.5, [EDGE_CODE.rock]: 0.275 * Q + 0.5 }; // (half the band the picture draws)
     const TMAX = 0.55 * Q + 2;
+    await rest();
     // for the dots near a floor: the nearest floor dot (seed) and how far it is (spread outward, nearest first)
     const seed = new Int32Array(N).fill(-1); const dist = new Float32Array(N).fill(1e9);
     let queue = [];
@@ -1743,7 +2171,9 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
       seed[i] = i; dist[i] = 0;
       if ((x > 0 && !floor[i - 1]) || (x < W - 1 && !floor[i + 1]) || (y > 0 && !floor[i - W]) || (y < H - 1 && !floor[i + W])) queue.push(i);
     }
+    let spins = 0;
     while (queue.length) {
+      if ((++spins & 4095) === 0) await rest();
       const next = [];
       for (const i of queue) {
         const x = i % W; const y = (i - x) / W; const s0 = seed[i]; const sx = s0 % W; const sy = (s0 - sx) / W;
@@ -1765,6 +2195,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     const toMap = (x, y) => [X0 + x / k, Y0 + y / k];
     const addLine = (pts) => { for (let i = 0; i < pts.length - 1; i++) { const [x1, y1] = toMap(pts[i][0], pts[i][1]); const [x2, y2] = toMap(pts[i + 1][0], pts[i + 1][1]); out.push([x1, y1, x2, y2]); } };
     const TOL = 1.4; // (about a ninth of a square: smooth, few corners, and still inside the band)
+    await rest();
     // (a) the middle of the walls: the outline of floors + near halves where the half is inside it
     for (const loop of contours(W, H, inV)) {
       const n = loop.length - 1; // (closed: the last corner is the first)
@@ -1784,6 +2215,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
       }
       if (run) addLine(rdp(run, TOL));
     }
+    await rest();
     // (b) between two floors parted by one band: its middle (where the nearest floor jumps from one side to the other)
     // (and the two floors lie on either side: not just a step along one curved edge, which only gives a little tick)
     const far = (i, j) => {
@@ -1812,6 +2244,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
     for (const [key, l] of ridge) if (l.length === 1) walk(key); // (lines first, from their ends)
     for (const [key, l] of ridge) while (l.length) walk(key); // (then the rest)
     const traced = out.length; // (Beta 3.36.1: what (a) and (b) traced, to be snapped)
+    await rest();
     // (c) wall lines along their middle (where they stand: an erased bit or a door lets through); pillars as a smaller block
     for (const it of os.items) {
       if (it.kind === 'line') {
@@ -1843,6 +2276,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
       };
       for (const loop of contours(W, H, core)) addLine(simplify(loop, TOL));
     }
+    await rest();
     // Beta 3.36.1: everything snaps. The walls traced on the small painting lie a little off the lines the picture draws
     // (up to a ninth of a square, their corners cut off): their corners go onto those lines (the middle of the wall band
     // of rooms drawn as a rectangle or a shape, of rock's first half; the middle of wall lines), at a corner onto the
@@ -1886,12 +2320,13 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
       const c = i < traced ? [...snapPt(s2[0], s2[1]), ...snapPt(s2[2], s2[3])] : s2;
       if (Math.hypot(c[2] - c[0], c[3] - c[1]) > 0.02 * g) segs.push(c);
     });
+    await rest();
     // doors: on the line they are drawn on (the middle of the wall: where their leaves hang), the walls cut there; the
     // door is a wall of its own, and from each end the wall goes on to the nearest wall along it (half a square at most):
     // no gap beside a door, nothing overlapping it
     const walls = [];
     const doors = os.doors.map((d) => {
-      const pl = doorPlace(os, d, g); const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1;
+      const pl = placeOf(os, d, g); const L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1;
       const nx = -(d.y2 - d.y1) / L; const ny = (d.x2 - d.x1) / L;
       return { ...d, x1: d.x1 + nx * pl.off, y1: d.y1 + ny * pl.off, x2: d.x2 + nx * pl.off, y2: d.y2 + ny * pl.off };
     });
@@ -1923,6 +2358,7 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
         if (t !== null && t > 0.01 * g) walls.push({ c: [ex, ey, ex + ux * sg2 * t, ey + uy * sg2 * t], key: `j${d.id}${sg2 > 0 ? 'b' : 'a'}` });
       }
     }
+    await rest();
     // a wall that ends just short of another (a wall line drawn up to a room, a traced wall beside a corner) goes on to it
     const ends = new Map(); const ek = (x, y) => `${Math.round(x / g * 50)},${Math.round(y / g * 50)}`;
     for (const w of walls) for (const [x, y] of [[w.c[0], w.c[1]], [w.c[2], w.c[3]]]) ends.set(ek(x, y), (ends.get(ek(x, y)) || 0) + 1);
@@ -1934,6 +2370,30 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
         if (ends.get(ek(x, y)) > 1) continue; // (it meets another there)
         const t = hitAlong(x, y, ux * sg2, uy * sg2, 0.35 * g, walls, w);
         if (t !== null && t > 0.005 * g) walls.push({ c: [x, y, x + ux * sg2 * t, y + uy * sg2 * t], key: `e${Math.round(x * 100)},${Math.round(y * 100)}` });
+      }
+    }
+    // Glinn, 26 Nov 2026 (the cave's rock is hidden by the fog): the fog can uncover what is built behind a wall the
+    // party sees (vision.js, widen). For that each wall knows how far it is from itself to the next floor, on its left
+    // and on its right (bk, map inches, at most 4 squares): measured here, where the floors are known. The least of
+    // five spots along it counts, so nothing behind a wall is uncovered that is floor: not the next room, not the
+    // passage on the other side of a thin rock.
+    {
+      const MAXB = 4 * g; const stepB = g / Q;
+      const fAt = (x, y) => { const X = Math.floor((x - X0) * k); const Y = Math.floor((y - Y0) * k); return X < 0 || Y < 0 || X >= W || Y >= H ? 0 : floor[Y * W + X]; };
+      for (const w of walls) {
+        if (!w.c || w.door) continue;
+        const [x1, y1, x2, y2] = w.c; const L = Math.hypot(x2 - x1, y2 - y1); if (L < 1e-6) continue;
+        const nx = -(y2 - y1) / L; const ny = (x2 - x1) / L; const bk = [];
+        for (const sgn of [1, -1]) {
+          let best = MAXB;
+          for (const f of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+            const px = x1 + (x2 - x1) * f; const py = y1 + (y2 - y1) * f; let t = 0.3 * g;
+            for (; t < best; t += stepB) if (fAt(px + nx * sgn * t, py + ny * sgn * t)) break;
+            if (t < best) best = t;
+          }
+          bk.push(best <= 0.3 * g + stepB ? 0 : Math.round(Math.max(0, best - 0.12 * g) * 100) / 100); // (the floor's side: nothing; else up to just short of the next floor)
+        }
+        if (bk[0] > 0 || bk[1] > 0) w.bk = bk;
       }
     }
     return walls;
@@ -2011,14 +2471,25 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
 
   // ---------- where the pointer is: which area (for the Floor tool) ----------
   let hitC = null;
+  // Speed 2 (WB10): each floor's box, worked out once for a drawing. A point outside it cannot be in the floor, so no
+  // path is built for it (the test built a path for every floor until one hit: on every move with Fill in hand, nine
+  // times for every door, four times for every corner). A passage's box is wide: its mitred bends reach far.
+  const hitBoxes = new WeakMap();
   function areaAt(os, x, y) {
     hitC = hitC || document.createElement('canvas').getContext('2d');
     const T = (px, py) => [px, py];
+    let boxes = hitBoxes.get(os);
+    if (!boxes || boxes.length !== os.items.length) {
+      boxes = os.items.map((it) => { if (it.kind !== 'area' && it.kind !== 'cut') return null; const b = itemBox(it); const pad = (it.shape === 'path' ? 10 * (it.r || 0) : 0) + 1e-6; return [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad]; });
+      hitBoxes.set(os, boxes);
+    }
     for (let i = os.items.length - 1; i >= 0; i--) {
       const it = os.items[i];
       if (it.kind !== 'area' && it.kind !== 'cut') continue;
+      const q = boxes[i]; if (!api.noHitBox && (x < q[0] || x > q[2] || y < q[1] || y > q[3])) continue;
       let hit;
-      if (it.shape === 'path' || it.shape === 'brush') {
+      if (it.shape === 'brush' && it.rough > 0) hit = hitC.isPointInPath(roughPath(it), x, y, 'nonzero'); // (XA4)
+      else if (it.shape === 'path' || it.shape === 'brush') {
         const p = new Path2D(); it.pts.forEach(([px, py], j) => (j ? p.lineTo(px, py) : p.moveTo(px, py)));
         if (it.pts.length === 1) p.lineTo(it.pts[0][0] + 0.001, it.pts[0][1]);
         hitC.lineWidth = it.r * 2; hitC.lineCap = it.shape === 'path' ? 'square' : 'round'; hitC.lineJoin = it.shape === 'path' ? 'miter' : 'round';
@@ -2031,6 +2502,15 @@ void main(){ ivec2 p = ivec2(floor(v_uv * size)); float f = max(texelFetch(a, p,
 
   // (noSharp: the self-test's software graphics are slow; it switches the sharp tiles off where they are not the point.
   // noPill: and the progress pill, whose running maid would keep its window drawing all the while)
-  const api = { DATA, FLOORS, MATERIALS, EDGES, LIVE_FX, RIPPLE_MAX, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, doorPlace, shadowOf, setSharp, stats, noSharp: false, noPill: false, sharpOf: (map) => { const b = boxOf(map); return b && b.sharp; }, supported: () => !!gl2(), DEFAULT_MAT };
+  const api = { MAX_SQUARES: 300, /* (XA3: how many squares a drawing may be across; the same number as OS_MAX in mapstate.js, which decides) */ DATA, FLOORS, MATERIALS, EDGES, LIVE_FX, RIPPLE_MAX, relOf, tileInfo, findJoints, matInfo, bounds, hash, bake, areaAt, doorPlace, WALLKITS, slotsOf, kitsAsRendered: false, keySig: () => `${sharpWant}|${densHas ? `${densHas.P},${densHas.sharpP}` : ''}|${api.noSharp}|${VERSION}`, hashCount: 0, slowBy: 0, noHitBox: false, failNext: false, noBreathe: false, forgetKept: () => { SIGHT.clear(); liveMemo = null; MASKS.clear(); maskPx = 0; }, // (what is kept between pictures and belongs to a drawing: let go when another campaign opens, and by the self-test)
+    // (Speed 2, WB9) what a door's place depends on: the floors, the cuts and the wall lines, not the picture
+    shapeSig: (os) => fingerprint(JSON.stringify(os.items.filter((it) => it.kind === 'area' || it.kind === 'cut' || it.kind === 'line').map((it) => [it.kind, it.shape, it.pts, it.r, it.w, it.edge, it.mat, it.rough || 0]))), shadowOf, setSharp, setHas, warm, progsState, noCull: false, stats, noSharp: false, noPill: false, sharpOf: (map) => { const b = boxOf(map); return b && b.sharp; }, supported: () => !!gl2(), DEFAULT_MAT,
+    // (for the self-test: the key of every sharp tile of a drawing, without making a picture)
+    tileKeysOf: (map, lib) => {
+      const bx = boxOf(map); if (!bx || !bx.sharp) return null;
+      const ts = bx.sharp.ts; const keys = {};
+      for (let r = Math.floor(bx.sy0 / ts); r <= Math.floor((bx.sy1 - 1) / ts); r++) for (let c = Math.floor(bx.sx0 / ts); c <= Math.floor((bx.sx1 - 1) / ts); c++) { const h = tileKey(map, lib, bx, c, r); if (h) keys[`${c},${r}`] = h; }
+      return { P: bx.P, sharpP: bx.sharp.P, ts, squares: bx.nsx * bx.nsy, keys };
+    } };
   return api;
 })();

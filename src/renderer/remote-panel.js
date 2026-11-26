@@ -32,15 +32,16 @@ const RemotePanel = (() => {
       const addr = h('div', { class: 'rm-addr' });
       const other = h('details', { class: 'rm-other' });
       const card = h('div', { class: 'rm-card' }, box, h('div', { class: 'rm-how' }, h('b', {}, title), h('ol', {}, ...steps.map((s) => h('li', {}, s))), addr));
-      let sig = ''; let pick = null;
+      let sig = '';
       async function draw() {
         const v = R();
-        const s = JSON.stringify([v.running, v.urls, v.keyRev, pick]);
+        const s = JSON.stringify([v.running, v.urls, v.keyRev]);
         if (s === sig) return;
         sig = s;
         card.hidden = !v.running;
-        if (!v.running || !v.urls.length) { box.replaceChildren(); addr.replaceChildren(); other.hidden = true; return; }
-        const r = await window.ts.remote('qr', { url: pick, role });
+        // (UI audit VE11: listening, but this PC is on no home network: the card says so; it was an empty frame)
+        if (!v.running || !v.urls.length) { box.replaceChildren(...(v.running ? [h('p', { class: 'hint' }, 'No home network found on this computer')] : [])); addr.replaceChildren(); other.hidden = true; return; }
+        const r = await window.ts.remote('qr', { role });
         if (!r || !r.ok) { box.replaceChildren(h('p', { class: 'hint' }, (r && r.error) || 'No QR code')); return; }
         const t = document.createElement('template');
         t.innerHTML = r.svg;
@@ -48,7 +49,8 @@ const RemotePanel = (() => {
         addr.replaceChildren(iconEl('wifi'), h('span', { class: 'ellipsis' }, r.base.replace('http://', '')));
         other.hidden = v.urls.length < 2;
         other.replaceChildren(h('summary', {}, 'Doesn\'t open? Another network of this PC'),
-          ...v.urls.map((u) => h('button', { class: `link-btn ${u === r.base ? 'on' : ''}`, onclick: () => { pick = u; draw(); } }, u.replace('http://', ''))));
+          // (UI audit VE11: the choice is kept by Tablescape, for the players' code and the join card on the table too)
+          ...v.urls.map((u) => h('button', { class: `link-btn ${u === r.base ? 'on' : ''}`, onclick: () => act('addr', { url: u }) }, u.replace('http://', ''))));
       }
       c().bind(draw);
       const fresh = h('button', { class: 'link-btn', 'data-tip': 'The old code stops working for new devices; connected ones stay', onclick: async () => { await act('newKey', { role }); sig = ''; draw(); toast('New code. Connected devices stay connected.', { ms: 3000 }); } }, 'New code');

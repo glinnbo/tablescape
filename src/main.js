@@ -65,6 +65,7 @@ let settings = {
   players: {}, // Prototype 1: moving tokens by phone (players.js DEFAULTS fill the rest)
   hudScale: 1, // size of text and panels on the TV (round, countdowns, turn order, markers) — not of the map
   uiScale: 1, // 4.0.1: size of everything in the GM window (small laptop screens); the TV is not touched
+  corners: 'sharp', // Beta 3.68 (Glinn): the GM window's corners: 'sharp' (square, the big pieces with cut corners; the default) | 'round'
   roundPos: { x: 0.07, y: 0.07 }, roundSize: 1.4, roundBanner: true, // the round on the TV: where (near copy), how big, announced
   mapTransition: 'ink', // a new map on the table: 'ink' (an ink brush sweeps over), 'fade'; 4.4: 'smoke', 'parchment', 'embers'
   quality: 'high', // effects quality: 'high' | 'medium' | 'low' (fewer particles, lighter layers, still videos on the GM screen)
@@ -81,6 +82,8 @@ let settings = {
   spellGpu: true, // Second Builder (second-spell-warmup): spell areas drawn by the graphics card (off: the simple drawing)
   mapQuality: {}, // map id -> 'medium' | 'low': lower effects for that map (remembered when the TV stuttered on it)
   momentStars: ['earthquake', 'explosion', 'blood', 'gas'], // starred moments: on top, and on Shift + 1 to 9
+  momentLook: {}, // I8: id → { str, col, len, vol }: a screen effect's Strength, Colour, Stays / Comes in, its sound's volume
+  soundPads: {}, // I8: a Soundboard pad (its folder and name without the number) → { loop, vol, hidden }
   momentSounds: {}, // moment id -> a sound file, or 'none' (else a matching sound from Audio/SFX, or the built-in one)
   // Spotify as a remote: moods (Tablescape's own little playlists), the device it plays on, how loud,
   // how the ambience dips under it, fade seconds
@@ -101,7 +104,15 @@ function tokenLook(t = settings.tokens || {}) {
     tagSize: Math.round(num(t.tagSize, 0.5, 2.5, 1) * 100) / 100,
     numbers: t.numbers !== false, turnGlow: t.turnGlow !== false, shadow: !!t.shadow, snap: t.snap !== false,
     conds: t.conds !== false, // D3: a token's conditions show as small animations on it (TV and GM screen)
+    sheet: sheetLines(t.sheet), // Beta 3.68: the lines of a picked token's sheet, for players and for NPCs (name and More always)
   };
+}
+// Beta 3.68 (Glinn): the token sheet's lines. As it comes: conditions, sight and light (an NPC: the light it carries)
+const SHEET_LINES = ['hp', 'ac', 'init', 'conds', 'sight', 'move', 'quick'];
+const SHEET_DEFAULT = { pc: ['conds', 'sight'], npc: ['conds', 'sight'] };
+function sheetLines(s) {
+  const one = (v, d, no) => (Array.isArray(v) ? SHEET_LINES.filter((k) => v.includes(k) && !no.includes(k)) : d.slice());
+  return { pc: one(s && s.pc, SHEET_DEFAULT.pc, []), npc: one(s && s.npc, SHEET_DEFAULT.npc, ['move']) };
 }
 
 // Beta 3.18: what belongs to a campaign, not to Tablescape: how the table looks (Looks), the turn order and the round
@@ -212,7 +223,8 @@ const state = {
   quiet: false, // all table sound faded out (the Quiet button under the table preview)
   fightNow: false, // fight music started by hand (Sound → Fight music → Play now)
   testPicture: false, // Options → Picture: on the TV, false | 'pattern' (grey steps, colours) | 'reference' (a picture with real maps)
-  moments: [], // screen moments playing on the TV: { key, id, seed, x, y, mapId, t0, dur, stop } (moments.js)
+  moments: [], // screen moments playing on the TV: { key, id, seed, x, y, mapId, t0, dur, stop, o } (moments.js; o: its look, I8)
+  board: [], // I8: Soundboard sounds playing: { key, path, t0, loop } (a once sound leaves by itself: the GM knows its length)
   dice: null, // a roll on the TV (dice-fx.js): { id, kind: 'dice' | 'wheel' | 'death', t0, dur, ... }
   diceLog: [], // this session's rolls, newest first (the Dice panel)
 };
@@ -292,13 +304,45 @@ const fogRev = new Map();
 const fogSent = new WeakMap(); // window -> Map(mapId -> rev)
 const bumpFog = (id) => fogRev.set(id, (fogRev.get(id) || 0) + 1);
 
+// Speed 3 (WC8): a number that is new whenever a map's drawing is another one. The things and doors of a drawing are
+// never changed in place (mapstate: an undo step shares them), so comparing them one by one, as pointers, tells. The
+// Draw tool turned the whole drawing into text on every state of the app, a token let go and a slider included, to
+// see whether its picture was still the right one: now only when this number is new.
+const osSeen = new WeakMap(); let osRevNext = 1;
+function osRevOf(map) {
+  const os = map.os; if (!os || !Array.isArray(os.items) || !Array.isArray(os.doors)) return 0;
+  let e = osSeen.get(map);
+  const rest = `${os.sun}|${os.shadowLen}|${os.shadowAll}|${os.sight}|${os.shadows}|${os.v}`;
+  const same = e && e.rest === rest && e.items.length === os.items.length && e.doors.length === os.doors.length && os.items.every((x, i) => x === e.items[i]) && os.doors.every((x, i) => x === e.doors[i]);
+  if (!same) { e = { rev: osRevNext++, rest, items: os.items.slice(), doors: os.doors.slice() }; osSeen.set(map, e); }
+  return e.rev;
+}
 // Fog can be large; only resend it to a window when it changed.
+// Speed 9 (WI4): a drawn map's picture came with the list of every drawn thing it shows, so the TV can ink the ones
+// it does not show yet. The list went out with every state (5000 names: about 60 KB each time) and was cut at 5000,
+// so on a larger drawing the things past that were inked on the table and stayed. The windows now get the other,
+// short list: the things of the drawing the picture does not show yet (bg.osNew; mostly none, or the one just drawn).
+// Worked out once per picture and drawing.
+const osNewKept = new WeakMap(); // the picture's list -> { rev, osNew }
+function bgForWindow(map) {
+  const { osIds, ...b } = map.bg;
+  const rev = map.os ? osRevOf(map) : 0;
+  let k = osNewKept.get(osIds);
+  if (!k || k.rev !== rev) {
+    const had = new Set(osIds);
+    k = { rev, osNew: map.os ? [...map.os.items, ...map.os.doors].filter((x) => !had.has(x.id)).map((x) => x.id) : [] };
+    osNewKept.set(osIds, k);
+  }
+  return { ...b, osNew: k.osNew };
+}
 function forWindow(win, map) {
   if (!map) return null;
   if (!fogSent.has(win)) fogSent.set(win, new Map());
   const sent = fogSent.get(win);
   const rev = fogRev.get(map.id) || 0;
   const { snaps, ...m } = map; // the windows draw the map; its snapshots go to the GM in the campaign summary
+  if (map.os) m.osRev = osRevOf(map);
+  if (m.bg && m.bg.osIds) m.bg = bgForWindow(map);
   if (sent.get(map.id) === rev) { const { fog, ...rest } = m; return { ...rest, fogOn: !!fog.enabled }; } // on or off travels without the fog
   sent.set(map.id, rev);
   return m;
@@ -352,12 +396,12 @@ const hoShown = (p) => (state.handouts || []).some((h) => h.path === p);
 const hoShares = () => (store.cur ? (store.cur.meta.handoutShare || {}) : {});
 // for the GM screen: [{ path, name, to: 'all' | [names], sent }]
 function hoShareList() {
-  return Object.entries(hoShares()).map(([k, v]) => { const p = library.resolveRef({ rel: k, path: k }); return { key: k, path: p, name: p ? path.parse(p).name : k, to: v.to, sent: v.sent || 0 }; });
+  return Object.entries(hoShares()).map(([k, v]) => { const p = library.resolveKept({ rel: k, path: k }); return { key: k, path: p, name: p ? path.parse(p).name : k, to: v.to, sent: v.sent || 0 }; });
 }
 // what one player's phone may look at: marked for everyone or for this player's character
 function handoutsFor(dev) {
   const me = dev && dev.char;
-  return hoShareList().filter((x) => x.sent && x.path && fs.existsSync(x.path) && (x.to === 'all' || (me && Array.isArray(x.to) && x.to.includes(me))))
+  return hoShareList().filter((x) => x.sent && x.path && library.there(x.path) && (x.to === 'all' || (me && Array.isArray(x.to) && x.to.includes(me))))
     // (Beta 3.8: only the picture goes to the phone, under an address that says nothing; never the file's name, which
     // is the DM's own label and often a spoiler)
     .sort((a, b) => b.sent - a.sent).slice(0, 24).map((x) => ({ url: Remote ? Remote.faceUrl(x.path) : null }));
@@ -419,9 +463,9 @@ const READY_KINDS = ['tokens', 'portraits', 'handouts', 'other'];
 const readyKindOf = (cat) => (['tokens', 'portraits', 'handouts'].includes(cat) ? cat : 'other');
 function readyOf(ch, kind) {
   return ((ch.ready && ch.ready[kind]) || []).map((r) => {
-    const p = library.resolveRef(r);
+    const p = library.resolveKept(r); // (Speed 4, WD5: asked of the disk once in a while, not for every state)
     const k = library.kindOf(p) || 'image';
-    return { path: p, rel: r.rel || null, name: r.name, kind: k, cat: r.rel ? library.categoryOf(r.rel, k) : kind === 'other' ? 'assets' : kind, missing: !p || !fs.existsSync(p) };
+    return { path: p, rel: r.rel || null, name: r.name, kind: k, cat: r.rel ? library.categoryOf(r.rel, k) : kind === 'other' ? 'assets' : kind, missing: !p || !library.there(p) };
   });
 }
 // the old "Tonight" tray (one per campaign) moves to the first chapter's Ready list, once
@@ -443,7 +487,7 @@ function migrateTray(c) {
 }
 // ---------- the hotbar: what's on it, files kept as library references ----------
 const HOTBAR_SIZE = 30;
-const HOT_KINDS = ['token', 'asset', 'portrait', 'handout', 'overlay', 'sound', 'mood', 'moment', 'cue', 'wheel', 'roll', 'death', 'spell', 'weather', 'light', 'map', 'panel', 'snap', 'fog', 'lights', 'volume', 'tool', 'do', 'door'];
+const HOT_KINDS = ['token', 'asset', 'portrait', 'handout', 'overlay', 'sound', 'mood', 'moment', 'cue', 'wheel', 'roll', 'death', 'spell', 'weather', 'light', 'map', 'panel', 'snap', 'fog', 'lights', 'volume', 'tool', 'do', 'door', 'trigger'];
 const HOT_FILES = ['token', 'asset', 'portrait', 'handout', 'overlay', 'sound'];
 function cleanHot(it) {
   if (!it || !HOT_KINDS.includes(it.kind)) return null;
@@ -464,8 +508,8 @@ function hotbarInfo(c) {
   return list.map((it) => {
     if (!it) return null;
     if (HOT_FILES.includes(it.kind)) {
-      const p = library.resolveRef(it.ref);
-      return { ...it, ref: { ...it.ref, path: p }, missing: !p || !fs.existsSync(p) };
+      const p = library.resolveKept(it.ref);
+      return { ...it, ref: { ...it.ref, path: p }, missing: !p || !library.there(p) };
     }
     if (it.kind === 'map') return { ...it, missing: !c.maps.has(it.ref) };
     if (it.kind === 'wheel') return { ...it, missing: !wheelList().some((w) => w.id === it.ref) };
@@ -627,7 +671,7 @@ function charFile(ref) { // a picture of a character, if it is (still) there; lo
   if (!ref) return null;
   if (Date.now() - charFileCache.at > 4000) charFileCache = { at: Date.now(), map: new Map() };
   const k = JSON.stringify(ref);
-  if (!charFileCache.map.has(k)) { const f = library.resolveRef(ref); charFileCache.map.set(k, f && fs.existsSync(f) ? f : null); }
+  if (!charFileCache.map.has(k)) { const f = library.resolveKept(ref); charFileCache.map.set(k, f && library.there(f) ? f : null); }
   return charFileCache.map.get(k);
 }
 function charPortrait(name) {
@@ -768,7 +812,7 @@ function partyGather() {
   if (fix(c.meta)) store.touch();
   for (const [id, m] of c.maps) if (fix(m)) store.touch(id);
   if (state.talk) fix(state.talk);
-  charFileCache.at = 0; portraitIdx.at = 0;
+  charFileCache.at = 0; portraitIdx.at = 0; library.thereForget();
   broadcast();
   applog.log.info(`party: ${moved.size} pictures moved into Party`);
   return { ok: true, moved: moved.size, failed: files.length - moved.size };
@@ -799,7 +843,8 @@ function charCards(face = (f) => (f ? pathToFileURL(f).href : null)) {
       ...(() => { const s0 = sightOf(name); return { eye: s0.eye, carry: s0.carry, bright: s0.bright, dim: s0.dim, sight: s0.sight }; })(), // Prototype 17
       senses: ch.senses || '', languages: ch.languages || '', notes: ch.notes || '',
       insp: !!ch.insp, exh: ch.exh || 0, ds: { s: (ch.ds && ch.ds.s) || 0, f: (ch.ds && ch.ds.f) || 0 },
-      cond: e && cdc ? (entryConds(e, I && store.map(I.mapId)) || (Array.isArray(e.vals[cdc.id]) ? e.vals[cdc.id] : [])) : [], // (D3: from the tokens) down: !!(hv && hv.cur != null && hv.cur <= 0), entry: e ? e.id : null,
+      cond: e && cdc ? (entryConds(e, I && store.map(I.mapId)) || (Array.isArray(e.vals[cdc.id]) ? e.vals[cdc.id] : [])) : [], // (D3: from the tokens)
+      down: !!(hv && hv.cur != null && hv.cur <= 0), entry: e ? e.id : null, // (Beta 3.68: they stood behind the comment above: the HP of a player in the turn order could not be set from the player panel)
     };
   });
 }
@@ -1061,8 +1106,12 @@ async function remoteHot(item) {
     it.ref = { ...it.ref, path: f };
   }
   const js = `Play.hotRun(${JSON.stringify(it)}).then(() => true, (e) => String((e && e.message) || e))`;
-  const r = await Promise.race([gm.webContents.executeJavaScript(js).catch((e) => String((e && e.message) || e)), new Promise((res) => setTimeout(() => res(true), 6000))]);
-  return r === true ? { ok: true } : { ok: false, error: String(r) };
+  // (UI audit VE11: the PC gives up after 5 s, before the phone does after 6; what went wrong goes into the log, the
+  // phone gets a plain word: it showed the program's own error text)
+  const r = await Promise.race([gm.webContents.executeJavaScript(js).catch((e) => String((e && e.message) || e)), new Promise((res) => setTimeout(() => res(true), 5000))]);
+  if (r === true) return { ok: true };
+  applog.log.warn(`remote key ${it.kind}: ${String(r).slice(0, 300)}`);
+  return { ok: false, error: 'That didn\'t work' };
 }
 // everything that can become a button on the phone ("+" in its edit mode)
 // (Prototype 25: pc = for the hotbar's own picker at the PC: without the hotbar's slots, the actions and the sliders (the
@@ -1139,8 +1188,8 @@ const DEFAULT_PIC = { name: 'The little maid (default)', url: 'calib/default.web
 function picOf(ref) {
   if (ref === 'none') return null;
   if (!ref) return DEFAULT_PIC;
-  const p = library.resolveRef(ref);
-  if (!p || !fs.existsSync(p)) return { name: ref.name || '', path: p || null, missing: true };
+  const p = library.resolveKept(ref);
+  if (!p || !library.there(p)) return { name: ref.name || '', path: p || null, missing: true };
   return { name: ref.name || path.parse(p).name, path: p, url: library.media(p).url, kind: library.kindOf(p) === 'video' ? 'video' : 'image' };
 }
 function screensSummary() {
@@ -1212,7 +1261,7 @@ function campaignFiles() {
   }
   return out;
 }
-const sfxNames = () => Object.fromEntries(Object.entries(settings.sfxMap || {}).map(([k, p]) => [k, { name: path.parse(p).name, missing: !fs.existsSync(p), url: pathToFileURL(p).href }]));
+const sfxNames = () => Object.fromEntries(Object.entries(settings.sfxMap || {}).map(([k, p]) => [k, { name: path.parse(p).name, missing: !library.there(p), url: pathToFileURL(p).href }]));
 
 function tableInfo() {
   const live = store.map(state.liveMapId);
@@ -1242,6 +1291,7 @@ function sfxLibrary(fresh) {
   return sfxCache.list;
 }
 // the sound a moment plays: the one the GM picked, else one from Audio/SFX with a fitting name, else the built-in one
+const BUILT_WAV = new Set(['explosion', 'roar', 'holy', 'timestop', 'lightsout', 'blood', 'gas', 'frost', 'madness', 'nat20', 'teleport', 'puff', 'rockfall', 'birds', 'bats']); // (I8: Glinn's own sounds and ones made anew; Earthquake, Dread and Flood keep their old ones)
 function momentSound(id, fresh) {
   const own = (settings.momentSounds || {})[id];
   if (own === 'none') return { none: true, name: 'No sound' };
@@ -1250,12 +1300,23 @@ function momentSound(id, fresh) {
   const hit = d && d.words.length ? sfxLibrary(fresh).find((it) => d.words.some((w) => it.name.toLowerCase().includes(w))) : null;
   if (hit) return { url: pathToFileURL(hit.path).href, name: hit.name, path: hit.path, match: true };
   if (id === 'lightning') return { name: 'Thunder', builtin: true }; // the thunder comes with the flash
-  return { url: `sfx/moment-${id}.ogg`, name: 'Built-in', builtin: true };
+  return { url: `sfx/moment-${id}.${BUILT_WAV.has(id) ? 'wav' : 'ogg'}`, name: 'Built-in', builtin: true };
+}
+// I8: a screen effect's look, kept to what it may be: Strength 0.5 … 2, a colour, Stays / Comes in 0.15 … 2.5, its sound's volume
+function cleanMomentLook(L) {
+  if (!L || typeof L !== 'object') return null;
+  const n = (v, lo, hi) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Number(v))) : null);
+  const o = {};
+  const str = n(L.str, 0.5, 2); if (str != null && str !== 1) o.str = str;
+  if (typeof L.col === 'string' && /^#[0-9a-f]{6}$/i.test(L.col)) o.col = L.col.toLowerCase();
+  const len = n(L.len, 0.15, 2.5); if (len != null && len !== 1) o.len = len;
+  const vol = n(L.vol, 0, 1); if (vol != null && vol !== 1) o.vol = vol;
+  return Object.keys(o).length ? o : null;
 }
 const momentSoundNames = () => Object.fromEntries(Moments.LIST.map((d) => { const x = momentSound(d.id); return [d.id, { name: x.name, own: !!x.own, match: !!x.match, none: !!x.none, missing: !!((settings.momentSounds || {})[d.id] && (settings.momentSounds || {})[d.id] !== 'none' && !x.own) }]; }));
 
 // ---------- dice, the wheel of luck, death saves (shown on the TV by dice-fx.js) ----------
-const { randomInt } = require('crypto');
+const { randomInt, createHash } = require('crypto');
 const TableParse = require('./renderer/table-parse.js'); // tables for the wheel (also used by the GM screen)
 const DICE = [2, 4, 6, 8, 10, 12, 20, 100];
 // Dice, the wheel and the death save run as slot-machine reels (dice-fx.js): each reel stops at its time,
@@ -1515,6 +1576,17 @@ function syncSpotifyFight() {
   else if (state.spotifyFight) spotifyStop();
 }
 
+// Speed 5 (WE1): the session log (up to half a million characters) went to the GM screen with every state. It goes
+// when it changed; otherwise the screen is told it is as it was and keeps the text it has. A state the screen asks
+// for itself brings it whole.
+let notesSent = null; // what the GM screen has: campaign, when it last changed, its length
+function notesOnce(sum) {
+  if (!sum || !sum.notes) return sum;
+  const sig = `${sum.id}|${sum.notes.changed}|${sum.notes.text.length}`;
+  if (notesSent === sig) { const { text, ...rest } = sum.notes; return { ...sum, notes: { ...rest, same: true } }; }
+  notesSent = sig;
+  return sum;
+}
 function gmState() {
   const edit = store.map(state.editMapId);
   const v = view();
@@ -1522,7 +1594,8 @@ function gmState() {
     screen: state.screen,
     view: v,
     table: tableInfo(),
-    campaign: campaignSummary(),
+    campaign: notesOnce(campaignSummary()),
+    trigOn: trigOnIds(), // (XA2: the triggers that are on: a click takes them back)
     atlas: atlasInfo(), // Beta 3.11
     atlasMap: store.isAtlas(state.atlasEdit) ? forWindow(gm, store.map(state.atlasEdit)) : null, // Beta 3.12: the Map table's map
     editMapId: edit ? edit.id : null,
@@ -1551,20 +1624,21 @@ function gmState() {
     settings: {
       sfxOn: settings.sfxOn, sfxVolume: settings.sfxVolume, burstSeconds: settings.burstSeconds, sfxMap: sfxNames(),
       seats: settings.seats, handout: handoutPrefs(), talk: { ...settings.talk, look: lookFor('talk').base }, tableStyle: TABLE_STYLES[settings.tableStyle] ? settings.tableStyle : 'ink', looks: Object.fromEntries(LOOK_PARTS.map((k) => [k, (settings.looks || {})[k] || 'style'])), initAuto: settings.initAutoSort !== false, portraitMirror: settings.portraitMirror, portraitSize: settings.portraitSize || {}, portraitOffset: settings.portraitOffset || {}, portraitFx: settings.portraitFx || {}, boardVolume: settings.boardVolume, weatherPresets: settings.weatherPresets,
-      hudScale: settings.hudScale || 1, uiScale: settings.uiScale || 1, askNotes: settings.askNotes !== false, joinMsg: joinMsg(),
+      hudScale: settings.hudScale || 1, uiScale: settings.uiScale || 1, corners: settings.corners === 'round' ? 'round' : 'sharp', askNotes: settings.askNotes !== false, joinMsg: joinMsg(),
       round: roundLook(), mapTransition: transitionOf(), initShow: settings.initShow !== false, initFoes: settings.initFoes === 'enemy' ? 'enemy' : 'names', initCount: Number(settings.initCount) || 0,
       quality: settings.quality || 'high', gmAnim: ['smooth', 'light', 'still'].includes(settings.gmAnim) ? settings.gmAnim : 'light', gmFx: ['smooth', 'light', 'still'].includes(settings.gmFx) ? settings.gmFx : 'light', animDraw: settings.animDraw === 'gpu' ? 'gpu' : 'cpu',
       soundOut: settings.soundOut || '', soundOutLabel: settings.soundOutLabel || '', fxOut: settings.fxOut ?? null, fxOutLabel: settings.fxOutLabel || '',
       duck: settings.duck !== false, fightAuto: settings.fightAuto !== false,
       picture: pictureFor(v.tvKey), fpsWatch: settings.fpsWatch !== false, spellGpu: settings.spellGpu !== false, buildWide: settings.buildWide !== false, mapQuality: settings.mapQuality || {},
       liveQuality: qualityFor(state.liveMapId), editQuality: qualityFor(state.editMapId),
-      momentStars: settings.momentStars || [], momentSounds: momentSoundNames(), boardVolumeNow: settings.boardVolume ?? 0.8,
+      momentStars: settings.momentStars || [], momentSounds: momentSoundNames(), boardVolumeNow: settings.boardVolume ?? 0.8, momentLook: settings.momentLook || {}, soundPads: settings.soundPads || {},
       tokens: tokenLook(),
       videoPath: VIDEO_PATHS.includes(settings.videoPath) ? settings.videoPath : 'noOverlay', videoPathNow: VIDEO_PATH_NOW, // 4.11.3
     },
     spotify: spotifyState(),
     testPicture: state.testPicture || false,
     moments: state.moments,
+    board: state.board, // (I8: the Soundboard's pads show what plays)
     dice: state.dice, diceLog: state.diceLog,
     sound: { quiet: !!state.quiet, fightNow: !!state.fightNow, fighting: !!(player && (fightTrack() || fightMood()) && fighting()), now: tableSoundNow() },
   };
@@ -1628,7 +1702,7 @@ function soundState() {
     spotify: open && Spotify && Spotify.linked() && spotifyNow && spotifyNow.playing ? Math.min(1, Math.max(0, settings.spotify.duck ?? 0.4)) : null,
     sfx: {
       on: settings.sfxOn, volume: settings.sfxVolume,
-      map: Object.fromEntries(Object.entries(settings.sfxMap || {}).filter(([, p]) => fs.existsSync(p)).map(([k, p]) => [k, pathToFileURL(p).href])),
+      map: Object.fromEntries(Object.entries(settings.sfxMap || {}).filter(([, p]) => library.there(p)).map(([k, p]) => [k, pathToFileURL(p).href])),
     },
     spells: live ? live.spells.map((sp) => ({ id: sp.id, t0: sp.t0, skin: sp.skin, hidden: !!sp.hidden, muted: !!sp.muted })) : [],
   };
@@ -1692,6 +1766,22 @@ function atlasForTable() {
   return { id: a.id, at: a.at, via: a.via || null, look: A.look, note: a.note, found: A.maps.filter((x) => x.found).map((x) => x.id), map: forWindow(player, map) };
 }
 
+// Speed 5 (WE3): the TV keeps a hidden view of the map you edit while another one is on the table, so that sending it
+// is instant: its pictures and videos are loaded. That map went to the TV whole with every state, and the TV set it up
+// again each time: every asset dragged on it cost the table twice (measured: 104 MB in three seconds, 8 pictures a
+// second on the TV). What the hidden view is for only changes when the map's files do, so the map now goes when they
+// change (or the table's size); otherwise the TV is told it is as it was. When the map goes onto the table it comes
+// whole as the live map, as always.
+const prepSent = new WeakMap(); // the TV window -> { sig }
+function prepFor(win, prep, v) {
+  if (!win || !prep) { if (win) prepSent.delete(win); return null; }
+  const b = prep.bg;
+  const sig = JSON.stringify([prep.id, v.world, v.ppi, b ? [b.path, b.kind, b.sharp ? b.sharp.tiles.map((t) => t.path) : null, b.live ? b.live.path : null] : null, prep.layers.map((l) => `${l.path}|${l.kind}|${l.asVideo ? 1 : 0}`).sort()]);
+  const was = prepSent.get(win);
+  if (was && was.sig === sig) return { id: prep.id, same: true };
+  prepSent.set(win, { sig });
+  return forWindow(win, prep);
+}
 function tableState() {
   const live = store.map(state.liveMapId);
   const edit = store.map(state.editMapId);
@@ -1708,7 +1798,7 @@ function tableState() {
     title: state.title,
     calibrating: state.calibrating ? { cardWidthIn: CARD_W_IN } : null,
     live: live ? forWindow(player, live) : null,
-    prep: prep ? forWindow(player, prep) : null,
+    prep: prepFor(player, prep, v),
     ambience: ambienceFor(live),
     timer: state.timer,
     seats: settings.seats,
@@ -1735,7 +1825,7 @@ function tableState() {
     init: initInfo(false),
     sfx: {
       on: settings.sfxOn, volume: settings.sfxVolume,
-      map: Object.fromEntries(Object.entries(settings.sfxMap || {}).filter(([, p]) => fs.existsSync(p)).map(([k, p]) => [k, pathToFileURL(p).href])),
+      map: Object.fromEntries(Object.entries(settings.sfxMap || {}).filter(([, p]) => library.there(p)).map(([k, p]) => [k, pathToFileURL(p).href])),
     },
   };
 }
@@ -1829,6 +1919,163 @@ function newEntry(o) {
     init: initNum(o.init), bonus: initNum(o.bonus) || 0, roll: null, hidden: !!o.hidden, custom: !!o.custom,
     tokens: Array.isArray(o.tokens) ? o.tokens.slice(0, 20) : [], group: o.group || null, vals: o.vals || {},
   };
+}
+// Beta 3.68: a monster token's line in the turn order: its own HP and AC first (the token sheet), else what the
+// campaign remembers of its kind; a token with them brings the HP or AC column
+function tokenVals(t, foe) {
+  if (t.hp) needCol('hp');
+  if (t.ac != null) needCol('ac');
+  const vals = knownVals({ ...(foe || {}), ...(t.ac != null ? { ac: t.ac } : {}) });
+  const hc = t.hp && initCols().find((x) => x.kind === 'hp');
+  if (hc) vals[hc.id] = { cur: t.hp.cur, max: t.hp.max };
+  return vals;
+}
+// I7: a trigger running: one step after another; a wait sets the next ones off later. The map's steps share one undo step.
+const trigUndo = new Map(); // run key → what was there before (trigger.undo)
+// XA2 (Glinn, 26 Nov 2026): a trigger is a switch. Clicked again (its mark, the Hotbar, Run), it takes back what that
+// run did, and only that: its handout is put away, its portraits leave, its doors, lights and tokens go back to what
+// each was, the time of day and the weather too, a countdown or a fight it started ends. Each step notes how to take
+// itself back (u.back) and does so only where things are still as it left them: a door you closed by hand since stays
+// closed. It is "on" only while something it did is still in effect (or it is still waiting): once you have put
+// everything back by hand, the next click simply runs it again. Not the trigger's Undo (trigger.undo), which puts everything back as it was before the run and is right
+// only seconds later. What cannot be taken back stays and is named: a snapshot, a revealed area, the room lights,
+// Spotify. A trigger of sounds, screen effects and waits alone runs again on every click.
+const trigOn = new Map(); // trigger id → { key, sig } of the run that is "on" (this session only)
+const trigSig = (tr) => JSON.stringify(tr.steps);
+const trigCanBack = (s) => ['talk', 'handout', 'mood', 'weather', 'lights', 'music', 'doors', 'tokens', 'fight', 'timer'].includes(s.kind) || (s.kind === 'moment' && Moments.BY[s.id] && !Moments.BY[s.id].dur && s.id !== 'lightning');
+const trigIsOn = (tr) => { const o = trigOn.get(tr.id); const u = o && trigUndo.get(o.key); return !!u && o.sig === trigSig(tr) && (!!u.waiting || u.soon > 0 || (u.back || []).some((b) => b.live())); }; // (soon: something of it is still on its way, as the portraits after the band)
+// the triggers of the map being edited that are on (for your screen: their marks are lit)
+function trigOnIds() { const out = []; for (const [id, o] of trigOn) { const mp = store.map(o.mapId); const tr = mp && (mp.triggers || []).find((x) => x.id === id); if (tr && trigIsOn(tr)) out.push(id); else if (!tr || !trigUndo.has(o.key) || o.sig !== trigSig(tr)) trigOn.delete(id); } return out; } // (forgotten only when it is gone or changed: one that is not in effect just now may be again in a moment)
+function trigBack(m, tr) {
+  const o = trigOn.get(tr.id); const u = o && trigUndo.get(o.key);
+  trigOn.delete(tr.id);
+  if (!u) return { ok: false };
+  u.stopped = true; trigUndo.delete(o.key); // (a run still waiting goes no further)
+  const key = `trb-${tr.id}-${Date.now()}`;
+  const onMap = (type, q) => handle(type, { mapId: u.mapId, coalesce: key, stepLabel: `${tr.name} taken back`, ...q });
+  for (const b of (u.back || []).slice().reverse()) { try { if (b.live()) b.undo(onMap); } catch (err) { applog.log.warn(`trigger ${tr.name}, taking back: ${err.message}`); } }
+  broadcast();
+  const stays = [...new Set(u.stays || [])];
+  return { ok: true, back: true, label: `${tr.name} taken back${stays.length ? ` (${stays.join(', ')} ${stays.length === 1 ? 'stays' : 'stay'})` : ''}` };
+}
+// (Glinn: a trigger shows the same every time) how its handout lies (lay) and its portraits look (look: size, place,
+// Bloodied and the rest, mirrored) are kept in the step: taken when it is set up (or on its first run) and put back on
+// each run, whatever was changed by hand since
+function portraitLook(p) {
+  const off = (settings.portraitOffset || {})[p]; const fx = (settings.portraitFx || {})[p];
+  return { size: (settings.portraitSize || {})[p] || 1, x: off ? off.x : 0, y: off ? off.y : 0, fx: fx ? { ...fx } : null, mirror: !!(settings.portraitMirror || {})[p] };
+}
+function portraitSet(p, L) {
+  const put = (k, v) => { settings[k] = { ...(settings[k] || {}) }; if (v == null) delete settings[k][p]; else settings[k][p] = v; };
+  put('portraitSize', Math.abs((L.size || 1) - 1) < 0.001 ? null : L.size);
+  put('portraitOffset', L.x || L.y ? { x: L.x || 0, y: L.y || 0 } : null);
+  put('portraitFx', L.fx && Object.keys(L.fx).length ? { ...L.fx } : null);
+  put('portraitMirror', L.mirror ? true : null);
+  clearTimeout(sizeSaveT); sizeSaveT = setTimeout(saveSettings, 600);
+}
+function withLook(s, onlyMissing) {
+  if (s.kind === 'handout' && s.path && (!onlyMissing || !s.lay)) return { ...s, lay: hoLayout(s.path) };
+  if (s.kind === 'talk') return { ...s, cast: s.cast.map((c) => (onlyMissing && c.look ? c : { ...c, look: portraitLook(c.path) })) };
+  return s;
+}
+const lookMissing = (s) => (s.kind === 'handout' && s.path && !s.lay) || (s.kind === 'talk' && s.cast.some((c) => !c.look));
+function runTrigger(m, tr, key, from, alphas = {}) {
+  const u = trigUndo.get(key);
+  const onMap = (type, q) => { const r = handle(type, { mapId: m.id, coalesce: key, stepLabel: tr.name, ...q }); if (r && r.ok !== false && u) u.map = true; return r; };
+  // (XA2) how this step is taken back, and what stays whatever happens
+  const back = (live, undo) => { if (u) (u.back || (u.back = [])).push({ live, undo }); }; // (live: is what it did still so? undo: put that back)
+  if (u) u.waiting = false;
+  const stays = (what) => { if (u) (u.stays || (u.stays = [])).push(what); };
+  const M = () => store.map(m.id);
+  for (let i = from; i < tr.steps.length; i++) {
+    if (u && u.stopped) return;
+    const s = tr.steps[i];
+    try {
+      switch (s.kind) {
+        case 'wait': if (u) u.waiting = true; setTimeout(() => { if (store.map(m.id)) runTrigger(m, tr, key, i + 1, alphas); }, s.s * 1000); broadcast(); return;
+        case 'talk': {
+          // (Glinn: as when the Conversation is used by hand) who is on stage and not wanted goes out the usual way; the
+          // band comes first, the portraits follow as a click brings them, each with its own soft edge or not
+          const fresh = !state.talk;
+          { const mine = s.cast.map((c) => c.path).filter((p2) => !(state.talk && state.talk.cast.some((x) => x.path === p2))); // (XA2: those it brings leave again; an empty stage it set up goes)
+            const there = (p2) => !!(state.talk && state.talk.cast.some((x) => x.path === p2));
+            back(() => mine.some(there) || (fresh && !!state.talk && !state.talk.cast.length), () => { for (const p2 of mine) if (there(p2)) handle('talk.toggle', { path: p2, out: true }); if (fresh && state.talk && !state.talk.cast.length) handle('talk.off', {}); }); }
+          for (const c of s.cast) if (c.look) portraitSet(c.path, c.look);
+          handle('talk.on', {});
+          if (s.mode === 'replace' && state.talk) for (const c of state.talk.cast.slice()) if (!s.cast.some((x) => x.path === c.path)) handle('talk.toggle', { path: c.path, out: true });
+          const bring = () => { if (u && fresh) u.soon = Math.max(0, (u.soon || 0) - 1); if (u && u.stopped) return; for (const c of s.cast) if (!(state.talk && state.talk.cast.some((x) => x.path === c.path))) handle('talk.toggle', { path: c.path, alpha: c.path in alphas ? !!alphas[c.path] : c.alpha !== false }); };
+          if (fresh) { if (u) u.soon = (u.soon || 0) + 1; broadcast(); setTimeout(() => { bring(); broadcast(); }, 600); } else bring(); // (XA2: until they are in, the trigger counts as on: a second click in that moment takes it back, and none comes in)
+          break;
+        }
+        case 'handout':
+          if (!s.path) break;
+          if (s.to === 'phones') {
+            const had = !!(store.cur && (store.cur.meta.handoutShare || {})[hoKey(s.path)]);
+            handle('handout.share', { path: s.path, to: 'all' });
+            if (!had) back(() => !!(store.cur && (store.cur.meta.handoutShare || {})[hoKey(s.path)]), () => handle('handout.share', { path: s.path })); // (XA2: off the phones again, if it was not on them before)
+          } else {
+            if (s.lay) hoKeep(s.path, s.lay); // (as the trigger keeps it, also when it already lies there)
+            if (!hoShown(s.path)) { handle('handout.show', { path: s.path, add: true }); back(() => hoShown(s.path), () => handle('handout.hide', { path: s.path })); } else broadcast();
+          }
+          break;
+        case 'snap': if (s.snap) { handle('snap.play', { id: s.snap }); stays('the snapshot'); } break; // (its transition too, as from the Snapshots panel)
+        case 'mood': {
+          const d = FXDATA.MOODS.find((x) => x.id === s.mood); if (!d) break;
+          const was = { darkness: M().light.darkness, tint: M().light.tint, mood: M().light.mood || null };
+          onMap('light.update', { darkness: d.darkness, tint: d.tint, mood: d.id, fade: 2 });
+          back(() => { const L = M() && M().light; return !!L && L.mood === d.id && was.mood !== d.id; }, (on2) => on2('light.update', { ...was, fade: 2 })); // (only while it is still this time of day)
+          break;
+        }
+        case 'weather': {
+          const w = FXDATA.WEATHER.find((x) => x.label === s.name || x.id === s.name);
+          const was = { name: M().weather.name, layers: structuredClone(M().weather.layers.filter((l) => !l.dying)) };
+          const now = w ? w.label : 'None';
+          onMap('weather.preset', w ? { name: w.label, layers: w.layers } : { name: 'None', layers: [] });
+          back(() => { const W = M() && M().weather; return !!W && W.name === now && was.name !== now; }, (on2) => on2('weather.preset', was));
+          break;
+        }
+        case 'moment': if (s.id) {
+          const d = Moments.BY[s.id]; const had = state.moments.some((x) => x.id === s.id && !x.stop);
+          handle('moment.play', { id: s.id, toggle: false, mapId: m.id });
+          if (d && !d.dur && d.id !== 'lightning' && !had) back(() => state.moments.some((x) => x.id === s.id && !x.stop), () => handle('moment.play', { id: s.id, mapId: m.id })); // (a lasting one it turned on: off again)
+        } break;
+        case 'lights': {
+          const set = [];
+          for (const f of m.fx.filter((x) => x.group === s.group && FXDATA.isLight(x))) { const on = s.on === 'toggle' ? f.lit === false : s.on; if ((f.lit !== false) !== on) { onMap('fx.lit', { id: f.id, on }); set.push([f.id, on]); } }
+          const still = () => set.filter(([id, on]) => { const f = M() && M().fx.find((x) => x.id === id); return f && (f.lit !== false) === on; });
+          back(() => still().length > 0, (on2) => { for (const [id, on] of still()) on2('fx.lit', { id, on: !on }); }); // (each light it switched, if it is still as the trigger left it)
+          break;
+        }
+        case 'room': if (s.scene && RoomLights) { RoomLights.action('mode', { mode: 'scene', sceneId: s.scene }).then(() => broadcastGm()).catch(() => {}); stays('the room lights'); } break;
+        case 'sound': if (s.path) handle('sound.play', { path: s.path }); break;
+        case 'music': { const was = !!state.fightNow; handle('sound.fight', { on: s.on }); if (was !== !!s.on) back(() => !!state.fightNow === !!s.on, () => handle('sound.fight', { on: was })); break; }
+        case 'spotify': if (s.mood && spotifyMood(s.mood)) { spotifyPlay(s.mood).catch(() => {}); stays('Spotify'); } break;
+        case 'doors': {
+          const isOpen = (w) => (w.door ? !!w.open : !w.shut); const set = [];
+          for (const id of s.ids) { const w = M().walls.find((x) => x.id === id); if (!w || isOpen(w) === !!s.open) continue; onMap('wall.door', { id, open: s.open }); set.push(id); }
+          const still = () => set.filter((id) => { const w = M() && M().walls.find((x) => x.id === id); return w && isOpen(w) === !!s.open; });
+          back(() => still().length > 0, (on2) => { for (const id of still()) on2('wall.door', { id, open: !s.open }); }); // (each door it moved, if it still stands as the trigger left it)
+          break;
+        }
+        case 'reveal': if (s.rings.length) { onMap('fog.op', { mode: 'reveal', shape: 'poly', rings: s.rings, name: s.name || null }); stays('the revealed area'); } break;
+        case 'tokens': {
+          const patches = s.ids.map((id) => M().layers.find((l) => l.id === id)).filter((l) => l && !!l.hidden !== !!s.hidden).map((l) => ({ id: l.id, hidden: s.hidden }));
+          if (patches.length) onMap('layer.many', { patches });
+          const still = () => patches.filter((q) => { const l = M() && M().layers.find((x) => x.id === q.id); return l && !!l.hidden === !!s.hidden; }).map((q) => ({ id: q.id, hidden: !s.hidden }));
+          back(() => still().length > 0, (on2) => on2('layer.many', { patches: still() }));
+          break;
+        }
+        case 'fight': {
+          for (const id of s.ids) if (m.layers.some((l) => l.id === id)) handle('init.addToken', { id, mapId: m.id });
+          if (state.init && !state.init.running) { handle('init.start', { mapId: m.id, roll: true }); const mine = state.init; back(() => !!state.init && state.init === mine && !!state.init.running, () => handle('init.end', {})); } // (a fight it started ends, if it is still that fight)
+          break;
+        }
+        case 'timer': { handle('timer.start', { seconds: s.seconds }); const mine = state.timer && state.timer.id; back(() => !!state.timer && state.timer.id === mine, () => handle('timer.stop', {})); break; }
+        default:
+      }
+    } catch (err) { applog.log.warn(`trigger ${tr.name}, step ${s.kind}: ${err.message}`); }
+  }
+  broadcast();
 }
 // what the campaign remembers: a player's AC and max HP, an enemy's bonus, AC and HP
 function knownVals(stats) {
@@ -1956,7 +2203,7 @@ function syncInit(I) {
     if (used.has(t.id) || I.dropped.includes(t.id)) continue;
     if (charTokOwner(t, true)) continue; // (4.2.2) the token of a player not here today: not an enemy (it can be added by hand)
     const foe = foeOf(t.name);
-    I.entries.push(newEntry({ name: tokName(t), tokens: [t.id], bonus: foe && foe.bonus, vals: knownVals(foe) }));
+    I.entries.push(newEntry({ name: tokName(t), tokens: [t.id], bonus: foe && foe.bonus, vals: tokenVals(t, foe) }));
   }
   tidyInit(I);
   keepTurn(I, before);
@@ -2045,7 +2292,7 @@ function watchSfx(root) {
   } catch (err) { applog.log.warn(`the Sounds folder is not watched: ${err.message}`); }
 }
 function sendEvent(e) {
-  if (e.kind === 'sound' || e.kind === 'stop') { soundEvent(e); return; } // the sound window plays them
+  if (e.kind === 'sound' || e.kind === 'stop' || e.kind === 'stopone') { soundEvent(e); return; } // the sound window plays them
   for (const w of [gm, player]) if (w && !w.isDestroyed()) w.webContents.send('event', e);
   if (e.kind !== 'toast') previewChanged('event'); // (4.9: a lightning strike, a moment …: the GM's picture of the TV follows)
 }
@@ -2161,6 +2408,7 @@ function createGm() {
   // the self-test opens on a second screen where there is one (the TV as a window beside it, targetDisplay), so the main
   // screen stays free while it runs (TS_TEST_SCREEN=main: on the main screen)
   const testScreen = TEST_DIR && process.env.TS_TEST_SCREEN !== 'main' ? screen.getAllDisplays().find((d) => d.id !== screen.getPrimaryDisplay().id) : null;
+  notesSent = null; // (WE1: a new GM window has no session log yet)
   gm = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1100, minHeight: 680,
     ...(testScreen ? { x: testScreen.workArea.x + 20, y: testScreen.workArea.y + 20 } : {}),
@@ -2229,7 +2477,12 @@ function openPlayer() {
     broadcast();
   });
   player.webContents.on('before-input-event', (e, input) => {
-    if (input.type === 'keyDown' && input.key === 'Escape') { e.preventDefault(); closePlayer(); }
+    if (input.type !== 'keyDown' || input.key === 'F12') return;
+    // UI audit VD6: on a real TV no key is meant for the table window (a click had landed there, Esc then closed the
+    // table and the other keys were dead): the GM screen gets the keyboard back. A table in a window on your own
+    // screen still closes with Esc.
+    if (!windowed && !TEST_DIR) { e.preventDefault(); if (gm && !gm.isDestroyed()) gm.focus(); return; }
+    if (input.key === 'Escape') { e.preventDefault(); closePlayer(); }
   });
   // Keep the TV awake while the table is open.
   const blocker = powerSaveBlocker.start('prevent-display-sleep');
@@ -2292,14 +2545,16 @@ function startPreview() {
 
 function devtoolsShortcut(win) {
   win.webContents.on('before-input-event', (e, input) => {
-    if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools();
+    if (input.type === 'keyDown' && input.key === 'F12' && !app.isPackaged) win.webContents.toggleDevTools(); // (UI audit VB11: not in the installed app, where it covered the map in mid-session)
   });
 }
 
 // =====================================================================
 // Commands
 // =====================================================================
-const MAP_CMD = /^(bg|view|layer|grid|fog|fx|light|weather|wind|live|spell|draw|mark|round|wall|vision|area|scene|atlasmap|os)\./;
+// (25 Nov: the three exceptions are the trigger's only. Written as "no .look at all" on 24 Nov, it also kept bg.look
+// from the map: the Map panel's looks and colour sliders did nothing, and the self-test's "Grim" check failed.)
+const MAP_CMD = /^(?!trigger\.(?:run|undo|look)$)(bg|view|layer|grid|fog|fx|light|weather|wind|live|spell|draw|mark|round|wall|vision|area|scene|atlasmap|os|trigger)\./; // (I7: trigger.run, .undo and .look are main's)
 
 // ---------- walls from files, and what the party has seen ----------
 const sightLast = new Map(); // mapId -> Map(eyeId -> what was last recorded into the fog)
@@ -2336,7 +2591,7 @@ function wallsForBg(map, p) {
   if (!src) return null;
   if (p.keep && map.walls.length) return null; // a variant keeps the walls the map has
   try {
-    const n = WallsImport.read(src, { prefer: path.parse(p.path).name });
+    const n = WallsImport.isVtt(src) ? library.vttWalls(src) : WallsImport.read(src, { prefer: path.parse(p.path).name }); // (Speed 4, WD6: a VTT file's walls are kept, not unpacked from its 20 to 60 MB each time)
     if (n.choose) return null;
     return importWalls(map, n, { fresh: !p.keep });
   } catch (e) { console.error('walls', e.message); return null; }
@@ -2408,8 +2663,8 @@ function metaFace(meta, name) {
 }
 const fileUrl = (f) => (f ? pathToFileURL(f).href : null);
 function mapPic(bg) {
-  const f = bg ? library.resolveRef(bg) : null;
-  if (!f || !fs.existsSync(f)) return null;
+  const f = bg ? library.resolveKept(bg) : null;
+  if (!f || !library.there(f)) return null;
   return { path: f, kind: bg.kind || library.kindOf(f) || 'image', thumb: library.thumbUrl(f) };
 }
 // what the home shows of a campaign: the party, Continue, the latest maps, the cover. live: the open campaign (names,
@@ -2454,6 +2709,81 @@ function liveView(map, p) {
   return { ok: true, mapId: map.id, live: true };
 }
 
+// Speed 5 (WE1, stage 2 of the plan of 26 Nov 2026): a move in the hand sends what moved, not the map.
+// Dragging, turning or sizing an asset, a light, an effect or a spell area, and their own sliders, sent the whole
+// state of the app to both windows with every mouse move: 54 MB to each in a three second drag on a map of 270 KB,
+// and each window set its whole map up again every time. A token drag never did (dragLive below). Now these go the
+// same way: the GM screen marks what it sends while the hand is on it (soft, gm-play.js send), and for the fields in
+// SOFT only the thing itself goes to the two windows ('patch': the layer, effect or spell as it is now). They put it
+// in the place of the one they have. The whole state follows when the hand rests for SOFT_REST ms or anything else
+// happens, exactly as before, so no window is ever behind for longer than the gesture. Everything not listed here
+// (a sound's volume, hidden, names, what a party light sees …) takes the old way.
+const SOFT = {
+  'layer.update': { kind: 'layers', keys: ['x', 'y', 'scale', 'w', 'size', 'rotation', 'opacity', 'flip', 'stretch', 'hue', 'pic', 'shadow', 'dark'] },
+  'layer.many': { kind: 'layers', keys: ['x', 'y', 'scale', 'w', 'size', 'rotation', 'opacity', 'flip', 'stretch', 'hue', 'pic', 'shadow', 'dark'] },
+  'fx.update': { kind: 'fx', keys: ['x', 'y', 'r', 'angle', 'rotation', 'intensity', 'density', 'speed', 'color', 'sat', 'bright', 'dim', 'hs', 'stretch', 'dust', 'critter', 'height', 'cone'] },
+  'spell.update': { kind: 'spells', keys: ['x', 'y', 'angle', 'size', 'width'] },
+  // (stage 3) the map's own sliders: the part of the map they belong to goes as it is now (it is small)
+  'light.update': { part: 'light', keys: ['darkness', 'tint'] },
+  'weather.update': { part: 'weather', keys: ['amount', 'opacity', 'size', 'speed', 'color', 'dir', 'gust'], sound: true },
+  'wind.set': { part: 'wind', keys: ['dir', 'strength', 'lean', 'branches', 'rustle'], sound: true },
+  'live.set': { part: 'live', keys: ['fx', 'set'] },
+  'grid.update': { part: 'grid', keys: ['size', 'angle', 'ox', 'oy', 'opacity', 'color', 'width'] },
+  'vision.update': { part: 'vision', keys: ['dim', 'rock'] },
+  // (stage 4) a stroke being painted or drawn: its new piece goes, and the windows add it to the stroke they have
+  // (XA7) the same change to several effects or lights: those go, not the map
+  'fx.many': { kind: 'fx', many: true },
+  'fx.stroke': { kind: 'fx', grow: true },
+  'draw.stroke': { kind: 'draw', grow: true },
+};
+const SOFT_REST = 250;
+const SOFT_META = new Set(['mapId', 'id', 'coalesce', 'held', 'soft', 'stepLabel', 'noHistory', 'patches']);
+const softEnd = new Map(); // mapId -> timer: the whole state when the hand rests
+const softStats = { sent: 0 }; // (for the self-test)
+function softLive(map, type, p, res) {
+  const S = SOFT[type];
+  if (!S || res.changed !== 'all' || (map.id !== state.editMapId && map.id !== state.liveMapId)) return null;
+  if (S.many) { // (what each of them may take the small way: what one alone may, and a light's reach and colour)
+    const may = p.cmd === 'fx.update' ? SOFT['fx.update'].keys : p.cmd === 'fx.lightSet' ? ['bright', 'color'] : null;
+    if (!may || !Array.isArray(p.ids) || !Object.keys(p.patch || {}).every((k) => may.includes(k))) return null;
+  }
+  const fits = (q) => S.grow || S.many || Object.keys(q).every((k) => SOFT_META.has(k) || S.keys.includes(k) || (k === 'attachTo' && type === 'fx.update' && q[k] == null));
+  const ids = type === 'layer.many' ? (p.patches || []).map((q) => q.id) : S.many ? p.ids : [p.id];
+  if (!fits(p) || (type === 'layer.many' && !(p.patches || []).every(fits))) return null;
+  const items = S.part ? null : ids.map((id) => map[S.kind].find((x) => x.id === id)).filter(Boolean);
+  if (S.part ? !map[S.part] : (!items.length || items.some((x) => x.role === 'audio'))) return null;
+  bumpRev(map.id);
+  if (map.light.memory) mapstate.recordSeen(map);
+  store.touch(map.id);
+  let msg = S.part ? { mapId: map.id, kind: S.part, value: map[S.part] } : { mapId: map.id, kind: S.kind, items };
+  if (S.grow) {
+    // the piece this command added: the last points of the stroke. A stroke (or an area, or a pen line) that began
+    // with this very piece is not known to the windows yet: then the whole thing goes, to be added
+    const it = items[0]; const n = (p.pts || []).length;
+    const st = type === 'fx.stroke' ? (it.strokes || []).find((x) => x.sid === p.sid) : it;
+    if (!st || !Array.isArray(st.pts) || !n) return null;
+    msg = st.pts.length <= n ? { mapId: map.id, kind: S.kind, items, add: true } : { mapId: map.id, kind: S.kind, grow: { id: it.id, sid: type === 'fx.stroke' ? st.sid : null, pts: st.pts.slice(-n) } };
+  }
+  if (S.sound) sendSound(); // (rain grows louder with its Amount, the wind with its strength: the sound window hears of it now)
+  if (gm && !gm.isDestroyed() && map.id === state.editMapId) gm.webContents.send('patch', msg);
+  if (player && !player.isDestroyed() && map.id === state.liveMapId) { player.webContents.send('patch', msg); previewChanged('state'); }
+  softStats.sent++;
+  // what the party sees follows a light that moves, as it follows a token in the hand: at most about 8 times a second
+  const now = Date.now();
+  if (map.fog && map.fog.enabled && now - (dragSightAt.get(map.id) || 0) >= 120) {
+    dragSightAt.set(map.id, now);
+    for (const op of mapstate.recordSight(map, lastSight(map.id), false)) { bumpFog(map.id); sendFogDelta(map.id, { op }); }
+  }
+  clearTimeout(softEnd.get(map.id));
+  softEnd.set(map.id, setTimeout(() => {
+    softEnd.delete(map.id);
+    // (what the party sees where the light came to rest; the steps above may have left the last piece out)
+    if (store.map(map.id) === map && map.fog && map.fog.enabled) for (const op of mapstate.recordSight(map, lastSight(map.id), true)) { bumpFog(map.id); sendFogDelta(map.id, { op }); }
+    broadcast();
+  }, SOFT_REST));
+  return { ok: true, selected: res.selected || null, label: res.label || null, undoable: true, mapId: map.id, ended: res.ended || null, walls: res.walls || null, soft: true };
+}
+
 // Prototype 14: a token dragged on the GM screen. Only its new place goes to the TV (a tiny message, one per tick);
 // your screen gets its state as usual. The TV's full state, the phones, the sight and the fog follow once when it is
 // let go (the final message), or here after a short pause if that never comes.
@@ -2489,7 +2819,7 @@ const dragSightAt = new Map(); // mapId → when the fog last followed a drag
 function osBaked(p) {
   const map = store.map(p.mapId);
   if (!map || !map.os || !store.cur) return { ok: false };
-  let file = null; let sharp = null; let live = null;
+  let file = null; let sharp = null; let live = null; let liveKey = null;
   if (p.data && !p.empty) {
     const dir = path.join(store.cur.dir, 'drawn');
     const hash = String(p.hash || Date.now()).replace(/[^a-z0-9]/gi, '').slice(0, 16) || 'x';
@@ -2498,7 +2828,9 @@ function osBaked(p) {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(file, Buffer.from(p.data));
       // (Beta 3.42) where its living tiles lie: a small picture beside it, named after it
-      if (p.live && p.live.length) { live = path.join(dir, `${map.id}-${hash}-live.png`); fs.writeFileSync(live, Buffer.from(p.live)); }
+      // (Speed 3, WC2: the file is new with every picture, also when nothing in it changed. Its key says what is in
+      // it, so a window can tell "the same living map as before" and keep its masks and its blades of grass)
+      if (p.live && p.live.length) { const buf = Buffer.from(p.live); live = path.join(dir, `${map.id}-${hash}-live.png`); fs.writeFileSync(live, buf); liveKey = createHash('sha1').update(buf).digest('hex').slice(0, 20); }
       // (Beta 3.25) the sharp tiles: a file each, named by its key; kept ones are there already
       if (p.sharp && Array.isArray(p.sharp.tiles)) {
         const tiles = [];
@@ -2521,7 +2853,7 @@ function osBaked(p) {
       for (const f of fs.readdirSync(dir)) if (f.startsWith(`${map.id}-`) && path.join(dir, f) !== file && !keep.has(f)) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* */ } }
     } catch (err) { applog.log.warn(`drawn map not saved: ${err.message}`); return { ok: false, error: err.message }; }
   }
-  const res = mapstate.apply(map, 'os.result', { bg: file ? { path: file, x: p.x, y: p.y, scale: p.scale, nw: p.nw, nh: p.nh, sharp, live } : null, empty: !!p.empty, hash: p.hash, ids: p.ids, walls: p.walls }, library.media);
+  const res = mapstate.apply(map, 'os.result', { bg: file ? { path: file, x: p.x, y: p.y, scale: p.scale, nw: p.nw, nh: p.nh, sharp, live, liveKey } : null, empty: !!p.empty, hash: p.hash, ids: p.ids, walls: p.walls }, library.media);
   if (!res.changed) return { ok: false };
   bumpRev(map.id);
   store.touch(map.id);
@@ -2586,15 +2918,19 @@ function handleCmd(type, p = {}) {
     if (type === 'view.update' && p.live) return liveView(map, p);
     if (type === 'view.update') { clearTimeout(liveViewEnd.get(mapId)); liveViewEnd.delete(mapId); if (previewQuiet) previewQuiet = Date.now() + 350; }
     const h = store.history(mapId);
-    const pushed = p.noHistory || type === 'live.set' ? false : h.before(map, p.coalesce, type, p.stepLabel); // (Prototype 14: the phones' moves are no undo steps; Beta 3.46: nor are the living effects' sliders, which Undo does not turn back)
+    const pushed = p.noHistory || type === 'live.set' ? false : h.before(map, p.coalesce, type, p.stepLabel, !!p.held); // (UI audit VA6: `held` = a drag still in the hand: one step however long it rested) // (Prototype 14: the phones' moves are no undo steps; Beta 3.46: nor are the living effects' sliders, which Undo does not turn back)
     if (type === 'spell.add' || type === 'spell.burst' || (type === 'spell.update' && 'mode' in p)) p.hold = settings.burstSeconds * 1000;
+    const fogWasOn = !!(map.fog && map.fog.enabled);
     const res = mapstate.apply(map, type, p, library.media);
-    if (!res.changed) { if (pushed) h.drop(); return { ok: false }; }
+    if (!res.changed) { if (pushed) h.drop(); return res.tooBig ? { ok: false, tooBig: res.tooBig } : { ok: false }; } // (tooBig: a drawn map's maximum size, for the Draw tool's message)
+    if (res.changed === 'fog' && !fogWasOn && map.fog && map.fog.enabled) res.changed = 'all'; // (UI audit VF4: the fog was switched on by this: the whole state goes out, so the panel's switch follows)
     if (RoomLights && (type === 'spell.add' || type === 'spell.burst') && mapId === state.liveMapId) { // a spell on the table: its colour flashes
       const sk = FXDATA.SKINS[p.skin || ((map.spells || []).find((x) => x.id === (res.selected || p.id)) || {}).skin];
       if (sk) RoomLights.event('spell', sk.c);
     }
     if (type === 'layer.update' && p.drag && !p.final) return dragLive(map, p, res); // Prototype 14
+    if (p.soft) { const small = softLive(map, type, p, res); if (small) return small; } // (Speed 5, WE1: a move in the hand: only what moved goes out)
+    if (softEnd.has(mapId)) { clearTimeout(softEnd.get(mapId)); softEnd.delete(mapId); } // (the whole state follows now)
     if (type === 'layer.update' && dragEnd.has(mapId)) { clearTimeout(dragEnd.get(mapId)); dragEnd.delete(mapId); } // let go: the full state follows now
     bumpRev(mapId);
     if (p.byPhone && type === 'layer.update' && p.id) { if (!phoneMoves.has(mapId)) phoneMoves.set(mapId, new Map()); phoneMoves.get(mapId).set(p.id, Date.now()); } // (Prototype 14)
@@ -2612,10 +2948,17 @@ function handleCmd(type, p = {}) {
 
   switch (type) {
     // ----- history -----
+    case 'history.cancel': // (UI audit VD1) Esc in mid-drag: the map as it was before this drag, and no trace of the drag in Undo or Redo
     case 'history.undo':
     case 'history.redo': {
       const map = store.map(p.mapId || state.editMapId);
       if (!map) return { ok: false };
+      const cancel = type === 'history.cancel';
+      if (cancel) {
+        if (!p.key || store.history(map.id).topKey() !== p.key) return { ok: false }; // (the newest step is not this drag's: nothing of it was taken yet, or something else came after)
+        clearTimeout(dragEnd.get(map.id)); dragEnd.delete(map.id);
+        clearTimeout(liveViewEnd.get(map.id)); liveViewEnd.delete(map.id);
+      }
       // Prototype 14: the tokens the phones moved since that copy was taken stay where they are now
       const moved = phoneMoves.get(map.id); const keep = new Map();
       if (moved) for (const l of map.layers) if (moved.has(l.id)) keep.set(l.id, { x: l.x, y: l.y, t: moved.get(l.id) });
@@ -2623,7 +2966,8 @@ function handleCmd(type, p = {}) {
       const eyes = (map.fx || []).filter((f) => f.eye);
       const eyeIds = new Set(eyes.map((f) => f.id));
       const seen = ((map.fog && map.fog.ops) || []).filter((o) => o.shape === 'sight' && o.eye && eyeIds.has(o.eye));
-      const ok = store.history(map.id).step(map, type === 'history.undo' ? 'undo' : 'redo');
+      const ok = store.history(map.id).step(map, type === 'history.redo' ? 'redo' : 'undo');
+      if (ok && cancel) store.history(map.id).forget();
       if (ok && keep.size) for (const l of map.layers) { const k = keep.get(l.id); if (k && k.t > ok) { l.x = k.x; l.y = k.y; } }
       if (ok && eyes.length) {
         map.fx = map.fx.filter((f) => !f.eye && !eyeIds.has(f.id)).concat(eyes);
@@ -2631,7 +2975,7 @@ function handleCmd(type, p = {}) {
         for (const o of seen) if (!have.has(o.id)) map.fog.ops.push(o);
       }
       if (ok) { bumpFog(map.id); bumpRev(map.id); store.touch(map.id); broadcast(); }
-      return { ok, label: ok ? (type === 'history.undo' ? 'Undone' : 'Redone') : null };
+      return { ok, label: ok ? (cancel ? 'Put back' : type === 'history.undo' ? 'Undone' : 'Redone') : null };
     }
 
     // ----- campaign structure -----
@@ -2667,7 +3011,7 @@ function handleCmd(type, p = {}) {
       const map = store.map(p.mapId || state.editMapId);
       if (!map || !p.path) return { ok: false };
       let n;
-      try { n = WallsImport.read(p.path, { scene: p.scene, prefer: map.bg ? map.bg.name : map.name }); } catch (e) { return { ok: false, error: `Could not read the walls: ${e.message}` }; }
+      try { n = WallsImport.isVtt(p.path) ? library.vttWalls(p.path) : WallsImport.read(p.path, { scene: p.scene, prefer: map.bg ? map.bg.name : map.name }); } catch (e) { return { ok: false, error: `Could not read the walls: ${e.message}` }; }
       if (n.choose) return { ok: false, choose: n.choose };
       store.history(map.id).before(map, null, 'wall.import');
       let res;
@@ -2773,17 +3117,18 @@ function handleCmd(type, p = {}) {
       if (d.id === 'lightning') { handle('strike.now', {}); return { ok: true, closed: !player }; }
       // a lasting moment that is on: a second click stops it
       const on = state.moments.find((m) => m.id === d.id && !m.stop);
-      if (on && !d.dur && p.toggle !== false) { on.stop = now; broadcast(); return { ok: true, stopped: true, label: `${d.label} stopped` }; }
+      if (on && !d.dur && p.toggle !== false) { on.stop = now; if (d.loopSound) sendEvent({ kind: 'stopone', key: `mo:${on.key}` }); broadcast(); return { ok: true, stopped: true, label: `${d.label} stopped` }; }
       if (on && !d.dur) return { ok: true }; // a cue turns it on: it already is
       state.moments = state.moments.filter((m) => Moments.alive(m, now));
       const at = d.spot && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)) && p.x !== null && p.y !== null;
-      const m = { key: `mo${now.toString(36)}${Math.random().toString(36).slice(2, 5)}`, id: d.id, seed: 1 + Math.floor(Math.random() * 997), x: at ? Number(p.x) : null, y: at ? Number(p.y) : null, mapId: (at && p.mapId) || state.liveMapId, t0: now, dur: d.dur, stop: null };
+      const o = (settings.momentLook || {})[d.id] || null; // (I8: as the GM set it up: Strength, Colour, Stays)
+      const m = { key: `mo${now.toString(36)}${Math.random().toString(36).slice(2, 5)}`, id: d.id, seed: 1 + Math.floor(Math.random() * 997), x: at ? Number(p.x) : null, y: at ? Number(p.y) : null, mapId: (at && p.mapId) || state.liveMapId, t0: now, dur: d.dur ? Math.round(d.dur * ((o && o.len) || 1)) : null, stop: null, ...(o ? { o } : {}) };
       state.moments.push(m);
       while (state.moments.length > 6) state.moments.shift();
       if (RoomLights && d.dur) RoomLights.event('moment', d.id);
       if (p.sound !== false && player) {
         const snd = momentSound(d.id, true); // a sound just added to Audio/SFX counts at once
-        if (snd && snd.url) sendEvent({ kind: 'sound', url: snd.url, name: snd.builtin ? `moment-${d.id}` : snd.name, volume: settings.boardVolume ?? 0.8, id: now });
+        if (snd && snd.url) sendEvent({ kind: 'sound', url: snd.url, name: snd.builtin ? `moment-${d.id}` : snd.name, volume: (settings.boardVolume ?? 0.8) * (o && o.vol != null ? o.vol : 1), id: now, ...(d.loopSound ? { loop: true, key: `mo:${m.key}` } : {}) }); // (Glinn: Dread's sound loops while it is on)
       }
       broadcast();
       return { ok: true, key: m.key, closed: !player, label: d.dur ? null : `${d.label}: click it again to stop it` };
@@ -2946,7 +3291,7 @@ function handleCmd(type, p = {}) {
     case 'moment.stop': {
       const now = Date.now();
       let n = 0;
-      for (const m of state.moments) if (!m.stop && (!p.id || m.id === p.id || m.key === p.id)) { m.stop = now; n++; }
+      for (const m of state.moments) if (!m.stop && (!p.id || m.id === p.id || m.key === p.id)) { m.stop = now; n++; if ((Moments.BY[m.id] || {}).loopSound) sendEvent({ kind: 'stopone', key: `mo:${m.key}` }); }
       if (n) broadcast();
       return { ok: true, stopped: n, label: n ? (p.id ? null : 'Screen effects stopped') : null };
     }
@@ -3015,6 +3360,42 @@ function handleCmd(type, p = {}) {
       store.touch();
       broadcast();
       return { ok: true, label: `${p.cue.name} is back` };
+    }
+    // ----- I7 (Glinn): a trigger: its steps in order (waits between), the map's part one undo step; the message's Undo
+    // takes back the map's part and puts back the conversation, the handouts, the fight music, a countdown and the turn order
+    case 'trigger.run': {
+      const m = store.map(p.mapId || state.editMapId);
+      let tr = m && (m.triggers || []).find((x) => x.id === p.id);
+      if (!tr) return { ok: false };
+      if (!tr.steps.length) return { ok: false, error: `${tr.name} has no steps yet` };
+      if (p.again !== false && trigIsOn(tr)) return trigBack(m, tr); // (XA2: clicked again: what that run did is taken back)
+      const key = `trg-${tr.id}-${Date.now()}`;
+      if (tr.steps.some(lookMissing)) { // (a trigger made before it kept them: how they are now, from here on)
+        handle('trigger.update', { mapId: m.id, id: tr.id, steps: tr.steps.map((s) => withLook(s, true)) });
+        tr = (store.map(m.id).triggers || []).find((x) => x.id === p.id) || tr;
+      }
+      trigUndo.set(key, { mapId: m.id, trig: tr.id, map: false, talk: structuredClone(state.talk || null), handouts: structuredClone(state.handouts || []), fightNow: state.fightNow, timer: structuredClone(state.timer || null), init: structuredClone(state.init || null) });
+      while (trigUndo.size > 20) trigUndo.delete(trigUndo.keys().next().value);
+      if (tr.steps.some(trigCanBack)) trigOn.set(tr.id, { key, sig: trigSig(tr), mapId: m.id }); else trigOn.delete(tr.id); // (XA2: on, until clicked again)
+      runTrigger(m, tr, key, 0, p.alphas || {});
+      return { ok: true, label: `${tr.name}: ${tr.steps.filter((s) => s.kind !== 'wait').length} ${tr.steps.length === 1 ? 'step' : 'steps'}`, undo: { type: 'trigger.undo', payload: { key } } };
+    }
+    case 'trigger.look': { // a step takes how its handout lies or its portraits look right now
+      const m = store.map(p.mapId || state.editMapId);
+      const tr = m && (m.triggers || []).find((x) => x.id === p.id);
+      if (!tr || !tr.steps[p.i]) return { ok: false };
+      return handle('trigger.update', { mapId: m.id, id: tr.id, steps: tr.steps.map((s, j) => (j === p.i ? withLook(s, false) : s)) });
+    }
+    case 'trigger.undo': {
+      const u = trigUndo.get(p.key);
+      if (!u) return { ok: false };
+      trigUndo.delete(p.key);
+      if (u.trig && trigOn.get(u.trig) && trigOn.get(u.trig).key === p.key) trigOn.delete(u.trig); // (XA2: undone: no longer on)
+      u.stopped = true;
+      if (u.map) handle('history.undo', { mapId: u.mapId });
+      state.talk = u.talk; state.handouts = u.handouts; state.fightNow = u.fightNow; state.timer = u.timer; state.init = u.init;
+      broadcast();
+      return { ok: true, label: 'Taken back' };
     }
     case 'cue.play': {
       const c = cueList().find((x) => x.id === p.id || (p.slot && x.slot === p.slot));
@@ -3308,7 +3689,7 @@ function handleCmd(type, p = {}) {
     case 'talk.size': { // Prototype 12: one portrait bigger or smaller than the others (Second Builder (second-conversation-rework): 30 % to 400 %, it may run off the TV; was 50 to 200 %)
       if (!p.path) return { ok: false };
       settings.portraitSize = { ...(settings.portraitSize || {}) };
-      const v = Math.round(Math.min(4, Math.max(0.3, Number(p.scale) || 1)) * 100) / 100; // (Second Builder (second-conversation-sliders): to the percent, as the Size slider sets it; was steps of 5 %)
+      const v = Math.round(Math.min(5, Math.max(0.3, Number(p.scale) || 1)) * 100) / 100; // (Glinn: up to 500 %) // (Second Builder (second-conversation-sliders): to the percent, as the Size slider sets it; was steps of 5 %)
       if (Math.abs(v - 1) < 0.001) delete settings.portraitSize[p.path]; else settings.portraitSize[p.path] = v;
       clearTimeout(sizeSaveT); sizeSaveT = setTimeout(saveSettings, 600); // (the slider sends many; save once it rests)
       broadcast();
@@ -3318,7 +3699,7 @@ function handleCmd(type, p = {}) {
       if (!p.path) return { ok: false };
       settings.portraitOffset = { ...(settings.portraitOffset || {}) };
       const cl = (v, m, lo = -m) => Math.round(Math.min(m, Math.max(lo, Number(v) || 0)) * 100) / 100;
-      const o = { x: cl(p.x, 1), y: cl(p.y, 0.8, 0) }; // (Second Builder (second-conversation-rework): sideways up to its own width, up to 80 %, never down below its band)
+      const o = { x: cl(p.x, 1), y: cl(p.y, 0.8) }; // (Glinn: down too, below its band, as far as up) // (Second Builder (second-conversation-rework): sideways up to its own width, up to 80 %, never down below its band)
       if (!o.x && !o.y) delete settings.portraitOffset[p.path]; else settings.portraitOffset[p.path] = o;
       clearTimeout(sizeSaveT); sizeSaveT = setTimeout(saveSettings, 600);
       broadcast();
@@ -3466,11 +3847,30 @@ function handleCmd(type, p = {}) {
     // ----- soundboard and lightning: played once on the table -----
     case 'sound.play': {
       if (!p.path || !fs.existsSync(p.path)) return { ok: false };
-      sendEvent({ kind: 'sound', url: pathToFileURL(p.path).href, name: path.parse(p.path).name, volume: settings.boardVolume ?? 0.8, id: Date.now() });
+      // I8: a Soundboard pad: once or looping, at its own volume; what plays is kept (state.board) so the pad shows it
+      const now = Date.now(); const key = p.key ? String(p.key).slice(0, 400) : null;
+      const vol = Number.isFinite(Number(p.vol)) ? Math.min(1, Math.max(0, Number(p.vol))) : 1;
+      if (key && p.loop) { state.board = state.board.filter((b) => b.key !== key); sendEvent({ kind: 'stopone', key }); }
+      sendEvent({ kind: 'sound', url: pathToFileURL(p.path).href, name: path.parse(p.path).name, volume: (settings.boardVolume ?? 0.8) * vol, id: now, loop: !!p.loop, key });
+      if (key) {
+        state.board = state.board.filter((b) => b.loop || now - b.t0 < 10 * 60000);
+        state.board.push({ key, path: p.path, t0: now, loop: !!p.loop });
+        while (state.board.length > 24) state.board.shift();
+        broadcast();
+      }
+      return { ok: true };
+    }
+    case 'sound.stopone': { // I8: one pad's sound stops (a looping one is clicked again)
+      if (!p.key) return { ok: false };
+      sendEvent({ kind: 'stopone', key: String(p.key) });
+      state.board = state.board.filter((b) => b.key !== p.key);
+      broadcast();
       return { ok: true };
     }
     case 'sound.stop':
       sendEvent({ kind: 'stop' });
+      state.board = [];
+      broadcast();
       return { ok: true };
     case 'strike.now': // (not 'weather.*': those are map commands)
       sendEvent({ kind: 'strike', seed: 1 + Math.random() * 1000, mapId: state.liveMapId });
@@ -3576,7 +3976,7 @@ function handleCmd(type, p = {}) {
       const I = state.init;
       if (!I) return { ok: false };
       const toks = freshTokens(I).filter((t) => !p.ids || p.ids.includes(t.id));
-      for (const t of toks) { const foe = foeOf(t.name); I.entries.push(newEntry({ name: tokName(t), tokens: [t.id], bonus: foe && foe.bonus, vals: knownVals(foe) })); }
+      for (const t of toks) { const foe = foeOf(t.name); I.entries.push(newEntry({ name: tokName(t), tokens: [t.id], bonus: foe && foe.bonus, vals: tokenVals(t, foe) })); }
       broadcast();
       return { ok: true, n: toks.length };
     }
@@ -3596,7 +3996,10 @@ function handleCmd(type, p = {}) {
         I.dropped = I.dropped.filter((k) => k !== `pc:${owner}`);
         if (!I.entries.some((e) => e.pc && e.name === owner)) I.entries.push(newEntry({ name: owner, pc: true, vals: knownVals(pcStats(owner)) }));
         linkCharTokens(I, [t]);
-      } else { const foe = foeOf(t.name); I.entries.push(newEntry({ name: tokName(t), tokens: [t.id], bonus: foe && foe.bonus, vals: knownVals(foe) })); }
+      } else {
+        const foe = foeOf(t.name);
+        I.entries.push(newEntry({ name: tokName(t), tokens: [t.id], bonus: foe && foe.bonus, vals: tokenVals(t, foe) }));
+      }
       if ((t.cond || []).length) needCol('cond');
       tidyInit(I);
       store.touch();
@@ -3668,6 +4071,19 @@ function handleCmd(type, p = {}) {
       if ('bonus' in p && !list[0].pc) rememberFoe({ name: list[0].name, bonus: p.bonus });
       const sorted = 'init' in p && autoSort(I, missing);
       if (condPatches.length) handle('layer.many', { mapId: I.mapId, patches: condPatches, stepLabel: 'Conditions' });
+      // Beta 3.68: an NPC's HP and AC from the turn order are kept on its token too (its sheet shows them after the fight)
+      if (p.vals) {
+        const hc = initCols().find((x) => x.kind === 'hp'); const acc = initCols().find((x) => x.kind === 'ac'); const m = store.map(I.mapId);
+        const vp = [];
+        for (const e of list) {
+          if (e.pc || e.tokens.length !== 1 || !m || !m.layers.some((l) => l.id === e.tokens[0])) continue;
+          const q = { id: e.tokens[0] };
+          if (hc && hc.id in p.vals) q.hp = e.vals[hc.id] ? { cur: e.vals[hc.id].cur, max: e.vals[hc.id].max } : null;
+          if (acc && acc.id in p.vals) q.ac = e.vals[acc.id] ?? null;
+          if (Object.keys(q).length > 1) vp.push(q);
+        }
+        if (vp.length) handle('layer.many', { mapId: I.mapId, patches: vp, noHistory: true });
+      }
       if (p.vals || 'bonus' in p) store.touch();
       broadcast();
       return { ok: true, sorted };
@@ -4100,6 +4516,8 @@ ipcMain.handle('state', (e) => {
   // A pulled state is a full resync: include fog for every map again.
   const isTable = player && e.sender === player.webContents;
   fogSent.delete(isTable ? player : gm);
+  if (isTable) prepSent.delete(player); // (WE3: and the hidden map whole)
+  else notesSent = null; // (WE1: and the session log)
   return isTable ? tableState() : gmState();
 });
 // ---------- 4.6: a campaign (or one chapter) as one file: export and import (transfer.js) ----------
@@ -4266,6 +4684,15 @@ ipcMain.handle('app', async (e, action, arg = {}) => {
       broadcast();
       return r;
     }
+    case 'os.tiles': { // (Speed 1, WA8) the keys of a drawn map's sharp tiles that are still on the disk
+      const id = String((arg && arg.mapId) || '');
+      if (!store.cur || !/^[A-Za-z0-9_-]+$/.test(id)) return [];
+      try {
+        const re = new RegExp(`^${id}-s([a-z0-9]+)\\.(?:webp|jpg)$`, 'i'); const out = [];
+        for (const f of fs.readdirSync(path.join(store.cur.dir, 'drawn'))) { const m = re.exec(f); if (m) out.push(m[1]); }
+        return out;
+      } catch { return []; }
+    }
     case 'missing.list': { // 4.6.2: also after the campaign opened (a file renamed meanwhile): the maps learn it at once
       const list = missing.list(store);
       const sig = `${store.cur ? store.cur.meta.id : ''}|${list.map((x) => x.key).sort().join('|')}`;
@@ -4381,6 +4808,7 @@ ipcMain.handle('settings', (e, patch) => {
   if ('fxOut' in patch) { settings.fxOut = patch.fxOut == null ? null : String(patch.fxOut).slice(0, 300); settings.fxOutLabel = String(patch.fxOutLabel || '').slice(0, 120); }
   if ('duck' in patch) settings.duck = !!patch.duck;
   if ('fightAuto' in patch) settings.fightAuto = !!patch.fightAuto;
+  if ('corners' in patch) settings.corners = patch.corners === 'round' ? 'round' : 'sharp';
   if ('uiScale' in patch) { settings.uiScale = Math.round(Math.min(1.3, Math.max(0.7, Number(patch.uiScale) || 1)) * 20) / 20; applyUiScale(); }
   if ('hudScale' in patch) {
     settings.hudScale = Math.min(2, Math.max(0.5, Number(patch.hudScale) || 1));
@@ -4414,6 +4842,17 @@ ipcMain.handle('settings', (e, patch) => {
     else delete settings.mapQuality[patch.mapQuality.mapId];
   }
   if (Array.isArray(patch.momentStars)) settings.momentStars = [...new Set(patch.momentStars.filter((id) => Moments.BY[id]))].slice(0, 12);
+  if (patch.momentLook && Moments.BY[patch.momentLook.id]) { // I8: a screen effect's look (null: as it came)
+    settings.momentLook = { ...(settings.momentLook || {}) };
+    const L = cleanMomentLook(patch.momentLook.look);
+    if (L) settings.momentLook[patch.momentLook.id] = L; else delete settings.momentLook[patch.momentLook.id];
+  }
+  if (patch.soundPad && typeof patch.soundPad.key === 'string') { // I8: a Soundboard pad: Loop, its volume, hidden
+    settings.soundPads = { ...(settings.soundPads || {}) };
+    const k = patch.soundPad.key.slice(0, 400); const q = patch.soundPad.pad;
+    const L = q && typeof q === 'object' ? { ...(q.loop ? { loop: true } : {}), ...(Number.isFinite(Number(q.vol)) && Number(q.vol) !== 1 ? { vol: Math.min(1, Math.max(0, Number(q.vol))) } : {}), ...(q.hidden ? { hidden: true } : {}) } : null;
+    if (L && Object.keys(L).length) settings.soundPads[k] = L; else delete settings.soundPads[k];
+  }
   if (patch.momentSound && Moments.BY[patch.momentSound.id]) {
     settings.momentSounds = { ...(settings.momentSounds || {}) };
     const f = patch.momentSound.path;
@@ -4469,15 +4908,16 @@ async function importToLibrary(arg) {
     if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
     files = r.filePaths;
   }
-  const done = library.importFiles(files, { cat: arg.cat, folder: arg.folder });
+  const { done, failed } = await library.importFilesSoon(files, { cat: arg.cat, folder: arg.folder }); // (UI audit VJ7)
   sfxCache.at = 0;
-  if (!done.length) return { ok: false, error: 'None of these files can be used here.' };
+  const lost = failed.length ? `${failed.length === 1 ? failed[0].name : `${failed.length} files`} could not be copied: ${failed[0].why}` : null;
+  if (!done.length) return { ok: false, error: lost || 'None of these files can be used here.' };
   const paths = new Set(done.map((d) => d.path));
   const used = campaignFiles();
   const items = library.listLibrary().filter((it) => paths.has(it.path)).map((it) => ({ ...it, inCampaign: used.has(it.path) }));
   // in the order they were picked
   items.sort((a, b) => done.findIndex((d) => d.path === a.path) - done.findIndex((d) => d.path === b.path));
-  return { ok: true, items, copied: done.filter((d) => d.copied).length, walls: done.filter((d) => d.walls).length };
+  return { ok: true, items, copied: done.filter((d) => d.copied).length, walls: done.filter((d) => d.walls).length, lost };
 }
 // Spotify (spotify.js): link, what plays, the library, moods
 async function spotifyAction(action, p = {}) {
@@ -4517,11 +4957,14 @@ ipcMain.handle('lights', async (e, action, p = {}) => {
 });
 
 // Prototype 2: the TV's top edge glows for a while when a phone looks for its seat
-let calibT = null;
-function setCalib(on) {
-  clearTimeout(calibT); calibT = null;
-  if (on) calibT = setTimeout(() => { state.calib = false; calibT = null; broadcast(); }, 45000);
-  if (state.calib !== !!on) { state.calib = !!on; broadcast(); }
+// (UI audit VE8: counted per phone. It was one flag: the first phone that found its seat put the glow out for a second
+// one still looking, and a second one starting gave the first another 45 s.)
+const calibs = new Map(); // device id → the timer that ends its 45 s
+function setCalib(on, dev) {
+  const id = (dev && dev.id) || '';
+  clearTimeout(calibs.get(id)); calibs.delete(id);
+  if (on) calibs.set(id, setTimeout(() => setCalib(false, dev), 45000));
+  if (state.calib !== calibs.size > 0) { state.calib = calibs.size > 0; broadcast(); }
 }
 // F1 (open point): the phone server starts by itself when something needs it (a QR code shown, players moving their
 // tokens); Tablescape settings → This screen switches phones and tablets off altogether (settings.remote.allowed)
@@ -4540,6 +4983,13 @@ async function remoteReady(ms = 4000) { // started and listening on the home net
 // Prototype 1: the Players' phones panel
 let joinT = null;
 const joinMsg = () => String(settings.joinMsg || '').slice(0, 160);
+// the players' code as the join card shows it (until: when the card goes; kept when only the code is drawn again)
+async function joinCard(until) {
+  const q = await Remote.action('qr', { role: 'player' });
+  if (!q || !q.ok) return { ok: false, error: q && q.error ? q.error : 'The phones can\'t connect yet' };
+  state.join = { svg: q.svg, url: q.base.replace('http://', ''), msg: joinMsg(), until };
+  return { ok: true, shown: true };
+}
 ipcMain.handle('players', async (e, action, p = {}) => {
   if (!Players) return { ok: false };
   if (action === 'join') { // the players' QR code on the TV for a minute and a half
@@ -4547,12 +4997,11 @@ ipcMain.handle('players', async (e, action, p = {}) => {
     if (p.on === false || (state.join && p.on !== true)) { state.join = null; broadcast(); return { ok: true, shown: false }; }
     if (settings.remote.allowed === false) return { ok: false, error: PHONES_OFF };
     await remoteReady();
-    const q = await Remote.action('qr', { role: 'player' });
-    if (!q || !q.ok) return { ok: false, error: q && q.error ? q.error : 'The phones can\'t connect yet' };
-    state.join = { svg: q.svg, url: q.base.replace('http://', ''), msg: joinMsg(), until: Date.now() + 90000 };
+    const r = await joinCard(Date.now() + 90000);
+    if (!r.ok) return r;
     joinT = setTimeout(() => { state.join = null; joinT = null; broadcast(); }, 90000);
     broadcast();
-    return { ok: true, shown: true };
+    return r;
   }
   if (action === 'set' && p.on === true) { if (settings.remote.allowed === false) return { ok: false, error: PHONES_OFF }; wakeRemote(); } // (F1: no "switch on the Remote first")
   const r = await Players.action(action, p);
@@ -4580,13 +5029,139 @@ ipcMain.handle('remote', async (e, action, p = {}) => {
       saveSettings(); r = { ok: true, deck: settings.remote.decks[w] }; break;
     }
     case 'catalog': r = { ok: true, groups: remoteCatalog(!!p.pc) }; break;
+    case 'addr': // (UI audit VE11: another network of this PC: the code on the table follows at once)
+      r = await Remote.action(action, p);
+      if (r && r.ok && state.join) { await joinCard(state.join.until); broadcast(); }
+      break;
     default: r = await Remote.action(action, p);
   }
   broadcastGm();
   return r;
 });
 
+// ---------- Speed 1 (WA1): a stopwatch for the main process ----------
+// Only with TS_PERF=1 in the environment. Every 5 s one line in the log when the main loop was held up for more than
+// 50 ms or a watched call took more than 8 ms: which call, how long. (The performance audit of 25 Nov 2026 had to
+// measure all of this from outside: notes/perf-audit-2026-11-25.md.)
+function perfLog() {
+  const { monitorEventLoopDelay } = require('perf_hooks');
+  const slow = [];
+  const timed = (name, fn) => function timedCall(...a) {
+    const t0 = process.hrtime.bigint();
+    try { return fn.apply(this, a); } finally { const ms = Number(process.hrtime.bigint() - t0) / 1e6; if (ms > 8 && slow.length < 40) slow.push(`${name} ${ms.toFixed(0)}`); }
+  };
+  /* eslint-disable no-func-assign */
+  gmState = timed('gmState', gmState); tableState = timed('tableState', tableState); osBaked = timed('osBaked', osBaked);
+  saveSettings = timed('saveSettings', saveSettings); animStatus = timed('animStatus', animStatus);
+  /* eslint-enable no-func-assign */
+  store.flush = timed('flush', store.flush);
+  library.listLibrary = timed('listLibrary', library.listLibrary);
+  missing.list = timed('missing.list', missing.list);
+  mapstate.recordSight = timed('recordSight', mapstate.recordSight);
+  mapstate.History.prototype.before = timed('History.before', mapstate.History.prototype.before);
+  const h = monitorEventLoopDelay({ resolution: 10 }); h.enable();
+  const t = setInterval(() => {
+    const worst = h.max / 1e6;
+    if (worst > 50 || slow.length) applog.log.info(`perf: main loop held up ${worst.toFixed(0)} ms at worst (p99 ${(h.percentile(99) / 1e6).toFixed(0)})${slow.length ? `; slow calls (ms): ${slow.splice(0).join(', ')}` : ''}`);
+    h.reset();
+  }, 5000);
+  if (t.unref) t.unref();
+  applog.log.info('perf: the stopwatch is on (TS_PERF=1)');
+}
+
+// ---------- UI audit VJ3: the Library renames, moves and takes away its files ----------
+// Glinn (25 Nov 2026): the open campaign follows a rename or a move at once; another campaign finds the file again
+// under Missing files (a moved one is suggested there by its name). Delete: to the Windows bin, asked first when the
+// open campaign uses the file.
+const sameName = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
+// every place the open campaign, the settings and what is on the table right now name the file: by its place in the
+// library (rel), by its full path, as a key (a handout's share) or as a bare path (a look's sound). → how many
+function followFile(from, to) {
+  osRevNext += 1e6; // (Speed 3, WC8: what follows writes the new place into things as they are: no number of before is met again)
+  const oldUrl = pathToFileURL(from.path).href; const newUrl = pathToFileURL(to.path).href;
+  let n = 0;
+  const walk = (o, depth) => {
+    if (!o || typeof o !== 'object' || depth > 14 || ArrayBuffer.isView(o)) return false;
+    let hit = false;
+    if (o instanceof Map || o instanceof Set) { for (const v of o.values()) if (walk(v, depth + 1)) hit = true; return hit; }
+    if (Array.isArray(o)) {
+      for (let i = 0; i < o.length; i++) {
+        const v = o[i];
+        if (typeof v === 'string') { if (sameName(v, from.path)) { o[i] = to.path; n++; hit = true; } } else if (typeof v === 'object' && walk(v, depth + 1)) hit = true;
+      }
+      return hit;
+    }
+    if ((from.rel && sameName(o.rel, from.rel)) || sameName(o.path, from.path)) {
+      o.path = to.path;
+      if (to.rel) o.rel = to.rel; else delete o.rel;
+      if (typeof o.url === 'string') library.hydrate(o);
+      n++; hit = true;
+    }
+    for (const k of Object.keys(o)) {
+      if (k === 'path' || k === 'rel' || k === 'url') continue;
+      const v = o[k];
+      if (typeof v === 'string') {
+        if (sameName(v, from.path)) { o[k] = to.path; n++; hit = true; } else if (v === oldUrl) { o[k] = newUrl; hit = true; }
+      } else if (typeof v === 'object' && walk(v, depth + 1)) hit = true;
+    }
+    for (const k of Object.keys(o)) { // (kept under the file's name: who a handout is for)
+      const nk = from.rel && sameName(k, from.rel) ? to.rel : sameName(k, from.path) ? to.path : null;
+      if (nk && nk !== k && !(nk in o)) { o[nk] = o[k]; delete o[k]; n++; hit = true; }
+    }
+    return hit;
+  };
+  const c = store.cur;
+  if (c) {
+    for (const m of c.maps.values()) if (walk(m, 0)) { hydrateMap(m); store.touch(m.id); }
+    if (walk(c.meta, 0)) store.touch();
+    for (const ch of c.meta.chapters) { if (ch.ambience) library.hydrate(ch.ambience); if (ch.fight) library.hydrate(ch.fight); }
+  }
+  if (walk(settings, 0)) saveSettings();
+  for (const k of ['handouts', 'handoutSeen', 'talk']) walk(state[k], 0);
+  charFileCache.at = 0; portraitIdx.at = 0; sfxCache.at = 0; lastMissingSig = ''; remoteGen++; library.thereForget();
+  return n;
+}
+// where the open campaign uses a file, in the GM's words ("Lower hall: Goblin (token)")
+function whereUsed(full) {
+  const out = [];
+  for (const r of missing.refs(store)) { const p = library.resolveRef(r.ref); if (p && sameName(p, full) && !out.includes(r.where)) out.push(r.where); }
+  return out;
+}
+function libraryRelocate(action, arg) {
+  const r = action === 'rename' ? library.renameFile(arg.path, arg.name) : library.moveFile(arg.path, { folder: arg.folder, newFolder: arg.newFolder });
+  if (!r.ok || r.same) return r;
+  const uses = followFile(r.from, { path: r.path, rel: r.rel });
+  applog.log.info(`library: ${action}, ${uses} place(s) in the campaign and the settings follow`);
+  broadcast();
+  return { ok: true, path: r.path, rel: r.rel, from: r.from, uses, name: path.parse(r.path).name, folder: path.dirname(r.rel).split(path.sep).join('/') };
+}
+async function libraryTrash(arg) {
+  const p = path.resolve(String(arg.path || ''));
+  if (!library.owns(p) || !fs.existsSync(p)) return { ok: false, error: 'That file is not in your library' };
+  const uses = whereUsed(p);
+  if (uses.length && !arg.sure) return { ok: false, ask: true, uses: uses.slice(0, 6), more: Math.max(0, uses.length - 6) };
+  const rel = library.toRef(p).rel;
+  const side = library.sideOf(p);
+  // (never deleted for good: the Windows bin; the self-test has a folder of its own for it and leaves the real bin alone)
+  const bin = async (f) => {
+    if (!TEST_DIR) { await shell.trashItem(f); return; }
+    const dir = path.join(TEST_DIR, 'bin'); fs.mkdirSync(dir, { recursive: true });
+    fs.renameSync(f, path.join(dir, `${Date.now()}-${path.basename(f)}`));
+  };
+  try { await bin(p); } catch (err) {
+    applog.log.warn(`library: to the bin: ${(err && err.message) || err}`);
+    return { ok: false, error: 'Windows could not move it to the bin (is the file in use?)' };
+  }
+  if (side) { try { await bin(side); } catch {} }
+  library.forgetFile(rel);
+  charFileCache.at = 0; portraitIdx.at = 0; sfxCache.at = 0; remoteGen++; library.thereForget();
+  broadcast();
+  return { ok: true, name: path.parse(p).name, used: uses.length };
+}
 ipcMain.handle('library', (e, action, arg) => {
+  if (action !== 'list' && action !== 'open' && action !== 'reveal') library.listDirty(); // (Speed 4, WD1: whatever it does, the kept list is not trusted after it)
+  if (action === 'rename' || action === 'move') return libraryRelocate(action, arg || {});
+  if (action === 'trash') return libraryTrash(arg || {});
   if (action === 'open') { shell.openPath(arg || library.root); return null; }
   if (action === 'reveal') { shell.showItemInFolder(arg); return null; }
   if (action === 'fav') return library.setFavourite(arg.path, arg.on);
@@ -4613,7 +5188,7 @@ function animNeeds({ all = false } = {}) {
   const want = new Map(); // path -> { path, url, name, tier, where }
   const consider = (l, map, where) => {
     if (!l || l.role !== 'asset' || l.kind !== 'video' || l.asVideo) return; // (4.8: played as a video, sharp: not baked)
-    const full = library.resolveRef(l);
+    const full = library.resolveKept(l); // (Speed 5, WE5: with the kept "is it there" of WD5, not the disk for every animated asset)
     if (!full) return;
     const px = (Number(l.w) || 1) * ((map.view && map.view.zoom) || 1) * v.ppi * (v.dpr || 1);
     const tier = animCache.tierFor(px);
@@ -4631,7 +5206,7 @@ function animNeeds({ all = false } = {}) {
     for (const s of m.snaps || []) for (const l of (s.data && s.data.layers) || []) consider(l, m, `${m.name}: ${s.name}`);
   }
   if (all) return [...want.values()].filter((w) => fs.existsSync(w.path));
-  return [...want.values()].filter((w) => !animFailed.has(w.path) && fs.existsSync(w.path) && !animCache.has(w.path, w.tier));
+  return [...want.values()].filter((w) => !animFailed.has(w.path) && library.there(w.path) && !animCache.has(w.path, w.tier));
 }
 // free space on the library's disk (2.5): baking pauses below 500 MB, Options → Performance warns below 2 GB
 const DISK_PAUSE = 500 * 1048576; const DISK_WARN = 2048 * 1048576;
@@ -4993,7 +5568,7 @@ async function moveLibrary() {
   if (store.cur && goHome() === false) return saveStuck(); // (J1: nothing is moved while changes are unsaved)
   try {
     fs.mkdirSync(to, { recursive: true });
-    fs.cpSync(from, to, { recursive: true, errorOnExist: false, force: true });
+    await fs.promises.cp(from, to, { recursive: true, errorOnExist: false, force: true }); // (UI audit VJ7: not in one blocking go: the window stays alive while it copies)
   } catch (err) {
     applog.log.error('library move failed (copy)', err);
     return { ok: false, error: `Copying failed: ${err.message}. Nothing was removed; the library is still at ${from}.` };
@@ -5077,7 +5652,7 @@ function askLibraryRoot() {
   const r = dialog.showMessageBoxSync({
     type: 'question', buttons: ['Use Documents', 'Choose a folder…'], defaultId: 0, cancelId: 0, noLink: true, title: 'Tablescape',
     message: 'Where should your library live?',
-    detail: `Tablescape keeps your maps, tokens, sounds and campaigns in one folder, the library.\n\nDocuments: ${def}\n\nYou can move it later under Settings → Library.`,
+    detail: `Tablescape keeps your maps, tokens, sounds and campaigns in one folder, the library.\n\nDocuments: ${def}\n\nYou can move it later under Tablescape settings → Library.`,
   });
   if (r !== 1) return;
   const picked = dialog.showOpenDialogSync({ title: 'Folder for the Tablescape library', properties: ['openDirectory', 'createDirectory'], buttonLabel: 'Use this folder' });
@@ -5218,6 +5793,7 @@ function startApp() {
     onChange: () => broadcastGm(),
   });
   Remote.start(); // listens only when switched on
+  if (process.env.TS_PERF === '1') perfLog();
   Players = createPlayers({
     store, state, settings: () => settings, save: saveSettings, handle, charOf, charFile, charTokOwner, ownerOf: playerTokOwner, charSet, sightOf, initInfo, combatRound: () => (combatInfo() || {}).n,
     turnName: () => { const b = remoteBase(); if (!b.player) b.player = remotePlayers(); const f = b.player.fight; const c = f && f.cards.find((x) => x.cur); return c ? c.name : 'someone else'; }, // (Prototype 3: as the players' screen names it)
@@ -5300,6 +5876,22 @@ function startApp() {
     if (changed) broadcast();
   }, 400);
 
+  // a map for trying things out, built in the campaign that is open (src/dev-maps.js): only when the app is started
+  // with TS_DEV_MAP=<name>, never in the self-test. It waits until a campaign is open (a minute at most).
+  // (Speed 3, WC3) a minute and a half after the start, once: small pictures of the library's cache that belong to no
+  // file any more are removed (library.sweepThumbs). Not in the self-test, which calls it itself.
+  if (!TEST_DIR) {
+    const t = setTimeout(() => { library.sweepThumbs([...campaignFiles()]).then((r) => { if (r.removed) applog.log.info(`thumbs: ${r.removed} without a file removed, ${r.kept} kept`); }).catch(() => {}); }, 90000);
+    if (t.unref) t.unref();
+  }
+  if (process.env.TS_DEV_MAP && !TEST_DIR) {
+    let tries = 0;
+    const t = setInterval(() => {
+      if (!store.cur && ++tries < 30) return;
+      clearInterval(t);
+      try { applog.log.info(`dev map: ${JSON.stringify(require('./dev-maps').make(process.env.TS_DEV_MAP, { handle, store, state }))}`); } catch (err) { applog.log.warn(`dev map: ${err.message}`); }
+    }, 2000);
+  }
   if (TEST_DIR) {
     // TS_SCRIPT: a script of your own instead of the self-test (for trying things out)
     // Prototype 26: the self-test in areas (src/tests) (U4: the old one in one piece is gone)
@@ -5321,6 +5913,7 @@ function offerImport(file) {
 app.on('second-instance', (e, argv) => { if (gm) { if (gm.isMinimized()) gm.restore(); gm.focus(); } offerImport(tablescapeArg(argv)); });
 app.on('open-file', (e, file) => { e.preventDefault(); if (/\.tablescape$/i.test(file)) offerImport(file); }); // (macOS)
 app.on('child-process-gone', (e, d) => { if (d.reason !== 'clean-exit') applog.log.error(`${d.type} process gone: ${d.reason} (${d.name || ''} exit code ${d.exitCode})`); });
+app.on('browser-window-focus', () => library.thereForget()); // (Speed 4, WD5: the GM comes back from the Explorer: ask the disk anew)
 app.on('window-all-closed', () => app.quit());
 // J4 (open point): what waits to be saved (the campaign, settings held back while a slider moves) goes to the disk now:
 // on quit, and when Windows shuts down or logs off (no before-quit then)

@@ -240,14 +240,44 @@ const LibraryDrawer = (() => {
       return null;
     };
 
+    // where the open folder lies in the library, as a path from its root (null: no folder is open)
+    function folderRel() {
+      const key = folderNow();
+      if (!key) return null;
+      const want = key.split('/').length;
+      for (const it of items) {
+        if (it.cat !== lib.cat || !it.rel) continue;
+        const f = foldersOf(it);
+        if (f.length < want || f.slice(0, want).join('/') !== key) continue;
+        const dirs = String(it.rel).split('/').slice(0, -1);
+        if (dirs.length < f.length - want) continue;
+        return dirs.slice(0, dirs.length - (f.length - want)).join('/') || null;
+      }
+      return null;
+    }
+    // what kind of thing the files are, asked at the Add button
+    function askKind() {
+      return new Promise((resolve) => {
+        const b = $('.lib-add', D());
+        const r = b ? b.getBoundingClientRect() : { left: 200, bottom: 80 };
+        let said = false;
+        const say = (v) => { if (said) return; said = true; clearInterval(watch); resolve(v); };
+        UI.openMenu(r.left, r.bottom + 4, [{ header: 'What are they?' }, ...CATS.filter((c) => !['all', 'party', 'tiles'].includes(c.id)).map((c) => ({ icon: c.icon, label: c.label, action: () => say(c.id) }))]);
+        const watch = setInterval(() => { if (!UI.menuOpen()) setTimeout(() => say(null), 80); }, 150);
+      });
+    }
     // ---------- Add from PC: files from anywhere are copied into the library, then used ----------
     async function addFromPc(files) {
       const d = ui.drawer || {};
       let cat = catFor(d.purpose) || (lib.cat !== 'all' ? lib.cat : null);
       if (!cat && files && files.length) cat = files.every((f) => /\.(mp3|ogg|opus|wav|flac|m4a)$/i.test(f)) ? 'sounds' : 'maps';
-      const folder = d.purpose === 'ambience' ? 'Audio/Ambience' : d.purpose === 'fight' ? 'Audio/Music' : null;
-      const r = await window.ts.library('import', { files: files || undefined, cat: cat || 'maps', folder });
+      // UI audit VJ3: in "All" the button asks what the files are (they all went to Maps); inside a folder they land
+      // in that folder (inside "Tokens › Goblins" they landed in Tokens)
+      if (!cat && !files) { cat = await askKind(); if (!cat) return null; }
+      const folder = d.purpose === 'ambience' ? 'Audio/Ambience' : d.purpose === 'fight' ? 'Audio/Music' : (!d.purpose && cat === lib.cat ? folderRel() : null);
+      const r = await UI.withLoader('Adding to the library …', () => window.ts.library('import', { files: files || undefined, cat: cat || 'maps', folder }), 1500); // (UI audit VJ7: big files take a while)
       if (!r || !r.ok) { if (r && r.error) toast(r.error, { kind: 'error' }); return null; }
+      if (r.lost) toast(r.lost, { kind: 'error' });
       await reload();
       const got = r.items.map((x) => items.find((i) => i.path === x.path) || x);
       const where = got[0] ? got[0].rel.split('/').slice(0, -1).join('/') : '';
@@ -326,8 +356,10 @@ const LibraryDrawer = (() => {
         .map((x) => x.it);
     }
     function matches(it) {
-      const q = words(lib.query);
-      if (q.length) { const t = tagsOf(it); const n = it.name.toLowerCase(); if (!q.every((w) => n.includes(w) || t.some((x) => x.startsWith(w)))) return false; }
+      // (UI audit VJ2: what was typed is what is looked for. Words under three letters, numbers and common words were
+      // dropped from the search: "go" showed everything, "42" and "map" never filtered)
+      const q = String(lib.query || '').toLowerCase().split(/[^a-z0-9äöüéèàç]+/).filter(Boolean);
+      if (q.length) { const t = tagsOf(it); const n = it.name.toLowerCase(); const where = String(it.rel || '').toLowerCase(); if (!q.every((w) => n.includes(w) || t.some((x) => x.startsWith(w)) || (w.length > 2 && where.includes(w)))) return false; }
       if (lib.tags.length && !lib.tags.every((w) => tagsOf(it).includes(w))) return false;
       if (lib.kind && it.kind !== lib.kind) return false;
       return true;
@@ -693,6 +725,68 @@ const LibraryDrawer = (() => {
     }
 
     // ---------- context menu ----------
+    // ---------- UI audit VJ3: rename, move and delete a file of the library ----------
+    // (Glinn, 25 Nov 2026: the open campaign follows a rename or a move; Delete goes to the Windows bin and asks first
+    // when the open campaign uses the file. All of it happens in the main process: library.js, main.js.)
+    // where a folder of a category lies in the library, from its root ("Tokens/Goblins"); a folder that exists for
+    // pictures and for videos (Maps/Static, Maps/Animated): the one for this kind of file first
+    function relOfFolder(cat, key, kind) {
+      const want = key.split('/').length;
+      let other = null;
+      for (const x of items) {
+        if (x.cat !== cat || !x.rel || x.builtin) continue;
+        const f = foldersOf(x);
+        if (f.length < want || f.slice(0, want).join('/') !== key) continue;
+        const dirs = String(x.rel).split('/').slice(0, -1);
+        const rel = dirs.slice(0, dirs.length - (f.length - want)).join('/');
+        if (!rel) continue;
+        if (x.kind === kind) return rel;
+        other = other || rel;
+      }
+      return other;
+    }
+    // the category's own folder this file lies in ("Tokens", "Maps/Static", a pack's folder)
+    const ownRoot = (it) => { const dirs = String(it.rel || '').split('/').slice(0, -1); return (it.pack ? dirs.slice(0, 2) : dirs.slice(0, Math.max(1, dirs.length - foldersOf(it).length))).join('/') || null; };
+    const hereOf = (it) => String(it.rel || '').split('/').slice(0, -1).join('/');
+    const libFail = (r) => toast((r && r.error) || "That didn't work", { kind: 'error', ms: 4000 });
+    async function renameItem(it) {
+      const n = await UI.askText('Name of the file', it.name, { ok: 'Rename' });
+      if (!n || n.trim() === it.name) return;
+      const r = await window.ts.library('rename', { path: it.path, name: n });
+      if (!r || !r.ok) { libFail(r); return; }
+      await reload();
+      toast(`Renamed to ${r.name}`, { undo: async () => { const b = await window.ts.library('rename', { path: r.path, name: it.name }); if (!b || !b.ok) libFail(b); await reload(); } });
+    }
+    function moveItem(it, x, y) {
+      const root = ownRoot(it); const here = hereOf(it);
+      const go = async (folder, newFolder) => {
+        const r = await window.ts.library('move', { path: it.path, folder, newFolder });
+        if (!r || !r.ok) { libFail(r); return; }
+        await reload();
+        if (r.same) return;
+        toast(`${it.name} moved to ${r.folder.replace(/\//g, ' › ')}`, { undo: async () => { const b = await window.ts.library('move', { path: r.path, folder: here }); if (!b || !b.ok) libFail(b); await reload(); } });
+      };
+      const rows = [];
+      const add = (node) => { for (const k of sortKids(node)) { const rel = relOfFolder(it.cat, k.key, it.kind); if (rel) rows.push({ icon: 'folder', label: k.key.replace(/\//g, ' › '), disabled: rel === here, action: () => go(rel) }); add(k); } };
+      add(treeOf(it.cat));
+      const cat = CATS.find((c) => c.id === it.cat) || { label: 'Library', icon: 'folder' };
+      openMenu(x, y, [{ header: 'Move to' },
+        ...(root ? [{ icon: cat.icon, label: it.pack ? `Pack: ${it.pack}` : cat.label, disabled: root === here, action: () => go(root) }] : []),
+        ...rows.slice(0, 80), '-',
+        { icon: 'folder-plus', label: 'New folder …', action: async () => { const n = await UI.askText('Name of the new folder', '', { ok: 'Move there' }); if (n) go(root || here, n); } }]);
+    }
+    async function deleteItem(it) {
+      let r = await window.ts.library('trash', { path: it.path });
+      if (r && r.ask) {
+        const ok = await UI.confirm(`Delete ${it.name}?`, `This campaign uses it: ${r.uses.join('; ')}${r.more ? ` and ${r.more} more` : ''}. It goes to the Windows bin, and the campaign will list it under Missing files.`, { ok: 'Delete', cancel: 'Keep it', danger: true });
+        if (!ok) return;
+        r = await window.ts.library('trash', { path: it.path, sure: true });
+      }
+      if (!r || !r.ok) { libFail(r); return; }
+      await reload();
+      toast(`${r.name} is in the Windows bin`, { ms: 4000 });
+    }
+
     function itemMenu(it, x, y) {
       const ch = ctx.viewChapter();
       const inTray = trayList().some((t) => t.path === it.path);
@@ -725,7 +819,11 @@ const LibraryDrawer = (() => {
         // Prototype 26: one Ready list per chapter for anything (it was Ready for tokens and portraits, and the Tonight tray)
         ...(it.cat !== 'maps' ? [{ icon: 'checklist', label: inTray ? 'Take off the Ready list' : `Ready for ${(ctx.ready.chapter() || {}).name || 'this chapter'}`, action: () => (inTray ? trayRemove(it.path) : trayAdd(it)) }] : []),
         { icon: 'star', label: it.fav ? 'Remove from favourites' : 'Add to favourites', action: () => setFav(it, !it.fav) },
-        ...(it.builtin ? [] : [{ icon: 'folder', label: 'Show in folder', action: () => window.ts.library('reveal', it.path) }])]); // (what comes with the app has no folder of yours)
+        // (what comes with the app has no folder of yours, and cannot be renamed, moved or deleted)
+        ...(it.builtin ? [] : [{ icon: 'folder', label: 'Show in folder', action: () => window.ts.library('reveal', it.path) }, '-',
+          { icon: 'pencil', label: 'Rename …', action: () => renameItem(it) },
+          { icon: 'arrow-right', label: 'Move to …', action: () => setTimeout(() => moveItem(it, x, y), 60) },
+          { icon: 'trash', label: 'Delete …', danger: true, action: () => deleteItem(it) }])]);
     }
 
     // ---------- using things ----------
@@ -751,7 +849,8 @@ const LibraryDrawer = (() => {
     async function use(it, as, anchor) {
       const d = ui.drawer || {};
       const s = S();
-      const action = as || actionFor(it, d.purpose) || { maps: 'newMap', tokens: 'token', assets: 'brush', overlays: 'overlay', sounds: 'sound', portraits: 'talk', handouts: 'handout', tiles: 'tile' }[it.cat];
+      // (UI audit VJ4, Glinn: a plain click on a sound plays it once; "Add to this map" is in its right-click menu)
+      const action = as || actionFor(it, d.purpose) || { maps: 'newMap', tokens: 'token', assets: 'brush', overlays: 'overlay', sounds: 'once', portraits: 'talk', handouts: 'handout', tiles: 'tile' }[it.cat];
       const ch = ctx.viewChapter();
       touch(it);
       const back = d.back && d.purpose ? d.back : null; // opened from a menu to pick one thing
@@ -814,11 +913,16 @@ const LibraryDrawer = (() => {
           if (r && r.ok) toast(a === 'table' ? `${it.name} covers the whole table` : `${it.name} added to the map`); else failed(r);
           break;
         }
+        case 'once': {
+          const r = await cmd('sound.play', { path: it.path });
+          if (r && r.ok) toast(r.closed ? `${it.name}: the table is closed, so only you hear it` : `${it.name} plays once on the table`, { ms: 2200 }); else failed(r);
+          break;
+        }
         case 'sound': {
           if (!s.map) { noMap(); break; }
           const r = await cmd('layer.add', { path: it.path, role: 'audio' });
           if (!(r && r.ok)) { failed(r); break; }
-          toast(`${it.name} plays while this map is on the table`);
+          toast(`${it.name} plays while this map is on the table`, { undo: () => cmd('history.undo', { mapId: r.mapId }) });
           if (back) done(r && r.selected);
           break;
         }

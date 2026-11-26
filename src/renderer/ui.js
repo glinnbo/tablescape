@@ -90,14 +90,33 @@ const UI = (() => {
       }, iconEl('arrow-back-up'), 'Undo'));
     }
     toastBox.append(t);
-    while (toastBox.children.length > 3) toastBox.firstChild.remove();
-    setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 250); }, ms);
+    // UI audit VH3: when a fourth comes, the oldest one without a button goes; one with Undo only when all have one
+    while (toastBox.children.length > 3) { const plain = [...toastBox.children].find((x) => x !== t && !x.querySelector('button')); (plain || toastBox.firstChild).remove(); }
+    // VH3: it waits while the mouse is on it; an error stays long enough to be read
+    let left = kind === 'error' ? Math.max(ms, 9000) : ms; let since = 0; let timer = 0;
+    const go = () => { t.classList.add('out'); setTimeout(() => t.remove(), 250); };
+    t._run = () => { since = performance.now(); clearTimeout(timer); timer = setTimeout(go, left); };
+    t._hold = () => { clearTimeout(timer); left = Math.max(1200, left - (performance.now() - since)); };
+    t._run();
   }
+  // (toasts let clicks through, so "the mouse is on it" is read from where the mouse is)
+  document.addEventListener('mousemove', (e) => {
+    if (!toastBox || !toastBox.firstChild) return;
+    for (const t of toastBox.children) {
+      if (!t._run || t.classList.contains('out')) continue;
+      const r = t.getBoundingClientRect();
+      const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (over !== !!t._over) { t._over = over; if (over) t._hold(); else t._run(); }
+    }
+  }, true);
 
   // ---------- context menu ----------
   const menu = h('div', { id: 'menu', role: 'menu' });
   function openMenu(x, y, items) {
+    if (skipOpen && skipOpen.el === downEl && performance.now() - skipOpen.t < 600) { skipOpen = null; return; } // (VH6: this click was on the button whose menu it just closed)
+    skipOpen = null;
     menu.innerHTML = '';
+    menu.classList.remove('drop'); menu.style.minWidth = ''; // (Beta 3.68: a menu dropping out of the token sheet's More sets these)
     for (const it of items) {
       if (it === '-') { menu.append(h('div', { class: 'menu-sep' })); continue; }
       if (it.header) { menu.append(h('div', { class: 'menu-head' }, it.header)); continue; }
@@ -114,7 +133,26 @@ const UI = (() => {
     menu.style.top = `${clamp(y, 4, innerHeight - r.height - 4)}px`;
     const first = menu.querySelector('.menu-item:not([disabled])');
     if (first) first.focus({ preventScroll: true });
+    opener = downEl;
   }
+  // UI audit VH6: a menu's own button closes it (the press closed it and the click opened it again); arrow keys walk
+  // its lines; Esc closes it on every screen and inside every dialog
+  let downEl = null; let opener = null; let skipOpen = null;
+  menu.addEventListener('keydown', (e) => {
+    const list = [...menu.querySelectorAll('.menu-item:not([disabled])')];
+    const i = list.indexOf(document.activeElement);
+    const to = e.key === 'ArrowDown' ? (i + 1) % list.length : e.key === 'ArrowUp' ? (i - 1 + list.length) % list.length : e.key === 'Home' ? 0 : e.key === 'End' ? list.length - 1 : -1;
+    if (to < 0 || !list.length) return;
+    e.preventDefault(); e.stopPropagation();
+    list[to].focus({ preventScroll: true });
+  });
+  // (not in the capture phase: a small box opened from a menu and lying on it, as the token sheet's Lines, takes its
+  // Esc first; a dialog asks menuOpen() itself, below)
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || !menu.classList.contains('on')) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    menu.classList.remove('on');
+  });
   function swatchIcon(it) {
     const i = iconEl(it.icon, it.swatch ? 'fill' : '');
     if (it.swatch) i.style.color = it.swatch;
@@ -122,7 +160,16 @@ const UI = (() => {
   }
   function closeMenu() { menu.classList.remove('on'); }
   const menuOpen = () => menu.classList.contains('on');
-  document.addEventListener('pointerdown', (e) => { if (menuOpen() && !e.target.closest('#menu')) closeMenu(); }, true);
+  document.addEventListener('pointerdown', (e) => {
+    const el = e.target && e.target.closest ? e.target.closest('button, [role="button"]') : null;
+    if (menuOpen() && !e.target.closest('#menu')) {
+      if (e.button === 0 && el && el === opener) skipOpen = { el, t: performance.now() };
+      closeMenu();
+    }
+    downEl = el;
+  }, true);
+  // (the skip is for the click of that one press only: once it is over, the next thing may open a menu again)
+  window.addEventListener('click', () => { setTimeout(() => { skipOpen = null; }, 0); }, true);
 
   // ---------- text prompt (Electron has no window.prompt) ----------
   function askText(title, value = '', { ok = 'Save', placeholder = '', allowEmpty = false } = {}) { // (allowEmpty: an empty answer is an answer, e.g. "no line under the name")
@@ -135,7 +182,7 @@ const UI = (() => {
         h('div', { class: 'modal-actions' },
           h('button', { type: 'button', class: 'btn ghost', onclick: () => close(null) }, 'Cancel'),
           h('button', { type: 'submit', class: 'btn primary' }, ok)));
-      const back = h('div', { class: 'modal-back', onpointerdown: (e) => { if (e.target === back) close(null); } }, form);
+      const back = h('div', { class: 'modal-back', onpointerdown: (e) => { if (e.target === back && input.value === value) close(null); } }, form); // (UI audit VH7: a click beside it no longer throws away what was typed)
       back.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { e.stopPropagation(); close(null); }
         if (e.key === 'Enter' && e.target === input) { e.preventDefault(); form.requestSubmit(); }
@@ -147,11 +194,18 @@ const UI = (() => {
   }
 
   // a dialog with a title, any content and a Close button; returns { el, body, close }
-  function dialog(title, content, { wide = false, onClose = null } = {}) {
+  // (UI audit VH7) keep: a function saying that the dialog holds work (a pasted table, a lamp scene being made): a
+  // click beside it then leaves it open. Whatever button is not a danger gets the keyboard, so Enter has an answer.
+  function dialog(title, content, { wide = false, onClose = null, keep = null } = {}) {
     const body = h('div', { class: 'dlg-body' }, content);
     let back = null;
     // Esc closes the dialog wherever the focus is (only the newest one, if several are open)
-    const onKey = (e) => { if (e.key !== 'Escape' || !back || back !== [...document.querySelectorAll('.modal-back')].pop()) return; e.stopImmediatePropagation(); e.preventDefault(); close(); };
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || !back || back !== [...document.querySelectorAll('.modal-back')].pop()) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      if (menuOpen()) { closeMenu(); return; } // (UI audit VH7: a menu open over the dialog closes first; the dialog went and the menu stayed)
+      close();
+    };
     const close = () => {
       if (!back) return;
       const a = document.activeElement; // (4.2.2) a field still being typed in keeps what was typed (Esc, a click beside the window)
@@ -161,11 +215,64 @@ const UI = (() => {
     const box = h('div', { class: `modal ${wide ? 'wide' : ''}`, role: 'dialog', 'aria-label': title },
       h('div', { class: 'dlg-head' }, h('h2', {}, title), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: close }, iconEl('x'))),
       body);
-    back = h('div', { class: 'modal-back', onpointerdown: (e) => { if (e.target === back) close(); } }, box);
+    back = h('div', { class: 'modal-back', onpointerdown: (e) => { if (e.target === back && !(keep && keep())) close(); } }, box);
     window.addEventListener('keydown', onKey, true);
     document.body.append(back);
     box.tabIndex = -1; box.focus();
+    // (VH7) "Remove player?", "Clear the cache?", "Start over?", Export, Import had no button on Enter
+    setTimeout(() => {
+      if (!back) return;
+      const a = document.activeElement;
+      if (a && a !== box && box.contains(a)) return; // (the caller chose)
+      const acts = box.querySelector('.modal-actions');
+      const safe = acts && (acts.querySelector('.btn.primary:not(.danger):not(:disabled)') || acts.querySelector('.btn:not(.danger):not(:disabled)'));
+      if (safe) safe.focus();
+    }, 0);
+    // (UI audit VH6) Tab stays inside the dialog (it reached the rail behind it)
+    box.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+      const list = [...box.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((x) => !x.disabled && x.offsetParent !== null);
+      if (!list.length) return;
+      const i = list.indexOf(document.activeElement);
+      e.preventDefault(); e.stopPropagation();
+      list[(i + (e.shiftKey ? -1 : 1) + list.length) % list.length].focus();
+    });
     return { el: box, body, close };
+  }
+
+  // UI audit VJ11: a plain name for a colour (a swatch's tip said "#b9cdeb" or "Colour 1")
+  function colourName(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return 'Colour';
+    const n = parseInt(m[1], 16); const r = (n >> 16) / 255; const g = ((n >> 8) & 255) / 255; const b = (n & 255) / 255;
+    const max = Math.max(r, g, b); const min = Math.min(r, g, b); const l = (max + min) / 2; const d = max - min;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    if (s < 0.12) return l > 0.9 ? 'White' : l < 0.12 ? 'Black' : l > 0.6 ? 'Light grey' : 'Grey';
+    let hue = d === 0 ? 0 : max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    hue = (hue * 60 + 360) % 360;
+    const base = hue < 15 || hue >= 345 ? 'Red' : hue < 42 ? (l < 0.4 ? 'Brown' : 'Orange') : hue < 68 ? 'Yellow' : hue < 160 ? 'Green' : hue < 195 ? 'Teal' : hue < 255 ? 'Blue' : hue < 295 ? 'Purple' : 'Pink';
+    return l > 0.78 ? `Pale ${base.toLowerCase()}` : l < 0.28 ? `Dark ${base.toLowerCase()}` : base;
+  }
+
+  // UI audit VI2: a slider that writes a setting shows its value at once and saves a moment after the last step (each
+  // step wrote the settings file and redrew every window). One timer per setting.
+  const soon = new Map();
+  function settingsSoon(key, patch, ms = 120) {
+    clearTimeout(soon.get(key));
+    soon.set(key, setTimeout(() => { soon.delete(key); window.ts.settings(patch); }, ms));
+  }
+
+  // UI audit VH7: one small "are you sure?": the way out has the keyboard (Enter leaves things as they are), and Esc
+  // or a click beside it mean the same. Resolves true only for the button that does it.
+  function confirm(title, text, { ok = 'Yes', cancel = 'Keep it', danger = true, icon = null } = {}) {
+    return new Promise((resolve) => {
+      let said = false;
+      const done = (v) => { if (said) return; said = true; dlg.close(); resolve(v); };
+      const keep = h('button', { class: 'btn', onclick: () => done(false) }, cancel);
+      const go = h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => done(true) }, icon ? iconEl(icon) : null, ok);
+      const dlg = dialog(title, h('div', { class: 'stack' }, text ? h('p', {}, text) : null, h('div', { class: 'modal-actions' }, keep, go)), { onClose: () => { if (!said) { said = true; resolve(false); } } });
+      setTimeout(() => keep.focus(), 0);
+    });
   }
 
   // ---------- thumbnails ----------
@@ -334,7 +441,7 @@ const UI = (() => {
 
   // The loading icon: the little maid hurrying along with her tray, and a few words
   function loader(text = 'Loading …', { big = false } = {}) {
-    return h('div', { class: `loader ${big ? 'big' : ''}`, role: 'status' }, h('img', { class: 'loader-maid', src: 'maid.webp', alt: '' }), text ? h('span', {}, text.replace(/\s*(…|\.\.\.)$/, '')) : null); // the dots dance by themselves
+    return h('div', { class: `loader ${big ? 'big' : ''}`, role: 'status' }, h('img', { class: 'loader-maid', src: big ? 'maid-run.webp' : 'maid.webp', alt: '' }) /* (XA6, Glinn 26 Nov 2026: the big sign shows her running, as the pill at the top does, and smaller) */, text ? h('span', {}, text.replace(/\s*(…|\.\.\.)$/, '')) : null); // the dots dance by themselves
   }
   // a loader over the whole GM screen while something takes a moment (shown only if it takes longer than a blink)
   async function withLoader(text, job, delay = 250) {
@@ -343,5 +450,5 @@ const UI = (() => {
     try { return await job(); } finally { clearTimeout(t); if (el) el.remove(); }
   }
 
-  return { $, $$, h, iconEl, wrapName, esc, clamp, round, toast, openMenu, closeMenu, menuOpen, askText, dialog, Thumbs, DragPic, pathToUrl, relTime, mount, hideTip, loader, withLoader, helpTip };
+  return { confirm, settingsSoon, colourName, $, $$, h, iconEl, wrapName, esc, clamp, round, toast, openMenu, closeMenu, menuOpen, askText, dialog, Thumbs, DragPic, pathToUrl, relTime, mount, hideTip, loader, withLoader, helpTip };
 })();

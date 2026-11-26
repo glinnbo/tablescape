@@ -1160,6 +1160,54 @@ const FX = (() => {
 
   // ---------- Beta 2: helpers for the new painted areas ----------
   // points along the painted strokes, about step × brush radius apart: [x, y, r]
+  // C15: the webs of a Webs area (orbs and tangles), made once per shape of the area; drawn each frame
+  const webCache = new Map();
+  function webShapes(fx, s) {
+    const key = `${fx.id}|${strokeSig(fx)}|${fx.density ?? 1}`;
+    const hit = lruGet(webCache, key);
+    if (hit) return hit;
+    const dens = Math.min(3, Math.max(0.3, fx.density ?? 1));
+    const out = samples(fx, 0.9).map(([x, y, r], i) => {
+      const k = h(s + i * 2.3); const ph = h(s + i * 4.1) * TAU;
+      const loose = []; const nl = Math.floor(h(s + i * 6.7) * 3);
+      for (let q = 0; q < nl; q++) { const a = h(s + i * 8.3 + q) * TAU; const d = r * (0.6 + 0.3 * h(s + i * 9.1 + q)); loose.push([x + Math.cos(a) * d, y + Math.sin(a) * d, r * (0.25 + 0.3 * h(s + i * 10.3 + q)), a]); }
+      const spider = h(s + i * 12.7) < 0.35;
+      if (h(s + i * 1.9) < 0.4) {
+        const R = r * (0.55 + 0.4 * h(s + i * 3.1));
+        const cx = x + (h(s + i * 5.3) - 0.5) * r * 0.5; const cy = y + (h(s + i * 7.1) - 0.5) * r * 0.5;
+        const ns = 9 + Math.floor(h(s + i * 9.7) * 5);
+        const ang = []; for (let q = 0; q < ns; q++) ang.push(((q + (h(s + i * 11 + q) - 0.5) * 0.5) / ns) * TAU);
+        const len = ang.map((_, q) => R * (0.75 + 0.35 * h(s + i * 13 + q)));
+        return { kind: 'orb', cx, cy, R, ns, ang, len, turns: Math.round(6 * dens), ph, k, loose, spider, home: Math.floor(h(s + i * 14.9) * ns), sx: x, sy: y, sr: r }; // (sx, sy, sr: the dab of the brush this web hangs in, XA8)
+      }
+      const nst = Math.round((4 + 5 * h(s + i * 15.1)) * dens); const strands = [];
+      for (let q = 0; q < nst; q++) {
+        const a1 = h(s + i * 17 + q) * TAU; const a2 = a1 + Math.PI + (h(s + i * 19 + q) - 0.5) * 1.6;
+        const d1 = r * (0.3 + 0.9 * h(s + i * 21 + q)); const d2 = r * (0.3 + 0.9 * h(s + i * 23 + q));
+        strands.push([x + Math.cos(a1) * d1, y + Math.sin(a1) * d1, x + Math.cos(a2) * d2, y + Math.sin(a2) * d2, (h(s + i * 25 + q) - 0.5) * r * 0.35, h(s + i * 27 + q)]);
+      }
+      return { kind: 'tangle', x, y, r, R: r, strands, ph, k, loose, spider };
+    });
+    return lruSet(webCache, key, out, 24);
+  }
+  // XA8 (Glinn, 26 Nov 2026: the spiders popped in and out). An orb web's spider walks between the hub and its hiding
+  // place at the rim, on one of the spokes. A spoke can end outside what was painted (a web is up to 1.3 dabs wide),
+  // and the web is cut to the painted area: there the spider sat unseen, and came and went at the edge. Now its
+  // hiding place is on its spoke, but no further out than the dab of the brush the web hangs in (less the area's
+  // soft edge). And it turns round over a moment at each end of its walk; it used to flip at once.
+  // cx, cy: the hub as the wind has moved it. Gives where it is, which way it looks, and its hiding place
+  function orbSpider(wb, tt, cx = wb.cx, cy = wb.cy) {
+    const per = 26 + 14 * wb.k; const u = (((tt + wb.ph * 7) % per) + per) % per / per;
+    const walk = u < 0.18 ? u / 0.18 : u < 0.62 ? 1 : u < 0.8 ? 1 - (u - 0.62) / 0.18 : 0; // 0: at its hiding place, 1: on the hub
+    let hx = wb.cx + Math.cos(wb.ang[wb.home]) * wb.len[wb.home]; let hy = wb.cy + Math.sin(wb.ang[wb.home]) * wb.len[wb.home];
+    if (wb.sr != null) {
+      const lim = Math.max(0, wb.sr - 0.35); const d = Math.hypot(hx - wb.sx, hy - wb.sy);
+      if (d > lim) { hx = wb.sx + ((hx - wb.sx) * lim) / (d || 1); hy = wb.sy + ((hy - wb.sy) * lim) / (d || 1); }
+    }
+    const sm = (v) => v * v * (3 - 2 * v);
+    const turn = u < 0.58 ? 0 : u < 0.62 ? sm((u - 0.58) / 0.04) : u < 0.96 ? 1 : 1 + sm((u - 0.96) / 0.04); // (half a turn on the hub, the other half at home)
+    return { x: hx + (cx - hx) * walk, y: hy + (cy - hy) * walk, a: Math.atan2(cy - hy, cx - hx) + Math.PI * turn, hx, hy, walk };
+  }
   function samples(fx, step = 0.5) {
     const out = []; const S = fx.strokes || []; const later = cutsAfter(S);
     S.forEach((st, si) => {
@@ -1721,64 +1769,106 @@ const FX = (() => {
         }
         break;
       }
-      case 'web': { // strands strung across the area (drawn once), a little sway, dew glinting on them
+      case 'web': { // C15 (Glinn: more and better movement): webs strung across the area, each one alive on its own
+        // Each web breathes (the orb sags and fills out, the strands of a tangle swing at their own pace); the map's
+        // wind bellies them out its way and gusts make them flutter; loose threads drift off their edges; now and then
+        // a spider walks to the middle of an orb or lets itself down on a thread and climbs back. The shapes are made
+        // once (webShapes), drawn each frame.
         const col = C || '#e9ecf2';
-        const mask = regionMask(ctx, fx, 0.25);
-        const F = flat(ctx, fx, 'web', 0.4, (g, m) => {
-          const sp = samples(fx, 0.9);
-          const px1 = 1 / m.a;
-          g.strokeStyle = rgba(col, Math.min(1, 0.55 * I));
-          g.lineWidth = Math.max(px1, 0.009);
-          g.beginPath();
-          const dens = Math.min(3, Math.max(0.3, fx.density ?? 1));
-          sp.forEach(([x, y, r], i) => {
-            if (h(s + i * 1.9) < 0.4) {
-              // an orb web: spokes and a spiral that sags between them
-              const R = r * (0.55 + 0.4 * h(s + i * 3.1));
-              const cx = x + (h(s + i * 5.3) - 0.5) * r * 0.5; const cy = y + (h(s + i * 7.1) - 0.5) * r * 0.5;
-              const ns = 9 + Math.floor(h(s + i * 9.7) * 5);
-              const ang = []; for (let k = 0; k < ns; k++) ang.push(((k + (h(s + i * 11 + k) - 0.5) * 0.5) / ns) * TAU);
-              const len = ang.map((_, k) => R * (0.75 + 0.35 * h(s + i * 13 + k)));
-              ang.forEach((a, k) => { g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * len[k], cy + Math.sin(a) * len[k]); });
-              const turns = Math.round(6 * dens);
-              for (let q = 1; q <= turns; q++) {
-                const f = q / (turns + 1);
-                for (let k = 0; k <= ns; k++) {
-                  const a = ang[k % ns]; const d = len[k % ns] * f;
-                  const x1 = cx + Math.cos(a) * d; const y1 = cy + Math.sin(a) * d;
-                  if (k === 0) { g.moveTo(x1, y1); continue; }
-                  const pa = ang[(k - 1) % ns]; const pd = len[(k - 1) % ns] * f;
-                  const mx = cx + Math.cos((a + pa + (k === ns ? TAU : 0)) / 2) * (d + pd) * 0.42; const my = cy + Math.sin((a + pa + (k === ns ? TAU : 0)) / 2) * (d + pd) * 0.42;
-                  g.quadraticCurveTo(mx, my, x1, y1);
-                }
-              }
-            } else {
-              // a tangle: sagging strands between nearby points
-              const k = Math.round((4 + 5 * h(s + i * 15.1)) * dens);
-              for (let q = 0; q < k; q++) {
-                const a1 = h(s + i * 17 + q) * TAU; const a2 = a1 + Math.PI + (h(s + i * 19 + q) - 0.5) * 1.6;
-                const d1 = r * (0.3 + 0.9 * h(s + i * 21 + q)); const d2 = r * (0.3 + 0.9 * h(s + i * 23 + q));
-                const x1 = x + Math.cos(a1) * d1; const y1 = y + Math.sin(a1) * d1; const x2 = x + Math.cos(a2) * d2; const y2 = y + Math.sin(a2) * d2;
-                const sag = (h(s + i * 25 + q) - 0.5) * r * 0.35;
-                const nx = -(y2 - y1); const ny = x2 - x1; const nl = Math.hypot(nx, ny) || 1;
-                g.moveTo(x1, y1); g.quadraticCurveTo((x1 + x2) / 2 + (nx / nl) * sag, (y1 + y2) / 2 + (ny / nl) * sag, x2, y2);
+        const m = ctx.getTransform(); const W = ctx.canvas.width; const H = ctx.canvas.height;
+        const B = regionBox(ctx, fx, 0.6);
+        if (!B) break;
+        const webs = webShapes(fx, s);
+        const sc = scratch(23, W, H, B); const g = sc.g;
+        g.setTransform(m);
+        g.lineCap = 'round'; g.lineJoin = 'round';
+        const px1 = 1 / m.a;
+        const [wx, wy, ws0] = typeof Creatures === 'object' && Creatures.windVec ? Creatures.windVec(s) : [0.6, 0.8, 0.6];
+        const ws = Math.min(2, ws0);
+        g.strokeStyle = rgba(col, Math.min(1, 0.55 * I));
+        g.lineWidth = Math.max(px1, 0.009);
+        g.beginPath();
+        const dew = [];
+        webs.forEach((wb, i) => {
+          const ph = wb.ph; const tt = t; // (WI1: t is the effect's own clock and has its Speed in it. It was multiplied by Speed once more: Speed counted twice, and every step of the slider threw the webs and their spiders to another moment)
+          const breath = Math.sin(tt * (0.35 + 0.25 * wb.k) + ph); // -1..1
+          const gust = Math.sin(tt * (2.7 + wb.k) + ph * 3) * Math.sin(tt * 0.41 + ph); // flutter now and then
+          const bel = wb.R * (0.05 * ws * (0.7 + 0.3 * Math.sin(tt * 0.6 + ph)) + 0.03 * breath) + wb.R * 0.02 * ws * gust;
+          const bx = wx * bel; const by = wy * bel;
+          if (wb.kind === 'orb') {
+            const cx = wb.cx + bx; const cy = wb.cy + by;
+            const ends = wb.ang.map((a2, k) => [wb.cx + Math.cos(a2) * wb.len[k], wb.cy + Math.sin(a2) * wb.len[k]]); // tied to the walls: they stay
+            ends.forEach(([ex, ey]) => { g.moveTo(cx, cy); g.lineTo(ex, ey); });
+            const sag = 0.42 * (1 + 0.12 * breath);
+            for (let q = 1; q <= wb.turns; q++) {
+              const f = q / (wb.turns + 1);
+              const P = ends.map(([ex, ey]) => [cx + (ex - cx) * f, cy + (ey - cy) * f]);
+              for (let k = 0; k <= wb.ns; k++) {
+                const [x1, y1] = P[k % wb.ns];
+                if (k === 0) { g.moveTo(x1, y1); continue; }
+                const [x0, y0] = P[(k - 1) % wb.ns];
+                const mx = (x0 + x1) / 2; const my = (y0 + y1) / 2;
+                const dx = mx - cx; const dy = my - cy; const k2 = sag / 0.5; // the spiral sags in towards the hub
+                g.quadraticCurveTo(cx + dx * k2 * 0.98 + bx * 0.2, cy + dy * k2 * 0.98 + by * 0.2, x1, y1);
+                if (q === Math.ceil(wb.turns / 2) && (k & 1)) dew.push([x1, y1, i * 31 + k]);
               }
             }
-          });
-          g.stroke();
-          // a faint grey haze where the strands are thickest
-          for (let i = 0; i < sp.length; i += 2) { const [x, y, r] = sp[i]; dot(g, sprite(col), x, y, r * 0.8, 0.05 * I); }
-          cutTo(g, mask, F0(ctx, fx));
+            // a spider: to the hub and back to its hiding place near the rim (orbSpider, XA8)
+            if (wb.spider) { const sp = orbSpider(wb, tt, cx, cy); dew.push([sp.x, sp.y, -1, sp.a, Math.max(0.09, wb.R * 0.1) * (fx.critter ?? 1)]); }
+          } else {
+            wb.strands.forEach(([x1, y1, x2, y2, sag0, k3], q) => {
+              const sw = Math.sin(tt * (0.5 + 0.5 * k3) + ph + q) * 0.5 + 0.2 * ws * gust;
+              const sag = sag0 * (1 + sw);
+              const nx = -(y2 - y1); const ny = x2 - x1; const nl = Math.hypot(nx, ny) || 1;
+              const mx = (x1 + x2) / 2 + (nx / nl) * sag + bx; const my = (y1 + y2) / 2 + (ny / nl) * sag + by;
+              g.moveTo(x1, y1); g.quadraticCurveTo(mx, my, x2, y2);
+              if (q % 3 === 0) dew.push([(x1 + 2 * mx + x2) / 4, (y1 + 2 * my + y2) / 4, i * 29 + q]);
+            });
+            // a spider lets itself down on its thread from the middle of the tangle and climbs back up
+            if (wb.spider) {
+              const per = 22 + 12 * wb.k; const u = (((tt + ph * 5) % per) + per) % per / per;
+              const drop = u < 0.3 ? 0 : u < 0.45 ? (u - 0.3) / 0.15 : u < 0.75 ? 1 : u < 0.95 ? 1 - (u - 0.75) / 0.2 : 0;
+              const len = wb.r * 0.55 * drop; const sway = Math.sin(tt * 1.3 + ph) * wb.r * 0.05 * drop;
+              const ex = wb.x + sway + wx * len * 0.15 * ws; const ey = wb.y + len;
+              if (drop > 0.02) { g.moveTo(wb.x, wb.y); g.lineTo(ex, ey); }
+              dew.push([ex, ey, -1, Math.PI / 2, Math.max(0.09, wb.r * 0.1) * (fx.critter ?? 1)]);
+            }
+          }
+          // loose threads drifting off its edge with the wind
+          for (let q = 0; q < wb.loose.length; q++) {
+            const [lx, ly, ll, la] = wb.loose[q];
+            const a3 = Math.atan2(wy, wx) * 0.6 + la * 0.4 + Math.sin(tt * (0.9 + q * 0.3) + ph + q) * 0.5;
+            const L = ll * (0.8 + 0.2 * Math.sin(tt * 0.7 + q));
+            g.moveTo(lx, ly);
+            g.quadraticCurveTo(lx + Math.cos(a3 - 0.4) * L * 0.5, ly + Math.sin(a3 - 0.4) * L * 0.5, lx + Math.cos(a3) * L, ly + Math.sin(a3) * L);
+          }
         });
-        if (!F) break;
-        const m = ctx.getTransform();
-        putFlat(ctx, F, 'source-over', 1, Math.sin(t * 0.7 + s) * 0.012 * m.a, Math.cos(t * 0.53 + s) * 0.009 * m.a);
-        ctx.globalCompositeOperation = 'lighter';
-        for (let i = 0; i < Math.min(50, n); i++) {
-          const [px, py, r] = at(i, 51);
-          const sh = Math.max(0, Math.sin(t * (0.5 + h(s + i * 3) * 0.6) + h(s + i * 7) * TAU)) ** 12;
-          dot(ctx, sprite('#ffffff', 0.5), px, py, r * 0.025, 0.8 * sh * I);
+        g.stroke();
+        // dew catching the light along the strands, and the spiders
+        g.globalCompositeOperation = 'lighter';
+        for (const [px, py, sd] of dew) {
+          if (sd < 0) continue;
+          const sh = Math.max(0, Math.sin(t * (0.45 + h(s + sd * 3) * 0.6) + h(s + sd * 7) * TAU)) ** 10;
+          if (sh > 0.02) dot(g, sprite('#ffffff', 0.5), px, py, 0.035, 0.85 * sh * I);
         }
+        g.globalCompositeOperation = 'source-over';
+        for (const d of dew) {
+          if (d[2] >= 0) continue;
+          const [px, py, , ang, sz] = d; const S2 = Math.max(0.05, sz);
+          g.save(); g.translate(px, py); g.rotate(ang);
+          g.strokeStyle = 'rgba(20,16,14,0.9)'; g.lineWidth = Math.max(px1, S2 * 0.18);
+          g.beginPath();
+          for (const side of [-1, 1]) for (let lg = 0; lg < 4; lg++) { // eight legs, bent
+            const a4 = (-0.9 + lg * 0.55) * side; const kx = Math.cos(a4) * S2 * 0.9; const ky = Math.sin(a4) * S2 * 0.9;
+            g.moveTo(0, 0); g.quadraticCurveTo(kx * 0.7, ky * 0.7 + side * S2 * 0.25, kx * 1.5, ky * 1.5 + side * S2 * 0.15);
+          }
+          g.stroke();
+          g.fillStyle = '#1a1412';
+          g.beginPath(); g.ellipse(-S2 * 0.35, 0, S2 * 0.55, S2 * 0.42, 0, 0, TAU); g.fill(); // its body
+          g.beginPath(); g.ellipse(S2 * 0.32, 0, S2 * 0.28, S2 * 0.24, 0, 0, TAU); g.fill(); // its head
+          g.restore();
+        }
+        stamp(ctx, sc, regionMask(ctx, fx, 0.25));
         break;
       }
       case 'glow': { // light from below: a soft glow that breathes, drifting brighter patches, motes
@@ -2190,7 +2280,7 @@ const FX = (() => {
     ctx.fillRect(-1, -1, W + 2, H + 2);
     // the bolt flickers twice and lingers a moment, big enough to read across the table
     const ba = age < 0.1 ? 1 : age < 0.16 ? 0.35 : age < 0.26 ? 1 : Math.max(0, 1 - (age - 0.26) / 0.4);
-    if (ba > 0) bolt(ctx, W, H, seed, ba, Math.max(1.6, Math.min(W, H) / 9), col);
+    if (ba > 0) bolt(ctx, W, H, seed, ba, Math.max(2.2, Math.min(W, H) / 6), col); // (I8: bigger, across much of the table; was / 9)
   }
 
   const WDRAW = {
@@ -3053,7 +3143,7 @@ const FX = (() => {
     // Second Builder (second-water-works): the helpers creatures.js draws with
     samples, flowLines, along, heading, regionMask, regionBox, scratch, stamp, patternAt, noiseTile, causticTile, tinted, flowDir, h, count, dot, smoke, centreOf,
     areaOf, // (Beta 3.63: how big a painted area really is)
-    hits, edge, scratchSet, forget, // (Beta 3.64: a click in an area picks it; its outline; the playing picture's own scratch canvases)
+    hits, edge, scratchSet, forget, _webShapes: (fx) => webShapes(fx, seedOf(fx.id)), _orbSpider: orbSpider, /* (for the self-test, XA8) */ swayOf: (id) => swaySrc.get(id) || null, // (swayOf: for the self-test, WI7) // (Beta 3.64: a click in an area picks it; its outline; the playing picture's own scratch canvases)
     layerAlpha, // (second-birds: the Birds layer fades in and out like the others)
     setQuality, emitter, waveOf, ventLevel, region, regionLights, anchor, sway, roof, lightMask, windowIcon, darkness, glow, weather, flashes, strike, weatherOn, spell, ghost, envelope, seedOf, sprite, rgba, mix, skinOf, flowTurn };
 })();

@@ -81,12 +81,12 @@ const LightsPanel = (() => {
       main.append(
         modes,
         h('div', { class: 'rl-bright' },
-          c().slider({ label: 'Brightness', min: 0.05, max: 1, step: 0.05, get: () => L().brightness, set: (x) => act('set', { brightness: x }), fmt: (x) => `${Math.round(x * 100)}%` }),
+          c().slider({ label: 'Brightness', min: 0.05, max: 1, step: 0.05, get: () => L().brightness, set: (x) => brightSoon({ brightness: x }), fmt: (x) => `${Math.round(x * 100)}%` }),
           // 4.5: one press, a little darker or brighter (also on the hotbar and the phone)
           ...[['dim', 'brightness-down', '−20%', 'A little darker: −20 %'], ['bright', 'brightness-up', '+20%', 'A little brighter: +20 % (while the lamps are off: on again at 20 %)']].map(([ref, ic, lab, tip]) =>
             Hotbar.offer(h('button', { class: 'btn small rl-step', dataset: { ref }, 'data-tip': tip, 'aria-label': tip, onclick: () => act('bright.step', { by: ref === 'dim' ? -0.2 : 0.2 }) }, iconEl(ic), h('span', {}, lab)),
               { kind: 'lights', ref, label: ref === 'dim' ? 'Lights −20%' : 'Lights +20%', icon: ic }))),
-        c().slider({ label: 'Effects', min: 0, max: 1, step: 0.05, get: () => L().fxStrength, set: (x) => act('set', { fxStrength: x }), fmt: (x) => (x < 0.02 ? 'Off' : `${Math.round(x * 100)}%`) }),
+        c().slider({ label: 'Effects', min: 0, max: 1, step: 0.05, get: () => L().fxStrength, set: (x) => fxSoon({ fxStrength: x }), fmt: (x) => (x < 0.02 ? 'Off' : `${Math.round(x * 100)}%`) }),
         flashNote,
         h('div', { class: 'ctl-label' }, 'Lamp scenes'), scenes,
         h('details', { class: 'rl-connect' }, h('summary', {}, 'Lamps and groups'), groups),
@@ -100,6 +100,9 @@ const LightsPanel = (() => {
     // Lamps set by hand stay so until "Back to the game" or until the window closes.
     // =====================================================================
     const later = (fn, ms = 120) => { let t = 0; let last = null; return (...a) => { last = a; if (t) return; t = setTimeout(() => { t = 0; fn(...last); }, ms); }; };
+    // (UI audit VI2: the panel's two sliders called the lamps on every step of a drag; now at most eight times a second, as fine-tuning does)
+    const brightSoon = later((p) => act('set', p));
+    const fxSoon = later((p) => act('set', p));
     let tuneTab = 'lamps';
     function openTune() {
       const body = h('div', { class: 'rl-tune' });

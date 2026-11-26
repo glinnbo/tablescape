@@ -1,8 +1,8 @@
 {
   "name": "tablescape",
   "productName": "Tablescape",
-  "version": "3.67.0",
-  "releaseLabel": "Beta 3.67",
+  "version": "3.68.0",
+  "releaseLabel": "Beta 3.68",
   "description": "Local tabletop player for TV and projector tables",
   "main": "src/main.js",
   "author": "glinnbo",

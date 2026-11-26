@@ -206,7 +206,7 @@ const LightsSetup = (() => {
               v.cloud.msg ? hint(v.cloud.msg) : null)),
           card('router', 'IKEA (TRÅDFRI gateway)', v.ikea.paired ? statusWord(v.ikea) : null,
             ...(v.ikea.paired
-              ? [hint(`Paired with ${v.ikea.host}. ${v.ikea.msg || ''}`), h('div', { class: 'ctl-row' }, c().btn('Forget the gateway', 'trash', () => act('ikea.forget'), { kind: 'small ghost' }))]
+              ? [hint(`Paired with ${v.ikea.host}. ${v.ikea.msg || ''}`), h('div', { class: 'ctl-row' }, c().btn('Forget the gateway', 'trash', async () => { if (await UI.confirm('Forget the gateway?', 'To pair it again you need the security code from the label under it.', { ok: 'Forget it', cancel: 'Keep it', icon: 'trash' })) act('ikea.forget'); }, { kind: 'small ghost' }))]
               : [h('ol', { class: 'ls-how' }, h('li', {}, 'Find the gateway (or type its address from the IKEA app or your router).'), h('li', {}, 'Type the security code from the label under it, then Pair.')),
                 h('div', { class: 'ctl-row' }, host, c().btn('Find', 'search', async () => { const r = await window.ts.lights('ikea.find'); if (r && r.ok) host.value = r.host; else toast((r && r.error) || 'No gateway found', { ms: 4000 }); }, { kind: 'small' })),
                 h('div', { class: 'ctl-row' }, code, c().btn('Pair', 'link', async () => { if (!host.value.trim() || !code.value.trim()) { toast('The address and the security code, please'); return; } const r = await act('ikea.pair', { host: host.value, code: code.value }); if (r && r.ok) toast('Gateway paired'); }, { kind: 'small primary' })),
@@ -333,7 +333,7 @@ const LightsSetup = (() => {
         hint('The lamps show the scene as you make it. Untouched lamps keep what they had.'),
         h('div', { class: 'modal-actions' }, h('span', { class: 'grow' }), h('button', { class: 'btn primary', onclick: save }, iconEl('check'), sc ? 'Save the scene' : 'Save as a scene')));
       const timer = setInterval(() => { if (!wrap.isConnected) { clearInterval(timer); return; } if (!plan.isDragging()) plan.render(V()); }, 700);
-      const dlg = dialog(sc ? `Lamp scene: ${sc.name}` : 'New lamp scene', wrap, { wide: true, onClose: () => { clearInterval(timer); window.ts.lights('release', {}); } });
+      const dlg = dialog(sc ? `Lamp scene: ${sc.name}` : 'New lamp scene', wrap, { wide: true, keep: () => true, onClose: () => { clearInterval(timer); window.ts.lights('release', {}); } }); // (UI audit VH7: a click beside it no longer throws the scene away; its ✕ and Esc still close it)
       dlg.el.classList.add('ls-dlg');
       plan.render(V());
       drawLamp();

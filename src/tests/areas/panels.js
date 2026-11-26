@@ -1,7 +1,7 @@
 // The Toolbox's panels: each one opens as its own small window, with content, and closes again
 'use strict';
 
-const PANELS = [['init', 'Initiative'], ['chars', 'Character cards'], ['timer', 'Countdown'], ['dice', 'Dice'], ['moments', 'Screen effects'], ['snaps', 'Snapshots'], ['sound', 'Soundboard'],
+const PANELS = [['init', 'Initiative'], ['chars', 'Character cards'], ['timer', 'Countdown'], ['dice', 'Dice'], ['moments', 'Screen effects'], ['snaps', 'Snapshots'], ['triggers', 'Triggers'], ['sound', 'Soundboard'],
   ['spotify', 'Spotify'], ['handouts', 'Handouts'], ['atlas', 'Cartographer'], ['notes', 'Session log'], ['break', 'Break'], ['lights', 'Room lights'], ['players', 'Player phones'], ['remote', 'Gamemaster remote']];
 
 module.exports = (area) => {
@@ -107,5 +107,31 @@ module.exports = (area) => {
     t.eq(await t.popTitle(), 'Marks', 'its panel');
     t.eq(await t.g(`[Play.ui.mark.mode, Play.ui.mark.me]`), ['label', true], 'a label only you see');
     await t.g(`Play.ui.mark.me = false`);
+  });
+
+  // Speed 5 (Open Point WE1): the session log goes to the GM screen when it changed, not with every state
+  area.quick('WE1: the session log travels once: later states say it is as it was, the screen keeps its text; a change and a state the screen asks for bring it again', async (t) => {
+    const gm = t.gm(); const real = gm.webContents.send.bind(gm.webContents); const seen = [];
+    gm.webContents.send = (ch, ...a) => { if (ch === 'gm:state' && a[0] && a[0].campaign) seen.push({ same: !!a[0].campaign.notes.same, len: (a[0].campaign.notes.text || '').length, has: 'text' in a[0].campaign.notes }); return real(ch, ...a); };
+    const text0 = (t.store.cur.meta.notes || {}).text || '';
+    const mine = 'A line of the session log. '.repeat(400); // (about 11,000 characters)
+    const here = () => t.g('Play.state().campaign.notes.text');
+    const nudge = async () => { const m = t.E(); t.handle('grid.update', { mapId: m.id, show: !m.grid.show }); await t.settle(); t.handle('grid.update', { mapId: m.id, show: !m.grid.show }); await t.settle(); };
+    try {
+      t.handle('notes.set', { text: mine }); await t.settle();
+      t.eq(await here(), mine, 'the log on the GM screen');
+      seen.length = 0;
+      await nudge();
+      t.ok(seen.length >= 2 && seen.every((x) => x.same && !x.has), 'states after that: each says the log is as it was, none carries it', seen);
+      t.eq(await here(), mine, 'and the screen still has every character');
+      t.handle('notes.set', { text: mine + 'One more line.' }); await t.settle();
+      t.ok(seen.some((x) => !x.same && x.len === mine.length + 14), 'a line added: the log comes once more', seen.slice(-2));
+      t.eq(await here(), mine + 'One more line.', 'and the screen has it');
+      const pulled = await t.g('window.ts.state().then((s) => [!!s.campaign.notes.same, s.campaign.notes.text.length])');
+      t.eq(pulled, [false, mine.length + 14], 'a state the screen asks for itself brings the log whole');
+    } finally {
+      gm.webContents.send = real;
+      t.handle('notes.set', { text: text0 }); await t.settle();
+    }
   });
 };

@@ -107,6 +107,7 @@
     for (const s of w) {
       h = (h * 31 + Math.round(s.x1 * 97 + s.y1 * 89 + s.x2 * 83 + s.y2 * 79)) | 0;
       h = (h * 7 + (s.door || 0) * 3 + (s.open ? 1 : 0) + (s.kind === 'window' ? (s.shut ? 17 : 11) : s.kind === 'invisible' ? 13 : 0)) | 0;
+      if (s.bk) h = (h * 13 + Math.round(s.bk[0] * 53 + s.bk[1] * 59)) | 0;
     }
     return `${w.length}:${h}`;
   }
@@ -186,14 +187,110 @@
     return raw ? pts : simplify(pts);
   }
 
+  // Beta 3.68: a light on a wall (a wall torch, a wall lantern) lights only its own side of that wall. The wall's line,
+  // drawn on far past its ends, stops its light: doors and windows in the same wall let none of it through (a torch
+  // beside a doorway lit the whole far side through the thin wall line). [x1, y1, x2, y2] or null.
+  function backOf(map, f) {
+    if (!f || !f.holder || !f.wall || f.attachTo) return null;
+    const w = (map.walls || []).find((s) => s.id === f.wall);
+    if (!w) return null;
+    const lx = w.x2 - w.x1; const ly = w.y2 - w.y1; const L = Math.hypot(lx, ly);
+    if (L < 1e-9) return null;
+    const ux = lx / L; const uy = ly / L; const nx = -uy; const ny = ux;
+    const s = (f.x - w.x1) * nx + (f.y - w.y1) * ny; // how far in front of the wall's line, signed
+    let o = 0;
+    if (Math.abs(s) < 2e-3) { // right on the line (an old map): its side from the way it is turned (its bracket meets the wall)
+      const a = ((f.rotation || 0) * Math.PI) / 180;
+      const k = -Math.sin(a) * nx + Math.cos(a) * ny;
+      if (Math.abs(k) < 1e-6) return null;
+      o = s - Math.sign(k) * 2e-3;
+    }
+    const fx = f.x - nx * (s - o); const fy = f.y - ny * (s - o);
+    return [fx - ux * FAR, fy - uy * FAR, fx + ux * FAR, fy + uy * FAR];
+  }
+
   // cached polygons (the same light is asked for every frame)
   const polyCache = new Map();
-  function poly(map, x, y, R, sig = wallSig(map)) {
-    const key = `${map.id}|${sig}|${x.toFixed(3)}|${y.toFixed(3)}|${R ? R.toFixed(3) : 0}`;
+  // ---------- what is built behind a wall in sight (Glinn, 26 Nov 2026) ----------
+  // A cave's rock, a wall's top: the fog covered them, since sight ends at the wall along the floor's edge. The walls
+  // stay where they are and stop sight as before. But where the shape of what is seen ends at a wall, the shape is
+  // widened past that wall: as deep as the map says (vision.rock, squares; 2.5 when not set; 0: not at all), and never
+  // deeper than what is built there (the wall's bk, measured when the drawing is painted: Oldschool, sightWalls). So
+  // the rock behind a stretch of wall shows when that stretch is seen, a corner still hides what is behind it, and no
+  // floor is uncovered that is not seen. Light is widened the same way, or the rock would be uncovered and dark.
+  // Only walls of a drawn map have a bk: on a picture map nothing changes.
+  const ROCK = 2.5;
+  const rockOf = (map) => { const v = map && map.vision ? map.vision.rock : null; const d = v == null ? ROCK : Number(v) || 0; return d > 0 ? d * ((map.grid && map.grid.size) || 1) : 0; };
+  const backCache = new Map(); // sig → the walls with something built behind them, in a grid of cells to find them by place
+  function backs(map, sig) {
+    let B = backCache.get(sig);
+    if (B) return B;
+    const g = (map.grid && map.grid.size) || 1; const cell = 2 * g; const cells = new Map(); const list = [];
+    for (const w of map.walls || []) {
+      if (!w.bk || w.kind || w.door) continue; // (what stops sight and has something behind it)
+      const i = list.length; list.push(w);
+      const x0 = Math.floor(Math.min(w.x1, w.x2) / cell - 0.05); const x1 = Math.floor(Math.max(w.x1, w.x2) / cell + 0.05);
+      const y0 = Math.floor(Math.min(w.y1, w.y2) / cell - 0.05); const y1 = Math.floor(Math.max(w.y1, w.y2) / cell + 0.05);
+      for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) { const k = cx * 100003 + cy; let l = cells.get(k); if (!l) cells.set(k, (l = [])); l.push(i); }
+    }
+    B = { list, cells, cell, g };
+    if (backCache.size > 24) backCache.clear();
+    backCache.set(sig, B);
+    return B;
+  }
+  function widen(map, pts, ex, ey, sig) {
+    const D = rockOf(map); const n = pts.length / 2;
+    if (!(D > 0) || n < 3) return pts;
+    const B = backs(map, sig); if (!B.list.length) return pts;
+    const { list, cells, cell, g } = B; const tol = 0.03 * g;
+    // each edge of the shape: does it lie on a wall with something behind it? Then: which way is behind, and how deep
+    const E = new Array(n).fill(null); let any = false;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n; const ax = pts[i * 2]; const ay = pts[i * 2 + 1]; const bx = pts[j * 2]; const by = pts[j * 2 + 1];
+      const L = Math.hypot(bx - ax, by - ay); if (L < 1e-6) continue;
+      const mx = (ax + bx) / 2; const my = (ay + by) / 2;
+      const near = cells.get(Math.floor(mx / cell) * 100003 + Math.floor(my / cell)); if (!near) continue;
+      for (const wi of near) {
+        const w = list[wi];
+        if (segDist(mx, my, w.x1, w.y1, w.x2, w.y2) > tol) continue;
+        const wl = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1;
+        if (Math.abs((bx - ax) * (w.y2 - w.y1) - (by - ay) * (w.x2 - w.x1)) / (L * wl) > 0.06) continue; // (it crosses the wall's line, it does not run along it)
+        let nx = -(w.y2 - w.y1) / wl; let ny = (w.x2 - w.x1) / wl; let side = 0;
+        if (nx * (mx - ex) + ny * (my - ey) < 0) { nx = -nx; ny = -ny; side = 1; } // (behind: away from the eye)
+        const dep = Math.min(D, w.bk[side]);
+        if (dep > 0.05 * g) { E[i] = [nx, ny, dep]; any = true; }
+        break;
+      }
+    }
+    if (!any) return pts;
+    // (a sliver of an edge between two stretches of wall, as the rays leave at a wall's end: it belongs to the run)
+    for (let i = 0; i < n; i++) {
+      if (E[i]) continue;
+      const j = (i + 1) % n; const p = E[(i - 1 + n) % n];
+      if (p && E[j] && Math.hypot(pts[j * 2] - pts[i * 2], pts[j * 2 + 1] - pts[i * 2 + 1]) < 0.08 * g) E[i] = p;
+    }
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const e = E[i]; const p = E[(i - 1 + n) % n]; const ax = pts[i * 2]; const ay = pts[i * 2 + 1];
+      if (!e && !p) { out.push(ax, ay); continue; }
+      if (e && !p) { out.push(ax, ay, ax + e[0] * e[2], ay + e[1] * e[2]); continue; } // out behind the wall
+      if (!e && p) { out.push(ax + p[0] * p[2], ay + p[1] * p[2], ax, ay); continue; } // and back to the shape
+      out.push(ax + p[0] * p[2], ay + p[1] * p[2]);
+      const sx = p[0] + e[0]; const sy = p[1] + e[1]; const sl = Math.hypot(sx, sy);
+      if (sl > 0.2 && sl < 1.98) { const d = Math.min(p[2], e[2]); out.push(ax + (sx / sl) * d, ay + (sy / sl) * d); } // (round the bend, so no notch is left between two stretches)
+      out.push(ax + e[0] * e[2], ay + e[1] * e[2]);
+    }
+    return out;
+  }
+  function poly(map, x, y, R, sig = wallSig(map), back = null) {
+    const key = `${map.id}|${sig}|${rockOf(map)}|${x.toFixed(3)}|${y.toFixed(3)}|${R ? R.toFixed(3) : 0}${back ? `|${back.map((v) => v.toFixed(3)).join(',')}` : ''}`;
     let p = polyCache.get(key);
     if (p) return p;
     const box = R > 0 ? null : boundsFor(map, x, y);
-    p = visibility(blockers(map, sig), x, y, R, box);
+    let segs = blockers(map, sig);
+    if (back) { const s = new Float64Array(segs.length + 4); s.set(segs); s.set(back, segs.length); segs = s; }
+    p = visibility(segs, x, y, R, box);
+    p = widen(map, p, x, y, sig);
     if (polyCache.size > 400) polyCache.clear();
     polyCache.set(key, p);
     return p;
@@ -232,7 +329,7 @@
     const idle = markersIdle(map);
     return (map.fx || []).filter((f) => (f.kind === 'light' || (f.kind === 'emitter' && f.bright > 0)) && f.lit !== false && (gm || !offTable(map, f)) && !idleMarker(f, idle)).map((f) => { // (Beta 3.54: not one that is put out)
       const p = posOf(map, f);
-      return { id: f.id, x: p.x, y: p.y, D: Math.max(0.05, ftToIn(map, Math.max(f.dim || 0, f.bright || 0))) };
+      return { id: f.id, x: p.x, y: p.y, D: Math.max(0.05, ftToIn(map, Math.max(f.dim || 0, f.bright || 0))), back: backOf(map, f) };
     });
   }
   const circleCache = new Map();
@@ -250,7 +347,7 @@
   // On a dark map the party sees what its own light, its darkvision and the other lights reach.
   function sight(map, eye, sig, walled = on(map)) {
     if (walled && !sig) sig = wallSig(map);
-    const reach = (x, y, R) => (walled ? poly(map, x, y, R, sig) : circle(x, y, R));
+    const reach = (x, y, R, back) => (walled ? poly(map, x, y, R, sig, back) : circle(x, y, R));
     const pts = walled ? poly(map, eye.x, eye.y, eye.V, sig) : circle(eye.x, eye.y, eye.V || ftToIn(map, OPEN_FT));
     if (!isDark(map)) return { pts, lit: null };
     const box = bboxOf(pts);
@@ -260,7 +357,7 @@
     for (const L of lights(map, false)) {
       if (L.id === eye.id) continue;
       if (!overlap(box, [L.x - L.D, L.y - L.D, L.x + L.D, L.y + L.D])) continue;
-      lit.push(reach(L.x, L.y, L.D));
+      lit.push(reach(L.x, L.y, L.D, L.back));
     }
     return { pts, lit };
   }
@@ -271,10 +368,10 @@
     const sig = walled ? wallSig(map) : 'open';
     return list.map((e) => ({ eye: e, ...sight(map, e, sig, walled) }));
   }
-  // the light of one source, stopped by the walls (null when line of sight is off)
-  function lightPoly(map, x, y, R) {
+  // the light of one source, stopped by the walls (null when line of sight is off); f: the light, for one on a wall
+  function lightPoly(map, x, y, R, f) {
     if (!on(map)) return null;
-    return poly(map, x, y, R);
+    return poly(map, x, y, R, wallSig(map), f ? backOf(map, f) : null);
   }
 
   // ---------- walls for editing ----------
@@ -461,7 +558,7 @@
   const api = {
     lightNow, room, inRings,
     visibility, poly, sight, sights, eyes, lights, lightPoly, offTable, blockers, movers, wallSig, wallAt, boundsFor,
-    on, isDark, markersIdle, idleMarker, segDist, raySeg, area, inPoly, bboxOf, simplify, DARK,
+    rockOf, ROCK, widen, on, isDark, markersIdle, idleMarker, segDist, raySeg, area, inPoly, bboxOf, simplify, DARK,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Vision = api;

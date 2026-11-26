@@ -195,7 +195,10 @@ const SpotifyPanel = (() => {
         sel.value = devs.some((d) => d.id === s.device) ? s.device : '';
         devBox.append(
           h('div', { class: 'ctl-row sp-user' }, iconEl('brand-spotify'), h('span', { class: 'grow' }, 'Linked as ', h('b', {}, s.user || 'you')),
-            btn('Unlink', 'unlink', async () => { await call('unlink'); U.connect = false; U.settings = false; toast('Spotify unlinked'); }, { kind: 'small ghost' })),
+            btn('Unlink', 'unlink', async () => { // (UI audit VH5: it asks first; one click unlinked for good)
+              if (!(await UI.confirm('Unlink Spotify?', 'Tablescape no longer plays or pauses Spotify until you link it again.', { ok: 'Unlink', cancel: 'Keep it linked', icon: 'unlink' }))) return;
+              await call('unlink'); U.connect = false; U.settings = false; toast('Spotify unlinked');
+            }, { kind: 'small ghost' })),
           h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Plays on'), h('div', { class: 'ctl-row sp-dev' }, sel,
             h('button', { class: 'icon-btn', 'aria-label': 'Look for Spotify devices', 'data-tip': 'Look again (Spotify open on the laptop, a phone or a speaker)', onclick: () => call('devices') }, iconEl('refresh')))));
         if (!devs.length) devBox.append(h('div', { class: 'ctl-row' }, h('span', { class: 'hint grow' }, 'No Spotify open right now.'), btn('Open Spotify', 'brand-spotify', () => call('open', { what: 'app' }), { kind: 'small' })));

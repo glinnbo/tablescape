@@ -57,13 +57,23 @@ const Play = (() => {
   // Commands
   // =====================================================================
   // N3 (open point): Undo and Redo first end a line of walls or a fog area being drawn (its walls may be what is undone)
-  const cmd = (type, payload) => { if (type === 'history.undo' || type === 'history.redo') endDrafts(); return ts.cmd(type, payload); };
+  // UI audit VA6: what is dragged on the map is one undo step however long the hand rests (`held`: main.js, History.before)
+  let gesture = false;
+  const held = (p) => (gesture && p && p.coalesce ? { ...p, held: true } : p);
+  const cmd = (type, payload) => { if (type === 'history.undo' || type === 'history.redo') endDrafts(); return ts.cmd(type, held(payload)); };
+  // UI audit VA1: the click that closes a wheel, a menu, "Open the door?", the condition picker or a pad's sheet does
+  // nothing else on the map. Noted here (window, capture: before any of them closes itself), read by the map's own press.
+  const CLOSES = '#radial, #menu.on, .door-ask, #cond-pick, #sheet-lines, .pad-sheet, .snap-pop';
+  let closingPress = null; let closedAt = 0; let lastPress = null;
+  let mouseAt = null; // (UI audit VH1: where the mouse is, for "Esc closes the panel under the mouse")
+  window.addEventListener('mousemove', (e) => { mouseAt = { x: e.clientX, y: e.clientY }; }, true);
+  window.addEventListener('pointerdown', (e) => { lastPress = { x: e.clientX, y: e.clientY, t: performance.now() }; closingPress = e.button === 0 && (document.querySelector(CLOSES) || strayPick()) ? e : null; }, true);
   function endDrafts() { try { if (Walls) Walls.endChain(); } catch { /* (not made yet) */ } cancelArea(); }
   // rAF-throttled sender for continuous input (drags, sliders); latest value per key wins.
   const pending = new Map();
   let frameQueued = false;
   function send(key, type, payload) {
-    pending.set(key, [type, { ...payload, coalesce: key }]);
+    pending.set(key, [type, held({ ...payload, coalesce: key, soft: true })]); // (soft: the hand is on it. Speed 5, WE1: main sends only what moved, see softLive there)
     if (frameQueued) return;
     frameQueued = true;
     requestAnimationFrame(() => {
@@ -252,6 +262,19 @@ const Play = (() => {
     });
   }
   window.addEventListener('resize', () => fitRail());
+  // UI audit VL6: a panel with side tabs (its scrollbar is hidden) and the rail show when they go on below: the class
+  // "more" fades their lower edge (styles.css). Looked at again after a scroll, a resize and when the panel's content changes.
+  function markMore() {
+    for (const el of [els.rail, els.pop && els.pop.querySelector(':scope > .pop-body')]) {
+      if (!el) continue;
+      const more = el.scrollHeight - el.scrollTop - el.clientHeight > 6;
+      if (el.classList.contains('more') !== more) el.classList.toggle('more', more);
+    }
+  }
+  let moreT = 0;
+  const moreSoon = () => { cancelAnimationFrame(moreT); moreT = requestAnimationFrame(markMore); };
+  document.addEventListener('scroll', moreSoon, true);
+  window.addEventListener('resize', moreSoon);
   function railBtn(it, small) {
     const b = h('button', {
       class: `rail-btn ${small ? 'small' : ''} ${it.cls || ''}`, dataset: { id: it.id }, 'data-tip': it.tip, 'data-key': it.key || null, 'aria-label': it.label,
@@ -302,18 +325,25 @@ const Play = (() => {
       h('aside', { id: 'drawer', 'aria-label': 'Library' }),
       h('div', { id: 'roster' }));
     root.append(rail, stage);
+    if (Search) stage.append(Search.el); // (I3: the command search, always at the top)
     els = {
       root, rail, stage, viewport: $('#viewport', stage), frame: $('#frame', stage), empty: $('#empty', stage),
       topbar: $('#topbar', stage), hint: $('#toolhint', stage), tctl: $('#table-ctl', stage), card: $('#token-card', stage),
       pop: $('#pop', stage), drawer: $('#drawer', stage), roster: $('#roster', stage),
     };
+    new MutationObserver(moreSoon).observe(els.pop, { childList: true, subtree: true, attributes: true, attributeFilter: ['open', 'hidden', 'class', 'style'] }); // (UI audit VL6)
+    new MutationObserver(moreSoon).observe(els.rail, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-dense', 'class', 'style'] });
     // the "Preparing animations" pill (top centre) moves down below the top bar while that shows
     const topbarEdge = () => { const r = els.topbar.getBoundingClientRect(); document.documentElement.style.setProperty('--topbar-bottom', `${r.height ? Math.round(r.bottom) : 0}px`); };
     new ResizeObserver(topbarEdge).observe(els.topbar);
+    { const ro = new ResizeObserver(() => clearOfPop()); ro.observe(els.topbar); ro.observe(els.hint); window.addEventListener('resize', () => clearOfPop()); } // (UI audit VH2)
     window.addEventListener('resize', topbarEdge);
     view = new SceneView(els.viewport, { gm: true });
-    view.on('render', () => { placeFrame(); placeCard(); updateBrushCursor(); });
-    view.on('broken', () => { renderRoster(true); refreshPop(); checkMissingSoon(); });
+    view.on('render', () => { placeFrame(); placeCard(); updateBrushCursor(); Trig.drawMarks(); });
+    // (Speed 8, WH5: once a frame. It ran for every picture that failed to load: a map with fifty missing files
+    // rebuilt the map bar and the open panel fifty times)
+    let brokenRaf = 0;
+    view.on('broken', () => { if (brokenRaf) return; brokenRaf = requestAnimationFrame(() => { brokenRaf = 0; renderRoster(true); refreshPop(); checkMissingSoon(); }); });
     view.on('render', () => updateAssetGhost());
     view.on('render', () => OS.redraw()); // (Beta 3.22) the Draw tool's preview follows the view
     view.on('render', () => { const hud = $('.tc-hud', els.tctl); if (hud && S) Tools.renderHud(hud); });
@@ -419,7 +449,18 @@ const Play = (() => {
       cmd('fx.anchor', { id: f.id, anc: Creatures.millAnchor(f, Date.now(), r1), noHistory: true }); // (no undo step: Undo never turns a windmill back)
     }
   }
+  // Speed 5 (WE1): a thing of the map as it is now, sent alone while your hand moves it (main.js softLive). The map this
+  // screen holds takes it; the view lays out that one thing; the frame, the sheet and the open panel follow. The bars
+  // around the map are left alone until the whole state comes (they do not show where a thing lies).
+  const patchStats = { n: 0, states: 0 }; let patchPop = 0;
+  function patch(p) {
+    if (!S || !S.map || !p || S.map.id !== p.mapId) return;
+    if (!view.patch(p.kind, p.items, p.value, p)) return;
+    patchStats.n++;
+    if (!patchPop) patchPop = setTimeout(() => { patchPop = 0; refreshPop(); }, 120); // (the panel's numbers follow, about 8 times a second)
+  }
   function update(s) {
+    patchStats.states++;
     const prevMapId = S && S.map ? S.map.id : null;
     S = s;
     view.setView(s.view);
@@ -430,6 +471,7 @@ const Play = (() => {
       endDrafts(); // (N3: a line of walls or a fog area half drawn on the map before doesn't go on here)
       if (prevMapId && !view.cam.auto) cams.set(prevMapId, { s: view.cam.s, tx: view.cam.tx, ty: view.cam.ty });
       ui.selected = null; ui.selFx = null; ui.selSpell = null; ui.aimFrom = null;
+      ui.trigPlace = null; ui.trigPick = null; // (VD5: a trigger of the other map no longer waits for a click)
       ui.expanded = null;
       pv = null;
     }
@@ -542,8 +584,10 @@ const Play = (() => {
     if (t === 'notes') t = 'mark'; // (U1: the old Notes tool is Marks; an old rail pin may still name it)
     // 4.8: the Map tool in hand: both screens keep the fog ready for a move
     if ((t === 'map') !== (ui.tool === 'map')) { if (view) view.prepareMove(t === 'map'); cmd('move.prepare', { on: t === 'map' }); }
-    if (t !== 'oldschool') OS.cancel(); // (Beta 3.22: a shape half drawn goes)
+    if (t !== 'oldschool') { OS.settle(); OS.leaveTool(); } // (Beta 3.22: a shape half drawn goes; Beta 3.68: and a picked light; UI audit VG3: from three corners the shape is closed instead)
     ui.tool = t;
+    ui.pickAny = false; // (VA5)
+    endTrigAim(); // (VD5)
     if (t === 'fog' && opts.mode) ui.fogMode = opts.mode;
     document.body.dataset.tool = t;
     if (t !== 'select' && t !== 'token') { ui.selected = null; view.setSelected(null); }
@@ -560,7 +604,7 @@ const Play = (() => {
     view.setWide(wideFor(t)); // (Prototype 5: the Build tools show the whole map with its light and effects)
     Party.toolChanged(t);
     view.setAreaMode(t === 'fog');
-    if (t !== 'fog') { cancelArea(); view.setRoomPreview(null); }
+    if (t !== 'fog') { settleArea(); view.setRoomPreview(null); } // (VG3)
     updateReadout();
     updateAssetGhost();
     placeCard();
@@ -645,7 +689,7 @@ const Play = (() => {
       else if (!badge || badge.dataset.tool !== m.label) {
         if (badge) badge.remove();
         tbRail.append(h('span', { class: 'rail-badge', dataset: { tool: m.label } }, iconEl(m.icon)));
-        tbRail.dataset.tip = `Toolbox · ${m.label} is in use (Esc: back to Select)`;
+        tbRail.dataset.tip = `Toolbox · ${m.label} is in use (V: back to Select)`; // (VD7: Esc first closes what is open)
       }
     }
     const tbBtn = els.rail.querySelector('[data-id="toolbox"]');
@@ -744,10 +788,11 @@ const Play = (() => {
   };
   // Prototype 25: the Guide's Help page shows every tip of every panel in one place (the "?" of a panel opens it there).
   // Tips that depend on a tab or a mode are collected for each of them; what all of them share comes last.
-  const PLAYER_TIPS = ['Everything here belongs to the character and goes with them to every map.',
-        'Sight: their token reveals the fog by its own line of sight, light and darkvision.',
-        'While player tokens see for themselves, the single party marker on that map rests.',
-        'HP and conditions live in the turn order: a player who is not in it gets the max HP here.'];
+  const SHEET_TIPS = ['A click on a token: its lines slide out beside it; More holds the rest. A right-click opens it with More open.', // (Beta 3.68: the token sheet)
+        'More → Lines … picks the lines, for players and for NPCs each.',
+        'Who a character is (darkvision, how far they see, own light, speed, AC, max HP) is on their character card.',
+        'Sight on a player\'s line: their token reveals the fog by its own line of sight, light and darkvision; the party marker on that map rests.',
+        'Ctrl + wheel turns a token (with Shift: in small steps).'];
   const HELP_VARIANTS = {
     fx: [{ fxMode: 'place' }, { fxMode: 'light', lightTab: 'sources' }, { fxMode: 'weather' }],
     walls: ['wall', 'room', 'door', 'edit', 'erase'].map((m) => ({ 'walls.mode': m })),
@@ -781,7 +826,7 @@ const Play = (() => {
     for (const [id, pdef] of Object.entries(POPS)) add(pdef.title, pdef.tips, id);
     for (const x of TB.PANELS) { const tips = TB.PANEL_TIPS[x.id]; if (tips) add(x.label, tips, x.id); }
     add('Snapshots', Snaps.def().tips, 'snaps');
-    add('Player tokens', PLAYER_TIPS, 'player');
+    add('Tokens on the map', SHEET_TIPS, 'sheet');
     // H4: the hotbar (it has no "?" of its own)
     add('Hotbar', ['Right-click an empty slot to pick an action, a panel or a tool for it; 1 to 0 play the slots.', 'Anything from the Library or a panel (a token, a sound, a handout, a portrait): drag it onto a slot.',
       'A door or a window: right-click it on the map → Put on the hotbar.', 'Its shape (a row, two rows, a column): Tablescape settings → This screen, or right-click the hotbar.'], 'hotbar');
@@ -792,8 +837,9 @@ const Play = (() => {
   }
   // Prototype 25: one line with what you cannot guess, shown for a few seconds when a tool is picked (Options → This screen)
   const TOOL_HINTS = {
+    select: 'Click a token for its sheet · drag it to move it · drag the map to move your view · F: fit', // (UI audit VK10: Select had no hint; how to move the view was nowhere)
     oldschool: () => ({ room: 'Drag a room · Shift: square · Alt: erase', shape: 'Click the corners · Enter or a click on the first closes it', round: 'Drag a round room · Shift: circle', brush: 'Paint a cave · Alt: erase', erase: 'Drag over what should go', wall: 'Drag a wall from corner to corner · Shift: straight', pillar: 'Click a square', stairs: 'Drag: they climb toward where you drag', door: 'Click a wall · drag: a longer one · again: the door goes', window: 'Click a wall · drag: a longer one · again: the window goes', light: 'Click: a light (a wall light on the wall) · click a light: pick it, drag it · Delete: it goes' }[ui.os && ui.os.tool] || ''),
-    map: 'Drag moves the map · Alt + wheel scales it · Space-drag moves your view',
+    map: 'Drag moves the map · Alt + wheel scales it (only here) · Space-drag moves your view',
     fx: () => (ui.fxSel && ui.fxMode !== 'weather' ? 'Click an effect: pick it · drag its marker: move it · right-click for more · Esc lets go'
       : ui.fxMode === 'place' ? 'Click places it · Select picks and moves what is on the map'
       : ui.fxMode === 'paint' ? ({ box: 'Drag a box · Shift: square · Alt: erase', round: 'Drag a round · Shift: circle · Alt: erase', erase: 'Drag over what should go · [ and ] change the size' }[ui.paintShape] || '[ and ] change the brush size · Alt: erase')
@@ -887,7 +933,7 @@ const Play = (() => {
         h('button', { class: 'chip', onclick: spot(0.5, 0.07), 'data-tip': 'The middle of the long edges' }, 'Long edges'),
         h('button', { class: 'chip', onclick: spot(0.06, 0.5), 'data-tip': 'The middle of the short ends' }, 'Short ends'),
         h('button', { class: 'chip', onclick: spot(0.5, 0.42), 'data-tip': 'Near the middle of the table' }, 'Middle')),
-      slider({ label: 'Size', min: 0.6, max: 3, step: 0.05, get: () => look().size, set: (v) => sendSettings({ roundSize: v }), fmt: (v) => `${Math.round(v * 100)}%` }),
+      slider({ label: 'Size', min: 0.6, max: 3, step: 0.05, get: () => look().size, set: (v) => UI.settingsSoon('roundSize', { roundSize: v }), fmt: (v) => `${Math.round(v * 100)}%` }), // (UI audit VI2)
       toggle({ label: 'Players see the round', get: () => !!(cb() && cb().show), set: (v) => { if (cb()) cmd('round.set', { mapId: cb().mapId, show: v }); } }));
   }
   function openPop(id, anchor) {
@@ -899,7 +945,8 @@ const Play = (() => {
     if (id === 'toolbox' && popId !== 'toolbox' && !anchor && !ui.tbKeep) ui.tb = ui.tb || 'home';
     if (ui.drawer) Drawer.close();
     // (Beta 3.37) a panel with things standing around it (Draw: tool tabs, a slider rail) scrolls in its body
-    const scroller = () => (els.pop.classList.contains('with-sides') && els.pop.querySelector('.pop-body')) || els.pop;
+    // (Beta 3.68: in Sharp every panel scrolls in its body, so the lines of its cut corners stay put)
+    const scroller = () => { const b = els.pop.querySelector(':scope > .pop-body'); return b && /auto|scroll/.test(getComputedStyle(b).overflowY) ? b : els.pop; };
     const again = popId === id; // (the same panel built anew: nothing slides out a second time)
     const scroll = popId === id ? scroller().scrollTop : 0;
     popId = id;
@@ -922,11 +969,13 @@ const Play = (() => {
     try { around = p.around ? p.around() : null; } catch (err) { console.error(`panel ${id}: ${err && err.stack ? err.stack : err}`); }
     els.pop.classList.toggle('with-sides', !!around); els.pop.classList.remove('os-docked'); els.pop.style.marginLeft = '';
     if (around) { els.pop.append(...around.els.filter(Boolean)); if (around.left) els.pop.style.marginLeft = `${around.left}px`; if (around.after) requestAnimationFrame(around.after); }
+    if (!again) { els.pop.classList.remove('on'); void els.pop.offsetWidth; } // (Beta 3.68: another panel slides out from behind the rail again, not only the first)
     els.pop.classList.add('on');
     const btn = anchor && anchor.offsetParent ? anchor : railButton(id);
     popWant = btn.getBoundingClientRect().top - els.stage.getBoundingClientRect().top - 6;
-    els.pop.style.left = '10px';
+    els.pop.style.left = '0px'; // (Beta 3.68: against the rail, behind it)
     placePop();
+    clearOfPop(); // (UI audit VH2)
     scroller().scrollTop = scroll;
     renderRail();
   }
@@ -948,6 +997,24 @@ const Play = (() => {
     els.pop.classList.remove('on', 'with-sides', 'os-docked'); els.pop.style.marginLeft = '';
     els.pop.innerHTML = '';
     renderRail();
+    clearOfPop();
+  }
+  // UI audit VH2: an open rail panel covered the Hotbar's first slots, the tool hint and the top bar in a small window:
+  // they move right, just as far as they have to, and back when it closes
+  function clearOfPop() {
+    if (!els) return;
+    if (Hot && Hot.place) Hot.place();
+    const pop = popId && els.pop.classList.contains('on') ? els.pop : null;
+    const right = pop ? pop.offsetLeft + Math.max(pop.offsetWidth, ...[...pop.children].map((c) => c.offsetLeft + c.offsetWidth)) : 0;
+    for (const el of [els.hint, els.topbar]) {
+      if (!el) continue;
+      if (el.style.left) el.style.left = '';
+      const w = el.offsetWidth; const host = el.offsetParent;
+      if (!pop || !w || !host || pop.offsetParent !== host) continue;
+      const at = host.clientWidth / 2 - w / 2;
+      const need = right + 10 - at; const room = host.clientWidth - 8 - (at + w);
+      if (need > 0 && pop.offsetTop < el.offsetTop + el.offsetHeight) el.style.left = `calc(50% + ${Math.round(Math.max(0, Math.min(need, room)))}px)`;
+    }
   }
   function refreshPop() {
     showToolHint(false); // (a tab or a mode of the tool changed: its hint follows)
@@ -963,14 +1030,47 @@ const Play = (() => {
     const out = h('output');
     const input = h('input', { type: 'range', min: o.min, max: o.max, step: o.step || 0.01, 'aria-label': o.label });
     const key = `sl-${o.label}-${Math.random().toString(36).slice(2, 6)}`;
-    input.addEventListener('input', () => { const v = Number(input.value); out.textContent = o.fmt ? o.fmt(v) : v; o.set(v, key); });
+    const text = (v) => String(o.fmt ? o.fmt(v) : v);
+    input.addEventListener('input', () => { const v = Number(input.value); out.textContent = text(v); o.set(v, key); });
     bind(() => {
       const v = o.get();
       if (v == null) return;
       if (document.activeElement !== input) input.value = v;
-      out.textContent = o.fmt ? o.fmt(Number(input.value)) : input.value;
+      out.textContent = text(Number(input.value));
     });
-    return h('label', { class: 'ctl ctl-slider' }, h('span', { class: 'ctl-label' }, o.label), input, out);
+    const name = h('span', { class: 'ctl-label' }, o.label);
+    // UI audit VI3: a click on the number lets you type it (60 for "60%", 90 for "90°"); a double click on the name
+    // puts a slider that has a default (`def`) back to it. Only where the slider shows a number.
+    if (/\d/.test(text(Number(o.max)))) {
+      const share = /%/.test(text(Number(o.max))) && Number(o.max) <= 2.5; // (shown as a share of 1)
+      out.classList.add('typed'); out.dataset.tip = 'Click to type it';
+      out.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const cur = Number(input.value);
+        const field = h('input', { type: 'text', class: 'ctl-type', inputmode: 'decimal', value: String(round(share ? cur * 100 : cur, 2)), 'aria-label': o.label, spellcheck: 'false' });
+        let over = false; // (taking the field away blurs it: once is enough)
+        const done = (take) => {
+          if (over || !field.isConnected) return;
+          over = true;
+          const raw = String(field.value).replace(',', '.').replace(/[^0-9.-]/g, '');
+          field.replaceWith(out);
+          const n = Number(raw);
+          if (!take || raw === '' || !Number.isFinite(n)) return;
+          const st = Number(o.step) || 0.01;
+          input.value = clamp(Math.round((share ? n / 100 : n) / st) * st, Number(o.min), Number(o.max));
+          out.textContent = text(Number(input.value));
+          o.set(Number(input.value), `${key}-typed`);
+        };
+        field.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') { ev.preventDefault(); done(true); } else if (ev.key === 'Escape') { ev.preventDefault(); done(false); } });
+        field.addEventListener('blur', () => done(true));
+        out.replaceWith(field); field.focus(); field.select();
+      });
+    }
+    if (o.def != null) {
+      name.dataset.tip = 'Double click: back to how it came';
+      name.addEventListener('dblclick', (e) => { e.preventDefault(); input.value = o.def; out.textContent = text(Number(input.value)); o.set(Number(input.value), `${key}-def`); });
+    }
+    return h('label', { class: 'ctl ctl-slider', 'data-tip': o.tip || null }, name, input, out); // (o.tip: what a label in brackets used to explain, UI audit VJ10)
   }
   function toggle(o) {
     const input = h('input', { type: 'checkbox', role: 'switch' });
@@ -1030,7 +1130,7 @@ const Play = (() => {
   // a fold that stays as it was left (ui[key]); a card of settings that stands beside the panel; the panel's foot
   const popFold = (key, label, ...kids) => h('details', { class: 'sfx-details fx-fold', dataset: { v: key }, open: !!ui[key], ontoggle: (e) => { ui[key] = e.target.open; placePop(); } }, h('summary', { onclick: () => { ui[`${key}Set`] = true; } }, label), h('div', { class: 'stack' }, ...kids.filter(Boolean)));
   const flyCard = (title, close, kids, past) => h('div', { class: `os-flywrap pop-flywrap${past ? ' past-parts' : ''}` }, h('div', { class: 'os-fly pop-fly stack' },
-    h('div', { class: 'os-fly-head' }, h('b', {}, title), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: close }, iconEl('x'))), ...kids.filter(Boolean)));
+    h('div', { class: 'os-fly-head' }, h('b', {}, title), h('button', { class: 'icon-btn', 'aria-label': 'Close', 'data-tip': 'Close', onclick: close }, iconEl('x'))), ...kids.filter(Boolean)));
   const popFoot = (text, ...btns) => h('div', { class: 'row os-status' }, typeof text === 'string' ? h('span', { class: 'grow hint' }, text) : text, ...btns.filter(Boolean));
   const secLabel = (t) => h('span', { class: 'ctl-label pop-sec' }, t);
 
@@ -1136,7 +1236,7 @@ const Play = (() => {
       if (now.textContent !== t) now.textContent = t;
     });
     const pct = (v) => `${Math.round(v * 100)}%`;
-    const sl = (label, k, min, max, d, fmt, tip) => { const e = slider({ label, min, max, step: 0.01, get: () => val(k, d), set: (v, key) => send(key, 'bg.look', { [k]: v }), fmt }); if (tip) e.dataset.tip = tip; return e; };
+    const sl = (label, k, min, max, d, fmt, tip) => { const e = slider({ label, min, max, step: 0.01, def: d, get: () => val(k, d), set: (v, key) => send(key, 'bg.look', { [k]: v }), fmt }); if (tip) e.dataset.tip = tip; return e; };
     const peek = (on) => { view.setPeek(on); cmd('look.peek', { on }); peekBtn.classList.toggle('on', on); };
     const peekBtn = btn('Original', 'eye', () => {}, { kind: 'small look-peek', tip: 'Hold the button to see the map without its colours, here and on the table' });
     peekBtn.addEventListener('pointerdown', (e) => { if (e.button === 0) { peekBtn.setPointerCapture(e.pointerId); peek(true); } });
@@ -1221,15 +1321,15 @@ const Play = (() => {
     return h('div', { class: 'stack fog-pop' },
       Hotbar.offer(toggle({ label: 'Fog on this map', get: () => map().fog.enabled, set: (v) => cmd('fog.enabled', { enabled: v }) }), fogHot('toggle')),
       modes,
-      shownIf(() => ui.fogShape === 'brush', slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.brushIn, set: (v) => { ui.brushIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` })),
-      h('div', { class: 'pop-two' }, Hotbar.offer(btn('Cover all', 'eye-off', () => undoable('fog.base', { base: 'cover' })), fogHot('cover-all')), Hotbar.offer(btn('Reveal all', 'eye', () => undoable('fog.base', { base: 'clear' })), fogHot('reveal-all'))),
+      shownIf(() => ui.fogShape === 'brush', slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.brushIn, set: (v) => { ui.brushIn = v; peekBrush(); }, fmt: (v) => `${v}″` })),
+      h('div', { class: 'pop-two' }, Hotbar.offer(btn('Cover all', 'eye-off', () => undoable('fog.base', { base: 'cover' })), fogHot('cover-all')), Hotbar.offer(btn('Reveal all', 'eye', () => revealAll()), fogHot('reveal-all'))),
       areas);
   }
 
   function setFogShape(v) {
     if (v === 'area' && ui.fogShape !== 'area') ui.fogShapeBefore = ui.fogShape; // back to it once the area is marked
     ui.fogShape = v;
-    if (v !== 'area') cancelArea();
+    if (v !== 'area') settleArea(); // (VG3)
     view.setRoomPreview(null);
     refreshPop(); updateBrushCursor();
   }
@@ -1278,14 +1378,58 @@ const Play = (() => {
     return true;
   }
   function cancelArea() { if (ui.areaPts) { ui.areaPts = null; view.setAreaDraft(null); } }
-  let roomHover = 0;
+  // UI audit VG1: the last corner of a half-drawn area goes (Backspace, Delete, Ctrl Z); with none left, the draft
+  function areaBack() {
+    if (!ui.areaPts) return false;
+    ui.areaPts.length = Math.max(0, ui.areaPts.length - 2);
+    view.setAreaDraft(ui.areaPts.length ? ui.areaPts.slice() : null);
+    if (!ui.areaPts.length) ui.areaPts = null;
+    return true;
+  }
+  // UI audit VG3: another tool or another shape with an area half drawn: from three corners it is marked (as Enter
+  // does), with fewer it goes and says why (it used to go without a word)
+  function settleArea() { if (ui.areaPts) finishArea(); }
+  // UI audit VF1 (Glinn: ask first): a small "sure?" at a spot, as a door asks before it opens (Enter or Y: yes; Esc,
+  // N or a click elsewhere: no)
+  let smallAsk = null;
+  function closeSmallAsk() { if (!smallAsk) return; smallAsk.el.remove(); document.removeEventListener('keydown', smallAsk.key, true); document.removeEventListener('pointerdown', smallAsk.out, true); smallAsk = null; }
+  function askAt(x, y, text, go) {
+    closeSmallAsk();
+    const yes = h('button', { class: 'btn small primary', onclick: () => { closeSmallAsk(); go(); } }, 'Yes');
+    const no = h('button', { class: 'btn small', onclick: closeSmallAsk }, 'No');
+    const el = h('div', { class: 'door-ask', role: 'dialog', 'aria-label': text }, h('b', {}, text), h('div', { class: 'door-ask-btns' }, yes, no));
+    document.body.append(el);
+    const b = el.getBoundingClientRect();
+    el.style.left = `${round(clamp(x - b.width / 2, 8, innerWidth - b.width - 8))}px`;
+    const above = y - b.height - 14;
+    el.style.top = `${round(above > 8 ? above : y + 14)}px`;
+    const me = { el,
+      key: (e) => { const k = e.key.toLowerCase(); if (k === 'enter' || k === 'y') { e.preventDefault(); e.stopPropagation(); closeSmallAsk(); go(); } else if (k === 'escape' || k === 'n') { e.preventDefault(); e.stopPropagation(); closeSmallAsk(); } },
+      out: (e) => { if (!el.contains(e.target)) closeSmallAsk(); } };
+    smallAsk = me;
+    document.addEventListener('keydown', me.key, true);
+    setTimeout(() => { if (smallAsk === me) document.addEventListener('pointerdown', me.out, true); }, 0);
+    yes.focus();
+  }
+  // "Reveal all" while the map is on the table: the players would see all of it, and Undo cannot un-show it
+  function revealAll() {
+    const go = () => undoable('fog.base', { base: 'clear' });
+    if (!(isLive() && map() && map().fog.enabled)) { go(); return; }
+    const at = lastPress && performance.now() - lastPress.t < 600 ? lastPress : { x: innerWidth / 2, y: innerHeight * 0.4 };
+    askAt(at.x, at.y, 'Reveal the whole map on the table?', go);
+  }
+  let roomHover = 0; let roomShown = null;
   function fogHover(pt) {
     if (ui.fogShape === 'area') { if (ui.areaPts) view.setAreaDraft([...ui.areaPts, pt.x, pt.y]); return; }
     if (ui.fogShape !== 'room') return;
+    // UI audit VF2: the outline never shows a room the pointer has left (a quick click revealed the room under the
+    // pointer while the one before was still outlined)
+    if (roomShown && !Vision.inRings(roomShown, pt.x, pt.y)) { roomShown = null; view.setRoomPreview(null); }
     clearTimeout(roomHover);
     roomHover = setTimeout(() => {
       if (ui.tool !== 'fog' || ui.fogShape !== 'room') return;
       const r = roomAt(pt);
+      roomShown = r ? r.rings : null;
       view.setRoomPreview(r ? { rings: r.rings, mode: ui.fogMode } : null);
     }, 90);
   }
@@ -1336,7 +1480,10 @@ const Play = (() => {
       }, c.hex ? null : iconEl('circle-off')));
     }
     // any other colour: a palette button over a hidden colour picker
-    const pick = h('input', { type: 'color', 'aria-label': 'Any colour', oninput: (e) => set(e.target.value) });
+    // (UI audit VI1: the picker says "this is one drag" with a key, so every shade it passes is one undo step together,
+    // not a step each: one drag pushed the whole undo history out)
+    const pickKey = `col-${Math.random().toString(36).slice(2, 7)}`;
+    const pick = h('input', { type: 'color', 'aria-label': 'Any colour', oninput: (e) => set(e.target.value, pickKey) });
     const pickBox = h('label', { class: 'swatch pick', 'data-tip': 'Any colour' }, iconEl('palette'), pick);
     wrap.append(pickBox);
     bind(() => {
@@ -1356,7 +1503,7 @@ const Play = (() => {
   // the options edit the selected effect, or the next one you place
   const lookGroup = (f) => (Fixtures.isLight(f) ? 'light' : LOOK_GROUP[f.kind]); // (Beta 3.54: a flame that gives light is a light)
   const lookTarget = () => { const f = fxOf(ui.selFx); return f && lookGroup(f) === ui.fxMode ? f : null; };
-  const LOOK_DEFAULT = { color: null, intensity: 1, density: 1, speed: 1, flicker: true, sat: null, angle: null, variant: null, wave: null, dust: 1, shape: 'arched', grid: 'cross', stretch: 1.5, spin: 1, swirl: true };
+  const LOOK_DEFAULT = { critter: 1, height: 0.6, color: null, intensity: 1, density: 1, speed: 1, flicker: true, sat: null, angle: null, variant: null, wave: null, dust: 1, shape: 'arched', grid: 'cross', stretch: 1.5, spin: 1, swirl: true };
   // Second Builder (second-water-works): the kind in hand, when it is one of this effect's kinds (ui.look is shared:
   // a Vent's "steam" must not reach a Bubbling pool); else the effect's first kind
   const kindOf = (d, v = lookGet('variant')) => (d && d.kinds ? (d.kinds.some((x) => x[0] === v) ? v : d.kinds[0][0]) : null);
@@ -1375,6 +1522,11 @@ const Play = (() => {
   // a control that shows only while it applies (the look section is kept, not rebuilt, when the pick changes)
   function shownIf(test, el) { bind(() => { el.hidden = !test(); }); return el; }
   function lookGet(k) { const f = lookTarget(); return f ? (f[k] ?? LOOK_DEFAULT[k]) : (ui.look[k] ?? LOOK_DEFAULT[k]); }
+  // C14 (Glinn): the animal effects have Size of the animals; the birds also How they fly (round a spot or over a painted
+  // area: two effects, one picked with the other's look) and Height
+  const BEASTS = new Set(['circling', 'birdflight', 'batflight', 'bats', 'critters', 'insects', 'fish', 'web']);
+  const BIRDS = new Set(['circling', 'birdflight']);
+  const beastLook = (id) => ({ ...(BEASTS.has(id) && ui.look.critter != null && Math.abs(ui.look.critter - 1) > 0.001 ? { critter: ui.look.critter } : {}), ...(BIRDS.has(id) && ui.look.height != null ? { height: ui.look.height } : {}) });
   function lookSet(k, v, key) {
     const f = lookTarget();
     const patch = { [k]: v };
@@ -1415,7 +1567,7 @@ const Play = (() => {
     const pick = h('div', { class: 'row os-fxtint' }, h('span', { class: 'ctl-label grow' }, 'The colour'), col);
     bind(() => { const on = now().grow === 'colour'; pick.hidden = !on; range.hidden = !on; });
     return h('div', { class: 'stack grass-card' },
-      sl('Amount', 'amount', 0, 1.5), sl('Length', 'length', 0.3, 2.5), sl('Thickness', 'thick', 0.5, 3), sl('Between gusts', 'calm', 0, 1, 'How much grass still shows where no gust is passing'), sl('Colour variety', 'vary', 0, 1),
+      sl('Amount', 'amount', 0, 1.5), sl('Length', 'length', 0.3, 5), sl('Thickness', 'thick', 0.5, 6), sl('Between gusts', 'calm', 0, 1, 'How much grass still shows where no gust is passing'), sl('Colour variety', 'vary', 0, 2),
       h('div', { class: 'ctl-label' }, 'Grows on'),
       seg({ options: [{ value: 'all', label: 'All' }, { value: 'bright', label: 'Bright' }, { value: 'dark', label: 'Dark' }, { value: 'colour', label: 'Colour' }], get: () => now().grow || 'all', set: (v) => cmd('live.set', { fx: 'grass', set: { grow: v } }) }),
       pick, range);
@@ -1427,7 +1579,7 @@ const Play = (() => {
     amount: (label = 'Amount') => shownIf(() => !(lookDef() && lookDef().still), slider({ label, min: 0.25, max: 3, step: 0.05, get: () => lookGet('density'), set: (v, k) => lookSet('density', v, k), fmt: (v) => `${round(v, 2)}×` })),
     speed: () => shownIf(() => !(lookDef() && lookDef().still), slider({ label: 'Speed', min: 0.25, max: 3, step: 0.05, get: () => lookGet('speed'), set: (v, k) => lookSet('speed', v, k), fmt: (v) => `${round(v, 2)}×` })), // (Beta 3.1: a Roof doesn't move)
     // Beta 2: which way it faces (light shaft, arcs); also Ctrl + wheel
-    facing: () => shownIf(() => { const d = lookDef(); return !!(d && (d.turn || d.cone)); }, slider({ label: 'Facing (Ctrl + wheel turns it too)', min: 0, max: 355, step: 5, get: () => { const d = lookDef(); const v = lookGet('angle'); return ((v ?? defaultAngle(d)) % 360 + 360) % 360; }, set: (v, k) => lookSet('angle', v, k), fmt: (v) => `${Math.round(v)}°` })),
+    facing: () => shownIf(() => { const d = lookDef(); return !!(d && (d.turn || d.cone)); }, slider({ label: 'Facing', tip: 'Ctrl + wheel turns it too', min: 0, max: 355, step: 5, get: () => { const d = lookDef(); const v = lookGet('angle'); return ((v ?? defaultAngle(d)) % 360 + 360) % 360; }, set: (v, k) => lookSet('angle', v, k), fmt: (v) => `${Math.round(v)}°` })),
     // 4.9: a window light: which window, its bars, how far the light reaches into the room
     window: () => shownIf(() => { const d = lookDef(); return !!(d && d.id === 'window'); }, windowPicks()),
     // 4.3.2: the dust in a light shaft (4.9: and a window light), up to ten times as big
@@ -1443,6 +1595,8 @@ const Play = (() => {
       shownIf(() => { const d = lookDef(); return !!(d && d.spin); }, seg({ label: 'Turns', options: [{ value: 1, label: 'Clockwise' }, { value: -1, label: 'Anticlockwise' }], get: () => (lookGet('spin') === -1 ? -1 : 1), set: (v) => lookSet('spin', v) })),
       shownIf(() => { const d = lookDef(); return !!(d && d.spin && d.id === 'whirl'); }, toggle({ label: 'Swirl the water', get: () => lookGet('swirl') !== false, set: (v) => lookSet('swirl', v) })),
       fxRow.dust(),
+      // C14: how high birds fly (low: bigger, the shadow close and dark)
+      shownIf(() => { const d = lookDef(); return !!(d && BIRDS.has(d.id)); }, slider({ label: 'Height', min: 0, max: 1, step: 0.05, get: () => lookGet('height') ?? 0.6, set: (v, k) => lookSet('height', v, k), fmt: (v) => (v < 0.3 ? 'low' : v < 0.7 ? 'middle' : 'high') })),
     ];
   }
   // 4.9: the window light's window and bars, as little pictures
@@ -1521,7 +1675,7 @@ const Play = (() => {
       get: () => { const f = P(); return (f ? f.lit !== false : ui.lt.lit !== false) ? 'lit' : 'unlit'; },
       set: (v) => { const f = P(); if (f) cmd('fx.lit', { id: f.id, on: v === 'lit' }); else next({ lit: v === 'lit' }); } }));
     out.push(colorSwatches(() => { const f = P(); return f ? (Fixtures.isOwnColor(f) ? '' : f.color) : ui.lt.color || ''; },
-      (v) => { const f = P(); if (f) cmd('fx.lightSet', { id: f.id, color: v || '' }); else next({ color: v || '' }); }, 'Colour of its light'));
+      (v, k) => { const f = P(); if (f) { if (k) send(k, 'fx.lightSet', { id: f.id, color: v || '' }); else cmd('fx.lightSet', { id: f.id, color: v || '' }); } else next({ color: v || '' }); }, 'Colour of its light'));
     out.push(wordSlider({ name: 'Reach', lo: 'short', hi: 'far', min: 5, max: 60, step: 5,
       get: () => { const f = P(); return f ? f.bright || 5 : ui.lt.reach || ltDef().bright; },
       set: (v, k) => { const f = P(); if (f) send(k, 'fx.lightSet', { id: f.id, bright: v }); else { ui.lt.reach = v; saveLt(); } },
@@ -1537,9 +1691,22 @@ const Play = (() => {
         seg({ label: 'Its light', options: [{ value: '', label: 'Steady' }, { value: 'pulse', label: 'Pulse', tip: 'Breathes slowly: magic, a heartbeat' }, { value: 'sputter', label: 'Sputter', tip: 'A dying torch: it gutters and almost goes out now and then' }],
           get: () => { const f = P(); return (f ? f.wave : ui.lt.wave) || ''; }, set: (v) => { if (P()) upd({ wave: v || null }); else next({ wave: v || '' }); } }),
         slider({ label: 'Colour strength', min: 0, max: 1, step: 0.05, get: () => { const f = P(); return f ? ltSat(f) : ui.lt.sat ?? (ui.lt.color ? 0.7 : 0.25); }, set: (v, k) => { if (P()) upd({ sat: v }, k); else { ui.lt.sat = v; saveLt(); } }, fmt: (v) => (v < 0.05 ? 'Natural' : v >= 0.95 ? 'Full colour' : pct(v)) }),
-        shownIf(cone, slider({ label: 'Facing (Ctrl + wheel turns it too)', min: 0, max: 355, step: 5, get: () => { const f = P(); const v = f ? f.angle : ui.look.angle; return (((v ?? 0) % 360) + 360) % 360; }, set: (v, k) => { if (P()) upd({ angle: v }, k); else ui.look.angle = v; }, fmt: (v) => `${Math.round(v)}°` })),
+        shownIf(cone, slider({ label: 'Facing', tip: 'Ctrl + wheel turns it too', min: 0, max: 355, step: 5, get: () => { const f = P(); const v = f ? f.angle : ui.look.angle; return (((v ?? 0) % 360) + 360) % 360; }, set: (v, k) => { if (P()) upd({ angle: v }, k); else ui.look.angle = v; }, fmt: (v) => `${Math.round(v)}°` })),
         shownIf(() => grp() !== 'plain', slider({ label: 'Flame size', min: 0.4, max: 3, step: 0.05, get: () => { const f = P(); return f ? (f.r || flameBase()) / flameBase() : ui.lt.size || 1; }, set: (v, k) => { if (P()) upd({ r: round(v * flameBase(), 4) }, k); else { ui.lt.size = v; saveLt(); } }, fmt: (v) => `${round(v, 2)}×` }))));
     out.push(more);
+    // I7: the light's group (Hall torches): a trigger switches a whole group on or off
+    if (f0) {
+      const grpBtn = h('button', { class: 'btn small lt-group', onclick: (e) => {
+        const f = P(); if (!f) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        const have = [...new Set(map().fx.filter((x) => x.group && Fixtures.isLight(x)).map((x) => x.group))].sort();
+        openMenu(r.left, r.bottom + 4, [...have.map((g) => ({ icon: f.group === g ? 'check' : 'bulb', checked: f.group === g, label: g, action: () => cmd('fx.update', { id: f.id, group: g }) })),
+          ...(have.length ? ['-'] : []), { icon: 'plus', label: 'New group …', action: async () => { const g = await askText('A group of lights', '', { ok: 'Make it', placeholder: 'Hall torches' }); if (g) cmd('fx.update', { id: f.id, group: g }); } },
+          ...(f.group ? [{ icon: 'x', label: 'In no group', action: () => cmd('fx.update', { id: f.id, group: null }) }] : [])]);
+      } });
+      bind(() => { const f = P(); const g = f && f.group; if (grpBtn.dataset.g === (g || '')) return; grpBtn.dataset.g = g || ''; grpBtn.replaceChildren(iconEl('bulb'), h('span', {}, g || 'None'), iconEl('chevron-down')); grpBtn.classList.toggle('on', !!g); });
+      out.push(h('div', { class: 'ctl-row lt-grouprow', 'data-tip': 'Lights in one group are switched together by a trigger (Toolbox → Triggers)' }, h('span', { class: 'ctl-label grow' }, 'Group'), grpBtn));
+    }
     if (f0 && o.remove) out.push(row(btn('Remove', 'trash', () => { const f = P(); if (f) { selectFx(null); undoable('fx.remove', { id: f.id }); } }, { kind: 'lt-remove', tip: 'Take this light away (Delete)' })));
     return out;
   }
@@ -1569,7 +1736,7 @@ const Play = (() => {
     { id: 'elements', label: 'Elements', icon: 'flame', tip: 'What sits on the map: water, fire, mist, magic, blood …' }];
   const indoors = () => ui.fxMode === 'paint' && ui.region === 'roof';
   const fxGroup = () => (ui.fxMode === 'light' ? (ui.lightTab === 'sources' ? 'lights' : 'scene') : ui.fxMode === 'weather' || indoors() ? 'scene' : dayNow() ? 'lights' : 'elements'); // (Beta 3.64: Daylight is part of Lights)
-  const elOf = (kind, id) => FXDATA.ELEMENTS.find((x) => x.kind === kind && x.id === id) || null;
+  const elOf = (kind, id) => FXDATA.ELEMENTS.find((x) => x.kind === kind && x.id === id) || (kind === 'region' && id === 'birdflight' ? { key: 'r:birdflight', kind, id, family: 'animals', label: 'Circling birds' } : null); // (C14: no tile of its own: Circling birds → Over an area)
   // Beta 3.64: painted areas show a thin outline while Elements is open (Indoors: the roofs), and a click inside one
   // picks it. Which areas: every painted effect in Elements, the roofs while Indoors is in hand
   // Beta 3.66 (Glinn): only with the **Select** tool (ui.fxSel). With an effect in hand the map is clean: no outlines,
@@ -1673,7 +1840,7 @@ const Play = (() => {
         row(btn('Forget explored areas', 'eraser', () => undoable('light.forget', {}), { kind: 'small', tip: 'Make everything dark again' })),
         seg({ label: 'Change over', options: [{ value: 10, label: '10 seconds' }, { value: 0, label: 'At once' }], get: () => ui.moodFade, set: (v) => { ui.moodFade = v; try { localStorage.setItem('moodFade', String(v)); } catch {} refreshPop(); } })),
       h('div', { class: 'ctl' }, h('div', { class: 'row fx-sec-row' }, h('span', { class: 'ctl-label fx-sec grow' }, 'Weather'), roof), W.presets),
-      indoors() ? shownIf(() => ui.paintShape === 'brush' || ui.paintShape === 'erase', slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` })) : null,
+      indoors() ? shownIf(() => ui.paintShape === 'brush' || ui.paintShape === 'erase', slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; peekBrush(); }, fmt: (v) => `${v}″` })) : null,
       W.strike,
       wind.main,
       fxFold('fxMoreWind', 'Advanced wind', ...wind.adv), // (Beta 3.66)
@@ -1717,20 +1884,23 @@ const Play = (() => {
     }
     // its rows: only what fits it
     const rows = [];
-    if (def && def.kinds && !erase) rows.push(seg({ label: def.kindsLabel || 'What comes out', options: def.kinds.map(([v, label]) => ({ value: v, label })), get: () => kindOf(def), set: (v) => lookSet('variant', v) })); // (second-water-works: kindsLabel, kindOf)
-    if (def && !def.noColor && !erase) rows.push(def.colorKinds ? shownIf(() => def.colorKinds.includes(kindOf(def)), colorSwatches(() => lookGet('color'), (v) => lookSet('color', v))) : colorSwatches(() => lookGet('color'), (v) => lookSet('color', v))); // (second-bats-insects: colorKinds, a colour only for some kinds: Insects' butterflies)
+    if (def && def.kinds && !erase) rows.push(seg({ label: def.kindsLabel || 'What comes out', cls: def.kinds.length > 4 ? 'seg-wrap' : '', options: def.kinds.map(([v, label]) => ({ value: v, label })), get: () => kindOf(def), set: (v) => lookSet('variant', v) })); // (second-water-works: kindsLabel, kindOf)
+    if (def && !def.noColor && !erase) rows.push(def.colorKinds ? shownIf(() => def.colorKinds.includes(kindOf(def)), colorSwatches(() => lookGet('color'), (v, k) => lookSet('color', v, k))) : colorSwatches(() => lookGet('color'), (v, k) => lookSet('color', v, k))); // (second-bats-insects: colorKinds, a colour only for some kinds: Insects' butterflies)
     if (def && kind === 'emitter') {
       const base = () => def.r * cellK();
       rows.push(slider({ label: 'Size', min: 0.4, max: 3, step: 0.05, get: () => { const x = lookTarget(); return x ? x.r / base() : ui.look.size || 1; },
         set: (v, k) => { const x = lookTarget(); if (x) send(k, 'fx.update', { id: x.id, r: round(v * base(), 4) }); else ui.look.size = v; }, fmt: (v) => (v < 0.7 ? 'small' : v < 1.3 ? 'medium' : v < 2.1 ? 'large' : 'huge') }));
     }
-    if (!f && kind === 'region' && (ui.paintShape === 'brush' || ui.paintShape === 'erase')) rows.push(slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; updateBrushCursor(); }, fmt: (v) => `${v}″` }));
+    if (def && !erase && BIRDS.has(def.id) && !f) rows.push(seg({ label: 'How they fly', options: [{ value: 'circling', label: 'Circle', tip: 'Round a spot: a click' }, { value: 'birdflight', label: 'Over an area', tip: 'Over what you paint, in loops and bends; a thin stroke: along it and back' }],
+      get: () => def.id, set: (v) => { if (v === def.id) return; armElement({ kind: v === 'circling' ? 'emitter' : 'region', id: v }); if (ui.paintShape === 'erase') ui.paintShape = 'box'; openPop('fx'); updateBrushCursor(); showToolHint(); } }));
+    if (def && !erase && BEASTS.has(def.id)) rows.push(slider({ label: def.id === 'web' ? 'Size of the spiders' : 'Size of the animals', min: 0.4, max: 2.5, step: 0.05, get: () => lookGet('critter') ?? 1, set: (v, k) => lookSet('critter', v, k), fmt: (v) => `${round(v, 2)}×` }));
+    if (!f && kind === 'region' && (ui.paintShape === 'brush' || ui.paintShape === 'erase')) rows.push(slider({ label: 'Brush size', min: 0.5, max: 8, step: 0.25, get: () => ui.paintIn, set: (v) => { ui.paintIn = v; peekBrush(); }, fmt: (v) => `${v}″` }));
     // Beta 2: oil can be set alight
     if (f && f.kind === 'region' && f.preset === 'oil') rows.push(row(btn('Set it alight', 'flame', () => { const x = lookTarget(); if (x) undoable('fx.update', { id: x.id, preset: 'burning' }, `${fxLabel(x)} is burning`); }, { kind: 'primary', tip: 'The oil becomes burning ground (Undo puts it out)' })));
     let fly = null;
     if (def && !erase && !o.day) {
       rows.push(btn(`${def.label} settings`, 'adjustments-horizontal', () => { ui.fxFly = !ui.fxFly; openPop('fx'); }, { kind: `wide os-fxset${ui.fxFly ? ' on' : ''}`, tip: engineFx() ? 'For all of it on this map' : 'How strong, how much, how fast' }));
-      if (ui.fxFly) fly = h('div', { class: 'os-fly os-fly-fx fx-fly stack' }, h('div', { class: 'os-fly-head' }, h('b', {}, def.label), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => { ui.fxFly = false; openPop('fx'); } }, iconEl('x'))), ...fxSettings().filter(Boolean));
+      if (ui.fxFly) fly = h('div', { class: 'os-fly os-fly-fx fx-fly stack' }, h('div', { class: 'os-fly-head' }, h('b', {}, def.label), h('button', { class: 'icon-btn', 'aria-label': 'Close', 'data-tip': 'Close', onclick: () => { ui.fxFly = false; openPop('fx'); } }, iconEl('x'))), ...fxSettings().filter(Boolean));
     }
     // (the effect was removed or another one picked while the panel stood: made again)
     const was = f ? f.id : null;
@@ -1762,7 +1932,7 @@ const Play = (() => {
     for (const e of FXDATA.ELEMENTS) {
       if (fam !== 'all' && e.family !== fam) continue;
       if (e.live && !liveSupported()) continue; // (Beta 3.65: the map's own light needs a graphics card)
-      const on = !erase && e.kind === kind && def && e.id === def.id;
+      const on = !erase && def && ((e.kind === kind && e.id === def.id) || (def.id === 'birdflight' && e.id === 'circling')); // (C14: Circling birds over an area is that tile too)
       const d = (e.kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === e.id);
       gal.append(h('button', {
         class: `fx-t ${on ? 'on' : ''}`, role: 'radio', 'aria-checked': String(on), dataset: { v: e.key }, 'aria-label': e.label, 'data-tip': e.tip, style: `--fc:${famOf(e).color}`,
@@ -1839,7 +2009,8 @@ const Play = (() => {
         presets.append(offer(h('button', {
           class: `tile ${kinds(p.layers) === now ? 'on' : ''}`, 'data-tip': p.own ? 'Your own mix. Right-click to delete it' : `${p.layers.length ? p.layers.map((l) => (WT[l.type] || {}).label).join(' + ') : 'No weather'}`,
           onclick: () => applyWeather(p),
-          oncontextmenu: p.own ? (e) => { e.preventDefault(); ts.settings({ weatherPresets: own().filter((o) => o.name !== p.label) }); toast(`${p.label} deleted`); } : null,
+          // (UI audit VK7, Glinn: a right-click opens a menu; it deleted the mix at once. VH5: Undo)
+          oncontextmenu: p.own ? (e) => { e.preventDefault(); openMenu(e.clientX, e.clientY, [{ header: p.label }, { icon: 'trash', label: 'Delete this mix', danger: true, action: () => { const before = own().slice(); ts.settings({ weatherPresets: before.filter((o) => o.name !== p.label) }); toast(`${p.label} deleted`, { undo: () => ts.settings({ weatherPresets: before }) }); } }]); } : null,
         }, iconEl(p.icon), h('span', {}, p.label)), { kind: 'weather', ref: p.layers, label: p.label, icon: p.own ? 'cloud-rain' : p.icon }, { menu: !p.own }));
       }
     });
@@ -1897,9 +2068,9 @@ const Play = (() => {
     return [
       h('div', { class: 'ctl-label' }, 'Mixes'),
       presets,
-      h('div', { class: 'ctl-label' }, 'Single layers: click to switch on or off'),
+      h('div', { class: 'ctl-label', 'data-tip': 'Click one to switch it on or off' }, 'Single layers'), // (UI audit VJ10: the explanation is a tip now)
       add,
-      h('div', { class: 'ctl-label' }, 'In this mix (click one to change it)'),
+      h('div', { class: 'ctl-label', 'data-tip': 'Click one to change it' }, 'In this mix'),
       list,
       strike,
       fade,
@@ -1978,7 +2149,7 @@ const Play = (() => {
     const sw = h('div', { class: 'swatches color-row' });
     const COLS = [null, '#ffffff', '#b9cdeb', '#9fe3ff', '#cfd6dc', '#d9b77a', '#a9a39b', '#ff8f2e', '#d6ff7a', '#f6b8c9', '#2a1408', '#000000'];
     for (const col of COLS) {
-      sw.append(h('button', { class: `swatch ${col ? '' : 'own'}`, style: col ? `background:${col}` : null, dataset: { v: col || '' }, 'aria-label': col || 'Its own colour', 'data-tip': col ? col : 'Its own colour', onclick: () => cmd('weather.update', { id: L.id, color: col }) }, col ? null : iconEl('circle-off')));
+      sw.append(h('button', { class: `swatch ${col ? '' : 'own'}`, style: col ? `background:${col}` : null, dataset: { v: col || '' }, 'aria-label': col ? UI.colourName(col) : 'Its own colour', 'data-tip': col ? UI.colourName(col) : 'Its own colour', onclick: () => cmd('weather.update', { id: L.id, color: col }) }, col ? null : iconEl('circle-off')));
     }
     const pick = h('input', { type: 'color', 'aria-label': 'Any colour', oninput: (e) => set('color')(e.target.value) });
     const pickBox = h('label', { class: 'swatch pick', 'data-tip': 'Any colour' }, iconEl('palette'), pick);
@@ -2175,7 +2346,7 @@ const Play = (() => {
       const nsig = JSON.stringify([[...offs.keys()], m.layers.map((l) => [l.id, l.name, l.hidden, l.role, l.anchor, l.n, l.locked]), m.fx.map((f) => [f.id, f.preset, f.hidden, f.attachTo, f.lit, f.holder]),
         m.marks.map((k) => [k.id, k.hidden, k.label, k.value, k.text, k.n]), m.draw.map((d) => [d.id, d.hidden, d.text]),
         m.spells.map((s) => [s.id, s.name, s.hidden]), m.weather.name, m.weather.layers.filter((l) => !l.dying).length, ui.selected, ui.selFx, ui.selSpell, ui.expanded, [...view.broken],
-        m.walls.length, m.walls.filter((w) => w.door).length, m.vision.on]);
+        m.walls.length, m.walls.filter((w) => w.door).length, m.vision.on, ui.lyFold]);
       if (nsig === sig) { for (const f of detailRefs) f(); return; }
       sig = nsig;
       list.innerHTML = '';
@@ -2191,7 +2362,7 @@ const Play = (() => {
           }] : []),
           ...m.layers.filter((l) => l.role === 'overlay' && l.anchor === 'table').reverse().map(layerItem)]],
         ['Spells', m.spells.slice().reverse().map((s) => ({
-          id: s.id, icon: (SKINS[s.skin] || SKINS.arcane).icon, name: `${s.name}${s.rounds != null ? ` · round ${s.rounds}` : ''}`, hidden: s.hidden,
+          id: s.id, pk: 'spells', kind: s.name, icon: (SKINS[s.skin] || SKINS.arcane).icon, name: `${s.name}${s.rounds != null ? ` · round ${s.rounds}` : ''}`, hidden: s.hidden,
           sel: ui.selSpell === s.id, main: () => { selectSpell(ui.selSpell === s.id ? null : s.id); if (ui.tool !== 'spell' && ui.tool !== 'select') setTool('select'); },
           eye: () => cmd('spell.update', { id: s.id, hidden: !s.hidden }), remove: () => undoable('spell.remove', { id: s.id }),
         }))],
@@ -2204,26 +2375,26 @@ const Play = (() => {
         ['Assets', m.layers.filter((l) => l.role === 'asset').reverse().map(layerItem)],
         // Beta 3.54: a light is one row: the bulb lights it or puts it out, the eye hides it from the players
         ['Lights', m.fx.filter((f) => Fixtures.isLight(f)).reverse().map((f) => ({
-          id: f.id, icon: SceneView.fxIcon(f), name: fxLabel(f), hidden: f.hidden, sel: ui.selFx === f.id,
+          id: f.id, pk: 'fx', kind: fxLabel(f), icon: SceneView.fxIcon(f), name: fxLabel(f), hidden: f.hidden, sel: ui.selFx === f.id,
           lit: () => cmd('fx.lit', { id: f.id, on: f.lit === false }), isLit: f.lit !== false,
           eye: () => cmd('fx.update', { id: f.id, hidden: !f.hidden }), remove: () => undoable('fx.remove', { id: f.id }),
           detail: () => fxDetail(f),
         }))],
         ['Atmosphere', [
           ...m.fx.filter((f) => !Fixtures.isLight(f)).reverse().map((f) => ({
-            id: f.id, icon: SceneView.fxIcon(f), name: fxLabel(f), hidden: f.hidden, sel: ui.selFx === f.id,
+            id: f.id, pk: 'fx', kind: fxLabel(f), icon: SceneView.fxIcon(f), name: fxLabel(f), hidden: f.hidden, sel: ui.selFx === f.id,
             eye: () => cmd('fx.update', { id: f.id, hidden: !f.hidden }), remove: () => undoable('fx.remove', { id: f.id }),
             detail: () => fxDetail(f),
           })),
           ...m.layers.filter((l) => l.role === 'overlay' && l.anchor !== 'table').reverse().map(layerItem)]],
         ['Drawings and markers', [
           ...m.marks.slice().reverse().map((k) => ({
-            id: k.id, icon: { pin: 'map-pin', x: 'x', dot: 'circle-number-1', counter: 'plus-minus', note: 'note' }[k.kind], hidden: k.hidden, noEye: k.kind === 'note',
+            id: k.id, pk: 'marks', kind: { pin: 'Pins', x: 'Crosses', dot: 'Markers', counter: 'Counters', note: 'Notes' }[k.kind], icon: { pin: 'map-pin', x: 'x', dot: 'circle-number-1', counter: 'plus-minus', note: 'note' }[k.kind], hidden: k.hidden, noEye: k.kind === 'note',
             name: k.kind === 'counter' ? `${k.label}: ${k.value}` : k.kind === 'note' ? `Note: ${k.text}` : k.kind === 'dot' ? `Marker ${k.n}` : k.kind === 'x' ? 'Cross' : 'Pin',
             eye: () => cmd('mark.update', { id: k.id, hidden: !k.hidden }), remove: () => undoable('mark.remove', { id: k.id }),
           })),
           ...m.draw.slice().reverse().map((d) => ({
-            id: d.id, icon: d.kind === 'text' ? 'typography' : 'ballpen', name: d.kind === 'text' ? d.text : 'Pen line', hidden: d.hidden,
+            id: d.id, pk: 'draw', kind: d.kind === 'text' ? 'Text' : 'Pen lines', icon: d.kind === 'text' ? 'typography' : 'ballpen', name: d.kind === 'text' ? d.text : 'Pen line', hidden: d.hidden,
             eye: () => cmd('draw.update', { id: d.id, hidden: !d.hidden }), remove: () => undoable('draw.remove', { id: d.id }),
           }))]],
       ];
@@ -2235,14 +2406,14 @@ const Play = (() => {
           h('button', { class: 'btn small', 'data-tip': 'Zoom out to see everything (Shift F)', onclick: fitAll }, iconEl('zoom-scan'), 'Show'),
           h('button', { class: 'btn small danger', 'data-tip': 'Remove everything that lies off the table', onclick: removeOffTable }, iconEl('trash'), 'Remove')));
       }
-      for (const [title, items] of groups) {
-        if (!items.length) continue;
-        any = true;
-        list.append(h('div', { class: 'layer-group' }, title));
-        for (const it of items) {
-          const open = ui.expanded === it.id || it.sel;
-          const off = offs.get(it.id);
-          list.append(h('div', { class: `layer-row ${open ? 'open' : ''} ${it.hidden ? 'is-hidden' : ''} ${it.broken ? 'broken' : ''} ${off ? 'is-off' : ''}`, dataset: { id: it.id } },
+      // Beta 3.68 (Glinn): a section folds at its title; two or more of a kind are one row that opens to each
+      // (folded at first). What is folded or opened is kept while the app runs (ui.lyFold).
+      const fold = ui.lyFold || (ui.lyFold = {});
+      const flip = (k) => { fold[k] = !fold[k]; refreshPop(); };
+      const rowOf = (it, inKind) => {
+        const open = ui.expanded === it.id || it.sel;
+        const off = offs.get(it.id);
+        list.append(h('div', { class: `layer-row ${inKind ? 'in-kind' : ''} ${open ? 'open' : ''} ${it.hidden ? 'is-hidden' : ''} ${it.broken ? 'broken' : ''} ${off ? 'is-off' : ''}`, dataset: { id: it.id } },
             h('button', { class: 'layer-main', onclick: () => { if (it.main) it.main(); ui.expanded = ui.expanded === it.id ? null : it.id; refreshPop(); } },
               iconEl(it.icon), UI.wrapName(it.name, 'grow'), off ? h('span', { class: 'off-badge', 'data-tip': 'Off the table: the players don\'t see it' }, 'off table') : null),
             off && !off.fixed ? h('button', { class: 'icon-btn off-bring', 'aria-label': `Bring ${it.name} onto the table`, 'data-tip': 'Bring it onto the table', onclick: () => bringHere(it.id, off) }, iconEl('focus-centered')) : null,
@@ -2250,14 +2421,40 @@ const Play = (() => {
             it.lit ? h('button', { class: `icon-btn lt-bulb ${it.isLit ? 'on' : ''}`, 'aria-label': it.isLit ? 'Put it out' : 'Light it', 'data-tip': it.isLit ? 'Lit. Click to put it out' : 'Put out. Click to light it', onclick: it.lit }, iconEl(it.isLit ? 'bulb' : 'bulb-off')) : null,
             it.noEye ? null : h('button', { class: 'icon-btn', 'aria-label': it.hidden ? 'Show to players' : 'Hide from players', 'data-tip': it.hidden ? 'Hidden from players. Click to show' : 'Visible to players. Click to hide', onclick: it.eye }, iconEl(it.hidden ? 'eye-off' : 'eye')),
             h('button', { class: 'icon-btn', 'aria-label': 'Remove', 'data-tip': 'Remove', onclick: it.remove }, iconEl('trash'))));
-          if (open && it.detail) list.append(it.detail());
+        if (open && it.detail) list.append(it.detail());
+      };
+      for (const [title, items] of groups) {
+        if (!items.length) continue;
+        any = true;
+        const shut = !!fold[`s:${title}`];
+        list.append(h('button', { class: `layer-group ${shut ? 'shut' : ''}`, dataset: { g: title }, 'aria-expanded': String(!shut), onclick: () => flip(`s:${title}`) },
+          iconEl(shut ? 'chevron-right' : 'chevron-down'), h('span', { class: 'grow' }, title), shut ? h('span', { class: 'layer-n' }, String(items.length)) : null));
+        if (shut) continue;
+        const kinds = new Map();
+        for (const it of items) { const k = it.kind && it.pk ? it.kind : `#${it.id}`; if (!kinds.has(k)) kinds.set(k, []); kinds.get(k).push(it); }
+        for (const [k, its] of kinds) {
+          if (its.length < 2) { rowOf(its[0], false); continue; }
+          const key = `k:${title}|${k}`;
+          const open = !!fold[key] || its.some((it) => it.sel || ui.expanded === it.id);
+          const allHidden = its.every((it) => it.hidden); const lights = its.every((it) => it.lit); const anyLit = lights && its.some((it) => it.isLit);
+          const eyeAll = () => { for (const it of its) if (!!it.hidden === allHidden) it.eye(); };
+          const litAll = () => { for (const it of its) if (!!it.isLit === anyLit) it.lit(); };
+          const removeAll = () => { const g = { layers: [], fx: [], spells: [], marks: [], draw: [] }; for (const it of its) g[it.pk].push(it.id); undoable('layer.purge', g, `${its.length} × ${k} removed`); };
+          list.append(h('div', { class: `layer-row layer-kind ${open ? 'unfolded' : ''} ${allHidden ? 'is-hidden' : ''}`, dataset: { kind: k } },
+            h('button', { class: 'layer-main', 'aria-expanded': String(open), onclick: () => flip(key) },
+              iconEl(open ? 'chevron-down' : 'chevron-right'), iconEl(its[0].icon), UI.wrapName(k, 'grow'), h('span', { class: 'layer-n' }, String(its.length))),
+            lights ? h('button', { class: `icon-btn lt-bulb ${anyLit ? 'on' : ''}`, 'aria-label': anyLit ? 'Put them all out' : 'Light them all', 'data-tip': anyLit ? 'Put them all out' : 'Light them all', onclick: litAll }, iconEl(anyLit ? 'bulb' : 'bulb-off')) : null,
+            its.some((it) => it.noEye) ? null : h('button', { class: 'icon-btn', 'aria-label': allHidden ? 'Show them all to players' : 'Hide them all from players', 'data-tip': allHidden ? 'All hidden from players. Click to show them' : 'Click to hide them all from players', onclick: eyeAll }, iconEl(allHidden ? 'eye-off' : 'eye')),
+            h('button', { class: 'icon-btn', 'aria-label': 'Remove them all', 'data-tip': `Remove all ${its.length}`, onclick: removeAll }, iconEl('trash'))));
+          if (open && its[0].pk === 'fx') list.append(kindDetail(its, lights, key)); // (XA7: what they share, changed for all of them)
+          if (open) for (const it of its) rowOf(it, true);
         }
       }
       if (!any) list.append(hint('Nothing placed yet.'));
     });
     function layerItem(l) {
       return {
-        id: l.id, icon: ROLE_ICON[l.role], name: l.name + (l.n ? ` ${l.n}` : '') + (view.broken.has(l.id) ? ' (missing)' : ''), hidden: l.hidden, broken: view.broken.has(l.id),
+        id: l.id, pk: 'layers', kind: l.name, icon: ROLE_ICON[l.role], name: l.name + (l.n ? ` ${l.n}` : '') + (view.broken.has(l.id) ? ' (missing)' : ''), hidden: l.hidden, broken: view.broken.has(l.id),
         lock: l.role === 'asset' ? () => cmd('layer.update', { id: l.id, locked: !l.locked }) : null, locked: !!l.locked,
         sel: l.role === 'token' && ui.selected === l.id,
         main: l.role === 'token' ? () => { if (ui.tool !== 'select') setTool('select'); ui.selected = ui.selected === l.id ? null : l.id; view.setSelected(ui.selected); placeCard(); } : null,
@@ -2304,6 +2501,40 @@ const Play = (() => {
       }
       return box;
     }
+    // XA7 (Glinn, 26 Nov 2026: 79 lights, their colour all at once): the open row of a kind starts with "All N": what
+    // the lights (or effects) of that kind share. A change goes to every one of them, as one undo step. Each shows the
+    // first one's value; the single rows under it still change one alone
+    function kindDetail(its, lights, key) {
+      const ids = its.map((it) => it.id); const first = () => ids.map(fxOf).find(Boolean) || null;
+      const many = (c, patch, k2) => { const q = { cmd: c, ids, patch }; if (k2) send(k2, 'fx.many', q); else cmd('fx.many', q); };
+      const box = h('div', { class: 'layer-detail layer-all', dataset: { all: String(ids.length) } }, h('div', { class: 'ctl-label layer-all-head' }, `All ${ids.length}`));
+      const asl = (o) => sl({ ...o, key: `all-${key}-${o.k}`, get: () => { const f = first(); return f ? o.of(f) : null; } });
+      if (lights) {
+        const colOf = (f) => (Fixtures.isOwnColor(f) ? '' : f.color || '');
+        const row = h('div', { class: 'swatches color-row' });
+        for (const c of FXDATA.COLORS) row.append(h('button', { class: `swatch ${c.hex ? '' : 'own'}`, style: c.hex ? `background:${c.hex}` : null, dataset: { v: c.hex || '' }, 'aria-label': c.label, 'data-tip': c.label, onclick: () => many('fx.lightSet', { color: c.hex || '' }) }, c.hex ? null : iconEl('circle-off')));
+        const pick = h('input', { type: 'color', 'aria-label': 'Any colour', oninput: (e) => many('fx.lightSet', { color: e.target.value }, `all-${key}-col`) }); // (one drag in the picker: one undo step)
+        const pickBox = h('label', { class: 'swatch pick', 'data-tip': 'Any colour' }, iconEl('palette'), pick);
+        row.append(pickBox);
+        local(() => {
+          const all = ids.map(fxOf).filter(Boolean); const v = all.length && all.every((f) => colOf(f) === colOf(all[0])) ? colOf(all[0]) : null; // (null: they differ, none is marked)
+          let preset = false;
+          for (const b of row.querySelectorAll('button.swatch')) { const on = v != null && b.dataset.v === v; b.classList.toggle('on', on); preset = preset || on; }
+          const custom = !!v && !preset; pickBox.classList.toggle('on', custom); pickBox.style.background = custom ? v : '';
+          if (v && document.activeElement !== pick) pick.value = v;
+        });
+        box.append(h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Colour'), row));
+        box.append(asl({ label: 'Reach', k: 'reach', min: 5, max: 60, step: 5, of: (f) => f.bright || 5, set: (v, k2) => many('fx.lightSet', { bright: v }, k2), fmt: (v) => `${v} ft bright · ${v * 2} ft dim` }));
+        box.append(asl({ label: 'Brightness', k: 'intensity', min: 0.1, max: 1, step: 0.05, of: (f) => f.intensity ?? 1, set: (v, k2) => many('fx.update', { intensity: v }, k2), fmt: pct }));
+        const fl = h('input', { type: 'checkbox', role: 'switch', onchange: (e) => many('fx.update', { flicker: e.target.checked }) });
+        local(() => { const f = first(); fl.checked = !!(f && f.flicker); });
+        box.append(h('label', { class: 'ctl ctl-toggle' }, h('span', { class: 'ctl-label' }, 'Flicker'), fl, h('span', { class: 'switch' })));
+      } else {
+        box.append(asl({ label: 'Strength', k: 'intensity', min: 0.1, max: 2, step: 0.05, of: (f) => f.intensity ?? 1, set: (v, k2) => many('fx.update', { intensity: v }, k2), fmt: pct }));
+        if ((first() || {}).kind === 'emitter') box.append(asl({ label: 'Size', k: 'r', min: 0.1, max: 6, step: 0.05, of: (f) => f.r, set: (v, k2) => many('fx.update', { r: v }, k2), fmt: (v) => `${round(v, 2)}″` }));
+      }
+      return box;
+    }
     function fxDetail(f) {
       const fr = (k) => { const x = fxOf(f.id); return x ? x[k] : null; };
       const fsl = (o) => sl({ ...o, key: `${f.id}-${o.k}`, get: () => fr(o.k), set: (v, key) => send(key, 'fx.update', { id: f.id, [o.k]: v }) });
@@ -2319,11 +2550,7 @@ const Play = (() => {
       }
       return box;
     }
-    return h('div', { class: 'stack' }, list,
-      // Third Builder (third-small-labels): C9, they add or jump, they don't filter the list
-      row(btn('+ Token', 'user', () => Drawer.open({ filter: 'tokens', purpose: 'addToken', back: { pop: 'layers' } }), { tip: 'Add a token' }),
-        btn('+ Effect', 'flame', () => { setTool('fx'); openPop('fx'); }, { tip: 'Place torches, mist, lights or weather', key: 'E' }),
-        btn('Ambience …', 'volume', () => openPop('sound'), { tip: 'Ambience, the map\'s sounds, fight music: all in the Ambience panel' })));
+    return h('div', { class: 'stack' }, list); // (Beta 3.68, Glinn: + Token, + Effect and Ambience … off; the rail has them)
   }
 
   // ---------- grid popover ----------
@@ -2360,7 +2587,7 @@ const Play = (() => {
   }
   function buildGridPop() {
     const SW = ['#ffffff', '#000000', '#e3963e', '#7fd0ff'];
-    const sw = h('div', { class: 'swatches' }, ...SW.map((c) => h('button', { class: 'swatch', style: { background: c }, 'aria-label': `Grid colour ${c}`, onclick: () => cmd('grid.update', { color: c }) })),
+    const sw = h('div', { class: 'swatches' }, ...SW.map((c) => h('button', { class: 'swatch', style: { background: c }, 'aria-label': `Grid colour: ${UI.colourName(c)}`, 'data-tip': UI.colourName(c), onclick: () => cmd('grid.update', { color: c }) })), // (UI audit VJ11: a name on hover)
       h('input', { type: 'color', 'aria-label': 'Custom grid colour', oninput: (e) => send('grid-color', 'grid.update', { color: e.target.value }) }));
     bind(() => { for (const b of sw.querySelectorAll('.swatch')) b.classList.toggle('on', b.style.background && rgbToHex(b.style.background) === grid().color); const ci = sw.querySelector('input'); if (document.activeElement !== ci) ci.value = grid().color; });
     // (Beta 3.61) what every map needs on top: Show, the kind, the cell size, the two buttons that set a grid up; the
@@ -2423,7 +2650,7 @@ const Play = (() => {
       const a = ch[kind]; const cmdName = kind === 'fight' ? 'chapter.fight' : 'chapter.ambience';
       if (!a) return add(kind === 'fight' ? 'Choose fight music' : 'Choose ambience', kind === 'fight' ? 'swords' : 'music', () => pick(kind, kind === 'fight' ? 'combat' : 'chapter'));
       return item(kind === 'fight' ? 'swords' : 'music', a.name, { flash: kind, missing: a.missing,
-        acts: [ib('refresh', 'Choose another', () => pick(kind, kind === 'fight' ? 'combat' : 'chapter')), ib('trash', kind === 'fight' ? 'Remove the fight music' : 'Remove the ambience', () => cmd(cmdName, { id: ch.id, path: null }))],
+        acts: [ib('refresh', 'Choose another', () => pick(kind, kind === 'fight' ? 'combat' : 'chapter')), ib('trash', kind === 'fight' ? 'Remove the fight music' : 'Remove the ambience', () => { cmd(cmdName, { id: ch.id, path: null }); toast(kind === 'fight' ? 'Fight music removed' : 'Ambience removed', { undo: () => cmd(cmdName, { id: ch.id, path: a.path }) }); })], // (UI audit VH5: Undo)
         vol: vol(kind, a.volume, kind === 'fight' ? 'Fight music volume' : 'Ambience volume', (v) => send(kind, cmdName, { id: ch.id, volume: v })) });
     };
     const mapSounds = () => map().layers.filter((l) => l.role === 'audio');
@@ -2589,7 +2816,7 @@ const Play = (() => {
   function mapTile(m, i, ch) {
     const live = S.table.liveMapId === m.id;
     const edit = S.editMapId === m.id;
-    const thumb = h('span', { class: 'tile-thumb' }, m.bgPath ? Thumbs.img(m.bgPath, m.bgKind) : iconEl(m.drawn ? 'pencil' : 'map-2'));
+    const thumb = h('span', { class: 'tile-thumb' }, m.bgPath ? Thumbs.img(m.bgPath, m.bgKind, m.drawn ? (window.ts.fileUrl ? window.ts.fileUrl(m.bgPath) : UI.pathToUrl(m.bgPath)) : null) : iconEl(m.drawn ? 'pencil' : 'map-2')); // (Speed 3, WC3: a drawn map shows its picture itself, as the Map panel does. Its file is new after every edit, and each one got a small picture of its own in the library's cache that nothing ever removed)
     if (m.drawn && m.bgPath) thumb.append(h('span', { class: 'drawn-chip', 'aria-label': 'Drawn (Oldschool map)' }, iconEl('pencil'))); // (Beta 3.22)
     if (live) thumb.append(h('span', { class: `tile-badge ${S.table.blackout ? 'black' : ''}` }, S.table.blackout ? 'Blacked out' : 'On table'));
     if (m.missing) thumb.append(h('span', { class: 'tile-badge warn' }, 'File missing'));
@@ -2602,7 +2829,7 @@ const Play = (() => {
     }
     const tile = h('button', {
       class: `map-tile ${edit ? 'is-edit' : ''} ${live ? 'is-live' : ''}`, role: 'listitem', draggable: 'true',
-      'data-tip': m.name, 'data-key': i < 9 ? String(i + 1) : null, 'data-tip-side': 'top',
+      'data-tip': m.name, 'data-key': i < 9 ? `Alt ${i + 1}` : null, 'data-tip-side': 'top', // (VB12: Alt + the number opens it; the bare number is the Hotbar)
       dataset: { id: m.id, index: String(i) },
       onclick: () => cmd('edit.open', { id: m.id }),
       ondblclick: () => cmd('table.send', { id: m.id }),
@@ -2678,6 +2905,13 @@ const Play = (() => {
   // =====================================================================
   function renderTopbar() {
     const t = els.topbar;
+    // (Speed 9, WI8: it was emptied and built anew on every state, so a press on Send to table that began on the old
+    // button and ended on the new one did nothing. Its buttons read what they need when they are pressed, so the bar
+    // is built only when what it shows is another thing)
+    const sig = JSON.stringify([ui.align ? [!!(S && S.map && Geom.isHex(grid())), ui.align.cells] : 0, ui.momentAim || 0, !!ui.trigPlace, !!ui.trigPick, ui.aimFrom ? [1, ui.spell && ui.spell.name] : 0,
+      S && S.map ? [S.map.id, S.map.name, isLive(), S.table && S.table.liveName] : 0]);
+    if (t.dataset.sig === sig) return;
+    t.dataset.sig = sig;
     t.innerHTML = '';
     if (ui.align) {
       const hex = S.map && Geom.isHex(grid());
@@ -2697,6 +2931,14 @@ const Play = (() => {
       const d = Moments.BY[ui.momentAim];
       t.append(h('div', { class: 'bar bar-mode' }, iconEl(d ? d.icon : 'target'), h('span', {}, `Click where the ${d ? d.label.toLowerCase() : 'effect'} should go`),
         btn('Cancel', null, () => aimMoment(null), { kind: 'ghost', key: 'Esc' })));
+      t.classList.add('on');
+      return;
+    }
+    // UI audit VD5: a trigger waiting for a click on the map says so here, with a way out (it stayed armed however
+    // long, with a 2 s toast as its only sign, and took the next click meant for a token)
+    if (ui.trigPlace || ui.trigPick) {
+      t.append(h('div', { class: 'bar bar-mode' }, iconEl('bolt'), h('span', {}, ui.trigPlace ? 'Click the map where the trigger\'s mark goes' : 'Click on the map what this step is for'),
+        btn('Cancel', null, () => endTrigAim(), { kind: 'ghost', key: 'Esc' })));
       t.classList.add('on');
       return;
     }
@@ -2794,7 +3036,7 @@ const Play = (() => {
     }
     const open = $('.tc-open', c);
     open.lastChild.textContent = t.open ? 'Close' : 'Open table';
-    open.dataset.tip = t.open ? 'Close the table window (Esc on the TV also works)' : 'Open the table window on the TV';
+    open.dataset.tip = t.open ? 'Close the table window' : 'Open the table window on the TV';
     $('.tc-shot', c).hidden = !t.open;
   }
 
@@ -3022,7 +3264,7 @@ const Play = (() => {
       h('div', { class: 'ctl-row' },
         m ? btn('Open library', 'photo', () => Drawer.open({ filter: 'maps', purpose: 'replace' }), { kind: 'primary', key: 'L' })
           : btn('Add map', 'plus', (ev) => addMapMenu(ev && ev.currentTarget, viewChapter() && viewChapter().id), { kind: 'primary' }),
-        m ? btn('Choose a file', 'folder', async () => { const r = await ts.library('import', { cat: 'maps' }); if (r && r.ok && r.items[0]) cmd('bg.set', { path: r.items[0].path }); }, { tip: 'Pick a map anywhere on this computer: it is copied into the library' }) : null)));
+        m ? btn('Choose a file', 'folder', async () => { const r = await ts.library('import', { cat: 'maps' }); if (r && r.ok && r.items[0]) cmd('bg.set', { path: r.items[0].path }); else if (r && r.error) toast(r.error, { kind: 'error' }); }, { tip: 'Pick a map anywhere on this computer: it is copied into the library' }) : null)));
   }
 
   // =====================================================================
@@ -3037,7 +3279,7 @@ const Play = (() => {
 
   function cardTarget() {
     const tok = ui.selected && layer(ui.selected);
-    if (tok && tok.role === 'token' && (ui.tool === 'select' || ui.tool === 'token')) return { kind: 'token', item: tok };
+    if (tok && tok.role === 'token' && (ui.tool === 'select' || ui.tool === 'token' || ui.pickAny)) return { kind: 'token', item: tok };
     const mk = Tools.cardTarget();
     if (mk) return mk;
     if (ui.tool === 'asset' && ui.selAssets.length > 1) {
@@ -3045,7 +3287,7 @@ const Play = (() => {
       if (items.length > 1) return { kind: 'assets', item: items[0], items };
     }
     const sp = spellOf(ui.selSpell);
-    if (sp && (ui.tool === 'select' || ui.tool === 'spell')) return { kind: 'spell', item: sp };
+    if (sp && (ui.tool === 'select' || ui.tool === 'spell' || ui.pickAny)) return { kind: 'spell', item: sp };
     const f = fxOf(ui.selFx);
     if (f && (ui.tool === 'fx' || (ui.tool === 'select' && f.preset === 'party'))) return { kind: 'fx', item: f };
     const a = ui.selAsset && layer(ui.selAsset);
@@ -3067,44 +3309,32 @@ const Play = (() => {
   function placeCard() {
     const c = els.card;
     const t = S && S.map ? cardTarget() : null;
-    if (!t) { c.classList.remove('on'); c.innerHTML = ''; c.dataset.sig = ''; cardPin = null; return; }
+    // Beta 3.68: a picked token has its sheet instead of the toolbar
+    placeSheet(t && t.kind === 'token' ? t.item : null);
+    if (!t || t.kind === 'token') { c.classList.remove('on'); c.innerHTML = ''; c.dataset.sig = ''; cardPin = null; return; }
     // (an asset's opacity is left out, so its slider in the card isn't rebuilt while it is dragged)
     const sigItem = t.kind === 'assets' ? t.items.map((a) => ({ ...a, opacity: 0, x: 0, y: 0 })) : t.kind === 'asset' ? { ...t.item, opacity: 0 } : t.item;
-    const pcName = t.kind === 'token' ? pcOf(t.item) : null; // (Prototype 17: a player's token has its own toolbar)
-    const sig = JSON.stringify([t.kind, sigItem, t.kind === 'token' ? [!!tokenLight(t.item.id), tokSet().card, tokSet().pic] : 0,
-      pcName ? [pcName, pcCard(pcName), ((S.players || {}).moves || {})[pcName], !!(S.players && S.players.on), playerOpen(pcName)] : 0]);
+    const sig = JSON.stringify([t.kind, sigItem]);
     if (c.dataset.sig !== sig) {
       c.dataset.sig = sig;
       c.innerHTML = '';
-      c.append(...(t.kind === 'token' ? (pcName ? playerCard(t.item, pcName) : tokenCard(t.item)) : t.kind === 'spell' ? spellCard(t.item) : t.kind === 'asset' ? assetCard(t.item)
+      c.append(...(t.kind === 'spell' ? spellCard(t.item) : t.kind === 'asset' ? assetCard(t.item)
         : t.kind === 'assets' ? assetsCard(t.items) : t.kind === 'mark' ? Tools.card(t) : fxCard(t.item)));
     }
     const range = c.querySelector('.card-range input');
     if (range && document.activeElement !== range && !range.matches(':active')) range.value = t.item.opacity ?? 1;
-    // 4.10: a token's toolbar: compact and see-through until the mouse is on it (default), as before, or docked
-    const style = t.kind === 'token' ? tokSet().card || 'compact' : 'floating';
-    c.classList.toggle('compact', style === 'compact');
-    c.classList.toggle('docked', style === 'docked');
     const tr = cardAnchor(t);
     if (!tr) { c.classList.remove('on'); cardPin = null; return; }
     c.classList.add('on');
     const sr = els.stage.getBoundingClientRect();
     const cr = c.getBoundingClientRect();
-    if (style === 'docked') { // above the hotbar, in the middle
-      const hb = Hot && Hot.el && Hot.el.isConnected && !Hot.el.hidden ? Hot.el.getBoundingClientRect() : null;
-      const bottom = hb && hb.height && hb.top - sr.top > sr.height / 2 ? hb.top - sr.top - 10 : sr.height - 14;
-      c.style.left = `${clamp(sr.width / 2 - cr.width / 2, 8, Math.max(8, sr.width - cr.width - 8))}px`;
-      c.style.top = `${clamp(bottom - cr.height, 8, Math.max(8, sr.height - cr.height - 8))}px`;
-      cardPin = null;
-      return;
-    }
     const pinKey = cardPinKey(t, sr);
     if (cardPin && cardPin.key === pinKey) {
       c.style.left = `${clamp(cardPin.x, 8, Math.max(8, sr.width - cr.width - 8))}px`;
       c.style.top = `${clamp(cardPin.y, 8, Math.max(8, sr.height - cr.height - 8))}px`;
       return;
     }
-    const gap = style === 'compact' ? 18 : 10; // (4.10: compact keeps a little further away)
+    const gap = 10;
     let y = tr.top - sr.top - cr.height - gap;
     if (y < 60) y = tr.bottom - sr.top + gap;
     let x = clamp(tr.left - sr.left + tr.width / 2 - cr.width / 2, 8, sr.width - cr.width - 8);
@@ -3198,24 +3428,6 @@ const Play = (() => {
     if (!v || v === l.name) return;
     cmd('layer.many', { patches: group.map((x) => ({ id: x.id, name: v })), stepLabel: 'Rename' }); // they keep their numbers
   }
-  function tokenCard(l) {
-    const lit = tokenLight(l.id);
-    const tag = TAG_LOOK[l.tag || 'off'];
-    return [
-      h('button', { class: 'card-title card-name ellipsis', 'data-tip': 'Rename, name tag', onclick: (e) => nameMenu(e.currentTarget, l) }, iconEl('user'), `${l.name}${l.n ? ` ${l.n}` : ''}`, iconEl('pencil', 'card-pen')),
-      ib(tag.icon, `${tag.tip}. Click to change`, (e) => nameMenu(e.currentTarget, l), { on: (l.tag || 'off') !== 'off', cls: `card-tag tag-${l.tag || 'off'}` }),
-      ib('minus', 'Smaller', () => stepSize(l, -1)),
-      h('button', { class: `card-size ${tokSet().card === 'compact' ? '' : 'wide'}`, 'data-tip': `${PlayTools.sizeName(l.size)}. Click to change the size`, onclick: (e) => sizeMenu(e.currentTarget, l) },
-        tokSet().card === 'compact' ? PlayTools.sizeShort(l.size) : PlayTools.sizeName(l.size)),
-      ib('plus', 'Bigger', () => stepSize(l, 1)),
-      cardSep(),
-      ib('rotate-clockwise', 'Turn 45°', () => cmd('layer.update', { id: l.id, rotation: ((l.rotation || 0) + 45) % 360 })),
-      ib(l.hidden ? 'eye-off' : 'eye', l.hidden ? 'Hidden. Click to show players' : 'Hide from players', () => cmd('layer.update', { id: l.id, hidden: !l.hidden }), { on: l.hidden, key: 'H' }),
-      ib('bulb', lit ? 'Carries a light. Click to put it out' : 'Carry a light (torch)', () => toggleTokenLight(l), { on: !!lit }),
-      ib('copy', 'Duplicate', () => duplicateToken(l)),
-      ib('trash', 'Remove', () => undoable('layer.remove', { id: l.id }), { danger: true, key: 'Del' }),
-    ];
-  }
   // =====================================================================
   // Prototype 17: a player's token. Its own toolbar (sight, the light they carry, darkvision, movement, HP) and,
   // from its name, the player panel. What it sees and carries belongs to the character (the whole campaign).
@@ -3225,18 +3437,12 @@ const Play = (() => {
   const CARRY_LOOK = { none: ['No light', 'circle-off'], candle: ['Candle', 'candle'], torch: ['Torch', 'flame'], lantern: ['Lantern', 'lamp'], light: ['Light', 'sparkles'], daylight: ['Daylight', 'sun'], custom: ['Own light', 'bulb'] };
   const CARRY_FT = { none: [0, 0], candle: [5, 10], torch: [20, 40], lantern: [30, 60], light: [20, 40], daylight: [60, 120] };
   const carryTip = (k) => (k === 'none' ? 'No light of their own' : k === 'custom' ? 'Their own bright and dim light' : `${CARRY_LOOK[k][0]}: ${CARRY_FT[k][0]} ft bright, light to ${CARRY_FT[k][1]} ft`);
-  const DV_STEPS = [0, 30, 60, 90, 120];
   const charSet = (name, patch) => cmd('char.set', { name, patch });
-  const chip = (iconName, text, tip, onclick, o = {}) => h('button', { class: `card-chip ${o.on ? 'on' : ''} ${o.off ? 'off' : ''} ${o.cls || ''}`, 'data-tip': tip, 'aria-label': tip, onclick }, iconEl(iconName), h('span', {}, text));
   const menuAt = (e) => { const r = e.currentTarget.getBoundingClientRect(); return [r.left, r.bottom + 6]; };
   function lightMenu(e, name, c) {
     openMenu(...menuAt(e), [{ header: `${name} carries` },
       ...Object.keys(CARRY_FT).map((k) => ({ icon: c.carry === k ? 'check' : CARRY_LOOK[k][1], checked: c.carry === k, label: k === 'none' ? 'No light' : `${CARRY_LOOK[k][0]} · ${CARRY_FT[k][0]} / ${CARRY_FT[k][1]} ft`, action: () => charSet(name, { carry: k }) })),
-      '-', { icon: c.carry === 'custom' ? 'check' : 'adjustments-horizontal', checked: c.carry === 'custom', label: 'Own light … (the player panel)', action: () => { charSet(name, { carry: 'custom' }); openPlayer(name); } }]);
-  }
-  function dvMenu(e, name, c) {
-    openMenu(...menuAt(e), [{ header: `${name}: darkvision` },
-      ...DV_STEPS.map((v) => ({ icon: (c.dark || 0) === v ? 'check' : null, checked: (c.dark || 0) === v, label: v ? `${v} ft` : 'None', action: () => charSet(name, { darkvision: v }) }))]);
+      '-', { icon: c.carry === 'custom' ? 'check' : 'bulb', checked: c.carry === 'custom', label: `Own light · ${c.bright ?? 20} / ${c.dim ?? 40} ft (the character card)`, action: () => charSet(name, { carry: 'custom' }) }]);
   }
   function pcMoreMenu(e, l, name) {
     const tag = l.tag || 'off';
@@ -3245,174 +3451,293 @@ const Play = (() => {
       { header: 'Name tag' },
       ...['off', 'gm', 'all'].map((t) => ({ icon: tag === t ? 'check' : null, checked: tag === t, label: { off: 'Off', gm: 'Only me (my screen)', all: 'Players too' }[t], action: () => cmd('layer.update', { id: l.id, tag: t }) })),
       '-',
-      { icon: 'id-badge-2', label: `${name}'s character card …`, action: () => Characters.openEditor({ state: () => S, name }) },
-      { icon: 'user-x', label: 'Not a player token', action: () => cmd('layer.update', { id: l.id, player: false, stepLabel: 'Not a player token' }) },
-      { icon: 'trash', label: 'Remove the token', danger: true, action: () => undoable('layer.remove', { id: l.id }) }]);
-  }
-  function playerCard(l, name) {
-    const c = pcCard(name) || { name, eye: true, carry: 'none' };
-    const mv = ((S.players || {}).moves || {})[name];
-    const phones = !!(S.players && S.players.on);
-    const carry = CARRY_LOOK[c.carry] ? c.carry : 'none';
-    const hp = c.hp ? `${c.hp.cur ?? '–'}/${c.hp.max ?? '–'}` : c.maxHp ? `${c.maxHp}` : null;
-    const open = playerOpen(name);
-    return [
-      h('button', { class: 'card-title card-name card-pc ellipsis', style: c.color ? `--pcc:${c.color}` : '', 'data-tip': `${name}: the player panel (sight, light, movement, HP, phone)`, onclick: () => (open ? closePlayer() : openPlayer(name, l.id)) },
-        h('i', { class: 'pc-dot' }), name, iconEl(open ? 'chevron-up' : 'chevron-down', 'pc-chev')),
-      ib(c.eye ? 'eye' : 'eye-off', c.eye ? 'Sees for themselves and reveals the fog. Click: sight off' : 'Sight off: reveals nothing. Click to switch it on', () => charSet(name, { eye: !c.eye }), { on: c.eye, cls: 'pc-sight' }),
-      chip(CARRY_LOOK[carry][1], carry === 'none' ? 'No light' : CARRY_LOOK[carry][0], `${carryTip(carry)}. Click to change`, (e) => lightMenu(e, name, c), { on: carry !== 'none', off: !c.eye }),
-      chip('moon', c.dark ? `${c.dark} ft` : '–', c.dark ? `Darkvision ${c.dark} ft. Click to change` : 'No darkvision. Click to change', (e) => dvMenu(e, name, c), { on: !!c.dark, off: !c.eye }),
-      mv ? chip('walk', phones && mv.left != null ? `${mv.left}/${mv.max}` : `${mv.speed} ft`, phones && mv.left != null ? `${mv.left} of ${mv.max} ft left this turn. Click: movement again` : `Speed ${mv.speed} ft. Click for movement`,
-        () => (phones && mv.left != null ? ts.players('resetChar', { name }).then((r) => r && r.ok && toast(`${name}: movement again`, { ms: 1600 })) : openPlayer(name, l.id)), { cls: 'pc-move' }) : null,
-      hp ? chip('heart', hp, c.hp ? 'HP now (from the turn order). Click to change' : 'Max HP. Click to change', () => openPlayer(name, l.id, 'hp'), { cls: `pc-hp ${c.down ? 'down' : ''}` }) : null,
-      cardSep(),
-      ib('minus', 'Smaller', () => stepSize(l, -1)),
-      h('button', { class: `card-size ${tokSet().card === 'compact' ? '' : 'wide'}`, 'data-tip': `${PlayTools.sizeName(l.size)}. Click to change the size`, onclick: (e) => sizeMenu(e.currentTarget, l) },
-        tokSet().card === 'compact' ? PlayTools.sizeShort(l.size) : PlayTools.sizeName(l.size)),
-      ib('plus', 'Bigger', () => stepSize(l, 1)),
-      ib('rotate-clockwise', 'Turn 45°', () => cmd('layer.update', { id: l.id, rotation: ((l.rotation || 0) + 45) % 360 })),
-      ib(l.hidden ? 'eye-off' : 'eye', l.hidden ? 'Hidden. Click to show players' : 'Hide from players', () => cmd('layer.update', { id: l.id, hidden: !l.hidden }), { on: l.hidden, key: 'H', cls: 'pc-hide' }),
-      ib('dots', 'More: name tag, character card, not a player token, remove', (e) => pcMoreMenu(e, l, name)),
-    ].filter(Boolean);
+      { icon: 'user-x', label: 'Not a player token', action: () => cmd('layer.update', { id: l.id, player: false, stepLabel: 'Not a player token' }) }]);
   }
 
-  // ---------- the player panel (a floating panel; opens under the toolbar) ----------
-  let pcPanel = null; // { name, id (the token it was opened from), focus }
-  const playerOpen = (name) => !!(Floats && Floats.isOpen('player') && pcPanel && pcPanel.name === name);
-  function closePlayer() { if (Floats) Floats.hide('player'); placeCard(); }
-  function openPlayer(name, tokenId, focus) {
-    if (!Floats) return;
-    const was = pcPanel && pcPanel.name;
-    pcPanel = { name, id: tokenId || (pcPanel && pcPanel.name === name ? pcPanel.id : null), focus: focus || null };
-    if (Floats.isOpen('player') && was !== name) Floats.hide('player');
-    if (Floats.isOpen('player')) { Floats.rebuild('player'); placeCard(); return; }
-    Floats.show({
-      id: 'player', title: name, icon: 'user', build: buildPlayerPanel, placeAlways: true,
-      place: (r, el) => {
-        const cr = els.card.classList.contains('on') ? els.card.getBoundingClientRect() : null;
-        if (!cr) return null;
-        const hgt = el.offsetHeight || 420; const w = el.offsetWidth || 340;
-        const x = clamp(cr.left - r.left + cr.width / 2 - w / 2, 8, Math.max(8, r.width - w - 8));
-        const below = cr.bottom - r.top + 8; const above = cr.top - r.top - hgt - 8;
-        if (below + hgt < r.height - 8) return { x, y: below };
-        if (above >= 8) return { x, y: above };
-        // too tall for above or below: beside the toolbar, on the side with room
-        const right = cr.right - r.left + 12; const left = cr.left - r.left - w - 12;
-        return { x: right + w < r.width - 8 || left < 8 ? Math.min(right, r.width - w - 8) : left, y: clamp(cr.top - r.top, 8, Math.max(8, r.height - hgt - 8)) };
-      },
-      tips: PLAYER_TIPS,
-    });
-    placeCard();
-  }
-  function buildPlayerPanel() {
-    const name = pcPanel.name;
-    const C = () => pcCard(name) || { name, eye: true, carry: 'none' };
-    const P = () => (S && S.players) || {};
-    const set = (patch) => charSet(name, patch);
-    const lab = (t) => h('div', { class: 'ctl-label' }, t);
-    const tok = () => (map() ? map().layers.find((x) => x.id === pcPanel.id) : null) || (map() ? map().layers.find((x) => pcOf(x) === name) : null);
-    const head = h('div', { class: 'pc-head' });
-    bind(() => {
-      const c = C();
-      const sig = JSON.stringify([c.color, c.face, c.player]);
-      if (head.dataset.sig === sig) return;
-      head.dataset.sig = sig;
-      head.style.setProperty('--pcc', c.color || 'var(--torch)');
-      head.replaceChildren(c.face ? h('img', { class: 'pc-face', src: c.face, alt: '' }) : h('span', { class: 'pc-face' }, iconEl('user')),
-        h('div', { class: 'grow' }, h('b', {}, name), c.player ? h('small', {}, `played by ${c.player}`) : null));
-    });
-    // sight
-    const sight = h('div', { class: 'stack pc-sec' }, lab('Sight'),
-      toggle({ label: 'Sees for themselves (reveals the fog)', get: () => C().eye, set: (v) => set({ eye: v }) }),
-      seg({ label: 'Darkvision', cls: 'seg-5', options: DV_STEPS.map((v) => ({ value: v, label: v ? `${v} ft` : 'None' })), get: () => C().dark || 0, set: (v) => set({ darkvision: v }) }),
-      stepper({ name: 'Sight', label: 'How far they see', get: () => C().sight || 0, set: (v) => set({ sight: v }), fmt: (v) => (v ? `${v} ft` : 'to the walls'),
-        prev: (v) => Math.max(0, v - (v > 60 ? 30 : 10)), next: (v) => Math.min(600, v + (v >= 60 ? 30 : 10)) }));
-    // the light they carry
-    const custom = h('div', { class: 'stack' },
-      stepper({ name: 'Bright', label: 'Bright light', get: () => C().bright ?? 20, set: (v) => set({ carry: 'custom', bright: v }), fmt: (v) => `${v} ft`, prev: (v) => Math.max(0, v - 5), next: (v) => Math.min(120, v + 5) }),
-      stepper({ name: 'Dim', label: 'Dim light to', get: () => C().dim ?? 40, set: (v) => set({ carry: 'custom', dim: v }), fmt: (v) => `${v} ft`, prev: (v) => Math.max(0, v - 5), next: (v) => Math.min(240, v + 5) }));
-    bind(() => { custom.hidden = C().carry !== 'custom'; });
-    const light = h('div', { class: 'stack pc-sec' }, lab('The light they carry'),
-      tiles(Object.keys(CARRY_LOOK).map((k) => ({ id: k, label: CARRY_LOOK[k][0], icon: CARRY_LOOK[k][1], tip: carryTip(k) })), () => C().carry || 'none', (v) => set({ carry: v })),
-      custom);
-    // movement
-    const moveNote = h('p', { class: 'hint' });
-    bind(() => {
-      const m = (P().moves || {})[name]; const sp = (m && m.speed) || C().speed || 30;
-      moveNote.textContent = !P().on ? `Speed ${sp} ft. Moving by phone is off, so no steps are counted.`
-        : m && m.left != null ? `${m.left} of ${m.max} ft left this turn${m.dashed ? ' (dashed)' : ''}.` : `Speed ${sp} ft: walks freely right now.`;
-    });
-    const moves = h('div', { class: 'pc-moves' });
-    bind(() => { const list = C().moves || []; const sig = JSON.stringify(list); if (moves.dataset.sig === sig) return; moves.dataset.sig = sig; moves.replaceChildren(...list.map((x) => h('span', { class: 'pc-pill' }, iconEl('bolt'), `${x.name}${x.ft ? ` +${x.ft} ft` : ''}`))); });
-    const movement = h('div', { class: 'stack pc-sec' }, lab('Movement'),
-      stepper({ name: 'Speed', label: 'Speed', get: () => C().speed || 30, set: (v) => set({ speed: v }), fmt: (v) => `${v} ft`, prev: (v) => Math.max(5, v - 5), next: (v) => Math.min(120, v + 5) }),
-      moves, moveNote,
-      row(btn('Movement again', 'refresh', () => ts.players('resetChar', { name }).then((r) => r && r.ok && toast(`${name}: movement again`, { ms: 1600 })), { kind: 'small', tip: 'A fresh turn: their feet, Dash and extra moves again' }),
-        btn('Extra moves …', 'pencil', () => Characters.openEditor({ state: () => S, name }), { kind: 'small ghost', tip: 'Cunning Action, Step of the Wind …: on the character card' })));
-    // HP, AC, conditions
-    const cols = () => ((S.init && S.init.cols) || []);
-    const hpCol = () => cols().find((x) => x.kind === 'hp'); const condCol = () => cols().find((x) => x.kind === 'cond');
-    const hpNow = h('b', { class: 'pc-hpnow' });
-    const hpIn = h('input', { type: 'text', class: 'pc-hpin', placeholder: '12, −7, +5 or 12/20', 'aria-label': 'HP', spellcheck: 'false' });
-    hpIn.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter') return;
-      const t = hpIn.value.trim().replace('−', '-'); const c = C();
-      let v = null; let m;
-      if ((m = t.match(/^([+-])\s*(\d+)$/))) v = { delta: (m[1] === '-' ? -1 : 1) * Number(m[2]) };
-      else if ((m = t.match(/^(\d+)\s*\/\s*(\d+)$/))) v = { cur: Number(m[1]), max: Number(m[2]) };
-      else if ((m = t.match(/^(\d+)$/))) v = { cur: Number(m[1]) };
-      if (!v) { toast('HP: type 12, −7, +5 or 12/20', { kind: 'error', ms: 2200 }); return; }
-      if (c.entry && hpCol()) cmd('init.set', { id: c.entry, vals: { [hpCol().id]: v } });
-      else if (v.max || v.cur) set({ hp: v.max || v.cur });
-      hpIn.value = '';
-    });
-    const acIn = h('input', { type: 'number', min: 0, max: 40, class: 'pc-acin', 'aria-label': 'AC' });
-    acIn.addEventListener('change', () => set({ ac: acIn.value === '' ? null : Number(acIn.value) }));
-    const condBox = h('div', { class: 'pc-conds' });
-    const combatNote = h('p', { class: 'hint' });
-    bind(() => {
-      const c = C();
-      hpNow.textContent = c.hp ? `${c.hp.cur ?? '–'} / ${c.hp.max ?? '–'}` : c.maxHp ? `max ${c.maxHp}` : '–';
-      hpNow.classList.toggle('danger-text', !!c.down);
-      if (document.activeElement !== acIn) acIn.value = c.ac ?? '';
-      combatNote.textContent = c.entry ? (hpCol() ? '' : 'The turn order has no HP column yet (Initiative → Column).') : 'Not in the turn order: HP here sets the max HP; conditions need the turn order.';
-      combatNote.hidden = !combatNote.textContent;
-      const list = c.cond || []; const can = !!(c.entry && condCol());
-      const sig = JSON.stringify([list, can]);
-      if (condBox.dataset.sig === sig) return;
-      condBox.dataset.sig = sig;
-      const save = (next) => cmd('init.set', { id: C().entry, vals: { [condCol().id]: next } });
-      condBox.replaceChildren(...list.map((x) => h('button', { class: 'pc-pill cond', 'data-tip': 'Click to take it off', onclick: () => save(list.filter((y) => y !== x)) }, x, iconEl('x'))),
-        ...(can ? [h('button', { class: 'btn small ghost', onclick: (e) => openMenu(...menuAt(e), CONDS.map((t) => ({ icon: list.includes(t) ? 'check' : 'tag', checked: list.includes(t), label: t, action: () => save(list.includes(t) ? list.filter((y) => y !== t) : [...list, t]) }))) }, iconEl('plus'), 'Condition')] : []));
-    });
-    const combat = h('div', { class: 'stack pc-sec', dataset: { sec: 'hp' } }, lab('HP, AC, conditions'),
-      h('div', { class: 'pc-hprow' }, iconEl('heart'), hpNow, hpIn, h('span', { class: 'pc-ac' }, iconEl('shield'), acIn)), condBox, combatNote);
-    // the phone
-    const phone = h('div', { class: 'stack pc-sec' });
-    bind(() => {
-      const v = P(); const ph = (v.phones || []).find((d) => d.char === name);
-      const free = (v.phones || []).filter((d) => d.char !== name);
-      const sig = JSON.stringify([v.on, ph && [ph.id, ph.name, ph.connected], free.map((d) => [d.id, d.name, d.char])]);
-      if (phone.dataset.sig === sig) return;
-      phone.dataset.sig = sig;
-      phone.replaceChildren(lab('Phone'),
-        h('p', { class: 'hint' }, ph ? `On ${ph.name} (${ph.connected ? 'connected' : 'away'}).` : 'No phone holds this character.'),
-        row(ph ? btn('Take it from the phone', 'user-off', () => ts.players('assign', { id: ph.id, name: null }), { kind: 'small' })
-          : btn('Hand to a phone …', 'device-mobile', (e) => openMenu(...menuAt(e), free.length ? free.map((d) => ({ icon: 'device-mobile', label: `${d.name}${d.char ? ` (now ${d.char})` : ''}`, action: () => ts.players('assign', { id: d.id, name }) })) : [{ header: 'No phone has joined yet' }]), { kind: 'small' }),
-          !v.on ? btn('Player phones …', 'device-gamepad-2', () => TB.openPanel('players'), { kind: 'small ghost', tip: 'Moving by phone is off: switch it on there' }) : null));
-    });
-    // the token
-    const token = h('div', { class: 'stack pc-sec' }, lab('Token'),
-      row(btn('Name tag …', 'tag', (e) => { const l = tok(); if (l) nameMenu(e.currentTarget, l); }, { kind: 'small' }),
-        btn('Character card …', 'id-badge-2', () => Characters.openEditor({ state: () => S, name }), { kind: 'small' })),
-      row(btn('Not a player token', 'user-x', () => { const l = tok(); if (l) { cmd('layer.update', { id: l.id, player: false, stepLabel: 'Not a player token' }); closePlayer(); } }, { kind: 'small ghost', tip: 'No longer a player token: no sight or light of its own (undo: its name menu)' })));
-    const body = h('div', { class: 'stack pc-panel' }, head, sight, light, movement, combat, phone, token);
-    if (pcPanel.focus === 'hp') setTimeout(() => { hpIn.focus(); combat.scrollIntoView({ block: 'nearest' }); }, 60);
-    pcPanel.focus = null;
-    return body;
-  }
   const CONDS = ['Blinded', 'Charmed', 'Concentrating', 'Deafened', 'Exhausted', 'Frightened', 'Grappled', 'Incapacitated', 'Invisible',
     'Paralyzed', 'Petrified', 'Poisoned', 'Prone', 'Restrained', 'Stunned', 'Unconscious'];
+
+  // =====================================================================
+  // Beta 3.68 (Glinn): the token sheet. Lines slide out from behind a picked token, at its edge, the same size at any
+  // zoom: its name, the lines picked under Lines … (as it comes: conditions, sight and light; an NPC: its light), and
+  // More. One place for every setting: the character card holds who a character is (darkvision, how far they see, own
+  // light, speed, AC, max HP), the lines what happens now, the name line the token's name (rename, name tag, player or
+  // not), More what is done with this token; More shows a row only for what no line shows. A right-click opens the
+  // sheet with More open. Only on this screen. It took the place of the token's toolbar, its wheel and the player panel.
+  // =====================================================================
+  const SHEET_LINES = ['hp', 'ac', 'init', 'conds', 'sight', 'move', 'quick'];
+  const SHEET_DEFAULT = ['conds', 'sight'];
+  const sheetLineName = (k, kind) => ({ hp: 'Hit points', ac: 'Armour class', init: 'Turn order', conds: 'Conditions', sight: kind === 'npc' ? 'Light' : 'Sight and light', move: 'Movement', quick: 'Quick buttons' })[k];
+  const sheetKind = (l) => (pcOf(l) ? 'pc' : 'npc');
+  const sheetLinesOf = (kind) => { const s = tokSet().sheet; return (s && Array.isArray(s[kind]) ? s[kind] : SHEET_DEFAULT).filter((k) => kind === 'pc' || k !== 'move'); };
+  function setSheetLines(kind, list) {
+    const cur = tokSet().sheet || {};
+    ts.settings({ tokens: { sheet: { pc: sheetLinesOf('pc'), npc: sheetLinesOf('npc'), ...cur, [kind]: SHEET_LINES.filter((k) => list.includes(k)) } } });
+  }
+  const tokLabel = (l) => `${l.name}${l.n ? ` ${l.n}` : ''}`;
+  const entryOf = (l) => (S.init && (S.init.entries || []).find((q) => (q.tokens || []).includes(l.id))) || null;
+  const initColOf = (kind) => ((S.init && S.init.cols) || []).find((c) => c.kind === kind) || null;
+  // hit points { cur, max } and AC where they live: a player's on the character (from the turn order while in it),
+  // a monster's in the turn order while it is in it, else on its token
+  function hpOf(l) {
+    const pc = pcOf(l);
+    if (pc) { const c = pcCard(pc); return c && c.hp ? c.hp : c && c.maxHp ? { cur: c.maxHp, max: c.maxHp } : null; }
+    const e = entryOf(l); const hc = initColOf('hp');
+    if (e && hc && e.vals && e.vals[hc.id]) return e.vals[hc.id];
+    return l.hp || null;
+  }
+  function acOf(l) {
+    const pc = pcOf(l);
+    if (pc) { const c = pcCard(pc); return c ? c.ac ?? null : null; }
+    const e = entryOf(l); const ac = initColOf('ac');
+    if (e && ac && e.vals && e.vals[ac.id] != null) return e.vals[ac.id];
+    return l.ac ?? null;
+  }
+  function parseHp(t) {
+    const s = String(t || '').trim().replace('−', '-'); let m;
+    if ((m = s.match(/^([+-])\s*(\d+)$/))) return { delta: (m[1] === '-' ? -1 : 1) * Number(m[2]) };
+    if ((m = s.match(/^(\d+)\s*\/\s*(\d+)$/))) return { cur: Number(m[1]), max: Number(m[2]) };
+    if ((m = s.match(/^(\d+)$/))) return { cur: Number(m[1]) };
+    return null;
+  }
+  async function editHp(l) {
+    const hp = hpOf(l); const pc = pcOf(l);
+    const t = await askText(`${pc || tokLabel(l)}: hit points${hp ? ` (${hp.cur ?? '–'} / ${hp.max ?? '–'})` : ''}`, '', { ok: 'Set', placeholder: '12, −7, +5 or 12/20' });
+    if (t == null || t === '') return;
+    const v = parseHp(t);
+    if (!v) { toast('Hit points: type 12, −7, +5 or 12/20', { kind: 'error', ms: 2200 }); return; }
+    const hc = initColOf('hp');
+    const eid = pc ? (pcCard(pc) || {}).entry : (entryOf(l) || {}).id;
+    if (eid && hc) { cmd('init.set', { id: eid, vals: { [hc.id]: v } }); return; }
+    if (pc) { if (v.max || v.cur) charSet(pc, { hp: v.max || v.cur }); return; }
+    const old = l.hp || { cur: null, max: null };
+    let max = 'max' in v ? v.max : old.max;
+    let cur = 'delta' in v ? (old.cur ?? max ?? 0) + v.delta : v.cur;
+    if (max == null && !('delta' in v)) max = cur; // (the first number given is the most it has too)
+    if (cur != null && max != null && 'delta' in v) cur = Math.min(cur, max); // (healing stops at the maximum)
+    cmd('layer.update', { id: l.id, hp: { cur, max }, stepLabel: 'Hit points' });
+  }
+  async function editAc(l) {
+    const pc = pcOf(l); const now = acOf(l);
+    if (pc) { Characters.openEditor({ state: () => S, name: pc }); return; } // (a player's AC: on the character card)
+    const t = await askText(`${pc || tokLabel(l)}: armour class`, now != null ? String(now) : '', { ok: 'Set', placeholder: '15', allowEmpty: true });
+    if (t == null) return;
+    const n = t.trim() === '' ? null : Number(t);
+    if (n != null && !Number.isFinite(n)) return;
+    const e = entryOf(l); const ac = initColOf('ac');
+    if (e && ac) cmd('init.set', { id: e.id, vals: { [ac.id]: n } });
+    else cmd('layer.update', { id: l.id, ac: n, stepLabel: 'Armour class' });
+  }
+  function toggleTurn(l) {
+    const e = entryOf(l);
+    if (e) return cmd('init.remove', { ids: [e.id] }).then((r) => { if (r && r.ok) toast(r.label, { undo: () => cmd('init.restore') }); });
+    return cmd('init.addToken', { id: l.id }).then((r) => { if (r && r.ok) toast(r.label, { ms: 1800 }); else if (r && r.error) toast(r.error, { kind: 'error' }); });
+  }
+  function moreItems(l, anchor) {
+    const pc = pcOf(l); const c = pc ? pcCard(pc) || { name: pc, eye: true, carry: 'none' } : null;
+    const on = sheetLinesOf(pc ? 'pc' : 'npc'); const off = (k) => !on.includes(k);
+    const hp = hpOf(l); const ac = acOf(l); const e = entryOf(l); const lit = tokenLight(l.id);
+    const sh = showItems(l);
+    const mv = pc && ((S.players || {}).moves || {})[pc]; const counting = !!(pc && S.players && S.players.on && mv && mv.left != null);
+    const carry = pc ? (CARRY_LOOK[c.carry] ? c.carry : 'none') : null;
+    const rows = [
+      off('hp') ? { icon: 'heart', label: hp ? `Hit points: ${hp.cur ?? '–'} / ${hp.max ?? '–'} …` : 'Hit points …', action: () => editHp(l) } : null,
+      !pc && off('ac') ? { icon: 'shield', label: ac != null ? `Armour class: ${ac} …` : 'Armour class …', action: () => editAc(l) } : null,
+      off('init') ? { icon: 'list-numbers', label: e ? `In the turn order${e.init != null ? ` (${e.init})` : ''}: take it out` : 'Into the turn order', checked: !!e, action: () => toggleTurn(l) } : null,
+      off('conds') ? { icon: 'tags', label: (l.cond || []).length ? `Conditions: ${l.cond.join(', ')} …` : 'Conditions …', action: () => { const r = anchor.getBoundingClientRect(); condPicker(r.right + 140, r.top, l); } } : null,
+      off('sight') && pc ? { icon: c.eye ? 'eye' : 'eye-off', label: c.eye ? 'Sight: on (reveals the fog)' : 'Sight: off', checked: c.eye, action: () => charSet(pc, { eye: !c.eye }) } : null,
+      off('sight') && pc ? { icon: CARRY_LOOK[carry][1], label: `Light: ${carry === 'none' ? 'none' : CARRY_LOOK[carry][0]} …`, action: () => lightMenu({ currentTarget: anchor }, pc, c) } : null,
+      off('sight') && !pc ? { icon: 'bulb', label: lit ? 'Put out its light' : 'Carry a light', action: () => toggleTokenLight(l) } : null,
+      off('move') && counting ? { icon: 'walk', label: `Movement again (${mv.left} / ${mv.max} ft left)`, action: () => ts.players('resetChar', { name: pc }).then((r) => r && r.ok && toast(`${pc}: movement again`, { ms: 1600 })) } : null,
+      '-',
+      off('quick') ? { icon: 'arrows-maximize', label: `Size: ${PlayTools.sizeName(l.size)} …`, action: () => sizeMenu(anchor, l) } : null,
+      off('quick') ? { icon: l.hidden ? 'eye' : 'eye-off', label: l.hidden ? 'Show to players' : 'Hide from players', key: 'H', action: () => cmd('layer.update', { id: l.id, hidden: !l.hidden }) } : null,
+      off('quick') ? { icon: 'target', label: 'Ping', action: () => ts.ping({ mapId: S.editMapId, x: l.x, y: l.y }) } : null,
+      ...(off('quick') ? sh.map((x) => ({ icon: x.icon, label: x.label, action: x.run })) : []),
+      pc ? null : { icon: 'copy', label: 'Duplicate', key: 'Ctrl D', action: () => duplicateToken(l) },
+      '-',
+      pc ? { icon: 'device-mobile', label: `Phone: ${phoneOf(pc) ? phoneOf(pc).name : 'none'} …`, action: () => phoneMenu(anchor, pc) } : null,
+      pc ? { icon: 'id-badge-2', label: 'Character card …', action: () => Characters.openEditor({ state: () => S, name: pc }) } : null,
+      '-',
+      { icon: 'adjustments-horizontal', label: 'Lines …', action: () => linesBox(anchor, sheetKind(l)) },
+      { icon: 'trash', label: 'Remove', danger: true, key: 'Del', action: () => undoable('layer.remove', { id: l.id }) },
+    ].filter(Boolean);
+    // no separator at the start, at the end or twice
+    return rows.filter((x, k) => x !== '-' || (k > 0 && k < rows.length - 1 && rows[k - 1] !== '-'));
+  }
+  // a player's phone: hand them to one, or take them from it
+  const phoneOf = (name) => (((S.players || {}).phones || []).find((d) => d.char === name)) || null;
+  function phoneMenu(anchor, name) {
+    const v = S.players || {}; const ph = phoneOf(name);
+    const free = (v.phones || []).filter((d) => d.char !== name);
+    const r = anchor.getBoundingClientRect();
+    openMenu(r.right + 6, r.top, [{ header: ph ? `On ${ph.name} (${ph.connected ? 'connected' : 'away'})` : `${name}: no phone` },
+      ...(ph ? [{ icon: 'user-off', label: 'Take it from the phone', action: () => ts.players('assign', { id: ph.id, name: null }) }] : []),
+      ...free.map((d) => ({ icon: 'device-mobile', label: `Hand to ${d.name}${d.char ? ` (now ${d.char})` : ''}`, action: () => ts.players('assign', { id: d.id, name }) })),
+      ...(!free.length && !ph ? [{ header: 'No phone has joined yet' }] : []),
+      ...(!v.on ? ['-', { icon: 'device-gamepad-2', label: 'Player phones …', action: () => TB.openPanel('players') }] : [])]);
+  }
+  // (Glinn) More drops down out of its line: right under it, as wide as the line past its fade, unrolling downwards
+  function openMore(l, anchor) {
+    // (where the line ends up, also while it is still sliding out: its place in the lines, not its moving picture)
+    const host = anchor.parentElement; const hr = host.getBoundingClientRect();
+    const r = { left: hr.left + anchor.offsetLeft, top: hr.top + anchor.offsetTop, width: anchor.offsetWidth, bottom: hr.top + anchor.offsetTop + anchor.offsetHeight, right: hr.left + anchor.offsetLeft + anchor.offsetWidth };
+    const flip = !!(sheetEl && sheetEl.classList.contains('left')); const FADE = 40;
+    openMenu(r.left, r.bottom - 1, moreItems(l, anchor));
+    const m = document.getElementById('menu');
+    m.style.minWidth = `${Math.round(r.width - FADE)}px`;
+    const mr = m.getBoundingClientRect();
+    // (Glinn) its right edge in line with the line's (a wider menu reaches further left)
+    m.style.left = `${Math.round(clamp((flip ? r.right - FADE : r.right) - mr.width, 4, innerWidth - mr.width - 4))}px`;
+    void m.offsetWidth; m.classList.add('drop');
+    moreOpenFor = l.id;
+  }
+  // a second click on More closes it: the menu closes itself on any press outside it, before the click arrives, so
+  // whether it was open is noted first (window, capture: before the menu's own listener)
+  let moreOpenFor = null; let moreWasOpen = false;
+  window.addEventListener('pointerdown', (e) => {
+    const on = !!document.querySelector('#menu.on');
+    moreWasOpen = on && !!(e.target && e.target.closest && e.target.closest('#token-sheet .ts-more')) && moreOpenFor === sheetFor;
+    if (!on) moreOpenFor = null;
+  }, true);
+  function clickMore(l, anchor) {
+    if (moreWasOpen) { moreWasOpen = false; moreOpenFor = null; return; }
+    openMore(l, anchor);
+  }
+  // Lines …: which lines the sheet shows, for players or for NPCs (stays open: several at once; Esc or a click elsewhere)
+  function linesBox(anchor, kind) {
+    const old = document.getElementById('sheet-lines'); if (old) old.remove();
+    let list = sheetLinesOf(kind);
+    const rows = h('div', { class: 'sl-rows' });
+    const paint = () => { for (const b of rows.querySelectorAll('[data-v]')) { const on = list.includes(b.dataset.v); b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); } };
+    rows.append(h('div', { class: 'sl-row fixed' }, h('span', { class: 'grow' }, 'Name'), h('i', { class: 'sl-sw on' })));
+    for (const k of SHEET_LINES) {
+      if (kind === 'npc' && k === 'move') continue;
+      rows.append(h('button', { class: 'sl-row', role: 'switch', dataset: { v: k }, onclick: () => { list = list.includes(k) ? list.filter((x) => x !== k) : [...list, k]; paint(); setSheetLines(kind, list); } },
+        h('span', { class: 'grow' }, sheetLineName(k, kind)), h('i', { class: 'sl-sw' })));
+    }
+    const back = h('button', { class: 'sl-row sl-back', onclick: () => { list = SHEET_DEFAULT.slice(); paint(); setSheetLines(kind, list); } }, iconEl('arrow-back-up'), h('span', { class: 'grow' }, 'As it came'));
+    const box = h('div', { id: 'sheet-lines', class: 'sheet-lines', role: 'dialog', 'aria-label': 'Lines' },
+      h('div', { class: 'menu-head' }, kind === 'pc' ? 'Lines · players' : 'Lines · NPCs'), rows, h('div', { class: 'sl-sep' }), back);
+    document.body.append(box);
+    paint();
+    const r = anchor.getBoundingClientRect(); const b = box.getBoundingClientRect();
+    box.style.left = `${Math.max(4, Math.min(r.right + 6, innerWidth - b.width - 4))}px`;
+    box.style.top = `${Math.max(4, Math.min(r.top - b.height / 2, innerHeight - b.height - 4))}px`;
+    const off = (ev) => { if (!box.contains(ev.target)) close(); };
+    const key = (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } };
+    function close() { box.remove(); document.removeEventListener('pointerdown', off, true); document.removeEventListener('keydown', key, true); }
+    setTimeout(() => { document.addEventListener('pointerdown', off, true); document.addEventListener('keydown', key, true); }, 0);
+  }
+  function sheetLines(l) {
+    const pc = pcOf(l); const c = pc ? pcCard(pc) || { name: pc, eye: true, carry: 'none' } : null;
+    const kind = pc ? 'pc' : 'npc';
+    const on = sheetLinesOf(kind);
+    const bar = (cls, ...kids) => h('div', { class: `ts-bar ${cls}` }, ...kids.filter(Boolean));
+    const ibtn = (icon, tip, fn, o = {}) => h('button', { class: `ts-ib ${o.on ? 'on' : ''} ${o.cls || ''}`, 'data-tip': tip, 'aria-label': tip, onclick: fn }, iconEl(icon));
+    const tchip = (icon, text, tip, fn, o = {}) => h('button', { class: `ts-chip ${o.on ? 'on' : ''} ${o.cls || ''}`, 'data-tip': tip, 'aria-label': tip, onclick: fn }, icon ? iconEl(icon) : null, h('span', {}, text));
+    const out = [];
+    // 1 the name (a click: rename and the name tag; a player: their menu)
+    const copies = l.named ? 0 : copiesOf(l).length;
+    out.push(bar('ts-name', h('button', { class: 'ts-namebtn', 'data-tip': pc ? 'Rename, name tag, not a player token' : 'Rename, name tag, make it a player token', onclick: (e) => (pc ? pcMoreMenu(e, l, pc) : nameMenu(e.currentTarget, l)) },
+      pc ? h('i', { class: 'ts-dot', style: c.color ? `background:${c.color}` : '' }) : null, h('b', {}, pc || tokLabel(l)),
+      pc ? (c.player ? h('small', {}, c.player) : null) : copies > 1 ? h('small', {}, `of ${copies}`) : null),
+    l.hidden ? h('span', { class: 'ts-hidden', 'data-tip': 'Hidden from players' }, iconEl('eye-off')) : null));
+    // the lines picked under Lines …
+    if (on.includes('hp')) {
+      const hp = hpOf(l); const down = hp && hp.cur != null && hp.cur <= 0;
+      const p = hp && hp.max ? Math.max(0, Math.min(1, (hp.cur ?? hp.max) / hp.max)) : 0;
+      out.push(bar('ts-hp', h('button', { class: 'ts-hpbtn', 'data-tip': 'Hit points: 12, −7, +5 or 12/20', onclick: () => editHp(l) },
+        iconEl(down ? 'skull' : 'heart'), h('span', { class: 'ts-hpbar' }, h('i', { style: `width:${Math.round(p * 100)}%` })),
+        hp ? h('b', {}, `${hp.cur ?? '–'}`, h('small', {}, ` / ${hp.max ?? '–'}`)) : h('small', { class: 'ts-none' }, 'Set')),
+      pc && down && c.ds ? h('span', { class: 'ts-ds', 'data-tip': 'Death saves' }, ...[0, 1, 2].map((i) => h('i', { class: i < c.ds.s ? 's' : '' })), h('span', { class: 'ts-ds-gap' }), ...[0, 1, 2].map((i) => h('i', { class: i < c.ds.f ? 'f' : '' }))) : null));
+    }
+    if (on.includes('ac')) { const ac = acOf(l); out.push(bar('ts-ac', tchip('shield', ac != null ? `AC ${ac}` : 'AC –', pc ? 'Armour class: on the character card' : 'Armour class. Click to change', () => editAc(l)))); }
+    if (on.includes('init')) {
+      const e = entryOf(l);
+      out.push(bar('ts-init', tchip('list-numbers', e ? (e.init != null ? `Turn order · ${e.init}` : 'In the turn order') : 'Not in the turn order', e ? 'In the turn order. Click to take it out' : 'Click to add it to the turn order', () => toggleTurn(l), { on: !!e })));
+    }
+    if (on.includes('conds')) {
+      const list = l.cond || [];
+      out.push(bar(`ts-conds ${list.length > 2 ? 'grow' : ''}`, h('div', { class: 'ts-chips' }, ...(list.length ? list.map((x) => h('button', { class: `ts-cond c-${x.toLowerCase()}`, 'data-tip': 'Click to take it off', onclick: () => cmd('layer.update', { id: l.id, cond: list.filter((y) => y !== x), stepLabel: 'Conditions' }) }, x))
+        : [h('span', { class: 'ts-none' }, 'No conditions')])),
+      h('button', { class: 'ts-add', 'data-tip': 'Conditions', 'aria-label': 'Add a condition', onclick: (ev) => { const r = ev.currentTarget.getBoundingClientRect(); condPicker(r.right + 120, r.top + 60, l); } }, iconEl('plus'))));
+    }
+    if (on.includes('sight')) {
+      if (pc) {
+        const carry = CARRY_LOOK[c.carry] ? c.carry : 'none';
+        out.push(bar('ts-sight', h('div', { class: 'ts-chips' },
+          tchip(c.eye ? 'eye' : 'eye-off', 'Sight', c.eye ? 'Sees for themselves and reveals the fog. Click: sight off' : 'Sight off. Click to switch it on', () => charSet(pc, { eye: !c.eye }), { on: c.eye, cls: 'ts-eye' }),
+          tchip(CARRY_LOOK[carry][1], carry === 'none' ? 'No light' : CARRY_LOOK[carry][0], `${carryTip(carry)}. Click to change`, (ev) => lightMenu(ev, pc, c), { on: carry !== 'none', cls: 'ts-carry' }))));
+      } else {
+        const lit = tokenLight(l.id);
+        out.push(bar('ts-sight', h('div', { class: 'ts-chips' }, tchip(lit ? 'flame' : 'circle-off', lit ? 'Carries a light' : 'No light', lit ? 'Carries a light. Click to put it out' : 'Carry a light (torch)', () => toggleTokenLight(l), { on: !!lit, cls: 'ts-carry' }))));
+      }
+    }
+    if (pc && on.includes('move')) {
+      const mv = ((S.players || {}).moves || {})[pc]; const phones = !!(S.players && S.players.on);
+      const txt = mv ? (phones && mv.left != null ? `${mv.left} / ${mv.max} ft` : `${mv.speed} ft`) : `${c.speed || 30} ft`;
+      out.push(bar('ts-move', tchip('walk', txt, phones && mv && mv.left != null ? 'Feet left this turn. Click: movement again' : 'Speed', () => (phones && mv && mv.left != null ? ts.players('resetChar', { name: pc }).then((r) => r && r.ok && toast(`${pc}: movement again`, { ms: 1600 })) : Characters.openEditor({ state: () => S, name: pc })))));
+    }
+    if (on.includes('quick')) {
+      const sh = showItems(l)[0];
+      out.push(bar('ts-quick', h('div', { class: 'ts-acts' },
+        ibtn(l.hidden ? 'eye-off' : 'eye', l.hidden ? 'Hidden. Click to show players' : 'Hide from players (H)', () => cmd('layer.update', { id: l.id, hidden: !l.hidden }), { on: l.hidden }),
+        ibtn('target', 'Ping', () => ts.ping({ mapId: S.editMapId, x: l.x, y: l.y })),
+        sh ? ibtn(sh.icon, sh.label, sh.run) : null,
+        h('button', { class: 'ts-size', 'data-tip': `${PlayTools.sizeName(l.size)}. Click to change the size`, onclick: (ev) => sizeMenu(ev.currentTarget, l) }, PlayTools.sizeShort(l.size)))));
+    }
+    // last: More
+    const more = h('button', { class: 'ts-bar ts-more', 'data-tip': 'Everything else', onclick: (ev) => clickMore(l, ev.currentTarget) }, iconEl('dots'), h('span', {}, 'More'), iconEl('chevron-right'));
+    out.push(more);
+    return out;
+  }
+  // (Glinn: open only on a click, not when dragging) a token pressed while its sheet is shut keeps it shut until the
+  // press ends without moving; a drag leaves it shut (the token stays picked)
+  let sheetEl = null; let sheetFor = null; let slideT = 0; let sheetHold = null;
+  function placeSheet(l) {
+    if (!sheetEl) { sheetEl = h('div', { id: 'token-sheet', 'aria-label': 'Token' }); els.stage.append(sheetEl); }
+    if (l && sheetHold && sheetHold !== l.id) sheetHold = null;
+    if (l && sheetHold === l.id) l = null;
+    const n = l && view.nodes && view.nodes.get(l.id);
+    const box = n && (n.box || n.el);
+    if (!l || !box) { sheetEl.classList.remove('on', 'slide'); sheetEl.replaceChildren(); sheetEl.dataset.sig = ''; sheetFor = null; return; }
+    const pc = pcOf(l);
+    const sig = JSON.stringify([l, pc ? [pcCard(pc), ((S.players || {}).moves || {})[pc], !!(S.players && S.players.on)] : 0, !!tokenLight(l.id), entryOf(l), initColOf('hp'), initColOf('ac'),
+      tokSet().sheet, showItems(l).map((x) => x.label), l.named ? 0 : copiesOf(l).length]);
+    const fresh = sheetFor !== l.id;
+    if (sheetEl.dataset.sig !== sig) {
+      sheetEl.dataset.sig = sig;
+      const bars = h('div', { class: `ts-bars ${fresh ? '' : 'still'}` }, ...sheetLines(l)); // (a change on the same token: no slide again)
+      [...bars.children].forEach((b, i) => b.style.setProperty('--k', i));
+      sheetEl.replaceChildren(bars);
+    }
+    // (Glinn: a left and a right click slid out at different speeds: the slide was switched off on the next redraw,
+    // which comes sooner after a right-click; it now always runs to its end)
+    if (fresh) { sheetEl.classList.remove('slide'); void sheetEl.offsetWidth; sheetEl.classList.add('slide'); clearTimeout(slideT); slideT = setTimeout(() => sheetEl.classList.remove('slide'), 1400); }
+    sheetFor = l.id;
+    // the lines start at the token's edge (the token itself stays free to click and drag), its name level with its top;
+    // on the side with room
+    const sr = els.stage.getBoundingClientRect(); const r = box.getBoundingClientRect();
+    const cx = r.left - sr.left + r.width / 2; const cy = r.top - sr.top + r.height / 2;
+    const T = Math.round(r.width / 2 + 1); const H = Math.round(r.height / 2);
+    sheetEl.style.setProperty('--T', `${T}px`);
+    sheetEl.style.setProperty('--H', `${H}px`);
+    const bars = sheetEl.querySelector('.ts-bars');
+    const bw = bars ? bars.offsetWidth : 260; const bh = bars ? bars.offsetHeight : 150;
+    sheetEl.classList.toggle('left', cx + T + bw > sr.width - 12 && cx - T - bw > 12);
+    sheetEl.style.left = `${Math.round(cx)}px`;
+    sheetEl.style.top = `${Math.round(clamp(cy, H + 8, Math.max(H + 8, sr.height - (bh - H) - 12)))}px`;
+    sheetEl.classList.toggle('moving', !!(drag && drag.kind === 'token' && drag.id === l.id));
+    sheetEl.classList.add('on');
+  }
+  // the More bar of the open sheet (a right-click opens it)
+  function sheetMore(l) {
+    sheetHold = null;
+    placeCard();
+    const m = sheetEl && sheetEl.querySelector('.ts-more');
+    if (m) openMore(l, m);
+  }
   function spellCard(sp) {
     return [
       h('span', { class: 'card-title ellipsis' }, skinDot(sp.skin), sp.name),
@@ -3451,7 +3776,7 @@ const Play = (() => {
         ib(f.lit === false ? 'bulb-off' : 'bulb', f.lit === false ? 'Put out. Click to light it' : 'Lit. Click to put it out', () => cmd('fx.lit', { id: f.id, on: f.lit === false }), { on: f.lit !== false }),
         ib('minus', 'Less light', () => cmd('fx.lightSet', { id: f.id, bright: Math.max(5, (f.bright || 5) - 5) })),
         h('span', { class: 'card-size wide', 'data-tip': 'Bright / dim light' }, `${f.bright || 0}/${f.dim || 0} ft`),
-        ib('plus', 'More light', () => cmd('fx.lightSet', { id: f.id, bright: (f.bright || 0) + 5 })));
+        ib('plus', 'More light', () => cmd('fx.lightSet', { id: f.id, bright: Math.min(LIGHT_REACH_MAX, (f.bright || 0) + 5) })));
     } else if (f.kind === 'emitter') {
       out.push(
         ib('minus', 'Smaller', () => cmd('fx.update', { id: f.id, r: round(Math.max(0.1, f.r / 1.25), 3) })),
@@ -3554,42 +3879,21 @@ const Play = (() => {
       { icon: 'arrow-back-up', label: 'Undo', disabled: !S.history.canUndo, run: () => cmd('history.undo') },
     ], 'Here');
   }
-  function tokenRadial(l, pt, x, y) {
+  // Beta 3.68: a right-click on a token opens its sheet with More open (the wheel it had before is in More)
+  // VA5: the tool in hand stays in hand (Fog went to Select without a word, and the next drag did not paint). With
+  // another tool the sheet is like a menu: the next click on the map, or Esc, only closes it.
+  function tokenRadial(l) {
+    if (ui.selSpell) { ui.selSpell = null; view.selectSpell(null); }
+    ui.pickAny = ui.tool !== 'select' && ui.tool !== 'token';
     ui.selected = l.id; view.setSelected(l.id);
-    if (ui.tool !== 'select') setTool('select');
-    ui.selected = l.id; view.setSelected(l.id); placeCard();
-    const lit = tokenLight(l.id);
-    // Wheel overhaul: the five that matter in play first (the fight, the table, hide, remove); the rest under More …
-    // (size and turning are also on the token bar)
-    const sh = showItems(l);
-    const hide = { icon: l.hidden ? 'eye' : 'eye-off', label: l.hidden ? 'Unhide' : 'Hide', hint: l.hidden ? 'Hidden from the table: click to show it' : 'Hide it from the table', run: () => cmd('layer.update', { id: l.id, hidden: !l.hidden }) };
-    const remove = { icon: 'trash', label: 'Remove', danger: true, run: () => undoable('layer.remove', { id: l.id }) };
-    const ping = { icon: 'target', label: 'Ping', run: () => ts.ping({ mapId: S.editMapId, ...pt }) };
-    const size = [
-      { icon: 'plus', label: 'Bigger', run: () => stepSize(l, 1) },
-      { icon: 'minus', label: 'Smaller', run: () => stepSize(l, -1) },
-      { icon: 'rotate-clockwise', label: 'Turn', run: () => cmd('layer.update', { id: l.id, rotation: ((l.rotation || 0) + 45) % 360 }) }];
-    // Prototype 14 / 17: a player's token: the player panel and their sight instead of Rename, Duplicate and a light
-    const pc = pcOf(l);
-    if (pc) {
-      const c = pcCard(pc) || { eye: true };
-      Radial.open(x, y, [...fightItems(l, x, y), { icon: 'user', label: 'Player …', run: () => openPlayer(pc, l.id) }, ...sh.slice(0, 1), remove,
-        { icon: c.eye ? 'eye-off' : 'eye', label: c.eye ? 'Sight off' : 'Sight on', run: () => charSet(pc, { eye: !c.eye }) }, hide, ping, ...sh.slice(1), ...size], `${l.name} (${pc})`);
-      return;
-    }
-    Radial.open(x, y, [...fightItems(l, x, y), ...sh.slice(0, 1), hide, remove,
-      { icon: 'pencil', label: 'Rename …', run: () => renameToken(l) },
-      { icon: 'bulb', label: lit ? 'Put out light' : 'Carry light', run: () => toggleTokenLight(l) },
-      { icon: 'copy', label: 'Duplicate', run: () => duplicateToken(l) }, ping, ...sh.slice(1), ...size], l.name);
+    sheetMore(l);
   }
-  // Beta 3.2: show a token to the table (table-show.js): only for the map on the table. While one turns, more join it.
-  // D3 (open point): a fight from the token's wheel: its conditions, and into or out of the turn order
-  function fightItems(l, x, y) {
-    const e = S.init && (S.init.entries || []).find((q) => (q.tokens || []).includes(l.id));
-    const n = (l.cond || []).length;
-    return [{ icon: 'tags', label: 'Conditions', badge: n || null, hint: n ? l.cond.join(', ') : 'Poisoned, Prone, Stunned …', run: () => condPicker(x, y, l) },
-      e ? { icon: 'swords', label: 'Turn order', cls: 'on', hint: 'In the turn order: click to take it out', run: () => cmd('init.remove', { ids: [e.id] }).then((r) => { if (r && r.ok) toast(r.label, { undo: () => cmd('init.restore') }); }) }
-        : { icon: 'swords', label: 'Turn order', hint: 'Not in the turn order: click to add it', run: () => cmd('init.addToken', { id: l.id }).then((r) => { if (r && r.ok) toast(r.label, { ms: 1800 }); else if (r && r.error) toast(r.error, { kind: 'error' }); }) }];
+  const strayPick = () => !!(ui.pickAny && (ui.selected || ui.selSpell));
+  function dropStrayPick() {
+    ui.pickAny = false;
+    if (ui.selected) { ui.selected = null; view.setSelected(null); }
+    if (ui.selSpell) { ui.selSpell = null; view.selectSpell(null); }
+    placeCard();
   }
   // a token's conditions from a small grid that stays open (several at once); Esc or a click elsewhere closes it
   function condPicker(x, y, l) {
@@ -3617,6 +3921,7 @@ const Play = (() => {
     function close() { box.remove(); document.removeEventListener('pointerdown', off, true); document.removeEventListener('keydown', key, true); }
     setTimeout(() => { document.addEventListener('pointerdown', off, true); document.addEventListener('keydown', key, true); }, 0);
   }
+  // Beta 3.2: show a token to the table (table-show.js): only for the map on the table. While one turns, more join it.
   function showItems(l) {
     if (!S || !S.table || S.table.liveMapId !== S.editMapId) return [];
     const sh = S.show && S.show.phase === 'show' && S.show.mapId === S.editMapId ? S.show : null;
@@ -3627,7 +3932,7 @@ const Play = (() => {
     return items;
   }
   function spellRadial(sp, pt, x, y) {
-    if (ui.tool !== 'spell' && ui.tool !== 'select') setTool('select');
+    ui.pickAny = ui.tool !== 'spell' && ui.tool !== 'select'; // (VA5: the tool stays in hand)
     selectSpell(sp.id);
     Radial.open(x, y, [
       { icon: 'bolt', label: 'Cast again', run: () => cmd('spell.burst', { id: sp.id }) },
@@ -3647,7 +3952,7 @@ const Play = (() => {
     Radial.open(x, y, [
       // N9 (open point): the same words and limits as the effect's card: a painted area is Stronger / Weaker, a placed one
       // Bigger / Smaller between 0.1 and 8
-      { icon: 'plus', label: light ? 'More light' : f.kind === 'region' ? 'Stronger' : 'Bigger', run: () => (light ? cmd('fx.lightSet', { id: f.id, bright: (f.bright || 0) + 5 }) : cmd('fx.update', f.kind === 'region' ? { id: f.id, intensity: round(Math.min(2, (f.intensity ?? 1) + 0.2), 2) } : { id: f.id, r: round(Math.min(8, f.r * 1.25), 3) })) },
+      { icon: 'plus', label: light ? 'More light' : f.kind === 'region' ? 'Stronger' : 'Bigger', run: () => (light ? cmd('fx.lightSet', { id: f.id, bright: Math.min(LIGHT_REACH_MAX, (f.bright || 0) + 5) }) : cmd('fx.update', f.kind === 'region' ? { id: f.id, intensity: round(Math.min(2, (f.intensity ?? 1) + 0.2), 2) } : { id: f.id, r: round(Math.min(8, f.r * 1.25), 3) })) },
       { icon: f.hidden ? 'eye' : 'eye-off', label: f.hidden ? 'Unhide' : 'Hide', run: () => cmd('fx.update', { id: f.id, hidden: !f.hidden }) },
       light ? { icon: f.lit === false ? 'bulb' : 'bulb-off', label: f.lit === false ? 'Light it' : 'Put it out', run: () => cmd('fx.lit', { id: f.id, on: f.lit === false }) } : null,
       f.attachTo
@@ -3693,6 +3998,7 @@ const Play = (() => {
       ...(d.turn ? { angle: L.angle ?? defaultAngle(d) } : {}), ...(d.kinds ? { variant: kindOf(d, L.variant) } : {}), ...(d.light && L.wave ? { wave: L.wave } : {}),
       ...(d.spin ? { spin: L.spin === -1 ? -1 : 1, swirl: L.swirl !== false } : {}), // Second Builder (second-water-works)
       ...(d.id === 'shaft' || d.id === 'window' ? { dust: L.dust ?? 1 } : {}),
+      ...beastLook(d.id),
       ...(d.id === 'window' ? { shape: L.shape || LOOK_DEFAULT.shape, grid: L.grid || LOOK_DEFAULT.grid, stretch: L.stretch ?? LOOK_DEFAULT.stretch } : {}),
     });
   }
@@ -3863,7 +4169,7 @@ const Play = (() => {
       tool: typeof r === 'string' && (r.includes(':') || (railItem(r) || {}).tool) ? 'switch to this tool (again: its panel)' : 'open or close it',
       door: 'open or close this door',
       do: doValue(r) ? doValue(r).def.what : ({ send: 'send this map to the table', blackout: 'blackout on or off', quiet: 'all table sound out, again to bring it back', next: 'next turn (no fight: next round)', fight: 'fight music on or off',
-        strike: 'a lightning flash on the table', 'stop-moments': 'stop the screen effects that are on', grid: 'the grid on or off', fit: 'fit your view to the table', again: 'movement again for every phone', join: 'the players\' join code on the TV, again to take it off',
+        strike: 'a lightning flash on the table', 'stop-moments': 'stop the screen effects that are on', 'close-panels': 'close every Toolbox panel that is open', grid: 'the grid on or off', fit: 'fit your view to the table', again: 'movement again for every phone', join: 'the players\' join code on the TV, again to take it off',
         'fight-start': 'round 1 begins with the first in the list', 'fight-end': 'end the fight', prev: 'back one turn', 'roll-enemies': 'd20 + bonus for every enemy without a number', 'init-sort': 'highest first',
         'sp-toggle': 'pause Spotify, again to go on', 'sp-next': 'the next song', 'sel-hide': 'hide what is selected, again to show it', 'sel-lock': 'lock the selected assets, again to unlock',
         'sel-dup': 'a copy of the selected token or asset', 'page-next': 'the next page of this hotbar', 'page-prev': 'the page before' })[r] || '',
@@ -3879,6 +4185,7 @@ const Play = (() => {
       case 'asset': { const tr = Trees.ofPath(r.path); return ui.tool === 'asset' && (tr ? ui.assetTab === 'living' && livingPick().v === tr.v && ui.living.size === tr.size : ui.assetTab === 'library' && !!ui.brush && ui.brush.path === r.path); }
       case 'portrait': return !!(S.talk && S.talk.cast.some((x) => x.path === r.path));
       case 'handout': return (S.handouts || []).some((x) => x.path === r.path);
+      case 'trigger': return (S.trigOn || []).includes(r.id); // (XA2: on: the next click takes it back)
       case 'overlay': return !!(m && m.layers.some((l) => l.role === 'overlay' && l.path === r.path));
       case 'sound': return !isSfx(r) && !!(m && m.layers.some((l) => l.role === 'audio' && l.path === r.path));
       case 'mood': return !!(S.spotify && S.spotify.playingMood === r && S.spotify.now && S.spotify.now.playing);
@@ -3944,6 +4251,7 @@ const Play = (() => {
     next: { label: 'Next turn', icon: 'player-track-next' }, fight: { label: 'Fight music', icon: 'swords' }, strike: { label: 'Lightning', icon: 'bolt' },
     'stop-moments': { label: 'Stop effects', icon: 'player-stop' }, grid: { label: 'Grid on/off', icon: 'grid-4x4' }, fit: { label: 'Fit the view', icon: 'zoom-scan' },
     again: { label: 'Movement again', icon: 'refresh' },
+    'close-panels': { label: 'Close all panels', icon: 'arrows-minimize' }, // (UI audit VH1: every Toolbox panel at once; in the search and for the Hotbar)
     join: { label: 'Join code', icon: 'qrcode' }, // (F1: the players' code on the TV, again: off)
     storm: { label: 'Storm in the trees', icon: 'tornado' }, // (Beta 3.20: the living trees; again: the storm passes)
     // fight (the Initiative panel's buttons)
@@ -3956,9 +4264,31 @@ const Play = (() => {
     // the hotbar itself
     'page-next': { label: 'Next hotbar page', icon: 'chevron-down' }, 'page-prev': { label: 'Previous hotbar page', icon: 'chevron-up' },
   };
-  const DO_GROUPS = [['Table', ['send', 'blackout', 'quiet', 'join', 'strike', 'storm', 'stop-moments', 'grid', 'fit']], ['Fight', ['fight-start', 'next', 'prev', 'roll-enemies', 'init-sort', 'fight-end', 'fight', 'again']],
+  const DO_GROUPS = [['Table', ['send', 'blackout', 'quiet', 'join', 'strike', 'storm', 'stop-moments', 'grid', 'fit', 'close-panels']], ['Fight', ['fight-start', 'next', 'prev', 'roll-enemies', 'init-sort', 'fight-end', 'fight', 'again']],
     ['Selection', ['sel-hide', 'sel-lock', 'sel-dup']], ['Spotify', ['sp-toggle', 'sp-next']], ['Hotbar', ['page-next', 'page-prev']]];
   // H: hide or show what is selected (a token, a marker, assets, a spell area, an effect)
+  // VB10: T says what it sent, and takes it back while another map was on the table before
+  function sendByKey() {
+    if (!S.map) return;
+    if (isLive()) { toast('Already on the table', { ms: 1400 }); return; }
+    const before = S.table.liveMapId && S.table.liveMapId !== S.editMapId ? S.table.liveMapId : null;
+    const name = S.map.name || 'This map';
+    cmd('table.send').then((r) => {
+      if (r && r.ok === false) { if (r.error) toast(r.error, { kind: 'error' }); return; }
+      toast(`On the table: ${name}`, before ? { undo: () => cmd('table.send', { id: before }) } : { ms: 2200 });
+    });
+  }
+  // VD5: "Put on the map" / "Pick on the map" of a trigger ends (Esc, Cancel, another tool, another map, its panel closed)
+  function endTrigAim() {
+    if (!ui.trigPlace && !ui.trigPick) return false;
+    ui.trigPlace = null; ui.trigPick = null;
+    if (Floats) Floats.refresh();
+    return true;
+  }
+  for (const k of ['trigPlace', 'trigPick']) { // (the top bar follows them, whoever sets them)
+    let v = ui[k] || null;
+    Object.defineProperty(ui, k, { enumerable: true, get: () => v, set: (x) => { const was = !!v; v = x || null; if (was !== !!v) { try { renderTopbar(); } catch { /* (not built yet) */ } } } });
+  }
   function toggleSelHidden() {
     if (ui.selected) { const l = layer(ui.selected); if (l) cmd('layer.update', { id: l.id, hidden: !l.hidden }); }
     else if (ui.selMark) Tools.toggleSelectedHidden();
@@ -4049,6 +4379,7 @@ const Play = (() => {
       case 'strike': cmd('strike.now', {}); toast('Lightning!', { ms: 1200 }); break;
       case 'storm': { if (!m) break; const x = await cmd('wind.storm', {}); if (x && x.label) toast(m.layers.some((l) => l.tree) ? x.label : `${x.label} (this map has no living trees)`, { ms: 1800 }); break; }
       case 'stop-moments': cmd('moment.stop', {}); break;
+      case 'close-panels': if (Floats) Floats.closeAll(); break;
       case 'grid': if (m) cmd('grid.update', { show: !m.grid.show }); break;
       case 'fit': view.fit(); break;
       case 'fight-start': startFight(); break;
@@ -4092,7 +4423,7 @@ const Play = (() => {
       return;
     }
     if (r === 'toggle') { cmd('fog.enabled', { enabled: !m.fog.enabled }).then((x) => { if (x && x.label) toast(x.label, { ms: 1400 }); }); return; }
-    if (r === 'reveal-all') { undoable('fog.base', { base: 'clear' }); return; }
+    if (r === 'reveal-all') { revealAll(); return; }
     if (r === 'cover-all') { undoable('fog.base', { base: 'cover' }); return; }
     if (r === 'reveal' || r === 'cover') ui.fogMode = r;
     if (r === 'brush' || r === 'rect' || r === 'room') setFogShape(r);
@@ -4157,6 +4488,11 @@ const Play = (() => {
       case 'fog': fogRun(r); break;
       case 'tool': toolRun(r); break;
       case 'do': await doRun(r); break;
+      case 'trigger': { // I7: a trigger of a map (it runs on its own map, wherever you are)
+        if (!r || !r.id) break;
+        await Trig.run(r.id, r.mapId);
+        break;
+      }
       case 'door': { // Prototype 25: a door of this map, opened or closed from the hotbar
         if (!S.map || !r || r.map !== S.map.id) { toast(`That ${String(it.label || '').startsWith('Window') ? 'window' : 'door'} is on another map`, { ms: 1800 }); break; }
         const x = await cmd('wall.door', { id: r.id });
@@ -4250,6 +4586,7 @@ const Play = (() => {
   let popTicker = null;
   const TB = Toolbox.create({
     doHot, toolHot, // Prototype 24: actions and tools on the hotbar
+    get Trig() { return Trig; },
     ui, cmd, state: () => S, ready: Ready, ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib, ctlLabel: (t) => h('div', { class: 'ctl-label' }, t) },
     refreshPop: () => { refreshPop(); renderRail(); }, openPop: (id) => openPop(id), closePop: () => closePop(), get Drawer() { return Drawer; }, get Tools() { return Tools; }, get Show() { return Show; }, get Spot() { return Spot; }, get Lights() { return Lights; }, get Remote() { return Remote; }, get Players() { return PlayersP; }, get Atlas() { return AtlasP; }, get Chars() { return Chars; }, get Dice() { return Dice; },
     setTick: (fn) => { popTicker = fn; }, nextTurn: () => Tools.nextRound(), startFight: () => startFight(),
@@ -4259,7 +4596,7 @@ const Play = (() => {
     // 4.5: Snapshots live in the Toolbox (Atmosphere, next to Moments)
     snaps: (toggle) => { if (toggle && Floats.isOpen('snaps')) Floats.hide('snaps'); else Snaps.openFor(null); renderRail(); },
     // a map tool from the Toolbox: switch the mouse to it and show its settings
-    useTool: (t0, mode0) => { const [t, mode] = Tools.normTool(t0, mode0); Tools.setMode(t, mode); setTool(t); openPop(t); },
+    useTool: (t0, mode0) => { const [t, mode] = Tools.normTool(t0, mode0); Tools.leaveNoteMode(t); Tools.setMode(t, mode); setTool(t); openPop(t); },
     // Prototype 14: Map notes, a tool from the Toolbox (or pinned to the rail): the mouse pins notes, its list opens
     mapNotes: (toggle) => { if (toggle && ui.tool === 'mark' && ui.mark.me) { setTool('select'); closePop(); } else { Tools.noteMode(); setTool('mark'); openPop('mark'); } renderRail(); }, // (Third Builder (third-marks-tool): Marks with Only me)
   });
@@ -4310,14 +4647,50 @@ const Play = (() => {
     ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib, ctlLabel: (t) => h('div', { class: 'ctl-label' }, t) },
     refresh: () => { refreshPop(); renderRail(); },
     aimMoment: (id) => aimMoment(id),
+    momentAim: (id) => momentAimAt(id),
   });
   // Snapshots (snapshots.js): the timeline, opened from Build or from a map's camera badge in the map bar
+  // I7 (Glinn): Triggers (triggers.js)
+  const Trig = Triggers.create({
+    ui, cmd, state: () => S, view: () => view,
+    ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
+    refresh: () => { refreshPop(); renderRail(); if (Floats) Floats.refresh(); },
+    hotAdd: (it) => Hot && Hot.add(it),
+    hasAlpha: (it) => TB.hasAlpha(it),
+  });
   const Snaps = Snapshots.create({
     ui, cmd, state: () => S, get Show() { return Show; },
     ctl: { slider, toggle, seg, tiles, stepper, btn, row, hint, sep, bind, ib },
     refresh: () => { refreshPop(); renderRail(); if (Floats) Floats.refresh(); },
     showPanel: (def) => { Floats.show(def); renderRail(); },
     capture: () => captureMap(), flash: (k) => flashRow(k),
+  });
+  // I3 (Glinn): Command search (search.js): one line at the top of the GM screen; every action goes through what the
+  // buttons and the Hotbar use
+  const railItems = () => RAIL.flatMap((g) => g.items || []).filter((it) => it.id && it.label && !['build', 'undo', 'redo'].includes(it.id));
+  const Search = CommandSearch.create({
+    state: () => S, cmd, hot: (it) => hotRun(it),
+    selectToken: (id) => {
+      if (ui.tool !== 'select' && ui.tool !== 'token') setTool('select');
+      ui.selected = id; view.setSelected(id); placeCard();
+      // the view goes to it
+      const n = view.nodes && view.nodes.get(id); const box = n && (n.box || n.el);
+      if (box) { const r = box.getBoundingClientRect(); const v = els.viewport.getBoundingClientRect(); view.panBy(v.left + v.width / 2 - (r.left + r.width / 2), v.top + v.height / 2 - (r.top + r.height / 2)); }
+      if (popId === 'layers') refreshPop();
+    },
+    toggleTurn: (l) => toggleTurn(l),
+    removeToken: (l) => undoable('layer.remove', { id: l.id }, `${l.name || 'Token'}${l.n ? ` ${l.n}` : ''} removed`),
+    runTrigger: (id) => Trig.run(id),
+    spells: () => SPELLS,
+    armEffect: (e) => { setTool('fx'); armElement({ kind: e.kind, id: e.id }); openPop('fx'); updateBrushCursor(); showToolHint(true); toast(`${e.label}: ${e.kind === 'region' ? 'paint it on the map' : 'click on the map to place it'}`, { ms: 1800 }); },
+    boardPads: () => (TB.boardPads ? TB.boardPads() : []), playPad: (p) => TB.playPad(p),
+    place: (x, role) => { const v = els.viewport.getBoundingClientRect(); const pt = view.toMap(v.left + v.width / 2, v.top + v.height / 2); return dropAsset(x.path, x.kind, role, pt, x.name); },
+    talk: (x) => TB.talkToggle(x),
+    panels: () => TB.PANELS || [], openPanel: (id) => TB.openPanel(id),
+    tools: railItems, pressRail: (id) => { const it = railItems().find((x) => x.id === id); const b = els.rail.querySelector(`.rail-btn[data-id="${id}"]`) || { blur() {} }; if (it) railClick(it, b); },
+    doActions: () => DO_HOT,
+    settings: () => (App.optionSections ? App.optionSections() : []), openSettings: (id, line) => App.openOptions(id, line),
+    settingLines: () => (App.settingLines ? App.settingLines() : []), // (UI audit VC3)
   });
   // A long fog (every step the party takes leaves one) is folded into one picture after a quiet moment (2.2):
   // all but the newest steps. The fog looks the same; drawing it, switching it on and sending it get fast again.
@@ -4356,6 +4729,21 @@ const Play = (() => {
     } catch { return null; } finally { document.body.classList.remove('capturing'); }
   }
   // the next click on the map plays a moment there
+  // I8: a Screen effects pad dragged over the map: a ring where it will play (one that plays over the whole table: none)
+  const AIM_SQ = { explosion: 3, gas: 4, holy: 4.5, blood: 1.3, teleport: 1.8, puff: 1.6, rockfall: 1.6, birds: 2, bats: 2 };
+  let aimEl = null;
+  function momentAimAt(id, x, y) {
+    const d = id && Moments.BY[id];
+    if (!d || !d.spot || !view || !S || !S.map) { if (aimEl) { aimEl.remove(); aimEl = null; } return; }
+    if (!aimEl) { aimEl = h('div', { class: 'mo-aim' }); els.stage.append(aimEl); }
+    const a = view.toMap(x, y); const b = view.toMap(x + 100, y);
+    const px = 100 / Math.max(1e-6, Math.abs(b.x - a.x)); // screen pixels per map unit
+    const look = ((S.settings && S.settings.momentLook) || {})[id] || {};
+    const r = (AIM_SQ[id] || 2) * Math.sqrt(look.str || 1) * grid().size * px;
+    const sr = els.stage.getBoundingClientRect();
+    Object.assign(aimEl.style, { left: `${Math.round(x - sr.left - r)}px`, top: `${Math.round(y - sr.top - r)}px`, width: `${Math.round(2 * r)}px`, height: `${Math.round(2 * r)}px` });
+    aimEl.dataset.label = d.label;
+  }
   function aimMoment(id) {
     ui.momentAim = id && Moments.BY[id] ? id : null;
     document.body.classList.toggle('aiming', !!ui.momentAim);
@@ -4365,7 +4753,7 @@ const Play = (() => {
   Floats = FloatPanels.create({
     host: () => els.stage,
     withBinds: (list, fn) => { const keep = refreshers; refreshers = list; try { return fn(); } finally { refreshers = keep; } },
-    onChange: () => { renderRail(); if (popId === 'toolbox') refreshPop(); sendPreviewSize(); if (Hot) Hot.render(); if (S && S.map) placeCard(); restForMapTable(); }, // (Prototype 17: the player toolbar's arrow)
+    onChange: () => { renderRail(); if (popId === 'toolbox') refreshPop(); sendPreviewSize(); if (Hot) Hot.render(); if (S && S.map) placeCard(); restForMapTable(); if (Floats && !Floats.isOpen('triggers')) endTrigAim(); }, // (Prototype 17: the player toolbar's arrow; VD5)
   });
   // The hotbar (hotbar.js): the bar itself; what each kind of thing does is here
   Hot = Hotbar.create({
@@ -4405,36 +4793,105 @@ const Play = (() => {
     if (ui.selSpell) { ui.selSpell = null; view.selectSpell(null); }
     placeCard();
     if (popId === 'layers') refreshPop();
-    return { kind: 'token', id: l.id, dx: l.x - pt.x, dy: l.y - pt.y, size: l.size, key: `tok-${l.id}-${Date.now()}` };
+    return { kind: 'token', id: l.id, dx: l.x - pt.x, dy: l.y - pt.y, size: l.size, sx: lastPointer ? lastPointer.x : null, sy: lastPointer ? lastPointer.y : null, moved: false, key: `tok-${l.id}-${Date.now()}` };
   }
 
   // =====================================================================
   // Pointer input on the canvas
   // =====================================================================
+  // UI audit VI4: one step and one limit per value, whoever changes it (the slider, the card's buttons, the keys).
+  // The brush stepped 0.25″ on its slider and 0.5″ with [ ]; an asset grew 20 % on its card and 15 % with ].
+  const BRUSH = { min: 0.5, max: 8, step: 0.25 };
+  const ASSET_STEP = 1.2;
+  const LIGHT_REACH_MAX = 60; // (ft: where a light's Reach slider ends; its + went on beyond it)
   let drag = null;
   let spaceDown = false;
   let lastPointer = null;
+  // UI audit VD1: Esc with something in the hand puts it back: nothing of the drag stays, on the map or in Undo. A
+  // pointer the system cancels, a lost capture and the window losing focus do the same (they counted as a release).
+  // SENT_BY: the drags that send while they move, and where each keeps the key its commands carry.
+  const SENT_BY = { token: 'key', map: 'key', fxmove: 'key', spellmove: 'key', assetgrip: 'key', assetmove: 'key', scatter: 'key', markmove: 'key', textmove: 'key', erase: 'key', wallend: 'key', wallmove: 'key', partymove: 'key', brush: 'id', pen: 'id', paint: 'sid' };
+  function cancelDrag() {
+    if (!drag) return false;
+    const d = drag;
+    drag = null; gesture = false;
+    document.body.classList.remove('panning');
+    hideLanding();
+    if (d.kind === 'right' || d.kind === 'pan' || d.kind === 'lpan') return true; // (your view stays where you moved it)
+    if (d.raf) cancelAnimationFrame(d.raf);
+    if (d.rect) d.rect.remove();
+    if (d.line) d.line.remove();
+    try { Tools.cancelDrag(d); Walls.cancelDrag(d); OS.cancelDrag(d); } catch (err) { console.error(`cancel drag: ${err && err.message}`); }
+    if (d.kind === 'map') { if (liveView) { clearTimeout(liveView.t); liveView = null; } pv = null; endMove(); }
+    if (d.kind === 'token' && sheetHold === d.id) sheetHold = null;
+    const key = d[SENT_BY[d.kind]];
+    const letGo = () => { if ((d.kind === 'token' || d.kind === 'fxmove') && view) view.hold(d.id, null); };
+    if (key) { pending.delete(key); ts.cmd('history.cancel', { key }).then(letGo, letGo); } else letGo();
+    if (d.kind === 'cast' && lastPointer && S && S.map) updateGhost(view.toMap(lastPointer.x, lastPointer.y), {});
+    updateBrushCursor(); updateAssetGhost();
+    return true;
+  }
   let brushCursor = null;
   let lastLaser = 0;
 
   // centre of the table, in map inches
   function viewCenter() { return tableCenterMap(); }
 
+  // UI audit VF5: while the Brush size slider moves, the ring shows in the middle of the map (the pointer is on the
+  // slider, so the size was set blind)
+  let brushPeek = 0; let brushPeekT = 0;
+  function peekBrush() { brushPeek = performance.now() + 1400; updateBrushCursor(); clearTimeout(brushPeekT); brushPeekT = setTimeout(updateBrushCursor, 1500); }
   function updateBrushCursor() {
+    updateLightGhost(lastPointer && S && S.map ? view.toMap(lastPointer.x, lastPointer.y) : null, lastPointer && lastPointer.x, lastPointer && lastPointer.y); // (Beta 3.68: and where the next light goes)
     if (!brushCursor) { brushCursor = h('div', { class: 'brush-cursor' }); view.marks.appendChild(brushCursor); }
+    let at = lastPointer;
+    if (!at && performance.now() < brushPeek) { const vr = els.viewport.getBoundingClientRect(); at = { x: vr.left + vr.width / 2, y: vr.top + vr.height / 2 }; }
     const fog = ui.tool === 'fog' && ui.fogShape === 'brush' && !(drag && drag.kind === 'rect');
     const fxPaint = ui.tool === 'fx' && ui.fxMode === 'paint' && !ui.fxSel; // (Beta 3.66: no brush with the Select tool)
     const paint = (fxPaint && (ui.paintShape === 'brush' || ui.paintShape === 'erase') && !(drag && drag.kind === 'fxrect')) || (ui.tool === 'asset' && ui.assetMode === 'scatter' && !!activeBrush());
-    const show = (fog || paint) && lastPointer && !ui.align && S && S.map;
+    const show = (fog || paint) && at && !ui.align && S && S.map;
     brushCursor.style.display = show ? '' : 'none';
     if (!show) return;
     if (brushCursor.parentNode !== view.marks) view.marks.appendChild(brushCursor);
-    const p = view.toTable(lastPointer.x, lastPointer.y);
+    const p = view.toTable(at.x, at.y);
     const d = (fog ? ui.brushIn : ui.tool === 'asset' ? ui.scatterIn : ui.paintIn) * view.ppi;
     Object.assign(brushCursor.style, { left: `${p.x * view.ppi}px`, top: `${p.y * view.ppi}px`, width: `${d}px`, height: `${d}px`, borderWidth: `${1.5 / view.cam.s}px` });
     brushCursor.classList.toggle('cover', fog && ui.fogMode === 'cover');
     brushCursor.classList.toggle('paint', paint);
     brushCursor.classList.toggle('erase', fxPaint && paint && (ui.paintShape === 'erase' || !!(drag && drag.kind === 'paint' && drag.erase)));
+  }
+
+  // Beta 3.68 (Glinn): Effects → Lights shows where a click puts the next light, as Draw → Light does: a wall light's
+  // box on the face of the wall near the pointer (turned to it), a ring where it shines (faint for a wall light with no
+  // wall near); just light over a token: a ring round the token, which would carry it. None over a light already there.
+  let ltGhost = null;
+  function updateLightGhost(pt, clientX, clientY) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const el = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
+    if (!ltGhost) ltGhost = el('svg', { class: 'os-preview lt-ghost' });
+    if (ltGhost.parentNode !== view.marks) view.marks.appendChild(ltGhost);
+    ltGhost.replaceChildren();
+    const m = S && S.map ? map() : null;
+    if (!pt || !m || ui.align || ui.tool !== 'fx' || ui.fxMode !== 'light' || ui.lightTab !== 'sources' || ui.fxSel || drag) return;
+    if (Fixtures.under(m, pt)) return;
+    const d = ltDef(); if (!d) return;
+    const s = cellK(); const ORANGE = '#f0b44a';
+    const p0 = view.mapToPx(0, 0); const px = view.mapToPx(1, 0); const py = view.mapToPx(0, 1);
+    const thin = 1.5 / ((Math.hypot(px.x - p0.x, px.y - p0.y) || 1) * (view.cam.s || 1)); // (1.5 pixels on the screen at any zoom)
+    const root = el('g', { transform: `matrix(${px.x - p0.x} ${px.y - p0.y} ${py.x - p0.x} ${py.y - p0.y} ${p0.x} ${p0.y})` });
+    ltGhost.append(root);
+    const col = (/^#[0-9a-f]{6}$/i.test(ui.lt.color || '') && ui.lt.color) || ORANGE;
+    const ring = (x, y, r, faint) => root.append(el('circle', { class: 'lt-ghost-ring', cx: x, cy: y, r, fill: 'none', stroke: col, 'stroke-width': thin, 'stroke-dasharray': `${thin * 6} ${thin * 4}`, opacity: faint ? '0.4' : '1' }));
+    const tok = d.group === 'plain' ? tokenUnder(clientX, clientY) : null;
+    if (tok) { ring(tok.x, tok.y, ((tok.size || 1) * s) / 2 + thin * 2); return; }
+    if (d.group === 'holder') {
+      const q = Fixtures.at(m, pt, d.id);
+      const w = d.w * s; const hh = d.h * s;
+      root.append(el('rect', { class: 'lt-ghost-box', x: q.x - w / 2, y: q.y - hh / 2, width: w, height: hh, fill: 'rgba(240,180,74,0.25)', stroke: ORANGE, 'stroke-width': thin, transform: `rotate(${q.rotation} ${q.x} ${q.y})` }));
+      ring(q.x, q.y, s * 0.45, q.free && d.wall != null);
+      return;
+    }
+    ring(pt.x, pt.y, s * 0.45);
   }
 
   function bindViewport() {
@@ -4444,10 +4901,17 @@ const Play = (() => {
       e.preventDefault();
       if (!S || !S.map) return;
       const factor = Math.exp(-e.deltaY * 0.0015);
-      if (e.altKey) { zoomAround(curView().zoom * factor, view.toTable(e.clientX, e.clientY), 'wheel-scale'); return; }
+      if (e.altKey && ui.tool === 'map') { zoomAround(curView().zoom * factor, view.toTable(e.clientX, e.clientY), 'wheel-scale'); return; } // (VA2: only with the Map tool; Alt is "place freely" in the others)
       if (e.ctrlKey || e.metaKey) {
-        if (ui.tool === 'fog') { ui.brushIn = clamp(round(ui.brushIn * factor * 4) / 4, 0.5, 8); refreshPop(); updateBrushCursor(); return; }
-        if (ui.tool === 'fx' && ui.fxMode === 'paint') { ui.paintIn = clamp(round(ui.paintIn * factor * 4) / 4, 0.5, 8); refreshPop(); updateBrushCursor(); return; }
+        // UI audit VK3: a pinch on a touchpad arrives as Ctrl + wheel in many small steps. It zooms; only a real notch
+        // of a wheel turns or sizes (one pinch spun the token, the spell or the whole map on the TV by 15° a step)
+        if (e.deltaY && Math.abs(e.deltaY) < 25) { view.zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.012)); return; }
+        // UI audit VK4: the brush grows and shrinks a quarter inch a notch, as on its slider (rounding kept it from
+        // getting under 0.75″)
+        const up = e.deltaY < 0 ? 1 : -1;
+        if (ui.tool === 'fog') { ui.brushIn = clamp(ui.brushIn + up * BRUSH.step, BRUSH.min, BRUSH.max); refreshPop(); updateBrushCursor(); return; }
+        if (ui.tool === 'oldschool' && OS.brushStep(up)) return; // (UI audit VF5: Draw's own brush)
+        if (ui.tool === 'fx' && ui.fxMode === 'paint') { ui.paintIn = clamp(ui.paintIn + up * BRUSH.step, BRUSH.min, BRUSH.max); refreshPop(); updateBrushCursor(); return; }
         // Ctrl + wheel turns things: 15° per notch, 5° with Shift
         const dir = Math.sign(e.deltaY || e.deltaX);
         if (dir && (ui.tool === 'spell' || ui.tool === 'select' || ui.tool === 'asset')) { turnWithWheel(e, dir, e.shiftKey ? 5 : 15); return; }
@@ -4461,17 +4925,19 @@ const Play = (() => {
       if (!S || !S.map) return;
       // no text selection or native drag on the map: either would cancel the pointer mid-stroke
       e.preventDefault();
+      if (closingPress === e) { closingPress = null; closedAt = performance.now(); if (strayPick()) dropStrayPick(); return; } // (VA1, VA5)
       const a = document.activeElement;
       if (a && a !== document.body && !vp.contains(a)) a.blur();
       vp.setPointerCapture(e.pointerId);
       const pt = view.toMap(e.clientX, e.clientY);
-      if (e.button === 2) {
-        if (ui.tool === 'walls' && Walls.chainActive()) { Walls.endChain(); return; } // right-click ends a line of walls
-        if (ui.tool === 'oldschool' && OS.rightClick()) return; // (Beta 3.22) right-click closes a shape
+      if (e.button === 2) { // (UI audit VG2: what a right-click does is decided when it is let go: a right-drag only moves the view)
         drag = { kind: 'right', x: e.clientX, y: e.clientY, moved: false, target: e.target }; return;
       }
       if (e.button === 1 || (e.button === 0 && spaceDown)) { drag = { kind: 'pan', x: e.clientX, y: e.clientY }; document.body.classList.add('panning'); return; }
       if (e.button !== 0) return;
+      // I7: a trigger's mark goes down, or a step picks doors, tokens or an area
+      if (ui.trigPlace && Trig.placeAt(pt)) return;
+      if (ui.trigPick && Trig.pickAt(e.clientX, e.clientY, pt, { tokenUnder, areaAt, roomAt, wallNear: (q) => Vision.wallAt(map(), q.x, q.y, grid().size * 0.5, (w) => !!w.door || w.kind === 'window') })) return;
       // a counter's − and + work in every tool
       const cbtn = e.target.closest('.sv-counter-btn');
       if (cbtn) { Tools.counterStep(cbtn.closest('.sv-mark').dataset.id, Number(cbtn.dataset.d)); return; }
@@ -4523,8 +4989,9 @@ const Play = (() => {
             const l = layer(tokEl.dataset.id);
             ui.selected = l.id; view.setSelected(l.id);
             if (ui.selSpell) { ui.selSpell = null; view.selectSpell(null); }
+            if (sheetFor !== l.id) sheetHold = l.id; // (its sheet opens when the press ends without a drag)
             placeCard();
-            drag = { kind: 'token', id: l.id, dx: l.x - pt.x, dy: l.y - pt.y, size: l.size, key: `tok-${l.id}-${Date.now()}` };
+            drag = { kind: 'token', id: l.id, dx: l.x - pt.x, dy: l.y - pt.y, x0: l.x, y0: l.y, size: l.size, sx: e.clientX, sy: e.clientY, moved: false, key: `tok-${l.id}-${Date.now()}` };
             if (popId === 'layers') refreshPop();
             break;
           }
@@ -4535,6 +5002,8 @@ const Play = (() => {
             selectSpell(null);
             if (popId === 'layers') refreshPop();
           }
+          // UI audit VK1 (Glinn: move the view): a left drag on empty map pans, as a right-drag does
+          drag = { kind: 'lpan', x: e.clientX, y: e.clientY, moved: false };
           break;
         }
         case 'map': {
@@ -4555,8 +5024,9 @@ const Play = (() => {
           if (e.shiftKey || ui.fogShape === 'rect') {
             const pre = h('div', { class: `rect-preview ${mode}` });
             view.marks.appendChild(pre);
-            drag = { kind: 'rect', mode, x0: pt.x, y0: pt.y, rect: pre };
-            updateRect(drag, pt);
+            const a = e.altKey ? pt : paintSnap(pt); // (UI audit VF3: the box snaps to half squares as the Effects box does; Alt: free)
+            drag = { kind: 'rect', mode, x0: a.x, y0: a.y, rect: pre };
+            updateRect(drag, a);
           } else {
             drag = { kind: 'brush', id: uid('s'), mode, r: ui.brushIn / 2 / zoom(), buf: [pt.x, pt.y], last: pt };
             flushBrush();
@@ -4595,10 +5065,16 @@ const Play = (() => {
 
     vp.addEventListener('pointermove', (e) => {
       lastPointer = { x: e.clientX, y: e.clientY };
+      gesture = !!drag; // (VA6)
       updateBrushCursor();
       if (ui.tool === 'asset' && !dropGhost) updateAssetGhost(); // Beta 1: the preview follows the mouse
       const pt = S && S.map ? view.toMap(e.clientX, e.clientY) : null;
       if (!drag) {
+        // UI audit VK2: with Select the pointer shows what a click would take: a token (a hand), a light or a spell area
+        if (ui.tool === 'select' && pt) {
+          const over = e.target.closest && e.target.closest('.sv-token, .sv-handle') ? 'token' : Fixtures.under(map(), pt) ? 'light' : view.spellAt(pt.x, pt.y) ? 'area' : '';
+          if (vp.dataset.over !== over) vp.dataset.over = over;
+        } else if (vp.dataset.over) vp.dataset.over = '';
         if (pt && ui.tool === 'spell' && !ui.align) updateGhost(pt, { alt: e.altKey, shift: e.shiftKey, token: ui.spell.shape === 'aura' ? tokenUnder(e.clientX, e.clientY) : null });
         if (pt && !ui.align) { Tools.hover(e, pt); Walls.hover(e, pt); Party.hover(e, pt); OS.hover(e, pt); if (ui.tool === 'fog') fogHover(pt); }
         if (ui.tool === 'fx') { const a = pt && !ui.align && !e.target.closest('.sv-handle') ? fxAreaAt(pt, e) : null; setAreaHover(a && a.id !== ui.selFx ? a.id : null); } // (Beta 3.64: the area a click would pick lights up)
@@ -4608,15 +5084,20 @@ const Play = (() => {
       if (Walls.owns(drag.kind)) { Walls.pointerMove(drag, e, pt); return; }
       if (OS.owns(drag.kind)) { OS.pointerMove(drag, e, pt); return; }
       if (Party.owns(drag.kind)) { Party.pointerMove(drag, e, pt); return; }
-      if (drag.kind === 'right') {
+      if (drag.kind === 'right' || drag.kind === 'lpan') {
         if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6) { drag.moved = true; document.body.classList.add('panning'); }
         if (drag.moved) { view.panBy(e.clientX - drag.x, e.clientY - drag.y); drag.x = e.clientX; drag.y = e.clientY; }
       } else if (drag.kind === 'pan') {
         view.panBy(e.clientX - drag.x, e.clientY - drag.y);
         drag.x = e.clientX; drag.y = e.clientY;
       } else if (drag.kind === 'token') {
-        send(drag.key, 'layer.update', { id: drag.id, x: pt.x + drag.dx, y: pt.y + drag.dy, drag: true }); // (Prototype 14: only the place goes to the TV)
-        view.dragLive(drag.id, pt.x + drag.dx, pt.y + drag.dy, false); // (Prototype 23: on your screen the token sticks to the mouse)
+        if (drag.sx == null) { drag.sx = e.clientX; drag.sy = e.clientY; } // (a drag begun by the Tokens tool)
+        if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 4) drag.moved = true;
+        if (drag.moved) { // (VA4: a click is not a move: nothing is sent, no undo step, and a token placed freely stays where it is)
+          send(drag.key, 'layer.update', { id: drag.id, x: pt.x + drag.dx, y: pt.y + drag.dy, drag: true }); // (Prototype 14: only the place goes to the TV)
+          view.dragLive(drag.id, pt.x + drag.dx, pt.y + drag.dy, false); // (Prototype 23: on your screen the token sticks to the mouse)
+          showLanding(drag, pt, e.altKey); // (VK9)
+        }
       } else if (drag.kind === 'map') {
         // 4.8: one step per screen frame, however many moves the mouse sends (a gaming mouse: up to 1000 a second)
         drag.cx = e.clientX; drag.cy = e.clientY;
@@ -4629,7 +5110,7 @@ const Play = (() => {
           });
         }
       } else if (drag.kind === 'rect') {
-        updateRect(drag, pt);
+        updateRect(drag, e.altKey ? pt : paintSnap(pt)); // (VF3)
       } else if (drag.kind === 'fxrect') {
         updateFxRect(drag, pt, e.shiftKey);
       } else if (drag.kind === 'align') {
@@ -4653,7 +5134,7 @@ const Play = (() => {
         if (drag.moved) { const q = fxDropAt(drag, pt); send(drag.key, 'fx.update', { id: drag.id, x: q.x, y: q.y, ...(drag.attached ? { attachTo: null } : {}) }); }
       } else if (drag.kind === 'spellmove') {
         if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 4) drag.moved = true;
-        if (drag.moved) send(drag.key, 'spell.update', { id: drag.id, x: pt.x + drag.dx, y: pt.y + drag.dy });
+        if (drag.moved) { const q = spellSnap(drag.id, { x: pt.x + drag.dx, y: pt.y + drag.dy }, e.altKey); send(drag.key, 'spell.update', { id: drag.id, x: q.x, y: q.y }); } // (VK5)
       } else if (drag.kind === 'cast') {
         if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 6) drag.moved = true;
         drag.o.shift = e.shiftKey;
@@ -4676,8 +5157,10 @@ const Play = (() => {
       updateAssetGhost();
     });
 
-    const end = (e) => {
+    const end = (e) => { gesture = !!drag; try { endDrag(e); } finally { gesture = false; } }; // (VA6: what the release sends belongs to the drag's undo step)
+    const endDrag = (e) => {
       if (!drag) return;
+      hideLanding();
       const pt = view.toMap(e.clientX, e.clientY);
       const d = drag;
       drag = null;
@@ -4687,20 +5170,28 @@ const Play = (() => {
         if (d.cx != null) sendView(d.key, { x: d.vx + (d.cx - d.sx) / view.cam.s / view.ppi, y: d.vy + (d.cy - d.sy) / view.cam.s / view.ppi }, true);
         finishView();
       }
-      if (d.kind === 'right' && !d.moved && e.type === 'pointerup') openRadial(e.clientX, e.clientY, d.target);
-      else if (Tools.owns(d.kind)) Tools.pointerUp(d, e, pt);
+      if (d.kind === 'right' && !d.moved && e.type === 'pointerup') {
+        if (ui.tool === 'walls' && Walls.chainActive()) Walls.endChain(); // right-click ends a line of walls
+        else if (ui.tool === 'oldschool' && OS.rightClick()) { /* (Beta 3.22) right-click closes a shape */ }
+        else openRadial(e.clientX, e.clientY, d.target);
+      } else if (Tools.owns(d.kind)) Tools.pointerUp(d, e, pt);
       else if (Walls.owns(d.kind)) Walls.pointerUp(d, e, pt);
       else if (OS.owns(d.kind)) OS.pointerUp(d, e, pt);
       else if (Party.owns(d.kind)) Party.pointerUp(d, e, pt);
       else if (d.kind === 'token') {
         pending.delete(d.key);
-        const free = tokSet().snap === false ? !e.altKey : e.altKey; // (4.10: Options → Tokens can turn snapping off; Alt does the other)
-        const p = free ? { x: pt.x + d.dx, y: pt.y + d.dy } : Geom.snap(grid(), pt.x + d.dx, pt.y + d.dy, d.size);
-        view.dragLive(d.id, p.x, p.y, false);
-        cmd('layer.update', { id: d.id, x: p.x, y: p.y, coalesce: d.key, final: true }).finally(() => view.hold(d.id, null));
+        if (!d.moved) { // (VA4) a click: the sheet opens, the token stays exactly where it is
+          if (sheetHold === d.id && e.type === 'pointerup') { sheetHold = null; placeCard(); }
+          view.hold(d.id, null);
+        } else {
+          const free = tokSet().snap === false ? !e.altKey : e.altKey; // (4.10: Options → Tokens can turn snapping off; Alt does the other)
+          const p = free ? { x: pt.x + d.dx, y: pt.y + d.dy } : Geom.snap(grid(), pt.x + d.dx, pt.y + d.dy, d.size);
+          view.dragLive(d.id, p.x, p.y, false);
+          cmd('layer.update', { id: d.id, x: p.x, y: p.y, coalesce: d.key, final: true }).finally(() => view.hold(d.id, null));
+        }
       } else if (d.kind === 'rect') {
         d.rect.remove();
-        const r = rectOf(d, pt);
+        const r = rectOf(d, e.altKey ? pt : paintSnap(pt)); // (VF3)
         if (r.w * zoom() > 0.1 && r.h * zoom() > 0.1) cmd('fog.op', { mode: d.mode, shape: 'rect', ...r });
       } else if (d.kind === 'brush') {
         flushBrush(d);
@@ -4711,7 +5202,7 @@ const Play = (() => {
         if (r.w > 0 && r.h > 0) {
           const L = ui.look;
           if (d.erase) cmd('fx.cut', { sid: d.sid, shape: d.round ? 'round' : 'rect', x: r.x, y: r.y, w: r.w, h: r.h });
-          else cmd('fx.shape', { id: d.id, preset: d.preset, sid: d.sid, shape: d.round ? 'round' : 'rect', ...r, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset), ...(L.spin === -1 && (FXDATA.REGIONS.find((x) => x.id === d.preset) || {}).spin ? { spin: -1 } : {}) }); // (second-water-works)
+          else cmd('fx.shape', { id: d.id, preset: d.preset, sid: d.sid, shape: d.round ? 'round' : 'rect', ...r, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset), ...beastLook(d.preset), ...(L.spin === -1 && (FXDATA.REGIONS.find((x) => x.id === d.preset) || {}).spin ? { spin: -1 } : {}) }); // (second-water-works)
         }
       } else if (d.kind === 'paint') {
         flushPaint(d);
@@ -4729,7 +5220,8 @@ const Play = (() => {
         cmd('fx.update', { id: d.id, x: w ? w.x : q.x, y: w ? w.y : q.y, ...(w ? { rotation: w.rotation, wall: w.wall || null } : {}), coalesce: d.key, final: true, ...(d.attached ? { attachTo: null } : {}) });
       } else if (d.kind === 'spellmove' && d.moved) {
         pending.delete(d.key);
-        cmd('spell.update', { id: d.id, x: pt.x + d.dx, y: pt.y + d.dy, coalesce: d.key });
+        const q = spellSnap(d.id, { x: pt.x + d.dx, y: pt.y + d.dy }, e.altKey); // (VK5)
+        cmd('spell.update', { id: d.id, x: q.x, y: q.y, coalesce: d.key });
       } else if (d.kind === 'assetgrip') {
         gripMove(d, pt, e, true);
       } else if (d.kind === 'assetmove' && d.moved) {
@@ -4750,13 +5242,20 @@ const Play = (() => {
       updateBrushCursor();
     };
     vp.addEventListener('pointerup', end);
-    vp.addEventListener('pointercancel', end);
+    vp.addEventListener('pointercancel', () => { cancelDrag(); }); // (VD1: a cancelled pointer is not a release)
+    vp.addEventListener('lostpointercapture', () => { cancelDrag(); }); // (after a release there is no drag left: nothing happens)
     vp.addEventListener('pointerleave', () => { lastPointer = null; setAreaHover(null); updateBrushCursor(); updateAssetGhost(); Tools.leave(); Walls.leave(); Party.leave(); OS.leave(); if (ui.tool === 'spell' && !ui.aimFrom && !drag) view.setGhost(null); });
     vp.addEventListener('dblclick', (e) => {
+      if (performance.now() - closedAt < 600) return; // (VA1: its first click only closed a menu)
       if (ui.tool === 'fog' && ui.fogShape === 'area') { finishArea(); return; }
       if (ui.tool === 'oldschool') { OS.dblClick(); return; }
-      if (ui.tool !== 'select' || e.target.closest('.sv-token') || !S.map) return;
-      ts.ping({ mapId: S.editMapId, ...view.toMap(e.clientX, e.clientY) });
+      if (ui.tool !== 'select' || !S.map) return;
+      // VA3: a ping only on empty map. What lies under the pointer is asked of the page, not of the event: the pointer is
+      // captured by the map, so the event's target is the map also over a (hidden) token
+      const pt = view.toMap(e.clientX, e.clientY);
+      if (document.elementsFromPoint(e.clientX, e.clientY).some((el) => el.closest && el.closest('.sv-token, .sv-door, .sv-handle, .sv-spell-label, .sv-mark, .sv-note, .sv-text'))) return;
+      if (Fixtures.under(map(), pt)) return;
+      ts.ping({ mapId: S.editMapId, ...pt });
     });
   }
 
@@ -4793,6 +5292,10 @@ const Play = (() => {
       showReadout(e, a ? stepTurn(a.rotation, dir, step) : ui.assetRot);
       return;
     }
+    // Beta 3.68 (Glinn): with Select, a token under the pointer turns (else a spell area, else the picked token)
+    const tk = ui.tool === 'select' ? tokenUnder(e.clientX, e.clientY) : null;
+    const turnTok = (l) => { if (ui.selected !== l.id) { ui.selected = l.id; view.setSelected(l.id); placeCard(); } const a = stepTurn(l.rotation || 0, dir, step); send(`turn-${l.id}`, 'layer.update', { id: l.id, rotation: a }); showReadout(e, a); };
+    if (tk) { turnTok(tk); return; }
     // a placed spell area under the pointer (in the spell tool: the selected one)
     const sid = view.spellAt(pt.x, pt.y);
     const target = spellOf(ui.tool === 'select' ? sid : (sid && sid === ui.selSpell ? sid : null));
@@ -4803,6 +5306,8 @@ const Play = (() => {
       showReadout(e, a);
       return;
     }
+    const picked = ui.tool === 'select' && ui.selected && layer(ui.selected);
+    if (picked && picked.role === 'token') { turnTok(picked); return; }
     if (ui.tool !== 'spell') return;
     ui.spellAngle = stepTurn(ui.spellAngle, dir, step);
     updateGhost(pt, { alt: e.altKey, shift: false, token: null });
@@ -4823,6 +5328,33 @@ const Play = (() => {
   }
   function updateReadout() { if (readout && ui.tool !== 'spell' && ui.tool !== 'asset' && ui.tool !== 'select') readout.classList.remove('on'); }
 
+  // UI audit VK5: a standing spell area moved with Select snaps as a cast does (the squares it covers shifted by a
+  // slip of the hand); Alt: free
+  function spellSnap(id, p, alt) {
+    const sp = spellOf(id); const g = grid();
+    if (alt || !sp) return p;
+    if (sp.shape === 'sphere' || sp.shape === 'cylinder') return Geom.isHex(g) ? Geom.snap(g, p.x, p.y, 1) : Geom.snap(g, p.x, p.y, 2);
+    if (sp.shape === 'cone' || sp.shape === 'line' || sp.shape === 'cube') return snapHalf(g, p);
+    return p;
+  }
+  // UI audit VK9: while a token is dragged, the square it will land on and how far that is from where it stood
+  let landEl = null;
+  function showLanding(d, pt, alt) {
+    const g = grid();
+    if (!g || Geom.isHex(g) || g.angle) { hideLanding(); return; }
+    const free = tokSet().snap === false ? !alt : alt;
+    const p = free ? { x: pt.x + d.dx, y: pt.y + d.dy } : Geom.snap(g, pt.x + d.dx, pt.y + d.dy, d.size);
+    if (d.x0 == null) { const l = layer(d.id); d.x0 = l ? l.x : p.x; d.y0 = l ? l.y : p.y; }
+    if (!landEl) landEl = h('div', { class: 'land-square' }, h('span', {}));
+    if (landEl.parentNode !== view.marks) view.marks.appendChild(landEl);
+    const side = Math.max(1, Number(d.size) || 1) * g.size; const k = view.ppi * zoom();
+    const a = view.mapToPx(p.x - side / 2, p.y - side / 2);
+    Object.assign(landEl.style, { display: '', left: `${a.x}px`, top: `${a.y}px`, width: `${side * k}px`, height: `${side * k}px`, borderWidth: `${2 / view.cam.s}px` });
+    const m = Geom.measure(g, { x: d.x0, y: d.y0 }, p, (ui.point && ui.point.rule) || 'phb', false);
+    landEl.firstChild.textContent = m.ft ? `${m.ft} ft` : '';
+    landEl.firstChild.style.fontSize = `${12 / view.cam.s}px`;
+  }
+  function hideLanding() { if (landEl) landEl.style.display = 'none'; }
   function startSpellMove(id, pt, e) {
     const sp = spellOf(id);
     if (!sp) return;
@@ -5056,7 +5588,9 @@ const Play = (() => {
   function assetPointerDown(e, pt) {
     const gripEl = e.target.closest('.sv-grip');
     if (gripEl && gripStart(e, pt, gripEl)) return;
-    const el = e.target.closest('.sv-asset');
+    // (UI audit VK11: the asset under the pointer as the page sees it, also when a token lies on it: the ghost hid as
+    // if a click would pick it, and the click stamped a copy)
+    const el = e.target.closest('.sv-asset') || assetElAt(e.clientX, e.clientY);
     if (el) {
       const a = layer(el.dataset.id);
       if (!a) return;
@@ -5125,6 +5659,9 @@ const Play = (() => {
   function updateAssetGhost() {
     if (!view) return;
     if (dropGhost) { placeDropGhost(); return; }
+    // (Speed 8, WH3: with another tool in hand there is no ghost to show. It asked the page what lies under the pointer
+    // first, on every move of the view and of a drag, and then found the tool was not Assets)
+    if (ui.tool !== 'asset') { hideGhost(); return; }
     const hovering = lastPointer && !!assetElAt(lastPointer.x, lastPointer.y);
     const b = ui.tool === 'asset' ? activeBrush() : null;
     const show = b && ui.assetMode === 'stamp' && lastPointer && S && S.map && !ui.selAsset && !hovering && !(drag && drag.kind === 'assetmove');
@@ -5194,8 +5731,8 @@ const Play = (() => {
   function assetCard(a) {
     return [
       h('span', { class: 'card-title ellipsis', 'data-tip': a.name }, iconEl('trees'), a.name),
-      ib('minus', 'Smaller', () => cmd('layer.update', { id: a.id, w: round(a.w / 1.2, 3) }), { key: '[' }),
-      ib('plus', 'Bigger', () => cmd('layer.update', { id: a.id, w: round(a.w * 1.2, 3) }), { key: ']' }),
+      ib('minus', 'Smaller', () => cmd('layer.update', { id: a.id, w: round(a.w / ASSET_STEP, 3) }), { key: '[' }),
+      ib('plus', 'Bigger', () => cmd('layer.update', { id: a.id, w: round(a.w * ASSET_STEP, 3) }), { key: ']' }),
       cardSep(),
       ib('rotate-clockwise', 'Turn 15° (or Ctrl + wheel)', () => cmd('layer.update', { id: a.id, rotation: normAngle((a.rotation || 0) + 15) })),
       a.tree ? ib('arrows-shuffle', 'Another look: a different tree of this kind', () => cmd('layer.reroll', { id: a.id })) // (Beta 3.20: a living tree)
@@ -5219,8 +5756,8 @@ const Play = (() => {
     const hidden = items.every((a) => a.hidden);
     return [
       h('span', { class: 'card-title' }, iconEl('trees'), `${items.length} assets`),
-      ib('minus', 'Smaller', () => many((a) => ({ w: round(a.w / 1.2, 3) })), { key: '[' }),
-      ib('plus', 'Bigger', () => many((a) => ({ w: round(a.w * 1.2, 3) })), { key: ']' }),
+      ib('minus', 'Smaller', () => many((a) => ({ w: round(a.w / ASSET_STEP, 3) })), { key: '[' }),
+      ib('plus', 'Bigger', () => many((a) => ({ w: round(a.w * ASSET_STEP, 3) })), { key: ']' }),
       cardSep(),
       ib('rotate-clockwise', 'Turn each 15° (or Ctrl + wheel)', () => many((a) => ({ rotation: normAngle((a.rotation || 0) + 15) }))),
       ib('flip-vertical', 'Mirror', () => many((a) => ({ flip: !a.flip }))),
@@ -5462,7 +5999,7 @@ const Play = (() => {
       d.tail = pts.slice(-2);
       return;
     }
-    cmd('fx.stroke', { id: d.id, preset: d.preset, sid: d.sid, r: d.r, pts, coalesce: d.sid, color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset), ...(L.spin === -1 && (FXDATA.REGIONS.find((x) => x.id === d.preset) || {}).spin ? { spin: -1 } : {}) }); // (second-water-works: its kind)
+    cmd('fx.stroke', { id: d.id, preset: d.preset, sid: d.sid, r: d.r, pts, coalesce: d.sid, soft: true, /* (Speed 5, WE1: the new piece of the stroke goes to the windows, not the map) */ color: L.color, intensity: L.intensity, density: L.density, speed: L.speed, variant: kindNext(d.preset), ...beastLook(d.preset), ...(L.spin === -1 && (FXDATA.REGIONS.find((x) => x.id === d.preset) || {}).spin ? { spin: -1 } : {}) }); // (second-water-works: its kind)
   }
   // Beta 3.41: a box or a round of a painted effect snaps to the grid's lines and half squares (a grid that is not
   // turned); Shift makes it a square or a circle. Returns the box in map units
@@ -5526,7 +6063,7 @@ const Play = (() => {
     const g = alignGrid(p0, p1, n);
     await cmd('grid.update', { type: g.type, size: g.size, angle: g.angle, ox: g.ox, oy: g.oy, show: true, coalesce: `align-${Date.now()}` });
     const phys = g.size * zoom();
-    toast(`Grid matched${Math.abs(g.angle) > 0.2 ? ` (tilted ${round(g.angle, 1)}°)` : ''}. One cell is ${round(phys, 2)}″ on the table${Math.abs(phys - 1) > 0.05 ? ': use "Make grid squares 1 inch" for miniatures' : ''}.`, { undo: () => cmd('history.undo', { mapId: alignMap }), ms: 8000 });
+    toast(`Grid matched${Math.abs(g.angle) > 0.2 ? ` (tilted ${round(g.angle, 1)}°)` : ''}. One cell is ${round(phys, 2)}″ on the table${Math.abs(phys - 1) > 0.05 ? ': use "Squares 1 inch" for miniatures' : ''}.`, { undo: () => cmd('history.undo', { mapId: alignMap }), ms: 8000 });
   }
 
   // =====================================================================
@@ -5545,31 +6082,45 @@ const Play = (() => {
       },
       leave: () => { if (!dropGhost) return; dropGhost = null; updateAssetGhost(); },
     });
-    vp.addEventListener('dragover', (e) => {
+    const onOver = (e) => {
       const types = [...e.dataTransfer.types];
+      if (types.includes('application/x-ts-moment')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; momentAimAt(document.body.dataset.momentDrag, e.clientX, e.clientY); return; } // (I8: a Screen effects pad)
       if (types.includes('application/x-ts-asset') || types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; vp.classList.add('drop-ok'); }
-    });
-    vp.addEventListener('dragleave', () => vp.classList.remove('drop-ok'));
-    vp.addEventListener('drop', async (e) => {
+    };
+    vp.addEventListener('dragover', onOver);
+    vp.addEventListener('dragleave', (e) => { vp.classList.remove('drop-ok'); if (!vp.contains(e.relatedTarget)) momentAimAt(null); });
+    // UI audit VJ1: the card of a map without a background says "drop an image or video file here", lies over the map
+    // and took the drop without doing anything with it: it takes what the map takes
+    els.empty.addEventListener('dragover', onOver);
+    els.empty.addEventListener('drop', (e) => onDrop(e));
+    vp.addEventListener('drop', (e) => onDrop(e));
+    const onDrop = async (e) => {
       e.preventDefault();
       vp.classList.remove('drop-ok');
       document.body.classList.remove('dragging-asset');
       if (!S || !S.map) return;
       const pt = view.toMap(e.clientX, e.clientY);
+      const mid = e.dataTransfer.getData('application/x-ts-moment');
+      if (mid && Moments.BY[mid]) { momentAimAt(null); Show.play(mid, Moments.BY[mid].spot ? { x: round(pt.x, 3), y: round(pt.y, 3), mapId: S.editMapId } : null); return; } // (I8: there, or over the whole table)
       const asset = parseAsset(e.dataTransfer);
       if (asset && asset.role === 'tile') { OS.dropTile(asset, pt); return; } // (Beta 3.22) a floor tile onto a drawn floor
       if (asset) { dropAsset(asset.path, asset.kind, asset.role, pt, asset.name); return; }
+      // (VJ1) a map that has no picture yet takes the first picture or video as its background, whatever it is called:
+      // "Lighthouse", "Gray Harbor" or "Snowy Pass" became an overlay or a token for a word in their name
+      let needBg = !S.map.bg;
       for (const f of [...e.dataTransfer.files]) {
         const p = ts.pathForFile(f);
         if (!p) continue;
         const kind = kindOfName(p);
         if (!kind) { toast(`${f.name} is not an image, video or sound file.`, { kind: 'error' }); continue; }
-        const role = await classify(p, kind, f.name);
+        const first = needBg && (kind === 'image' || kind === 'video');
+        const role = first ? 'map' : await classify(p, kind, f.name);
+        if (first) needBg = false;
         // a copy goes into the library first, so the map keeps working when the original is moved
         const lp = await toLibrary(p, role);
         dropAsset(lp, kind, role, pt, f.name);
       }
-    });
+    };
     // dropping files anywhere else should never navigate the window away
     window.addEventListener('dragover', (e) => e.preventDefault());
     window.addEventListener('drop', (e) => e.preventDefault());
@@ -5584,6 +6135,8 @@ const Play = (() => {
         return r.items[0].path;
       }
     } catch {}
+    // (UI audit VJ1: this was silent, and the map then showed the file as missing once the original moved)
+    toast(`${String(p).split(/[\\/]/).pop()} could not be copied into the library: it is used where it lies`, { kind: 'error' });
     return p;
   }
   async function dropAsset(path, kind, role, pt, name) {
@@ -5615,9 +6168,10 @@ const Play = (() => {
   // Smart default for files dropped from outside the library.
   async function classify(path, kind, name) {
     if (kind === 'audio') return 'sound';
-    const n = name.toLowerCase();
-    if (/token|npc|monster|creature|mini/.test(n)) return 'token';
-    if (/overlay|fx|effect|rain|snow|fog|mist|dust|ember|fire|smoke|spark|light|ray|leaves|alpha/.test(n)) return 'overlay';
+    // (UI audit VJ1: whole words only: "light" in Lighthouse and "ray" in Gray are no hint)
+    const n = ` ${name.toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/[^a-z0-9]+/g, ' ')} `;
+    if (/ (tokens?|npcs?|monsters?|creatures?|minis?) /.test(n)) return 'token';
+    if (/ (overlays?|fx|effects?|rain|snow|fog|mist|dust|embers?|fire|smoke|sparks?|light|rays?|leaves|alpha) /.test(n)) return 'overlay';
     const info = await probe(path, kind);
     if (!info) return kind === 'video' ? 'map' : 'token';
     if (kind === 'video') return info.alpha ? 'overlay' : 'map';
@@ -5666,6 +6220,30 @@ const Play = (() => {
     // (only Enter: it may close the field while you keep typing; Esc or a click is leaving on purpose and ends it)
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') typedAt = 0; else if (isField(e.target) && e.key === 'Enter') typedAt = Date.now(); }, true);
     window.addEventListener('pointerdown', () => { typedAt = 0; }, true);
+    // UI audit VB1: a button clicked with the mouse lets go of the keyboard afterwards, so Enter is the next turn and never
+    // "that button again" (Blackout, Mute, a Hotbar slot, a pad). Reached with the keyboard, a button keeps its Enter.
+    const letsGo = (x) => !!x && x !== document.body && !!x.matches && x.matches('button, [role="button"], [role="switch"], [role="tab"], input[type="checkbox"], input[type="radio"], summary');
+    const KEEPS = '.modal-back, .snap-keep-back, .tr-back, #menu, .door-ask, #cond-pick, #sheet-lines, #radial';
+    window.addEventListener('click', (e) => {
+      if (e.detail < 1 || document.body.dataset.screen !== 'play') return; // (detail 0: pressed with the keyboard)
+      setTimeout(() => {
+        const a = document.activeElement;
+        if (!letsGo(a) || a.closest(KEEPS)) return;
+        const mt = a.closest('.mt'); // (VB5: in the Cartographer the keys stay with it)
+        const stage = mt && mt.querySelector('.mt-stage');
+        if (stage) stage.focus({ preventScroll: true }); else a.blur();
+      }, 0);
+    }, true);
+    // VB8, VB9: a slider or a dropdown lets go of the keyboard once the mouse has set it (worked with the keys, it keeps
+    // them): Ctrl Z, [ ] and the letters work again, and the slider shows what the map has
+    const isSetter = (x) => !!x && (x.tagName === 'SELECT' || (x.tagName === 'INPUT' && x.type === 'range'));
+    let setterKeyAt = 0;
+    window.addEventListener('keydown', (e) => { if (isSetter(e.target)) setterKeyAt = performance.now(); }, true);
+    window.addEventListener('change', (e) => {
+      const x = e.target;
+      if (!isSetter(x) || performance.now() - setterKeyAt < 500) return;
+      setTimeout(() => { if (document.activeElement === x) x.blur(); }, 0);
+    }, true);
     window.addEventListener('keydown', (e) => {
       if (!S || S.screen !== 'play' || document.body.dataset.screen !== 'play' || document.querySelector('.modal-back:not(.help)')) return;
       if (App.helpOpen()) return; // 4.0.1: the Guide is open: the keys are for it, not for the map behind it
@@ -5673,9 +6251,17 @@ const Play = (() => {
       // where the key went, not what has focus now: a field may already have handled Enter and blurred itself
       const typing = isField(e.target) || isField(a);
       if (e.key === 'Escape') {
+        // UI audit, group UI 4: one ladder for Esc, one rung a press
+        if (cancelDrag()) return; // (VD1) what is in the hand goes back
+        // VD2: in a field Esc only leaves the field (it also closed the open panel or let go of the token). The
+        // Library's own search is the way out of the Library: there Esc goes on and closes it.
+        if (typing && !(a && a.closest && a.closest('#drawer'))) { if (isField(a)) a.blur(); return; }
         if (Walls.key('escape')) return;
         if (Party.cancel()) return;
         if (ui.areaPts) { cancelArea(); return; }
+        if (endTrigAim()) return; // (VD5) a trigger waiting for a click on the map
+        // VD4: an Esc that only closes a wheel, a menu or something being aimed leaves the Spotlight on the TV on
+        const small = Radial.isOpen || menuOpen() || App.helpOpen() || !!ui.momentAim || !!ui.align || !!ui.aimFrom || strayPick();
         if (Radial.isOpen) Radial.close();
         else if (menuOpen()) closeMenu();
         else if (App.helpOpen()) App.toggleHelp(false);
@@ -5683,6 +6269,9 @@ const Play = (() => {
         else if (ui.align) stopAlign();
         else if (ui.aimFrom) { ui.aimFrom = null; updateGhost(); renderTopbar(); }
         else if (Tools.routeEnd()) { /* (Beta 3.11) the route being drawn ends here */ }
+        else if (strayPick()) dropStrayPick(); // (VA5: a sheet opened by right-click with another tool in hand)
+        else if (Floats && mouseAt && Floats.at(mouseAt.x, mouseAt.y)) Floats.hide(Floats.at(mouseAt.x, mouseAt.y)); // (UI audit VH1, Glinn: Esc closes a Toolbox panel only while the mouse is over it)
+        else if (popId === 'fx' && ui.selFx) selectFx(null); // (VD3: a picked effect is let go first, as its tip says; the panel stays)
         else if (popId) closePop();
         else if (ui.drawer) Drawer.cancel();
         else if (ui.selected) { ui.selected = null; view.setSelected(null); placeCard(); }
@@ -5691,24 +6280,72 @@ const Play = (() => {
         else if (ui.selAsset) selectAsset(null);
         else if (ui.selMark) Tools.selectMark(null);
         else if (!typing && ui.tool !== 'select') setTool('select'); // N8 (open point): nothing else to close: back to Select (as the Toolbox's tip says)
-        Tools.spotOff();
+        if (!small) Tools.spotOff();
         if (typing) a.blur();
         return;
       }
+      // UI audit VC2: Ctrl K from anywhere, also while the keyboard is in a field (the Library opens with its search focused)
+      if (typing && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); Search.focus(); return; }
       if (typing) return;
       if (!e.ctrlKey && !e.metaKey && (e.key.length === 1 || e.key === 'Enter') && Date.now() - typedAt < 900) return;
-      const k = e.key.toLowerCase();
-      if (e.ctrlKey || e.metaKey) {
-        if (k === 'z' && !e.shiftKey) { e.preventDefault(); cmd('history.undo'); }
-        else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); cmd('history.redo'); }
-        else if (k === 'd' && ui.selected) { e.preventDefault(); const l = layer(ui.selected); if (l) duplicateToken(l); }
-        // Ctrl + 1 to 9: the Spotify moods
-        else if (/^Digit[1-9]$/.test(e.code) && !e.shiftKey && !e.altKey) { e.preventDefault(); Spot.playNumber(Number(e.code.slice(5))); }
+      let k = e.key.toLowerCase();
+      // VB3: a key held a moment too long fires once (Enter skipped fighters, B made Blackout flicker, a number played
+      // its Hotbar slot again and again). What is meant to repeat still does.
+      if (e.repeat && e.key !== ' ' && !(/^Arrow/.test(e.key) || '[]+-=_'.includes(e.key) || /^Bracket/.test(e.code) || e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')))) {
+        if (/^(Tab|Enter|F\d+)$/.test(e.key)) e.preventDefault();
         return;
       }
-      if (e.key === ' ') { spaceDown = true; e.preventDefault(); return; }
+      // VB4: [ and ] also where they sit on a keyboard that prints something else there (ü and ¨ on a Swiss one), and as
+      // printed with AltGr, which arrives as Ctrl + Alt
+      const altGr = !!(e.getModifierState && e.getModifierState('AltGraph'));
+      const odd = e.key === 'Dead' || (e.key.length === 1 && e.key.charCodeAt(0) > 126);
+      const bare = !e.ctrlKey && !e.altKey && !e.metaKey;
+      const bracket = e.key === '[' || e.key === ']' ? e.key : odd && bare && e.code === 'BracketLeft' ? '[' : odd && bare && e.code === 'BracketRight' ? ']' : null;
+      if (bracket && !ui.drawer) k = bracket;
+      if ((e.ctrlKey || e.metaKey) && !(bracket && altGr)) {
+        // (UI audit VG1: with something half drawn, Ctrl Z takes back its last corner and nothing else: it used to drop
+        // a fog area and undo the fog step before it, on the TV)
+        if (k === 'z' && !e.shiftKey) { e.preventDefault(); if (!(areaBack() || Walls.back() || OS.back())) cmd('history.undo'); }
+        else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); cmd('history.redo'); }
+        else if (k === 'd' && ui.selected) { e.preventDefault(); const l = layer(ui.selected); if (l) duplicateToken(l); }
+        // I3: Ctrl K: the command search
+        else if (k === 'k' && !e.shiftKey && !e.altKey) { e.preventDefault(); Search.focus(); }
+        // Ctrl + 1 to 9: the Spotify moods
+        else if (/^Digit[1-9]$/.test(e.code) && !e.shiftKey && !e.altKey) { e.preventDefault(); Spot.playNumber(Number(e.code.slice(5))); }
+        // I8: Ctrl + Shift + 1 to 9: the starred Soundboard sounds (Alt + 1 to 9 open a map of this chapter, Shift + 1 to 9 the starred screen effects)
+        else if (/^Digit[1-9]$/.test(e.code) && e.shiftKey && !e.altKey) { e.preventDefault(); TB.playStarredSound(Number(e.code.slice(5))); }
+        return;
+      }
+      // VB6: the Library is open: what is typed goes into its search. (After a click on a folder the letters were the
+      // map's shortcuts: "c" closed the Library and opened Fog, T sent the map, Delete removed the token behind it.)
+      if (ui.drawer) {
+        const box = document.querySelector('#drawer .lib-search');
+        if (box && e.key.length === 1 && !e.altKey) { box.focus({ preventScroll: true }); return; } // (the key itself then lands in the field)
+        if (e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Enter' || e.key === 'Tab') return;
+      }
+      if (e.key === ' ') { spaceDown = true; document.body.classList.add('space-held'); e.preventDefault(); return; } // (space-held: the hand shows before the press, UI audit VK10)
+      // UI audit VK9: the arrow keys nudge what is picked: a token one square (one undo step for a burst of presses),
+      // an asset one pixel (Shift: ten)
+      if (/^Arrow/.test(e.key) && S.map && !e.ctrlKey && !e.altKey) {
+        const ax = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0; const ay = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+        const tk = (ui.tool === 'select' || ui.tool === 'token') && ui.selected ? layer(ui.selected) : null;
+        if (tk && tk.role === 'token') {
+          e.preventDefault();
+          const g = grid(); const { u, v } = Geom.toLocal(g, tk.x, tk.y); const q = Geom.fromLocal(g, u + ax * g.size, v + ay * g.size);
+          cmd('layer.update', { id: tk.id, x: round(q.x, 4), y: round(q.y, 4), coalesce: `nudge-${tk.id}` });
+          return;
+        }
+        const as = ui.tool === 'asset' && ui.selAssets.length ? ui.selAssets.map(layer).filter(Boolean) : [];
+        if (as.length) {
+          e.preventDefault();
+          const st = (e.shiftKey ? 10 : 1) / (view.ppi * zoom() * view.cam.s);
+          cmd('layer.many', { patches: as.map((x) => ({ id: x.id, x: round(x.x + ax * st, 4), y: round(x.y + ay * st, 4) })), coalesce: 'nudge-assets' });
+          return;
+        }
+      }
       // F1 to F8: the snapshots of the map on the table (or of this one); maps without any: the older cues
-      if (/^F[1-8]$/.test(e.key)) {
+      // (VB11: not with Alt or Shift: Alt + F4 played snapshot 4)
+      if (/^F[1-8]$/.test(e.key) && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         const n = Number(e.key.slice(1));
         Snaps.playBy({ n }).then((r) => {
@@ -5719,6 +6356,7 @@ const Play = (() => {
         });
         return;
       }
+      if (e.key === '/' && !e.ctrlKey && !e.altKey) { e.preventDefault(); Search.focus(); return; } // (I3: the command search)
       // Shift + 1 to 9: the starred moments (+ and − keep sizing a spell, on keyboards where they need Shift)
       if (e.shiftKey && /^Digit[1-9]$/.test(e.code) && !(ui.tool === 'spell' && /^[+\-=_]$/.test(e.key))) {
         e.preventDefault();
@@ -5736,10 +6374,10 @@ const Play = (() => {
         if (m) cmd('edit.open', { id: m.id });
         return;
       }
-      // 1 to 0: the hotbar
-      if (!e.altKey && !e.shiftKey && /^Digit[0-9]$/.test(e.code)) {
+      // 1 to 0: the hotbar (VB4: the number pad too, while it types numbers)
+      if (!e.altKey && !e.shiftKey && (/^Digit[0-9]$/.test(e.code) || (/^Numpad[0-9]$/.test(e.code) && /^[0-9]$/.test(e.key)))) {
         e.preventDefault();
-        const n = Number(e.code.slice(5));
+        const n = Number(e.code.slice(-1));
         if (Hot && S.map) Hot.press(n === 0 ? 9 : n - 1);
         return;
       }
@@ -5770,36 +6408,38 @@ const Play = (() => {
         case 'x': Tools.tableMarks(); setTool('mark'); if (popId !== 'mark') openPop('mark'); else refreshPop(); break; // (N7)
         case 'j': Tools.noteMode(); setTool('mark'); if (popId !== 'mark') openPop('mark'); else refreshPop(); break; // (Third Builder (third-marks-tool): a note only you see, in Marks)
         case 'enter':
-          if (a && a !== document.body && a.tagName === 'BUTTON') break; // Enter on a focused button clicks that button
+          if (a && a !== document.body && (a.tagName === 'BUTTON' || a.getAttribute('role') === 'button')) break; // Enter on a focused button (or pad: VB1) presses that, and nothing else
           e.preventDefault();
           if (Walls.key('enter')) break; // ends a line of walls
           if (ui.tool === 'fog' && finishArea()) break; // ends an area
+          if (ui.tool === 'walls' || ui.tool === 'fog' || ui.tool === 'oldschool') break; // (VB7: with these in hand Enter finishes what is half drawn; with nothing half drawn it does nothing, not "next turn")
           Tools.nextRound();
           break;
         case 'l': if (e.shiftKey) Drawer.open({ full: true }); else Drawer.toggle(); break;
         case 'k': togglePop('layers'); break;
         case 'g': cmd('grid.update', { show: !S.map.grid.show }); break;
         case 'f': if (e.shiftKey) fitAll(); else view.fit(); break;
-        case 't': if (!isLive()) cmd('table.send'); break;
-        case 'b': if (S.table.open) cmd('table.blackout'); break;
+        case 't': sendByKey(); break;
+        case 'b': if (S.table.open) cmd('table.blackout'); else toast('The table is closed', { ms: 1600 }); break; // (VB10: a word instead of nothing)
         case '+': case '=': case '-': case '_':
           if (ui.tool === 'spell') setSpell({ size: stepIn(SIZES, ui.spell.size, k === '+' || k === '=' ? 1 : -1) });
           break;
         case '[': case ']':
           if (ui.tool === 'asset') {
             const a = ui.selAsset && layer(ui.selAsset);
-            if (ui.selAssets.length > 1) cmd('layer.many', { patches: ui.selAssets.map(layer).filter(Boolean).map((x) => ({ id: x.id, w: round(x.w * (k === ']' ? 1.15 : 1 / 1.15), 3) })), coalesce: 'size-many' });
-            else if (a) cmd('layer.update', { id: a.id, w: round(a.w * (k === ']' ? 1.15 : 1 / 1.15), 3), coalesce: `size-${a.id}` });
+            if (ui.selAssets.length > 1) cmd('layer.many', { patches: ui.selAssets.map(layer).filter(Boolean).map((x) => ({ id: x.id, w: round(x.w * (k === ']' ? ASSET_STEP : 1 / ASSET_STEP), 3) })), coalesce: 'size-many' });
+            else if (a) cmd('layer.update', { id: a.id, w: round(a.w * (k === ']' ? ASSET_STEP : 1 / ASSET_STEP), 3), coalesce: `size-${a.id}` });
             else if (ui.assetTab === 'living') { livingResize(k === ']' ? 1 : -1); updateAssetGhost(); }
             else { ui.assetCells = clamp(ui.assetCells + (k === ']' ? 0.25 : -0.25), 0.25, 8); updateAssetGhost(); }
-          } else if (ui.tool === 'fx') { ui.paintIn = clamp(ui.paintIn + (k === ']' ? 0.5 : -0.5), 0.5, 8); }
-          else ui.brushIn = clamp(ui.brushIn + (k === ']' ? 0.5 : -0.5), 0.5, 8);
+          } else if (ui.tool === 'fx') { ui.paintIn = clamp(ui.paintIn + (k === ']' ? BRUSH.step : -BRUSH.step), BRUSH.min, BRUSH.max); }
+          else if (ui.tool === 'oldschool') { OS.brushStep(k === ']' ? 1 : -1); break; } // (UI audit VF5: in Draw they set Draw's brush; they changed the Fog brush unseen)
+          else ui.brushIn = clamp(ui.brushIn + (k === ']' ? BRUSH.step : -BRUSH.step), BRUSH.min, BRUSH.max);
           refreshPop(); updateBrushCursor();
           break;
-        case 'h': toggleSelHidden(); break;
+        case 'h': if (toggleSelHidden() === false) toast('Nothing picked to hide', { ms: 1400 }); break; // (VB10)
         case 'delete': case 'backspace':
           if (Walls.key(k)) break;
-          if (ui.areaPts && ui.areaPts.length) { ui.areaPts.length -= 2; view.setAreaDraft(ui.areaPts.length ? ui.areaPts.slice() : null); if (!ui.areaPts.length) ui.areaPts = null; break; }
+          if (areaBack()) break;
           if (ui.selected) undoable('layer.remove', { id: ui.selected });
           else if (ui.selMark) Tools.removeSelected();
           else if (ui.selAssets.length > 1) { undoable('layer.removeMany', { ids: ui.selAssets.slice() }); setAssetSelection([]); }
@@ -5810,8 +6450,8 @@ const Play = (() => {
         default:
       }
     });
-    window.addEventListener('keyup', (e) => { if (e.key === ' ') spaceDown = false; });
-    window.addEventListener('blur', () => { spaceDown = false; }); // (N4: Space let go in another window: no stuck pan)
+    window.addEventListener('keyup', (e) => { if (e.key === ' ') { spaceDown = false; document.body.classList.remove('space-held'); } });
+    window.addEventListener('blur', () => { spaceDown = false; document.body.classList.remove('space-held'); cancelDrag(); }); // (N4: Space let go in another window: no stuck pan; VD1: nor a token stuck to the mouse)
   }
 
   // Away from the maps (the campaign page, the start screen) the GM's map stops drawing and its videos pause,
@@ -5834,12 +6474,12 @@ const Play = (() => {
   }
 
   return {
-    helpSections, showToolHint, mount, update, setActive, setTool, openPop, closePop, Drawer, view: () => view, ui, state: () => S,
+    helpSections, showToolHint, mount, update, patch, patchStats, setActive, setTool, openPop, closePop, Drawer, view: () => view, ui, state: () => S,
     undoable, openFxRadial: (id, x, y) => fxRadial(fxOf(id), x, y), // (self-test: N1, N9)
     offTable: () => [...offTable().entries()].map(([id, o]) => ({ id, ...o })), fitAll, aimMoment, Show, get TB() { return TB; }, get Floats() { return Floats; }, get Atlas() { return AtlasP; },
     simFps: (r) => { const n = typeof r === 'number' ? r : r.fps; ui.tableFps = n; ui.fpsSimAt = Date.now(); fpsWatch(n, r.hitches || 0, r.heavy || null); }, bigPreview, setPreviewWidth,
     openRadial, startAlign, finishAlign, alignGrid, castAt, cast, spellFromPointer, setSpell, pickSpell, oneInch, fitView, selectFx: (id) => selectFx(id),
-    get Snaps() { return Snaps; }, get Hot() { return Hot; }, get OS() { return OS; }, captureMap, hotRun, hotLive: (it) => hotLive(it), pinnable: (id) => !UNPINNED.has(id),
+    get Snaps() { return Snaps; }, get Trig() { return Trig; }, get Search() { return Search; }, get Hot() { return Hot; }, get OS() { return OS; }, captureMap, hotRun, hotLive: (it) => hotLive(it), pinnable: (id) => !UNPINNED.has(id),
     hotActions: () => Object.keys(DO_HOT).map((k) => doHot(k)), // (for the self-test: every single action)
     holdBake: (on) => { bakeHeld = !!on; if (!on && S && S.map) maybeBakeFog(S.map); },
     tokPref: (k) => Tools.tokPref(k), setTokPref: (k, v) => Tools.setTokPref(k, v), // 4.10: Options → Tokens

@@ -40,7 +40,7 @@ module.exports = (area) => {
 
   area.quick('the top: Guide, Library, Discord and Ko-fi; no Options there (it is in the menu), no Tutorial until there is one', async (t) => {
     const btns = await t.g(`[...document.querySelectorAll('.hm-actions .btn')].map((b) => b.getAttribute('aria-label') || b.textContent.trim())`);
-    for (const b of ['Guide', 'Library', 'Discord', 'Ko-fi']) t.has(btns, b, `${b} at the top`);
+    for (const b of ['Guide', 'Library folder', 'Discord', 'Ko-fi']) t.has(btns, b, `${b} at the top`);
     t.ok(!btns.includes('Options'), 'Options is not at the top', btns);
     t.ok(!btns.includes('Tutorial'), 'no Tutorial button that only says "coming soon" (P6)', btns);
   });
@@ -330,6 +330,19 @@ module.exports = (area) => {
       t.ok(r.above > 150 && Math.abs(r.above - r.below) < 40, 'as much room above as below', r);
       t.ok(r.tops < 4, 'both columns start at the same height', r);
       t.ok(r.footEnd < 60, 'the campaigns stay at the bottom', r);
+    });
+  });
+
+  // Beta 3.68: a short, wide window: the campaign keeps room above and below (the screen gets smaller instead)
+  area.quick('a short wide window: the campaign keeps room above and below', async (t) => {
+    await home(t);
+    await sized(t, 2000, 792, async () => {
+      const r = await t.g(`(() => { const b = (sel) => document.querySelector(sel).getBoundingClientRect();
+        const hs = +getComputedStyle(document.getElementById('home')).getPropertyValue('--hs');
+        const top = b('.hm-top'); const main = b('.hm-main'); const foot = b('.hm-foot');
+        return { hs, above: Math.round((main.top - top.bottom) / hs), below: Math.round((foot.top - main.bottom) / hs), footEnd: Math.round(innerHeight - foot.bottom) }; })()`);
+      t.ok(r.above >= 100 && r.below >= 100, 'room above and below the campaign', r);
+      t.ok(r.footEnd >= 0 && r.footEnd < 60, 'the campaigns stay at the bottom, in view', r);
     });
   });
 };

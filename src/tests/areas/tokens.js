@@ -26,15 +26,26 @@ module.exports = (area) => {
     t.ok(Math.hypot(b.x - a.x, b.y - a.y) > 0.5, 'the token moved', [a.x, a.y, b.x, b.y]);
     const centred = (v) => Math.abs((((v / s) % 1) + 1) % 1 - 0.5) < 0.01;
     t.ok(centred(b.x) && centred(b.y), 'the token sits in the middle of a square', [b.x / s, b.y / s]);
+    // (Glinn) its sheet opens on a click only, not when it is dragged
+    await t.sleep(300);
+    t.ok(!(await t.g(`!!document.querySelector('#token-sheet.on')`)), 'a drag leaves the sheet shut');
+    const r2 = await t.rect(`.sv-token[data-id="${id}"]`);
+    await t.click(r2.cx, r2.cy);
+    await t.until(() => t.g(`!!document.querySelector('#token-sheet.on')`), 3000, 'a click opens it');
   });
 
-  area.quick('a click selects a token and shows its card; H hides it from the players only', async (t) => {
+  area.quick('a click selects a token and shows its sheet; H hides it from the players only', async (t) => {
     const id = add(t, 6, 4);
     await t.until(() => t.rect(`.sv-token[data-id="${id}"]`), 3000, 'the token on the GM screen');
     t.gm().webContents.focus();
     await t.key('V');
     await t.clickSel(`.sv-token[data-id="${id}"]`);
-    await t.until(() => t.g(`!!document.querySelector('#token-card.on')`), 3000, 'the token card');
+    await t.until(() => t.g(`!!document.querySelector('#token-sheet.on')`), 3000, 'the token sheet');
+    await t.sleep(250);
+    t.ok((await t.g(`(() => { const a = [...document.querySelectorAll('#token-sheet .ts-bar')].flatMap((b) => b.getAnimations()); return a.filter((x) => x.playState === 'running').length; })()`)) > 0, 'a quarter of a second in, the lines are still sliding out (redraws no longer cut it short)');
+    // Beta 3.68: as it comes, four lines: the name, conditions, the light (an NPC), More; no toolbar
+    t.eq(await t.g(`[...document.querySelectorAll('#token-sheet .ts-bar')].map((b) => b.classList[1])`), ['ts-name', 'ts-conds', 'ts-sight', 'ts-more'], 'four lines: name, conditions, light, More');
+    t.ok(!(await t.g(`document.getElementById('token-card').classList.contains('on')`)), 'no toolbar above the token');
     const v0 = (await t.tvDebug()).tokensVisible;
     await t.key('H');
     await t.until(() => tok(t, id).hidden === true, 3000, 'H to hide the token');
@@ -57,37 +68,64 @@ module.exports = (area) => {
     await t.until(() => !!tok(t, id), 3000, 'the token to come back');
   });
 
-  // D3 (open point): the token's wheel has Conditions and Turn order; conditions are kept on the token, show as small
-  // animations on the TV, and the turn order shows and changes the same list. Wheel overhaul: six slots, the rest
-  // (Rename …, size, light …) under More …
-  area.quick('a token\'s wheel: six slots with Conditions, Turn order and More …; conditions show on the TV and in the turn order', async (t) => {
+  // D3 (open point): conditions are kept on the token, show as small animations on the TV, and the turn order shows and
+  // changes the same list. Beta 3.68 (Glinn): the token sheet took the wheel's place: a right-click opens the sheet with
+  // More open (hit points, armour class, the turn order, size, hide, rename … Lines …, Remove); conditions on their line
+  area.quick('a token\'s sheet: a right-click opens More; conditions on their line show on the TV and in the turn order; hit points and AC on the token', async (t) => {
     const id = add(t, 7, 3);
     const has = (c) => JSON.stringify(tok(t, id).cond || []) === JSON.stringify(c);
     const tv = () => t.t(`(() => { const e = document.querySelector('.tv-layer.shown .sv-token[data-id="${id}"]'); const b = document.querySelector('.tv-layer.shown .sv-tagbox[data-id="${id}"]'); return e && b && { bub: b.querySelectorAll('.sv-conds .cd-bub').length, prone: e.classList.contains('cd-prone') }; })()`);
+    const typeIn = async (v) => {
+      await t.until(() => t.g(`!!document.querySelector('.modal-back form input')`), 3000, 'the field to type in');
+      await t.g(`(() => { const i = document.querySelector('.modal-back form input'); i.value = ${JSON.stringify(v)}; i.closest('form').requestSubmit(); })()`);
+      await t.until(() => t.g(`!document.querySelector('.modal-back')`), 3000, 'the field to close');
+    };
     try {
       await t.until(() => t.rect(`.sv-token[data-id="${id}"]`), 3000, 'the token on the GM screen');
       t.gm().webContents.focus();
       await t.key('V');
-      const wheel = async () => {
+      const more = async () => {
         await t.rightClickSel(`.sv-token[data-id="${id}"]`);
-        await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the token\'s wheel');
-        return t.g(`[...document.querySelectorAll('#radial.on .radial-item > span')].map((x) => x.textContent)`);
+        return t.until(() => t.menu(), 3000, 'the sheet with More open');
       };
       const inOrder = () => t.state.init && t.state.init.entries.some((e) => e.tokens.includes(id));
-      const items = await wheel();
-      t.eq(items, ['Conditions', 'Turn order', 'Show', 'Hide', 'Remove', 'More …'], 'six slots: the fight, the table, hide, remove and More');
-      t.ok(!(await t.g(`(() => { const c = document.getElementById('token-card'); return !!c && c.classList.contains('on') && getComputedStyle(c).visibility !== 'hidden'; })()`)), 'the token bar steps away while the wheel is open');
+      const items = await more();
+      t.ok(await t.g(`!!document.querySelector('#token-sheet.on .ts-more')`), 'the right-click opened the sheet');
+      t.ok((await t.g(`(() => { const a = [...document.querySelectorAll('#token-sheet .ts-bar')].flatMap((b) => b.getAnimations()); return a.filter((x) => x.playState === 'running').length; })()`)) > 0, 'after a right-click the lines slide out as after a left click');
+      // (Beta 3.68, Glinn: in Sharp the menu had scroll bars: its corner lines stuck out of it)
+      t.ok(await t.g(`(() => { const m = document.getElementById('menu'); return m.scrollWidth <= m.clientWidth && m.scrollHeight <= m.clientHeight; })()`), 'More has nothing to scroll');
+      // (Glinn) it drops down right under its line
+      await t.sleep(1000); // (the lines are still sliding out after a right-click)
+      const mg = await t.g(`(() => { const m = document.getElementById('menu').getBoundingClientRect(); const b = document.querySelector('#token-sheet .ts-more').getBoundingClientRect(); return { dy: Math.round(m.top - b.bottom), left: Math.round(m.left - b.left), right: Math.round(b.right - m.right) }; })()`);
+      t.ok(Math.abs(mg.dy) <= 2 && Math.abs(mg.right) <= 1, 'More drops down right under its line, the right edges in line', mg);
+      for (const want of ['Hit points', 'Armour class', 'Size', 'Hide from players', 'Ping', 'Duplicate', 'Lines', 'Remove']) t.ok(items.some((x) => x.startsWith(want)), `More has ${want}`, items);
+      // one place for each: what a line shows (conditions, its light) and the name things (the name line) are not in More
+      for (const not of ['Conditions', 'Carry a light', 'Turn 45°', 'Name', 'Rename']) t.ok(!items.some((x) => x.startsWith(not)), `More has no ${not}`, items);
       if (inOrder()) { // (a prepared turn order takes the map's tokens by itself)
-        t.ok(await t.g(`[...document.querySelectorAll('#radial.on .radial-item')].find((b) => b.textContent.includes('Turn order')).classList.contains('on')`), 'Turn order is lit while it is in');
-        await t.clickText('#radial.on .radial-item', 'Turn order');
+        await t.menuPick('In the turn order');
         await t.until(() => !inOrder(), 3000, 'the token out of the turn order');
-        await wheel();
+        await more();
       }
-      await t.clickText('#radial.on .radial-item', 'Turn order');
-      await t.until(() => t.state.init && t.state.init.entries.some((e) => e.tokens.includes(id)), 3000, 'the token in the turn order');
-      // conditions: a grid that stays open for several
-      await wheel();
-      await t.clickText('#radial.on .radial-item', 'Conditions');
+      // hit points on the token, as long as it is not in the turn order
+      await t.menuPick('Hit points');
+      await typeIn('7');
+      await t.until(() => tok(t, id).hp && tok(t, id).hp.cur === 7 && tok(t, id).hp.max === 7, 3000, 'the first number: 7 of 7');
+      await more(); await t.menuPick('Hit points'); await typeIn('-3');
+      await t.until(() => tok(t, id).hp.cur === 4, 3000, 'minus 3: 4 of 7');
+      await more(); await t.menuPick('Armour class'); await typeIn('15');
+      await t.until(() => tok(t, id).ac === 15, 3000, 'armour class 15 on the token');
+      // into the turn order: it brings them; a change there comes back onto the token
+      await more(); await t.menuPick('Into the turn order');
+      await t.until(() => inOrder(), 3000, 'the token in the turn order');
+      const ent = await t.until(() => t.g(`(() => { const I = Play.state().init; const hc = I && I.cols.find((x) => x.kind === 'hp'); const ac = I && I.cols.find((x) => x.kind === 'ac'); const e = I && I.entries.find((q) => (q.tokens || []).includes(${JSON.stringify(id)})); return e && hc && ac && { id: e.id, hc: hc.id, hp: e.vals[hc.id], ac: e.vals[ac.id] }; })()`), 3000, 'its line in the turn order');
+      t.eq([ent.hp, ent.ac], [{ cur: 4, max: 7 }, 15], 'the turn order takes its hit points and AC');
+      t.handle('init.set', { id: ent.id, vals: { [ent.hc]: { delta: -2 } } });
+      await t.until(() => tok(t, id).hp.cur === 2, 3000, 'damage in the turn order: on the token too');
+      // conditions: + on their line opens the grid, which stays open for several
+      await t.key('Escape');
+      await t.clickSel(`.sv-token[data-id="${id}"]`);
+      await t.until(() => t.rect('#token-sheet.on .ts-conds .ts-add'), 3000, 'the conditions line');
+      await t.clickSel('#token-sheet .ts-conds .ts-add');
       await t.until(() => t.rect('#cond-pick'), 3000, 'the conditions');
       t.eq(await t.count('#cond-pick .cond-chip'), 16, 'all sixteen');
       await t.clickText('#cond-pick .cond-chip', 'Poisoned');
@@ -96,10 +134,8 @@ module.exports = (area) => {
       t.ok(await t.rect('#cond-pick'), 'the grid stays open for more');
       await t.key('Escape');
       await t.until(async () => !(await t.rect('#cond-pick')), 2000, 'Esc closes it');
+      await t.until(async () => (await t.count('#token-sheet .ts-conds .ts-cond')) === 2, 3000, 'both on the sheet');
       await t.until(async () => { const v = await tv(); return v && v.bub === 3 && v.prone; }, 3000, 'bubbles rising and the token lying down on the TV');
-      await wheel();
-      t.eq(await t.g(`[...document.querySelectorAll('#radial.on .radial-item')].find((b) => b.textContent.includes('Conditions')).querySelector('.radial-badge').textContent`), '2', 'the wheel counts them');
-      await t.g(`document.querySelector('#radial .radial-center').click()`);
       // the turn order shows them; a change there reaches the token, in one undo step
       const view = await t.until(() => t.g(`(() => { const I = Play.state().init; const c = I && I.cols.find((x) => x.kind === 'cond'); const e = c && I.entries.find((q) => (q.tokens || []).includes(${JSON.stringify(id)})); return e && { id: e.id, col: c.id, v: e.vals[c.id] }; })()`), 3000, 'the turn order\'s Conditions column');
       t.eq(view.v, ['Poisoned', 'Prone'], 'the turn order shows the token\'s conditions');
@@ -112,17 +148,29 @@ module.exports = (area) => {
       await t.until(async () => { const v = await tv(); return v && !v.bub && !v.prone; }, 3000, 'switched off: nothing on the token');
       await t.g(`window.ts.settings({ tokens: { conds: true } })`);
       await t.until(async () => { const v = await tv(); return v && v.bub === 3; }, 3000, 'on again');
-      // Rename
-      await wheel();
-      await t.clickText('#radial.on .radial-item', 'More');
-      const more = await t.until(() => t.menu(), 3000, 'More … as a menu');
-      for (const want of ['Rename …', 'Carry light', 'Duplicate', 'Ping', 'Bigger', 'Smaller', 'Turn']) t.has(more, want, 'under More …');
-      await t.menuPick('Rename …');
-      await t.until(() => t.g(`!!document.querySelector('.modal-back form input')`), 3000, 'the name to type');
-      await t.g(`(() => { const i = document.querySelector('.modal-back form input'); i.value = 'Grimgor'; i.closest('form').requestSubmit(); })()`);
+      // Lines …: Hit points switched on brings its line; As it came takes it away again
+      await more(); await t.menuPick('Lines');
+      await t.until(() => t.rect('#sheet-lines'), 3000, 'Lines');
+      await t.g(`document.querySelector('#sheet-lines .sl-row[data-v="hp"]').click()`);
+      await t.until(() => (t.settings.tokens.sheet.npc || []).includes('hp'), 3000, 'Hit points on for NPCs');
+      await t.until(() => t.g(`(() => { const b = document.querySelector('#token-sheet .ts-hp b'); return !!b && b.textContent.split(' ').join('') === '2/7'; })()`), 3000, 'its line on the sheet: 2 / 7');
+      t.eq(t.settings.tokens.sheet.pc, ['conds', 'sight'], 'the players\' lines stay as they were');
+      await t.key('Escape');
+      const items2 = await more();
+      t.ok(!items2.some((x) => x.startsWith('Hit points')), 'its line on: Hit points leaves More', items2);
+      await t.menuPick('Lines');
+      await t.until(() => t.rect('#sheet-lines'), 3000, 'Lines again');
+      await t.g(`document.querySelector('#sheet-lines .sl-back').click()`);
+      await t.until(() => JSON.stringify(t.settings.tokens.sheet.npc) === '["conds","sight"]', 3000, 'As it came');
+      await t.key('Escape');
+      // Rename: a click on the name
+      await t.g(`document.querySelector('#token-sheet .ts-namebtn').click()`);
+      await t.until(() => t.menu(), 3000, 'the name menu');
+      await t.menuPick('Rename');
+      await typeIn('Grimgor');
       await t.until(() => tok(t, id).name === 'Grimgor', 3000, 'the token renamed');
     } finally {
-      await t.g(`window.ts.settings({ tokens: { conds: true } })`);
+      await t.g(`window.ts.settings({ tokens: { conds: true, sheet: { pc: ['conds', 'sight'], npc: ['conds', 'sight'] } } })`);
       const e = t.state.init && t.state.init.entries.find((q) => q.tokens.includes(id));
       if (e) t.handle('init.remove', { ids: [e.id] });
       t.handle('layer.remove', { mapId: t.L().id, id });
@@ -138,8 +186,8 @@ module.exports = (area) => {
     t.gm().webContents.focus();
     await t.key('V');
     await t.rightClickSel(`.sv-token[data-id="${id}"]`);
-    await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the token\'s menu');
-    await t.clickText('#radial.on .radial-item', 'Show');
+    await t.until(() => t.menu(), 3000, 'the token\'s sheet with More open');
+    await t.menuPick('Show');
     await t.until(() => t.state.show && t.state.show.ids.includes(id), 3000, 'the show to start');
     await t.until(async () => (await onTv(t)) === 1, 3000, 'the picture on the TV');
     t.ok(await aside(t, id), 'the token itself steps aside on the TV');
@@ -274,15 +322,15 @@ module.exports = (area) => {
     await t.until(async () => !(await t.tvDebug()).tags.some((x) => x.text === label(get(t, a))), 3000, 'a hidden token\'s name to leave the TV');
   });
 
-  area.deep('renaming one token through its card gives it a name of its own, without a number', async (t) => {
+  area.deep('renaming one token through its sheet gives it a name of its own, without a number', async (t) => {
     await ownMap(t);
     const a = put(t, 12, 4, { tag: 'all' }); put(t, 14, 4, { tag: 'all' });
     await t.until(() => t.rect(`.sv-token[data-id="${a}"]`), 3000, 'the token');
     t.gm().webContents.focus();
     await t.key('V');
     await t.clickSel(`.sv-token[data-id="${a}"]`);
-    await t.until(() => t.rect('#token-card.on .card-name'), 3000, 'the token card');
-    await t.g(`document.querySelector('#token-card .card-name').click()`);
+    await t.until(() => t.rect('#token-sheet.on .ts-namebtn'), 3000, 'the token sheet');
+    await t.g(`document.querySelector('#token-sheet .ts-namebtn').click()`);
     const menu = await t.until(() => t.menu(), 3000, 'the name menu');
     t.ok(menu.some((x) => /^Rename this/.test(x)) && menu.some((x) => /^Rename all/.test(x)), 'the menu offers this one and all copies', menu);
     await t.menuPick('Rename this');
@@ -337,5 +385,55 @@ module.exports = (area) => {
     await t.cmd('layer.update', { mapId: own, id: a, hidden: true });
     await t.until(async () => !(await t.t(`window.__table.fxShown(${JSON.stringify(light.id)})`)), 3000, 'the light to leave the TV with the hidden token');
     t.ok(await t.rect(`.sv-token[data-id="${a}"]`), 'the GM still sees the token');
+  });
+
+  // Beta 3.68 (Glinn): a player's token has its own sheet: their name and who plays them, conditions, their sight,
+  // darkvision and the light they carry; More holds their phone and own light, the character card, Not a player token
+  area.quick('a player\'s token sheet: their name, sight, darkvision and light; More has the player\'s rows', async (t) => {
+    const party0 = (t.store.cur.meta.party || []).slice();
+    t.handle('party.set', { names: [...new Set([...party0, 'Mira'])] });
+    t.handle('char.set', { name: 'Mira', patch: { token: t.pic('tokens', /Hero/i), dark: 60, color: '#6cc3ff' } });
+    const id = add(t, 9, 5);
+    t.handle('layer.update', { mapId: t.L().id, id, player: 'Mira' });
+    const mira = () => (t.g(`(Play.state().chars || []).find((c) => c.name === 'Mira')`));
+    try {
+      await t.until(() => t.rect(`.sv-token[data-id="${id}"]`), 3000, 'the token');
+      t.gm().webContents.focus();
+      await t.key('V');
+      await t.clickSel(`.sv-token[data-id="${id}"]`);
+      await t.until(() => t.g(`!!document.querySelector('#token-sheet.on .ts-dot')`), 3000, 'a player\'s sheet');
+      t.eq(await t.text('#token-sheet .ts-namebtn b'), 'Mira', 'their name');
+      t.eq(await t.g(`[...document.querySelectorAll('#token-sheet .ts-bar')].map((b) => b.classList[1])`), ['ts-name', 'ts-conds', 'ts-sight', 'ts-more'], 'as it comes: name, conditions, sight and light, More');
+      t.eq(await t.g(`[...document.querySelectorAll('#token-sheet .ts-sight .ts-chip')].map((b) => b.textContent.trim())`), ['Sight', 'No light'], 'sight and the light they carry (darkvision: on the character card)');
+      // the lines: at the token's edge, all one length, no big picture of the token
+      await t.sleep(1000); // (once they have slid out)
+      const geo = await t.g(`(() => { const tk = document.querySelector('.sv-token[data-id="${id}"] .sv-token-pic').getBoundingClientRect(); const bs = [...document.querySelectorAll('#token-sheet .ts-bar')].map((b) => b.getBoundingClientRect()); return { gap: Math.round(bs[0].left - tk.right), widths: [...new Set(bs.map((b) => Math.round(b.width)))], ring: !!document.querySelector('#token-sheet img, .ts-ring') }; })()`);
+      t.ok(Math.abs(geo.gap) <= 2 && geo.widths.length === 1 && !geo.ring, 'at the token\'s edge, one length, no ring', geo);
+      // Ctrl + wheel turns it
+      const r0 = tok(t, id).rotation || 0; const tr = await t.rect(`.sv-token[data-id="${id}"]`);
+      t.gm().webContents.sendInputEvent({ type: 'mouseWheel', x: Math.round(tr.cx), y: Math.round(tr.cy), deltaX: 0, deltaY: -120, modifiers: ['control'] });
+      await t.until(() => (tok(t, id).rotation || 0) !== r0, 3000, 'Ctrl + wheel turns the token');
+      t.eq(Math.abs(((tok(t, id).rotation - r0) % 360 + 360) % 360 - 180), 165, 'by 15°', tok(t, id).rotation);
+      const eye0 = (await mira()).eye;
+      await t.clickSel('#token-sheet .ts-sight .ts-eye');
+      await t.until(async () => (await mira()).eye === !eye0, 3000, 'a click on Sight switches it');
+      await t.clickSel('#token-sheet .ts-sight .ts-eye');
+      await t.until(async () => (await mira()).eye === eye0, 3000, 'and back');
+      await t.clickSel('#token-sheet .ts-more');
+      const items = await t.until(() => t.menu(), 3000, 'More');
+      for (const want of ['Phone', 'Character card', 'Lines']) t.ok(items.some((x) => x.startsWith(want)), `More has ${want}`, items);
+      for (const not of ['Duplicate', 'Armour class', 'Not a player token']) t.ok(!items.some((x) => x.startsWith(not)), `More has no ${not} (a player's AC: on the card; not a player: the name line)`, items);
+      await t.clickSel('#token-sheet .ts-more');
+      await t.until(async () => !(await t.g(`!!document.querySelector('#menu.on')`)), 2000, 'a second click on More closes it');
+      await t.sleep(200);
+      t.ok(!(await t.g(`!!document.querySelector('#menu.on')`)), 'and it stays closed');
+      await t.g(`document.querySelector('#token-sheet .ts-namebtn').click()`);
+      const nm = await t.until(() => t.menu(), 3000, 'the name menu');
+      t.ok(nm.some((x) => x.startsWith('Not a player token')) && nm.some((x) => x.startsWith('Rename')), 'the name line: rename, name tag, not a player token', nm);
+      await t.key('Escape');
+    } finally {
+      t.handle('layer.remove', { mapId: t.L().id, id });
+      t.handle('party.set', { names: party0 });
+    }
   });
 };

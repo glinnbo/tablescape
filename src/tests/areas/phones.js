@@ -339,4 +339,219 @@ module.exports = (area) => {
     t.eq(!!t.state.blackout, b0, 'and back');
     sd.close();
   });
+
+  // ---------- UI audit, group UI 5: Phones (Open Points VE) ----------
+  const devOf = (t, x) => (t.settings.remote.devices || []).find((d) => d.token === x.token);
+  const fresh = (t) => t.g(`window.ts.players('set', {})`); // (the GM's state anew)
+  const only = async (t, who, name) => { await ph.run(A.token, 'unpick', {}); await ph.run(B.token, 'unpick', {}); const r = await ph.run(who.token, 'pick', { name }); t.ok(r.ok, `${name} picked`, r); };
+
+  area.quick('VE6, VE8: a phone is called by its character until the GM names it; one that left gives its character to the next pick at once; the seat glow is counted per phone', async (t) => {
+    await only(t, A, 'Mira');
+    const dA = devOf(t, A);
+    const rows = async () => { await fresh(t); return t.g(`Play.state().players.phones.map((d) => [d.name, d.char, d.connected])`); };
+    t.ok((await rows()).some((x) => x[0] === 'Mira\'s Phone A'), 'in the GM\'s list: Mira\'s Phone A', await rows());
+    const no = await ph.run(B.token, 'pick', { name: 'Mira' });
+    t.ok(!no.ok && /another phone/.test(no.error || ''), 'while Phone A is connected Phone B is turned away', no);
+    try {
+      await t.g(`window.ts.remote('rename', { id: ${JSON.stringify(dA.id)}, name: 'Anna' })`);
+      t.ok((await rows()).some((x) => x[0] === 'Anna' && x[1] === 'Mira'), 'renamed by the GM: that name stays', await rows());
+      t.ok(/on Anna/.test((await ph.run(B.token, 'pick', { name: 'Mira' })).error || ''), 'and it is the name a player is told');
+      // the seat: two phones look for theirs, one finds it: the edge still glows for the other
+      t.ok((await ph.run(B.token, 'pick', { name: 'Thorin' })).ok, 'Phone B is Thorin');
+      await ph.run(A.token, 'calib', { on: true }); await ph.run(B.token, 'calib', { on: true });
+      t.eq(t.state.calib, true, 'the TV\'s edge glows');
+      await ph.run(A.token, 'calib', { on: false });
+      t.eq(t.state.calib, true, 'still glowing for the second phone');
+      await ph.run(B.token, 'calib', { on: false });
+      t.eq(t.state.calib, false, 'out when the last one is done');
+      await ph.run(B.token, 'unpick', {});
+      // Phone A leaves (a dead battery): its character goes to the next phone that picks it, at once
+      sa.close();
+      await t.until(async () => (await rows()).some((x) => x[0] === 'Anna' && !x[2]), 5000, 'Phone A away');
+      t.eq(sb.last.ctl.chars.find((c) => c.name === 'Mira').taken, null, 'Mira is not shown as taken');
+      const yes = await ph.run(B.token, 'pick', { name: 'Mira' });
+      t.ok(yes.ok, 'Phone B takes Mira without waiting a minute', yes);
+      t.eq(dA.char, undefined, 'Phone A has no character any more');
+    } finally {
+      delete dA.named; dA.name = 'Phone A';
+      sa = ph.stream(A.token);
+      await t.until(() => sa.last, 5000, 'Phone A back');
+      await ph.run(B.token, 'unpick', {});
+    }
+  });
+
+  area.quick('VE7: an aim that arrives after its step or let-go is dropped; one that came too soon is shown a moment later', async (t) => {
+    await only(t, A, 'Mira');
+    const aims = () => t.g(`[...document.querySelectorAll('#viewport .sv-aim-cell')].map((e) => [Math.round(parseFloat(e.style.left)), Math.round(parseFloat(e.style.top))])`);
+    const n0 = Date.now();
+    await t.sleep(400);
+    await ph.run(A.token, 'aim', { dir: 's', n: n0 + 1 });
+    const south = await t.until(async () => { const a = await aims(); return a.length === 1 && a[0]; }, 3000, 'the aim on the map');
+    await ph.run(A.token, 'aim', { dir: null, n: n0 + 10 });
+    await t.until(async () => (await aims()).length === 0, 3000, 'the aim gone when the stick is let go');
+    await ph.run(A.token, 'aim', { dir: 'e', n: n0 + 5 }); // (sent before the let-go, here after it)
+    await t.sleep(300);
+    t.eq((await aims()).length, 0, 'aims on the map from before the let-go');
+    // two within a moment: the second one is the one that stays
+    await t.sleep(100);
+    await Promise.all([ph.run(A.token, 'aim', { dir: 's', n: n0 + 20 }), ph.run(A.token, 'aim', { dir: 'w', n: n0 + 21 })]);
+    await t.sleep(350);
+    const west = (await aims())[0];
+    t.ok(west && west[0] < south[0] && west[1] < south[1], 'the last of two quick aims is the one shown (west, not south)', [west, south]);
+    // a step, then an aim from before it
+    const p0 = at(t);
+    await t.sleep(250);
+    const st = await ph.run(A.token, 'move', { dir: 's', n: n0 + 30 });
+    t.ok(st.ok, 'a step south', st);
+    await t.until(() => at(t)[1] === p0[1] + 1, 3000, 'the token a square south');
+    await ph.run(A.token, 'aim', { dir: 'w', n: n0 + 25 });
+    await t.sleep(300);
+    t.eq((await aims()).length, 0, 'aims on the map from before the step');
+    await ph.run(A.token, 'aim', { dir: 'n', n: n0 + 40 });
+    await t.until(async () => (await aims()).length === 1, 3000, 'a new aim right after the step');
+    await t.sleep(250);
+    await ph.run(A.token, 'move', { dir: 'n', n: n0 + 50 });
+    await t.until(() => at(t)[1] === p0[1], 3000, 'the token back');
+  });
+
+  area.quick('VE11, VE13: an old code is answered without a panel that does not exist; a rest is told as the time left', async (t) => {
+    const bad = await ph.pair('000001', 'st-y', 'Stranger');
+    t.ok(/join code/.test(bad.error || '') && /Gamemaster remote/.test(bad.error || '') && !/→ Remote\b/.test(bad.error || ''), 'what an old code is told', bad.error);
+    await only(t, A, 'Mira');
+    const p0 = at(t);
+    await t.g(`window.ts.players('set', { rest: 5 })`);
+    try {
+      await t.sleep(250);
+      t.ok((await ph.run(A.token, 'move', { dir: 's' })).ok, 'a step');
+      const me = await t.until(() => sa.last.ctl && sa.last.ctl.me && sa.last.ctl.me.restLeft > 0 && sa.last.ctl.me, 4000, 'the rest on the phone');
+      t.ok(me.restLeft > 2500 && me.restLeft <= 5000 && !('restUntil' in me) && me.rest === 5, 'the time left in milliseconds, no clock time of the PC', [me.restLeft, me.rest]);
+    } finally {
+      await t.g(`window.ts.players('set', { rest: 0 })`);
+      await t.sleep(250);
+      await ph.run(A.token, 'move', { dir: 'n' });
+      await t.until(() => at(t)[1] === p0[1], 3000, 'the token back');
+    }
+  });
+
+  area.deep('VE1, VE3, VE5, VE8, VE12, VE13: the real phone page: a touch taken away is no step; Cancel keeps the seat; Back closes the menu; a lost line says so; no campaign: it waits as Mira', async (t) => {
+    const { BrowserWindow } = require('electron');
+    await ph.run(A.token, 'unpick', {}); await ph.run(B.token, 'unpick', {});
+    const Q = await ph.pair(t.settings.remote.playerKey, 'st-q', 'Phone Q');
+    const w = new BrowserWindow({ show: false, width: 390, height: 780, webPreferences: { partition: 'phone-test-q' } });
+    const errs = [];
+    w.webContents.on('console-message', (e, lvl, msg) => { const level = typeof e.level === 'string' ? e.level : lvl; if (level === 'error' || level === 3) errs.push(e.message || msg); });
+    const js = (code) => w.webContents.executeJavaScript(code);
+    // a thumb on the stick: fx, fy from its middle (1 = the rim)
+    const stick = (type, fx, fy) => js(`(() => { const el = document.querySelector('.ctl .stick'); const b = el.getBoundingClientRect(); const R = b.width / 2; el.dispatchEvent(new PointerEvent(${JSON.stringify(type)}, { pointerId: 7, clientX: b.left + R + ${fx} * R * 0.7, clientY: b.top + R + ${fy} * R * 0.7, bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true })); return 0; })()`);
+    const aims = () => t.g(`document.querySelectorAll('#viewport .sv-aim').length`);
+    try {
+      await w.loadURL(`http://127.0.0.1:${ph.port}/#t=${Q.token}`);
+      await t.until(() => js(`[...document.querySelectorAll('.pick-card')].some((b) => b.textContent.includes('Mira'))`), 8000, 'Who are you? with Mira');
+      // VE12: the cards stay the same cards while states come in
+      await js(`window.__card = document.querySelector('.pick-card'); 0`);
+      await t.g(`window.ts.players('set', { pings: false })`); await t.g(`window.ts.players('set', { pings: true })`);
+      await t.sleep(1300);
+      t.eq(await js(`window.__card === document.querySelector('.pick-card')`), true, 'Who are you? is not built anew with every state');
+      await js(`[...document.querySelectorAll('.pick-card')].find((b) => b.textContent.includes('Mira')).click()`);
+      await t.until(() => js(`!!document.querySelector('.ctl.calib')`), 5000, 'the seat set-up');
+      t.eq(await js(`[...document.querySelectorAll('.ctl.calib .pbtn')].pop().textContent`), 'Skip (it is away from me)', 'no seat yet: Skip');
+      // the seat: the TV's top edge is to the right of this player
+      await stick('pointerdown', 1, 0); await stick('pointerup', 1, 0);
+      await t.until(() => js(`!!document.querySelector('.ctl.drive')`), 5000, 'the controller');
+      t.eq(await js(`localStorage.getItem('ts.remote.seat')`), '90', 'the seat');
+      // VE8: Seat again, then Cancel: the seat stays
+      await js(`document.querySelector('.abtn.seat').click()`);
+      await t.until(() => js(`!!document.querySelector('.ctl.calib')`), 4000, 'the seat set-up again');
+      t.eq(await js(`[...document.querySelectorAll('.ctl.calib .pbtn')].pop().textContent`), 'Cancel', 'with a seat: Cancel');
+      await js(`[...document.querySelectorAll('.ctl.calib .pbtn')].pop().click()`);
+      await t.until(() => js(`!!document.querySelector('.ctl.drive')`), 4000, 'the controller again');
+      t.eq(await js(`localStorage.getItem('ts.remote.seat')`), '90', 'the seat after Cancel');
+      await t.until(() => !t.state.calib, 3000, 'the TV\'s edge dark again');
+      // VE5: the touch is taken away (a call, a swipe from the edge): no step
+      const p0 = at(t);
+      await t.sleep(400);
+      await stick('pointerdown', -1, 0); // (left on this phone: south on the table, from this seat)
+      await t.until(async () => (await aims()) === 1, 3000, 'the aim on the map');
+      await stick('pointercancel', -1, 0);
+      await t.until(async () => (await aims()) === 0, 3000, 'the aim gone');
+      await t.sleep(500);
+      t.eq(at(t), p0, 'where the token stands after a touch that was taken away');
+      t.eq(await js(`document.querySelector('.stick .knob').style.transform`), 'translate(0px, 0px)', 'the knob is back in the middle');
+      // a finger lifted is a step; VE12: the picture and the buttons stay the same ones; VE13: the rest counts on the phone
+      await t.g(`window.ts.players('resetChar', { name: 'Mira' })`); // (a rest left over from the check before)
+      await t.g(`window.ts.players('set', { rest: 4 })`);
+      await js(`window.__face = document.querySelector('.ctl-face'); window.__seat = document.querySelector('.abtn.seat'); 0`);
+      await stick('pointerdown', -1, 0); await t.sleep(150); await stick('pointerup', -1, 0);
+      await t.until(() => at(t)[1] === p0[1] + 1, 3000, 'a step south');
+      await t.until(() => js(`!!document.querySelector('.stick-centre.rest')`), 4000, 'the rest in the middle of the stick');
+      const left = Number(await js(`document.querySelector('.stick-centre.rest b').textContent`));
+      t.ok(left >= 2 && left <= 4, 'seconds of rest left', left);
+      await t.sleep(1200);
+      t.eq(await js(`[window.__face === document.querySelector('.ctl-face'), window.__seat === document.querySelector('.abtn.seat')]`), [true, true], 'the picture and the buttons are the same ones after a step and a second of rest');
+      await t.g(`window.ts.players('set', { rest: 0 })`);
+      await t.sleep(400);
+      await stick('pointerdown', 1, 0); await t.sleep(150); await stick('pointerup', 1, 0);
+      await t.until(() => at(t)[1] === p0[1], 3000, 'the step back');
+      // VE13: Back closes the menu and the page stays; closed by its own button, Back is not used up
+      const sheet = () => js(`!!document.querySelector('.sheet-back')`);
+      await js(`document.querySelector('.pl-more').click()`);
+      t.eq(await sheet(), true, 'the menu');
+      await js(`history.back(); 0`);
+      await t.until(async () => !(await sheet()), 3000, 'Back closes the menu');
+      t.ok(await js(`location.hash.startsWith('#t=') && !!document.querySelector('.ctl.drive')`), 'and the controller is still there');
+      await js(`document.querySelector('.pl-more').click()`);
+      await js(`document.querySelector('.sheet-head .ib').click()`);
+      await t.sleep(300);
+      t.eq(await sheet(), false, 'closed by its own button');
+      await js(`document.querySelector('.pl-more').click()`);
+      await js(`history.back(); 0`);
+      await t.until(async () => !(await sheet()), 3000, 'Back closes the next one too');
+      t.ok(await js(`!!document.querySelector('.ctl.drive')`), 'the controller is still there');
+      // VE1: no campaign open on the PC: the phone waits and is still Mira afterwards
+      t.handle('campaign.home');
+      await t.until(() => js(`!!document.querySelector('.ctl.wait') && document.querySelector('.ctl.wait').textContent`), 6000, 'the phone waits');
+      t.ok(/Mira/.test(await js(`document.querySelector('.ctl.wait').textContent`)) && /Waiting for the GM/.test(await js(`document.querySelector('.ctl.wait').textContent`)), 'it says who it is and that it waits', await js(`document.querySelector('.ctl.wait').textContent`));
+      await t.openDemo(); t.handle('edit.open', { id: mapId }); t.handle('table.send', { id: mapId });
+      await t.until(() => js(`!!document.querySelector('.ctl.drive') && document.querySelector('.ctl-names').textContent === 'Mira'`), 8000, 'Mira again, without picking');
+      // VE3: the line is lost: the page says so and takes no taps; back when Tablescape is heard again
+      const port = ph.port;
+      await t.g(`window.ts.remote('set', { on: false })`);
+      await t.until(() => js(`document.body.dataset.conn === 'lost'`), 8000, 'the phone notices the lost line');
+      const lost = await js(`({ chip: getComputedStyle(document.querySelector('.conn-chip')).display, text: document.querySelector('.conn-chip').textContent, stick: getComputedStyle(document.querySelector('.stick')).pointerEvents })`);
+      t.eq([lost.chip !== 'none', lost.text, lost.stick], [true, 'Reconnecting …', 'none'], 'Reconnecting … shows, the stick takes no touch');
+      await t.g(`window.ts.remote('set', { on: true })`);
+      await t.until(() => t.g(`Play.state().remote && Play.state().remote.port`), 8000, 'the phones\' server again');
+      t.eq(await t.g(`Play.state().remote.port`), port, 'on the same port');
+      await t.until(() => js(`document.body.dataset.conn === 'on'`), 15000, 'connected again by itself');
+      t.eq(await js(`getComputedStyle(document.querySelector('.conn-chip')).display`), 'none', 'the chip is gone');
+      t.eq(errs.filter((x) => !/Failed to load resource|ERR_CONNECTION|ERR_EMPTY|net::/.test(x)), [], 'errors in the phone app');
+    } finally {
+      w.destroy();
+      await t.g(`window.ts.players('set', { rest: 0 })`).catch(() => {});
+      if (!(await t.g(`Play.state().remote && Play.state().remote.running`).catch(() => false))) await t.g(`window.ts.remote('set', { on: true })`);
+      await t.sleep(500);
+      sa.close(); sb.close(); sa = ph.stream(A.token); sb = ph.stream(B.token);
+      await t.until(() => sa.last && sb.last, 6000, 'the two phones back');
+      await ph.run(Q.token, 'unpick', {});
+    }
+  });
+
+  // (the last one: it goes back to Home)
+  area.quick('VE1: back at Home a phone keeps its character, is told to wait, and moves nothing', async (t) => {
+    await only(t, A, 'Mira');
+    const dA = devOf(t, A);
+    t.handle('campaign.home');
+    try {
+      await t.until(() => t.g(`document.body.dataset.screen === 'home'`), 5000, 'the home screen');
+      const c = await t.until(() => sa.last.ctl && sa.last.ctl.closed && sa.last.ctl, 5000, 'the phone told that no campaign is open');
+      t.eq([c.mine, c.me, c.chars], ['Mira', null, []], 'who it is, and nothing to pick');
+      const r = await ph.run(A.token, 'move', { dir: 'e' });
+      t.ok(!r.ok && r.why === 'closed', 'a step is turned away', r);
+      t.eq(dA.char, 'Mira', 'the phone\'s character after all that');
+    } finally {
+      await t.openDemo(); t.handle('edit.open', { id: mapId }); t.handle('table.send', { id: mapId });
+    }
+    const me = await t.until(() => sa.last.ctl && sa.last.ctl.me, 8000, 'Mira again once the campaign is open');
+    t.eq(me.name, 'Mira', 'without picking again');
+  });
 };

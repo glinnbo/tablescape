@@ -939,6 +939,12 @@ const AtlasPanel = (() => {
 
       const root = h('div', { class: 'mt' }, strip, opts, h('div', { class: 'mt-main' }, stage, bar), grip);
       root.addEventListener('keydown', onKey);
+      // UI audit VB5: the window takes the keyboard as it opens (until a click inside it, T, R, D and E went to the
+      // battlemap behind it, and T sent the map being edited to the TV)
+      requestAnimationFrame(() => {
+        const a = document.activeElement;
+        if (root.isConnected && (!a || a === document.body || a.tagName === 'BUTTON' || (a.getAttribute && a.getAttribute('role') === 'button'))) stage.focus({ preventScroll: true });
+      });
       win = {
         root, ed,
         close() { if (win === this) win = null; try { ed.destroy(); } catch {} },

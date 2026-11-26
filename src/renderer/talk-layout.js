@@ -49,7 +49,7 @@ window.TalkLayout = (() => {
     }
     return items.map((it, i) => {
       const off = (it && it.offset) || { x: 0, y: 0 };
-      return { left: left[i], width: widths[i], height: hs[i], dx: (off.x || 0) * widths[i], dy: -Math.max(0, off.y || 0) * hs[i], front: i === items.length - 1 }; // (never below its band)
+      return { left: left[i], width: widths[i], height: hs[i], dx: (off.x || 0) * widths[i], dy: -(off.y || 0) * hs[i], front: i === items.length - 1 }; // (Glinn: below its band too, sinking behind it)
     });
   }
   // where the speaker's left edge goes for a given pos, and back (the small TV drags the speaker sideways). It may stand

@@ -609,6 +609,7 @@ void main() {
   let renderer = ''; let waiters = [];
   const info = { buildMs: 0, testMs: 0, parallel: false };
   const SOFTWARE = /swiftshader|llvmpipe|software|basic render|softpipe/i; // (as trees.js)
+  let slowTries = 0; let againT = 0; const TEST = { waits: [5000, 15000, 45000], fakeSlow: 0 }; // (waits: when a "too slow" is timed again; fakeSlow: the self-test, so many timings come out slow)
   const SLOW_MS = 40; // three looks, each at the most pixels a spell takes (both passes): slower than this, the old drawing
   const role = /role=table/.test(location.search) ? 'table' : 'gm';
   const note = (text) => { try { if (window.ts && window.ts.app) window.ts.app('note', { text: `[${role}] spells: ${text}` }).catch(() => {}); } catch { /* */ } };
@@ -619,8 +620,17 @@ void main() {
     clearTimeout(pollT);
     state = next; stats.why = String(why || '').slice(0, 300);
     if (next !== 'slow') { gl = null; prog = null; } // (slow: the program stays, Try again times it once more)
-    note(`the old drawing (${stats.why})`);
+    note(`the old drawing (${stats.why})${next === 'slow' && slowTries < TEST.waits.length ? '; timed again shortly' : ''}`);
     settle();
+    // Glinn's log, 26 Nov 2026: twice the TV found an RTX 4080 "too slow" (45 and 284 ms a spell, 2 to 6 ms on other
+    // days) and drew the spells the old way all session. It is timed the moment the window opens, and that is when the
+    // map's pictures go to the graphics card and a drawn map may be painted: the card was busy, not slow. So a verdict
+    // of "too slow" is not final at once: it is timed again after 5, 15 and 45 seconds, and the first time it passes
+    // the spells are drawn by the card. Nothing waits for that (the old drawing shows meanwhile).
+    if (next === 'slow' && slowTries < TEST.waits.length) {
+      clearTimeout(againT);
+      againT = setTimeout(() => { if (state === 'slow' && gl && !off) { state = 'building'; report(); timeIt(); } }, TEST.waits[slowTries++]);
+    }
   }
   function begin() {
     if (state !== 'idle') return;
@@ -665,9 +675,10 @@ void main() {
     const skins = [SKIN_IDS.fire ?? 0, SKIN_IDS.cloud ?? 10, SKIN_IDS.water ?? 14];
     const runs = [-1, 0, 0, 1, 1, 2, 2]; const best = [Infinity, Infinity, Infinity]; let i = 0;
     const done = (ms) => {
+      if (TEST.fakeSlow > 0) { TEST.fakeSlow--; ms = 999; }
       info.testMs = Math.round(ms * 10) / 10;
       if (ms > SLOW_MS) { quit('slow', `this graphics card is too slow for it: ${info.testMs} ms a spell`); return; }
-      state = 'ready'; stats.why = '';
+      state = 'ready'; stats.why = ''; slowTries = 0; clearTimeout(againT);
       note(`drawn by the graphics card (built in ${info.buildMs} ms${info.parallel ? ' in the background' : ''}, ${soft ? 'not timed' : `${info.testMs} ms a spell`}; ${renderer})`);
       settle();
     };
@@ -725,8 +736,9 @@ void main() {
   }
   // Options → Performance: time it once more (after "too slow"), or try again after a failure
   function retry() {
-    if (state === 'slow' && gl) { state = 'building'; timeIt(); return warm(); }
+    if (state === 'slow' && gl) { clearTimeout(againT); slowTries = 0; state = 'building'; timeIt(); return warm(); } // (asked by hand: it gets its three more tries again)
     if (state === 'building') return warm();
+    clearTimeout(againT); slowTries = 0;
     state = 'idle'; gl = null; prog = null;
     return warm();
   }
@@ -804,7 +816,7 @@ void main() {
   // Second Builder (second-spell-warmup): the GM's switch; tests on software graphics (as Trees.allowSoft)
   const setOff = (v) => { off = !!v; };
   const allowSoft = (v) => { soft = !!v; if (soft && state === 'off') { state = 'idle'; gl = null; prog = null; } return soft; };
-  return { draw, supported, stats, SKIN_IDS, cellOf, warm, retry, status, setOff, allowSoft };
+  return { draw, supported, stats, SKIN_IDS, cellOf, warm, retry, status, setOff, allowSoft, TEST };
 })();
 // Second Builder (second-spell-warmup): build it from the start, in the background (the start screen waits for it)
 // The TV builds the program only once the GM screen's build is over. A build from nothing takes ~20 s on Windows;

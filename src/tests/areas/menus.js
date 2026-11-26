@@ -142,7 +142,7 @@ module.exports = (area) => {
       t.handle('chapter.ambience', { id: ch.id, volume: ch.vol });
     }
     // fight music: its item, Play it now, and the card that says Playing while the chapter waits
-    const track = t.library.listLibrary().find((x) => /\.(ogg|mp3)$/i.test(x.path) && x.name !== ch.amb);
+    const track = t.library.listLibrary().find((x) => /\.(ogg|mp3|wav)$/i.test(x.path) && x.name !== ch.amb); // (the starter sounds are .wav since I8)
     t.ok(await t.findText('#pop .snd-card[data-v="fight"] .snd-add', 'Choose fight music'), 'Fight: one dashed button while there is none');
     t.handle('chapter.fight', { id: ch.id, path: track.path });
     await t.until(async () => (await t.text('#pop .snd-card[data-v="fight"] .snd-item')).includes(track.name), 3000, 'the fight music by name');
@@ -212,5 +212,21 @@ module.exports = (area) => {
     await t.until(async () => !(await t.count('#pop .as-ban .fx-ban-tag')) && (await t.count('#pop .as-tools')), 4000, 'All assets lets go of it');
     t.handle('layer.remove', { mapId: m.id, id: r.selected });
     await t.g(`Play.closePop(); Play.setTool('select')`);
+  });
+  // Beta 3.68 (Glinn): the rail's panels lie behind the rail and slide out from under it, also when another one opens
+  // from an open one (only the first slid before); the same panel built anew does not slide
+  area.quick('a rail panel slides out from behind the rail, also when another one opens', async (t) => {
+    const slides = () => t.g(`document.getElementById('pop').getAnimations().some((a) => a.animationName === 'pop-slide')`);
+    await t.g(`Play.closePop(); Play.setTool('map'); Play.openPop('map')`);
+    t.ok(await slides(), 'opened from closed: it slides');
+    await t.sleep(500);
+    const r = await t.g(`(() => { const p = document.getElementById('pop').getBoundingClientRect(); const rail = document.getElementById('rail').getBoundingClientRect(); return { gap: Math.round(p.left - rail.right), left: getComputedStyle(document.getElementById('pop')).borderLeftWidth }; })()`);
+    t.ok(Math.abs(r.gap) <= 1 && r.left === '0px', 'against the rail, no border there', r);
+    await t.g(`Play.openPop('grid')`);
+    t.ok(await slides(), 'another panel from an open one: it slides again');
+    await t.sleep(500);
+    await t.g(`Play.openPop('grid')`);
+    t.ok(!(await slides()), 'the same panel built anew: no slide');
+    await t.g(`Play.closePop()`);
   });
 };

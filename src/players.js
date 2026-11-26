@@ -47,8 +47,12 @@ function create(o) {
   let groupN = 1; // Prototype 8: which hand-out of movement this is (pace 'group')
   // (diag: diagonal steps this turn; trail: the squares walked this turn, { mapId, id (token), pts: [{ x, y, ft }] })
   const T = (name) => { let t = turns.get(name); if (!t) { t = { turnKey: null, used: 0, dashed: false, extra: [], restUntil: 0, diag: 0, trail: null }; turns.set(name, t); } return t; };
-  // a phone that left keeps its character for a minute (the screen locked, the Wi-Fi blinked)
-  const present = (d) => o.connected(d) || Date.now() - (d.seen || 0) < 60000;
+  // UI audit VE8: a character is taken while its phone is connected. A phone that left (a dead battery, a new phone)
+  // keeps its character until another phone picks it: that pick goes through at once (it waited a minute before).
+  const open = () => !!o.store.cur; // (UI audit VE1: no campaign open is no reason to forget who a phone is)
+  // UI audit VE6: what a phone is called: the name the GM gave it, else its character's ("Mira's iPhone"), else the browser's
+  const labelOf = (d) => (d.named || !d.char ? d.name : `${d.char}'s ${d.name}`);
+  const CLOSED = { ok: false, why: 'closed', error: 'The GM has no campaign open yet' };
   const live = () => (o.state.liveMapId ? o.store.map(o.state.liveMapId) : null);
   const party = () => { const c = o.store.cur; if (!c) return []; const away = new Set(c.meta.away || []); return (c.meta.party || []).filter((n) => !away.has(n)); };
   const holders = () => o.devices().filter((d) => d.role === 'player' && d.char);
@@ -184,10 +188,23 @@ function create(o) {
     return null;
   }
 
+  // the arrow and the landing square of one phone on the TV
+  function showAim(dev, dir, n) {
+    const map = live(); const tok = tokenOf(dev, map);
+    if (!map || !tok || !dev.char) return;
+    const m = M(dev);
+    m.aimAt = Date.now(); m.aiming = true; m.aimN = n || 0;
+    const can = allowed(dev, map, tok);
+    const t = can.ok ? target(map, tok, dir) : { ok: false, to: (target(map, tok, dir) || {}).to };
+    o.ping(aimMsg(map, tok, dev, t));
+  }
+
   // ---------- what a phone does ----------
   async function run(op, a, dev) {
     if (!OPS.includes(op)) return { ok: false, error: 'Tablescape doesn\'t know that (an older version?)' };
     const P = opt();
+    // UI audit VE1: with no campaign open nothing moves, and nobody loses their character over it
+    if (!open() && op !== 'unpick' && !(op === 'calib' && !a.on) && !(op === 'aim' && !a.dir)) return CLOSED;
     // Prototype 3: switched off means off for everything a phone does on the table (leaving and letting go still work)
     // (Beta 3.7: saying who you are works without it too: a table with miniatures still sends handouts to single players)
     if (!P.on && op !== 'pick' && op !== 'unpick' && !(op === 'calib' && !a.on) && !(op === 'aim' && !a.dir)) return { ok: false, why: 'off', error: 'The DM has not switched on moving by phone' };
@@ -195,8 +212,8 @@ function create(o) {
       const name = String(a.name || '');
       if (!party().includes(name)) return { ok: false, error: 'That character is not in the party' };
       const other = holderOf(name, dev);
-      if (other && present(other)) return { ok: false, error: `${name} is already on ${other.name}` };
-      if (other) { delete other.char; } // (a phone that left: its character is free)
+      if (other && o.connected(other)) return { ok: false, error: `${name} is already on ${other.named ? other.name : 'another phone'}` };
+      if (other) { delete other.char; M(other).handed = null; } // (a phone that left: its character is free, UI audit VE8)
       if (dev.char && dev.char !== name) M(dev).handed = null;
       dev.char = name;
       o.save();
@@ -204,10 +221,10 @@ function create(o) {
     }
     if (op === 'unpick') { delete dev.char; M(dev).handed = null; o.save(); return { ok: true }; }
     if (!dev.char) return { ok: false, error: 'Pick your character first' };
-    if (!party().includes(dev.char)) { delete dev.char; o.save(); return { ok: false, error: 'Pick your character again' }; } // (left the party, or away tonight)
+    if (open() && !party().includes(dev.char)) { delete dev.char; o.save(); return { ok: false, error: 'Pick your character again' }; } // (left the party, or away tonight)
     const map = live();
     const tok = tokenOf(dev, map);
-    if (op === 'calib') { o.calib(!!a.on); return { ok: true }; } // the TV's top edge glows while this phone finds its seat
+    if (op === 'calib') { o.calib(!!a.on, dev); return { ok: true }; } // the TV's top edge glows while this phone finds its seat (counted per phone, UI audit VE8)
     if (op === 'point') {
       if (!map || !tok) return { ok: false, error: 'Your token is not on this map' };
       if (!P.pings) return { ok: false, error: 'The DM switched pings off' };
@@ -219,12 +236,17 @@ function create(o) {
     if (op === 'aim') { // the stick is pushed (or let go without a step): the TV shows where it would land
       if (!map || !tok) return { ok: true };
       const m = M(dev); const now = Date.now();
-      if (!a.dir) { if (m.aiming) { m.aiming = false; o.ping(aimMsg(map, tok, dev, null)); } return { ok: true }; }
-      if (now - m.aimAt < 60 || now < (m.noAimUntil || 0)) return { ok: true }; // (an aim that was still on its way when the step came would stay on the map)
-      m.aimAt = now; m.aiming = true;
-      const can = allowed(dev, map, tok);
-      const t = can.ok ? target(map, tok, a.dir) : { ok: false, to: (target(map, tok, a.dir) || {}).to };
-      o.ping(aimMsg(map, tok, dev, t));
+      // UI audit VE7: n is the phone's own clock when it sent this. An aim older than the last step or let-go was still
+      // on its way and would stay on the map: it is dropped. (A phone page without n: nothing for 300 ms after a step.)
+      const n = Number(a.n) || 0;
+      clearTimeout(m.aimT); m.aimT = null;
+      if (!a.dir) { if (n) m.cutN = n; if (m.aiming) { m.aiming = false; o.ping(aimMsg(map, tok, dev, null)); } return { ok: true }; }
+      if (n ? (m.cutN && n < m.cutN && m.cutN - n < 10000) : now < (m.noAimUntil || 0)) return { ok: true };
+      // (not more than one every 60 ms; the last one that came too soon is shown when the 60 ms are over: it was dropped,
+      // and the arrow stood still until the phone said it again 1.5 s later)
+      const wait = 60 - (now - m.aimAt);
+      if (wait > 0) { m.aimT = setTimeout(() => { m.aimT = null; showAim(dev, a.dir, n); }, wait); return { ok: true }; }
+      showAim(dev, a.dir, n);
       return { ok: true };
     }
     if (op === 'dash' || op === 'extra') {
@@ -246,7 +268,10 @@ function create(o) {
     }
     // ----- a step -----
     const m = M(dev); const now = Date.now();
-    if (m.aiming) { m.aiming = false; if (map && tok) o.ping(aimMsg(map, tok, dev, null)); }
+    const sentN = Number(a.n) || 0;
+    clearTimeout(m.aimT); m.aimT = null;
+    if (sentN) m.cutN = sentN;
+    if (m.aiming && !(sentN && m.aimN > sentN)) { m.aiming = false; if (map && tok) o.ping(aimMsg(map, tok, dev, null)); } // (an aim sent after this step stays)
     if (now - m.lastStep < 140) return { ok: true, skipped: true }; // (a finger that drums)
     const can = allowed(dev, map, tok);
     if (!can.ok) return { ok: false, error: can.error, why: can.why };
@@ -276,10 +301,12 @@ function create(o) {
     const tok = tokenOf(dev, map);
     const face = (n) => o.faceUrl(o.faceFor({ name: n, pc: true, tokens: [] }, o.state.liveMapId));
     const col = (n) => (o.charOf(n) || {}).color || null;
-    const chars = party().map((n) => { const hd = holderOf(n, dev); return { name: n, color: col(n), face: face(n), taken: hd && present(hd) ? hd.name : null }; });
+    // UI audit VE1: no campaign open: the phone waits and stays who it is (back at Home every phone lost its character)
+    if (!open()) return { on: !!P.on, chars: [], me: null, closed: true, mine: dev.char || null };
+    const chars = party().map((n) => { const hd = holderOf(n, dev); return { name: n, color: col(n), face: face(n), taken: hd && o.connected(hd) ? (hd.named ? hd.name : 'another phone') : null }; });
     const out = { on: !!P.on, chars, me: null };
     if (!dev.char) return out;
-    if (!party().includes(dev.char)) { delete dev.char; o.save(); return out; }
+    if (!party().includes(dev.char)) { delete dev.char; o.save(); return out; } // (left the party, or away tonight)
     const can = allowed(dev, map, tok);
     const F = can.F || (can.why === 'turn' ? round() : null);
     const B = can.B || (F && F.pcs.includes(dev.char) ? budget(dev, F) : null);
@@ -287,7 +314,8 @@ function create(o) {
       name: dev.char, color: col(dev.char), face: face(dev.char),
       token: tok ? { id: tok.id, hidden: !!tok.hidden } : null,
       can: can.ok, why: can.ok ? null : can.why, error: can.ok ? null : can.error,
-      restUntil: P.rest > 0 ? T(dev.char).restUntil || 0 : 0, rest: P.rest,
+      // (UI audit VE13: how long the rest still lasts, not when it ends: the phone's clock is not the PC's)
+      restLeft: P.rest > 0 ? Math.max(0, (T(dev.char).restUntil || 0) - Date.now()) : 0, rest: P.rest,
       fight: F ? { mine: F.pcs.includes(dev.char), group: !!F.group, who: F.who, key: F.key, left: B ? B.left : 0, max: B ? B.max : 0, dashed: !!(B && B.dashed), extras: B ? B.extras : [] } : null,
       rules: { pings: P.pings },
     };
@@ -303,14 +331,14 @@ function create(o) {
       const tok = tokenOf(d, map);
       const can = d.char ? allowed(d, map, tok) : null;
       const R = d.char ? round() : null; const B = R && R.pcs.includes(d.char) ? budget(d, R) : null;
-      return { left: B ? B.left : null, max: B ? B.max : null, speed: d.char ? speedOf(d.char) : null, id: d.id, name: d.name, kind: d.kind, connected: o.connected(d), char: d.char || null, color: d.char ? col(d.char) : null, carry: d.char && o.sightOf ? o.sightOf(d.char).carry : 'none',
+      return { left: B ? B.left : null, max: B ? B.max : null, speed: d.char ? speedOf(d.char) : null, id: d.id, name: labelOf(d), own: d.name, kind: d.kind, connected: o.connected(d), char: d.char || null, color: d.char ? col(d.char) : null, carry: d.char && o.sightOf ? o.sightOf(d.char).carry : 'none',
         token: tok ? { id: tok.id, name: tokName(tok), handed: !!M(d).handed } : null, can: can ? can.ok : false, why: can && !can.ok ? can.why : null, lastStep: M(d).lastStep || 0 };
     });
     const tokens = map ? map.layers.filter((l) => l.role === 'token').map((l) => ({ id: l.id, name: tokName(l), hidden: !!l.hidden, owner: o.ownerOf ? o.ownerOf(l) : o.charTokOwner(l, true) })) : [];
     // Prototype 17: the player menu: how far each character may still walk now (in a fight or Movement), their speed
     const R = round();
     const moves = Object.fromEntries(party().map((n) => { const B = R && R.pcs.includes(n) ? budget({ char: n }, R) : null; return [n, { speed: speedOf(n), left: B ? B.left : null, max: B ? B.max : null, dashed: !!(B && B.dashed) }]; }));
-    return { ...P, hex: !!(map && Geom.isHex(map.grid)), map: map ? map.name : null, fight: !!fight(), phones, party: party().map((n) => ({ name: n, color: col(n), holder: (holderOf(n) || {}).name || null })), tokens, carries: CARRIES, moves };
+    return { ...P, hex: !!(map && Geom.isHex(map.grid)), map: map ? map.name : null, fight: !!fight(), phones, party: party().map((n) => ({ name: n, color: col(n), holder: holderOf(n) ? labelOf(holderOf(n)) : null, holderId: (holderOf(n) || {}).id || null })), tokens, carries: CARRIES, moves };
   }
   async function action(a, p = {}) {
     const dev = p.id ? o.devices().find((d) => d.id === p.id) : null;

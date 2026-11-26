@@ -76,8 +76,8 @@ uniform sampler2D uTex;
 uniform vec2 uSize, uAnchor;
 uniform float uScale, uTreeScale, uRot, uFlip;
 uniform float uRadius;                             // crown radius, texture px
-uniform float uTime, uRustleT, uBranchT;           // clocks (rustle/branch clocks run with the wind)
-uniform vec2 uWind;                                // wind direction, map space
+uniform float uTime, uBranchT;                     // clocks (the branch clock runs with the wind)
+uniform vec2 uRustleOff;                           // how far the leaves' noise has drifted downwind, summed up frame by frame
 uniform float uRustleAmt, uRustleScale, uLight;
 uniform float uBranchAmt, uLobes, uSeed, uTreeSeed;
 uniform float uShadow, uAlpha;
@@ -104,7 +104,7 @@ void main(){
   vec2 seedOff = vec2(uTreeSeed*97.0, uTreeSeed*61.0);
   if (uShadow < 0.5) {
     // leaf rustle: noise field in tree space drifting downwind, stronger toward the crown edge
-    vec2 p = (vNoise + seedOff)*uRustleScale*0.35 - uWind*uRustleT;
+    vec2 p = (vNoise + seedOff)*uRustleScale*0.35 - uRustleOff;
     float amp = uRustleAmt*(0.35 + 0.65*r*r);
     vec2 d = vec2(fbm(p) - 0.5, fbm(p + 17.3) - 0.5)*2.0*amp;     // tree space
     float cr = cos(-uRot), sr = sin(-uRot);
@@ -115,7 +115,7 @@ void main(){
   if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) discard;
   vec4 col = texture2D(uTex, uv);
   if (uShadow > 0.5) { gl_FragColor = vec4(0.0, 0.0, 0.0, col.a*uAlpha); return; }
-  vec2 p2 = (vNoise + seedOff)*uRustleScale*0.9 - uWind*uRustleT*1.6;
+  vec2 p2 = (vNoise + seedOff)*uRustleScale*0.9 - uRustleOff*1.6;
   vec3 rgb = col.rgb*(1.0 + (fbm(p2) - 0.5)*2.0*uLight);
   // colour variation: soft patches stuck to the leaves + per tree/layer hue, saturation, brightness, warmth
   float pn = n(L*0.009 + vec2(uSeed*13.0, uSeed*7.0)) - 0.5;      // one octave is enough for soft patches
@@ -161,7 +161,7 @@ function hueMatrix(rad) {
 
 const DEBUG_TINTS = [[.95,.3,.3],[.95,.65,.2],[.9,.9,.25],[.3,.85,.4],[.3,.6,.95],[.75,.4,.95],[.95,.4,.7],[.4,.9,.9],[.6,.6,.6]];
 const UNIFORMS = ['uView','uCenter','uSize','uAnchor','uOffset','uScale','uTreeScale','uRot','uFlip','uTex','uRadius','uTime',
-  'uRustleT','uBranchT','uWind','uRustleAmt','uRustleScale','uLight','uBranchAmt','uLobes','uSeed','uTreeSeed','uShadow','uAlpha',
+  'uRustleOff','uBranchT','uRustleAmt','uRustleScale','uLight','uBranchAmt','uLobes','uSeed','uTreeSeed','uShadow','uAlpha',
   'uHue','uSat','uBright','uWarm','uPatchHue','uPatchBri','uHueM','uTint','uTintAmt','uLookM','uLookO','uLookOn'];
 const DEG = Math.PI/180;
 
@@ -184,6 +184,7 @@ class TreeWind {
     this.debugLayers = false;           // tint each layer a different colour
     this.animate = true;                // false = freeze all movement (static trees)
     this.time = 0; this.rustleT = 0; this.branchT = 0; this.gustT = 0;
+    this.rustleOff = { x: 0, y: 0 };   // the way the leaves' noise has drifted (see update)
     this._lean = { x: 0, y: 0 };        // eased lean vector (direction * amount)
     this._springs = new Map();          // treeId -> [{x,y,vx,vy}] per layer slot
     this._looks = new Map();            // treeId -> cached variation (rebuilt when seed/variant/base/variation change)
@@ -270,7 +271,13 @@ class TreeWind {
     dt = Math.min(Math.max(dt, 0), 0.1);
     const W = this.wind, storm = Math.min(1, Math.max(0, (W.strength - 1)/1.5));
     this.time += dt;
-    this.rustleT += dt*(0.5 + 0.5*W.strength);
+    // XA9 (Glinn, 26 Nov 2026): the leaves flickered while the wind turned. Their noise was read at wind direction
+    // times a clock that runs as long as the map is open: one degree of turn threw it whole noise cells away, more
+    // the longer the map had been open (the animation rules: never a time times a rate that changes). Now each
+    // frame's step downwind is added to where the noise is.
+    const rs = dt*(0.5 + 0.5*W.strength), ra = W.dir*DEG;
+    this.rustleT += rs;
+    this.rustleOff.x += Math.cos(ra)*rs; this.rustleOff.y += Math.sin(ra)*rs;
     this.branchT += dt*(0.6 + 0.4*W.strength);
     this.gustT += dt*(1 + 0.7*storm);
     // lean target eases in, so turning the wind swings the trees over instead of snapping
@@ -358,8 +365,8 @@ class TreeWind {
     gl.activeTexture(gl.TEXTURE0); gl.uniform1i(U.uTex, 0);
     // map units -> clip space (column-major mat3)
     gl.uniformMatrix3fv(U.uView, false, [a*2/Wd, -b*2/Hd, 0, c*2/Wd, -d*2/Hd, 0, e*2/Wd - 1, 1 - f*2/Hd, 1]);
-    gl.uniform1f(U.uTime, this.time); gl.uniform1f(U.uRustleT, this.rustleT); gl.uniform1f(U.uBranchT, this.branchT);
-    const wa = this.wind.dir*DEG; gl.uniform2f(U.uWind, Math.cos(wa), Math.sin(wa));
+    gl.uniform1f(U.uTime, this.time); gl.uniform1f(U.uBranchT, this.branchT);
+    gl.uniform2f(U.uRustleOff, this.rustleOff.x, this.rustleOff.y);
     // the map's colours: a colour matrix as feColorMatrix takes it (20 values, row by row), or none
     const L = Array.isArray(this.look) && this.look.length === 20 ? this.look : null;
     gl.uniform1f(U.uLookOn, L ? 1 : 0);

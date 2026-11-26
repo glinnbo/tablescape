@@ -33,6 +33,9 @@ PARTS FROM OTHERS (under their own licenses)
      SRD 5.1 is licensed under the Creative Commons Attribution 4.0
      International License, available at
      https://creativecommons.org/licenses/by/4.0/legalcode.
+   - Sound effects of the screen effects and the Soundboard, and the demo
+     campaign's music: made with Suno by glinnbo, part of Tablescape's
+     content
    - Electron and Chromium, electron-updater, node-tradfri-client and
      qrcode-generator: their licenses are in the installation folder and in
      their packages.

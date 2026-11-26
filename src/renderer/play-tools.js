@@ -62,7 +62,9 @@ const PlayTools = (() => {
       // Prototype 30: new tokens come without a name tag (a choice remembered from Beta 4.7 kept showing names); Options → Tokens → New tokens still sets it
       if (localStorage.getItem('tokTagOff30') !== '1') { prefs.tok.tag = 'off'; localStorage.setItem('tokTagOff30', '1'); }
     } catch {}
+    if (prefs.mark.byJ) { prefs.mark.me = false; prefs.mark.byJ = false; } // (UI audit VF6: J's "Only me" does not come back with the next start)
     Object.assign(ui, prefs, { selMark: null });
+    let pickedByHand = false; // (VF6) the picked mark was picked by a click on it, not just placed
     // 4.10: Options → Tokens
     const tokSet = () => { const st = S(); return (st && st.settings && st.settings.tokens) || { pic: Geom.PIC_DEFAULT, snap: true }; };
     const snapOn = () => tokSet().snap !== false;
@@ -109,6 +111,8 @@ const PlayTools = (() => {
     // N7 (open point): X after J: marks go on the table again (J's "only me" stayed for every mark after it)
     function tableMarks() { if (ui.mark.byJ) { ui.mark.me = false; ui.mark.byJ = false; save(); } }
     // old names still on a hotbar or the rail: Draw → Text and Map notes open Marks
+    // (UI audit VF6: Marks opened by its tile, the Hotbar or the search: J's "Only me" is over, as with X)
+    const leaveNoteMode = (t) => { if (t === 'mark') tableMarks(); };
     const normTool = (t, mode) => (t === 'draw' && mode === 'text' ? ['mark', 'label'] : t === 'notes' ? ['mark', 'label'] : [t, mode]);
     const isMe = (m) => m.kind === 'note' || !!m.hidden;
     // who sees it: hidden for the others; a label for Only me becomes a note, and a note on the table a label (mapstate)
@@ -183,7 +187,9 @@ const PlayTools = (() => {
       build: () => {
         loadLibTokens();
         const recentPaths = () => new Set((ui.tok.recent || []).map((b) => b.path));
-        const onMap = () => new Set(map() ? map().layers.filter((l) => l.role === 'token').map((l) => l.path) : []);
+        // (Speed 8, WH2: once for each state of the map, not once for each line of the list four times a second)
+        let onMapFor = null; let onMapSet = new Set();
+        const onMap = () => { const ls = map() ? map().layers : null; if (ls !== onMapFor) { onMapFor = ls; onMapSet = new Set(ls ? ls.filter((l) => l.role === 'token').map((l) => l.path) : []); } return onMapSet; };
         return PickList.build({
           bind: c().bind, round: true,
           items: () => libTokens,
@@ -248,7 +254,7 @@ const PlayTools = (() => {
           }, it.missing ? h('span', { class: 'miss-thumb' }, iconEl('alert-triangle')) : Thumbs.img(it.path, it.kind, it.thumb), h('span', {}, it.name),
           ready ? h('span', { class: 'ready-x', role: 'button', 'aria-label': `Take ${it.name} off the Ready list`, 'data-tip': 'Take it off the Ready list', onclick: (e) => { e.stopPropagation(); ctx.ready.remove('tokens', it.path); } }, iconEl('x')) : tick(it)));
         }
-        if (!list.length) row.append(h('p', { class: `hint tok-empty ${ready ? 'ready-empty' : ''}` }, ready ? 'No tokens yet: Library → From this PC' : g === 'party' ? 'No party tokens yet: they come from the character cards' : g === 'recent' ? 'No token picked yet: All tokens has every one' : 'Nothing starred yet: the star in All tokens'));
+        if (!list.length) row.append(h('p', { class: `hint tok-empty ${ready ? 'ready-empty' : ''}` }, ready ? 'No tokens yet: All tokens → From this PC …' : g === 'party' ? 'No party tokens yet: they come from the character cards' : g === 'recent' ? 'No token picked yet: All tokens has every one' : 'Nothing starred yet: the star in All tokens'));
         if (ready && ch) ctx.ready.drop(row, 'tokens');
         strip.append(row);
       });
@@ -426,7 +432,7 @@ const PlayTools = (() => {
       if (!d.buf.length) return;
       const pts = d.buf;
       d.buf = [];
-      cmd('draw.stroke', { id: d.id, color: d.color, w: d.w, pts, coalesce: d.id });
+      cmd('draw.stroke', { id: d.id, color: d.color, w: d.w, pts, coalesce: d.id, soft: true }); // (Speed 5, WE1: only the new piece goes to the windows)
     }
     // pen lines the eraser touched on its way from a to b, in map inches (Third Builder (third-marks-tool): labels are no longer erased here)
     function drawAt(a, b, clientX, clientY) {
@@ -515,7 +521,7 @@ const PlayTools = (() => {
           const me = isMe(m);
           list.append(h('div', { class: `mk-row ${me ? 'me' : ''} ${ui.selMark === m.id ? 'on' : ''}`, dataset: { flash: m.id, id: m.id } },
             h('span', { class: 'mk-ico', style: `color:${m.kind === 'note' ? '#e2b44f' : m.color || '#ffffff'}` }, iconEl(markIcon(m))),
-            h('button', { class: 'mk-text', 'data-tip': 'Show it on the map', onclick: () => { selectMark(m.id); if (ctx.showPoint) ctx.showPoint(m.x, m.y); } }, markName(m)),
+            h('button', { class: 'mk-text', 'data-tip': 'Show it on the map', onclick: () => { selectMark(m.id); pickedByHand = true; if (ctx.showPoint) ctx.showPoint(m.x, m.y); } }, markName(m)),
             c().ib(me ? 'eye-off' : 'eye', me ? 'Only you see it. Click: on the table' : 'On the table. Click: only you', () => setWho(m, !me), { on: me }),
             c().ib('trash', 'Remove', () => { undoable(isText(m) ? 'draw.remove' : 'mark.remove', { id: m.id }); if (ui.selMark === m.id) selectMark(null); }, { danger: true })));
         }
@@ -532,8 +538,12 @@ const PlayTools = (() => {
         c().sep(),
         h('span', { class: 'ctl-label' }, 'On this map'),
         list,
-        c().row(count, c().btn('Clear', 'trash', () => { undoable('mark.clear', { kinds: ['pin', 'x', 'dot', 'counter', 'note'], labels: true }, 'Marks cleared'); selectMark(null); },
-          { kind: 'danger', tip: 'Remove every mark and label from this map (Ctrl + Z brings them back)' })));
+        // (UI audit VF6: Clear takes what is on the table; your own notes and "Only me" marks stay, and go by a second
+        // Clear once nothing else is left)
+        c().row(count, c().btn('Clear', 'trash', () => {
+          const onTable = allMarks().some((m) => !isMe(m));
+          undoable('mark.clear', { kinds: ['pin', 'x', 'dot', 'counter', 'note'], labels: true, shown: onTable }, onTable ? 'The table\'s marks cleared' : 'Your notes cleared'); selectMark(null);
+        }, { kind: 'danger', tip: 'Remove the marks and labels on the table. Yours ("Only me") stay: Clear once more takes them too (Ctrl + Z brings them back)' })));
     }
     async function placeMark(pt, mode = markMode()) {
       const m = ui.mark;
@@ -560,7 +570,7 @@ const PlayTools = (() => {
         p = { kind: 'place', title, color: m.color, hidden };
       } else { p = { kind: ['pin', 'x', 'dot'].includes(m.shape) ? m.shape : 'pin', color: m.color, text: said || undefined, hidden }; used(); }
       const r = await cmd('mark.add', { ...p, x: pt.x, y: pt.y });
-      if (r && r.selected) selectMark(r.selected);
+      if (r && r.selected) { selectMark(r.selected); pickedByHand = false; }
     }
     function counterStep(id, d) {
       const m = map().marks.find((x) => x.id === id);
@@ -612,18 +622,21 @@ const PlayTools = (() => {
         if (textEl) {
           const d = markOf(textEl.dataset.id);
           if (!d) return null;
-          selectMark(d.id);
+          selectMark(d.id); pickedByHand = true;
           return { kind: 'textmove', id: d.id, dx: d.x - pt.x, dy: d.y - pt.y, sx: e.clientX, sy: e.clientY, moved: false, key: `tx-${d.id}-${Date.now()}` };
         }
         const el = e.target.closest('.sv-mark, .sv-note');
         if (el) {
           const m = markOf(el.dataset.id);
           if (!m) return null;
-          selectMark(m.id);
+          selectMark(m.id); pickedByHand = true;
           return { kind: 'markmove', id: m.id, dx: m.x - pt.x, dy: m.y - pt.y, sx: e.clientX, sy: e.clientY, moved: false, key: `mk-${m.id}-${Date.now()}` };
         }
         if (t === 'mark' && markMode() === 'route') { routeClick(pt, e); return null; } // (Beta 3.11)
-        placeMark(pt, markMode()); // (Esc deselects; a click on the map always places the next one)
+        // UI audit VF6: a mark you picked (by a click on it, or in the list) is let go by a click beside it, and nothing
+        // is placed. The mark just placed is no such pick: the next click places the next one, as before.
+        if (ui.selMark && pickedByHand) { selectMark(null); return null; }
+        placeMark(pt, markMode());
         return null;
       }
       return null;
@@ -1045,7 +1058,8 @@ const PlayTools = (() => {
 
     return {
       buildTokenPop, tokenAround: () => tokSides, buildPointPop, buildDrawPop, buildMarkPop, buildTimerPop, noteMode, tableMarks, normTool, markKind, // (Third Builder (third-marks-tool): no Map notes panel; noteMode for J, normTool for old hotbar items)
-      pointerDown, pointerMove, pointerUp, hover, leave, toolChanged, cycle, setMode, owns: (k) => OWN.has(k),
+      pointerDown, pointerMove, pointerUp, hover, leave, toolChanged, cycle, setMode, owns: (k) => OWN.has(k), leaveNoteMode,
+      cancelDrag: (d) => { if (!OWN.has(d.kind)) return; clearTimeout(d.sendT); if (d.kind === 'chalk') flushChalk(d, true); },
       cardTarget, cardAnchor, card, markRadial, removeSelected, toggleSelectedHidden, selectMark, routeEnd, onAtlas,
       setTokenBrush, placeToken, counterStep, nextRound, renderHud, update, spotOff, sizeName, SIZES,
       // 4.10: Options → Tokens sets what new tokens get (size, hidden, numbers, name tag)

@@ -226,4 +226,27 @@ module.exports = (area) => {
     t.ok(sp(t).some((x) => x.name === 'Stays'), 'the lasting area is still there');
     await t.g('window.ts.settings({ burstSeconds: 8 })');
   });
+
+  // Glinn's log, 26 Nov 2026: the TV found his graphics card "too slow" for the spells twice (it was busy with the map)
+  area.quick('a graphics card found "too slow" for the spells while it was busy is timed again by itself and draws them after all; one that stays slow is left alone after three more tries; nothing waits for any of it', async (t) => {
+    const st0 = await t.t('SpellGL.warm()');
+    if (st0.state !== 'ready') { t.note('no graphics card for the spells here: ' + JSON.stringify(st0)); t.ok(true, 'nothing to time here'); return; }
+    try {
+      // busy at the first two timings, free at the third
+      const first = await t.t(`(async () => { SpellGL.TEST.waits = [250, 250, 250]; SpellGL.TEST.fakeSlow = 2; const a = performance.now(); const st = await SpellGL.retry(); return { state: st.state, why: st.why, ok: SpellGL.supported(), ms: Math.round(performance.now() - a) }; })()`);
+      t.eq([first.state, first.ok], ['slow', false], 'found too slow: the old drawing for now, and whoever waited is told at once', first);
+      t.ok(/too slow/.test(first.why), 'it says why', first.why);
+      const back = await t.until(async () => { const st = await t.t('SpellGL.status()'); return st.state === 'ready' && st; }, 6000, 'it to be timed again by itself and found fast enough');
+      t.eq([back.state, await t.t('SpellGL.supported()'), await t.t('SpellGL.TEST.fakeSlow')], ['ready', true, 0], 'timed again twice: the third time it is free, and the spells are drawn by the card', back);
+      // a card that really is too slow: three more tries, then it is left alone
+      const slow = await t.t(`(async () => { SpellGL.TEST.fakeSlow = 9; const st = await SpellGL.retry(); return st.state; })()`);
+      t.eq(slow, 'slow', 'slow at once');
+      await t.until(async () => (await t.t('SpellGL.TEST.fakeSlow')) === 5, 6000, 'three more timings after the first');
+      await t.sleep(1200);
+      t.eq([await t.t('SpellGL.TEST.fakeSlow'), (await t.t('SpellGL.status()')).state], [5, 'slow'], 'and then no more: four timings in all, the old drawing stays');
+    } finally {
+      await t.t(`(async () => { SpellGL.TEST.fakeSlow = 0; SpellGL.TEST.waits = [5000, 15000, 45000]; await SpellGL.retry(); return 0; })()`);
+    }
+    t.eq((await t.t('SpellGL.status()')).state, 'ready', 'left as it was found: drawn by the card');
+  });
 };

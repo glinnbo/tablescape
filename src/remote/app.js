@@ -8,7 +8,7 @@
 'use strict';
 
 (() => {
-  const KEYS = { token: 'ts.remote.token', id: 'ts.remote.id', page: 'ts.remote.deckpage', awake: 'ts.remote.awake', seat: 'ts.remote.seat' };
+  const KEYS = { token: 'ts.remote.token', id: 'ts.remote.id', page: 'ts.remote.deckpage', awake: 'ts.remote.awake', seat: 'ts.remote.seat', role: 'ts.remote.role' };
   const ls = {
     get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
     set: (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, String(v)); } catch {} },
@@ -59,13 +59,46 @@
       retry ? h('button', { class: 'pbtn primary', onclick: () => location.reload() }, ic('refresh'), 'Try again') : null));
   }
 
+  // ---------------------------------------------------------------- Back closes what is open
+  // UI audit VE13: a sheet, the menu, a handout: the phone's Back button closes it (it left the page). Each one that
+  // opens is a step in the browser's history; closed by its own button, its step goes with it.
+  const layers = []; let skipPop = 0;
+  function layer(close) {
+    const L = { close, open: true, pushed: false };
+    layers.push(L);
+    try { history.pushState({ ts: 1 }, ''); L.pushed = true; } catch {}
+    return () => {
+      if (!L.open) return;
+      L.open = false;
+      const i = layers.indexOf(L); if (i >= 0) layers.splice(i, 1);
+      close();
+      if (L.pushed) { skipPop += 1; history.back(); }
+    };
+  }
+  window.addEventListener('popstate', () => {
+    if (skipPop > 0) { skipPop -= 1; return; }
+    const L = layers.pop();
+    if (L && L.open) { L.open = false; L.close(); }
+  });
+
   // ---------------------------------------------------------------- talking to Tablescape
   let token = null; let role = null; let S = null; let label = ''; let es = null;
+  let heldStick = null; // the stick a thumb is on right now (let go of when the line is lost)
+  // UI audit VE11: where the code is, said to the one who holds this device (no panel is called "Remote")
+  const whereCode = () => {
+    const r = role || ls.get(KEYS.role);
+    return r === 'player' ? 'Ask the GM for the join code.' : r === 'dm' ? 'The QR code is in Tablescape: Toolbox → Gamemaster remote.' : 'Players: ask the GM for the join code. The GM\'s own code: Toolbox → Gamemaster remote.';
+  };
   // O3 (open point): a request gives up after 6 s (on bad Wi-Fi a key spun for minutes, and the reconnect waited for it)
+  let troubleT = 0;
   async function post(url, body) {
     const ctl = new AbortController(); const giveUp = setTimeout(() => ctl.abort(), 6000);
     let r;
-    try { r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store', signal: ctl.signal }); } finally { clearTimeout(giveUp); }
+    try { r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store', signal: ctl.signal }); } catch (e) {
+      // (UI audit VE3: a request that got no answer says the line is down sooner than the quiet does)
+      if (token && es) { setConn('wait'); clearTimeout(troubleT); troubleT = setTimeout(() => { if (token && document.body.dataset.conn !== 'on') connect(); }, 1200); }
+      throw e;
+    } finally { clearTimeout(giveUp); }
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) unpaired();
     return j;
@@ -77,9 +110,20 @@
     token = null; ls.set(KEYS.token, null);
     if (es) { es.close(); es = null; }
     history.replaceState(null, '', '/');
-    showMsg('This device was disconnected in Tablescape. Scan the QR code again: Toolbox → Remote.');
+    everOn = false; document.body.dataset.conn = 'off';
+    showMsg(`This device was disconnected from Tablescape. ${whereCode()}`);
   }
-  function setConn(c) { document.body.dataset.conn = c; }
+  // UI audit VE3: 'wait' until the first state; 'lost' when a line that worked went quiet: the page says so
+  // ("Reconnecting …"), dims the stick and the keys and takes no taps until Tablescape is heard again
+  let everOn = false;
+  const chip = h('div', { class: 'conn-chip', role: 'status' }, 'Reconnecting …');
+  document.body.append(chip);
+  function setConn(c) {
+    if (c === 'on') everOn = true; else if (everOn) c = 'lost';
+    if (document.body.dataset.conn === c) return;
+    document.body.dataset.conn = c;
+    if (c === 'lost' && heldStick) heldStick.abort();
+  }
   let heard = 0; // (4.2.2) when the PC was last heard: a line that went quiet (a phone that slept) is opened again
   function connect() {
     if (es) es.close();
@@ -92,7 +136,7 @@
       const d = JSON.parse(e.data);
       if (label && d.label && d.label !== label) { location.reload(); return; } // 4.11.5: the PC has a new version: this page too
       label = d.label || '';
-      if (role !== d.role) { role = d.role; mount(); }
+      if (role !== d.role) { role = d.role; ls.set(KEYS.role, role); mount(); }
       setConn('on');
     });
     es.onmessage = (e) => { heard = Date.now(); S = JSON.parse(e.data); setConn('on'); draw(); };
@@ -112,9 +156,9 @@
       showMsg('Connecting to Tablescape …');
       const r = await post('/api/pair', { key, id: devId, kind: tablet ? 'tablet' : 'phone', name: devName }).catch(() => null);
       if (r && r.ok) token = r.token;
-      else { showMsg((r && r.error) || 'Tablescape didn\'t answer. Same Wi-Fi as the PC? Is the Remote switched on there?', !r); return; }
+      else { showMsg((r && r.error) || 'Tablescape didn\'t answer. Is this device on the same Wi-Fi as the PC?', !r); return; }
     }
-    if (!token) { showMsg('Scan the QR code in Tablescape: Toolbox → Remote.'); return; }
+    if (!token) { showMsg(`This device is not connected to Tablescape. ${whereCode()}`); return; }
     ls.set(KEYS.token, token);
     history.replaceState(null, '', `/#t=${token}`); // "Add to Home Screen" keeps this address, and with it the connection
     showMsg('Connecting to Tablescape …');
@@ -137,15 +181,16 @@
   document.addEventListener('pointerdown', () => { if (wantAwake() && (!vid || vid.paused) && !lock) awake(true); }, { passive: true });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    if (token && (!es || es.readyState === 2 || Date.now() - heard > 20000)) connect();
+    if (token && (!es || es.readyState === 2 || Date.now() - heard > 12000)) connect();
     if (wantAwake()) { lock = null; awake(true); }
   });
-  setInterval(() => { if (token && es && document.visibilityState === 'visible' && Date.now() - heard > 40000) connect(); }, 10000);
+  // (UI audit VE3: Tablescape says "still here" every 5 s; 12 s of quiet is a lost line. It was 15 s and 40 to 50 s.)
+  setInterval(() => { if (token && es && document.visibilityState === 'visible' && Date.now() - heard > 12000) connect(); }, 4000);
 
   // ---------------------------------------------------------------- a small menu (both views)
   function sheet(title, body) {
     const back = h('div', { class: 'sheet-back' });
-    const close = () => back.remove();
+    const close = layer(() => back.remove());
     back.addEventListener('click', (e) => { if (e.target === back) close(); });
     back.append(h('div', { class: 'sheet', role: 'dialog', 'aria-label': title }, h('div', { class: 'sheet-head' }, h('h2', {}, title), h('button', { class: 'ib', 'aria-label': 'Close', onclick: close }, ic('x'))), body));
     document.body.append(back);
@@ -163,7 +208,7 @@
     const m = sheet(role === 'player' ? 'Player screen' : 'Button deck', h('div', { class: 'stack' },
       h('div', { class: 'trow' }, h('div', {}, 'Keep the screen on', h('small', {}, 'If it turns off anyway: set Auto-Lock to Never (Settings → Display on an iPhone or iPad).')), sw),
       document.fullscreenEnabled ? h('button', { class: 'pbtn', onclick: () => { m.close(); document.documentElement.requestFullscreen().catch(() => {}); } }, ic('maximize'), h('span', {}, 'Full screen')) : null,
-      role === 'dm' ? h('p', { class: 'muted' }, 'The buttons are arranged on the PC: Toolbox → Remote → Arrange the deck.') : null,
+      role === 'dm' ? h('p', { class: 'muted' }, 'The buttons are arranged on the PC: Toolbox → Gamemaster remote → Arrange the deck.') : null,
       role === 'player' && S && S.ctl && S.ctl.me ? h('button', { class: 'pbtn', onclick: async () => { m.close(); said(await act('unpick').catch(() => null)); } }, ic('user-edit'), h('span', {}, `Not ${S.ctl.me.name}? Change character`)) : null,
       leave,
       h('p', { class: 'muted' }, `${devName}${label ? ` · Tablescape ${label}` : ''}`)));
@@ -356,6 +401,7 @@
     put(el, row);
     let last = null; let sig = '';
     const charDo = async (name, patch) => { vib(); said(await act('char', { name, ...patch }).catch(() => null)); };
+    const hpDo = async (id, delta) => { vib(); said(await act('init', { do: 'hp', id, delta }).catch(() => null)); }; // (UI audit VE2: a tap that got no answer said nothing)
     function card(c) {
       const hp = c.hp ? `${c.hp.cur ?? '–'}/${c.hp.max ?? '–'}` : c.maxHp != null ? String(c.maxHp) : '–';
       const pass = PASS.map(([k, , short]) => h('span', { class: 'in-p' }, h('small', {}, short), h('b', {}, c[k] ?? '–')));
@@ -376,8 +422,8 @@
         if (!c) return;
         const tick = (kind, i) => h('button', { class: `in-tick ${kind} ${c.ds[kind] > i ? 'on' : ''}`, onclick: () => charDo(c.name, { ds: { ...c.ds, [kind]: c.ds[kind] > i ? i : i + 1 } }) });
         put(body,
-          c.entry && c.hp ? h('div', { class: 'in-hprow' }, ...[-10, -5, -1].map((d) => h('button', { class: 'hpb dmg', onclick: () => act('init', { do: 'hp', id: c.entry, delta: d }) }, String(d))),
-            h('output', {}, `${c.hp.cur ?? '–'} / ${c.hp.max ?? '–'}`), ...[1, 5, 10].map((d) => h('button', { class: 'hpb heal', onclick: () => act('init', { do: 'hp', id: c.entry, delta: d }) }, `+${d}`))) : null,
+          c.entry && c.hp ? h('div', { class: 'in-hprow' }, ...[-10, -5, -1].map((d) => h('button', { class: 'hpb dmg', onclick: () => hpDo(c.entry, d) }, String(d))),
+            h('output', {}, `${c.hp.cur ?? '–'} / ${c.hp.max ?? '–'}`), ...[1, 5, 10].map((d) => h('button', { class: 'hpb heal', onclick: () => hpDo(c.entry, d) }, `+${d}`))) : null,
           h('div', { class: 'trow' }, h('div', {}, 'Inspiration'), h('button', { class: `sw ${c.insp ? 'on' : ''}`, 'aria-label': 'Inspiration', onclick: () => charDo(c.name, { insp: !c.insp }) })),
           h('div', { class: 'trow' }, h('div', {}, 'Exhaustion'), h('div', { class: 'in-step' }, h('button', { class: 'ib', disabled: !c.exh, onclick: () => charDo(c.name, { exh: c.exh - 1 }) }, ic('minus')), h('b', {}, String(c.exh)), h('button', { class: 'ib', disabled: c.exh >= 6, onclick: () => charDo(c.name, { exh: c.exh + 1 }) }, ic('plus')))),
           h('div', { class: 'trow' }, h('div', {}, 'Death saves'), h('div', { class: 'in-ticks' }, ic('heart'), tick('s', 0), tick('s', 1), tick('s', 2), ic('skull'), tick('f', 0), tick('f', 1), tick('f', 2))),
@@ -436,7 +482,9 @@
       const img = h('img', { src: faceSrc(x.url), alt: 'Handout', draggable: false }); // (Beta 3.8: no name: the phone never gets one)
       const stage = h('div', { class: 'ho-stage' }, img);
       const view = h('div', { class: 'ho-view', role: 'dialog', 'aria-label': 'Handout', dataset: { url: x.url } },
-        stage, h('div', { class: 'ho-cap' }, h('span', {}), h('button', { class: 'ho-x', 'aria-label': 'Close', onclick: (e) => { e.stopPropagation(); cancelAnimationFrame(glide); view.remove(); } }, ic('x'))));
+        stage, h('div', { class: 'ho-cap' }, h('span', {}), h('button', { class: 'ho-x', 'aria-label': 'Close', onclick: (e) => { e.stopPropagation(); close(); } }, ic('x'))));
+      const close = layer(() => { cancelAnimationFrame(glide); view.remove(); }); // (Back closes it too, UI audit VE13)
+      view._close = close;
       let z = 1; let tx = 0; let ty = 0; // zoom and shift of the picture (from the middle of the screen)
       let glide = 0;
       const pts = new Map(); // the fingers down: id → { x, y }
@@ -535,23 +583,26 @@
       stage.addEventListener('pointercancel', up);
       stage.addEventListener('wheel', (e) => { e.preventDefault(); const r = stage.getBoundingClientRect(); zoomAt(z * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - r.left, e.clientY - r.top); }, { passive: false }); // (a mouse)
       img.addEventListener('load', () => set(1, 0, 0));
-      img.addEventListener('error', () => { view.remove(); toast('The handout could not be loaded'); });
+      img.addEventListener('error', () => { close(); toast('The handout could not be loaded'); });
       const onSize = () => { if (!view.isConnected) { window.removeEventListener('resize', onSize); return; } set(z, tx, ty); };
       window.addEventListener('resize', onSize);
       view.debug = () => ({ z, tx, ty, max: maxZ() });
-      for (const old of document.querySelectorAll('.ho-view')) old.remove();
+      for (const old of document.querySelectorAll('.ho-view')) shut(old);
       document.body.append(view);
       paint();
     }
+    const shut = (el) => { if (el._close) el._close(); else el.remove(); }; // (through its own close: its step in the history goes too)
     function openHandouts() {
       if (!hos.length) return;
       if (hos.length === 1) { showHandout(hos[0]); return; }
-      const sheet = h('div', { class: 'ho-list', role: 'dialog', 'aria-label': 'Handouts', onclick: (e) => { if (e.target === sheet) sheet.remove(); } },
+      for (const old of document.querySelectorAll('.ho-list')) shut(old);
+      const sheet = h('div', { class: 'ho-list', role: 'dialog', 'aria-label': 'Handouts', onclick: (e) => { if (e.target === sheet) close(); } },
         h('div', { class: 'ho-sheet' }, h('h2', {}, 'Handouts'),
-          h('div', { class: 'ho-grid' }, ...hos.map((x, i) => h('button', { class: 'ho-tile', 'aria-label': `Handout ${i + 1}`, dataset: { url: x.url }, onclick: () => { sheet.remove(); showHandout(x); } },
+          h('div', { class: 'ho-grid' }, ...hos.map((x, i) => h('button', { class: 'ho-tile', 'aria-label': `Handout ${i + 1}`, dataset: { url: x.url }, onclick: () => { close(); showHandout(x); } },
             h('img', { src: faceSrc(x.url), alt: '', draggable: false })))),
-          h('button', { class: 'pbtn', onclick: () => sheet.remove() }, 'Close')));
-      for (const old of document.querySelectorAll('.ho-list')) old.remove();
+          h('button', { class: 'pbtn', onclick: () => close() }, 'Close')));
+      const close = layer(() => sheet.remove());
+      sheet._close = close;
       document.body.append(sheet);
     }
     function drawHandouts(list) {
@@ -565,9 +616,9 @@
       hoBtn.lastChild.textContent = list.length > 1 ? String(list.length) : '';
       // L2 (open point): one taken back closes, also while others stay (before: only when every one was taken back)
       const still = new Set(keys);
-      for (const v of document.querySelectorAll('.ho-view')) if (!still.has(v.dataset.url)) v.remove();
+      for (const v of document.querySelectorAll('.ho-view')) if (!still.has(v.dataset.url)) shut(v);
       for (const tl of document.querySelectorAll('.ho-list .ho-tile')) if (!still.has(tl.dataset.url)) tl.remove();
-      if (!list.length) for (const el of document.querySelectorAll('.ho-list')) el.remove();
+      if (!list.length) for (const el of document.querySelectorAll('.ho-list')) shut(el);
     }
     put(app, head, row, ctlEl, more, hoBtn);
     let showT = 0;
@@ -632,7 +683,7 @@
       }
       if (!F.cards.length) put(row, h('p', { class: 'pl-empty' }, 'The fight goes on …'));
     }
-    return { draw };
+    return { draw, resize: () => Ctl.fit() };
   }
 
   // ---------------------------------------------------------------- Prototype 2: the controller
@@ -651,20 +702,35 @@
       if (e.pointerId !== pid) return;
       const dx = e.clientX - cx; const dy = e.clientY - cy; const r = Math.hypot(dx, dy);
       const k = r > R ? R / r : 1; place(dx * k, dy * k);
-      if (r < R * 0.32) { set(null); return; }
+      // UI audit VE7: a thumb resting on the edge between two directions flickered between them (and each flicker was
+      // a new aim on the TV). A direction is now left only 8° past its edge, and the middle only below 26 % once aiming.
+      if (r < R * (cur == null ? 0.32 : 0.26)) { set(null); return; }
       raw = norm(Math.atan2(dx, -dy) * 180 / Math.PI);
-      set(norm(Math.round(raw / 45) * 45));
+      let deg = norm(Math.round(raw / 45) * 45);
+      if (cur != null && deg !== cur && Math.abs(norm(raw - cur + 180) - 180) < 30.5) deg = cur;
+      set(deg);
+    };
+    const drop = () => {
+      pid = null; clearInterval(keep); keep = 0;
+      if (heldStick === api) heldStick = null;
+      el.classList.remove('live'); place(0, 0);
     };
     const end = (e) => {
       if (pid == null || (e && e.pointerId !== pid)) return;
-      pid = null; clearInterval(keep); keep = 0;
-      el.classList.remove('live'); place(0, 0);
+      drop();
       const was = cur; cur = null; for (const t of el.querySelectorAll('.stick-tick')) t.classList.remove('on');
       o.onRelease(was, raw);
     };
+    // UI audit VE5: the phone took the touch away (a call, a swipe from the screen's edge, a lost line): nobody let go,
+    // so there is no step: the aim goes, the knob goes back. (It was handled like a finger lifted: the token walked.)
+    const abort = (e) => {
+      if (pid == null || (e && e.pointerId != null && e.pointerId !== pid)) return;
+      drop();
+      set(null);
+    };
     el.addEventListener('pointerdown', (e) => {
       if (pid != null || el.classList.contains('off')) return;
-      e.preventDefault(); pid = e.pointerId;
+      e.preventDefault(); pid = e.pointerId; heldStick = api;
       try { el.setPointerCapture(pid); } catch {}
       const b = el.getBoundingClientRect(); cx = b.left + b.width / 2; cy = b.top + b.height / 2; R = b.width / 2 - knob.offsetWidth / 2 - 26; // (the knob stops short of the rim: the direction marks stay in view)
       el.classList.add('live');
@@ -672,20 +738,30 @@
       move(e);
     });
     el.addEventListener('pointermove', move);
-    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, end);
+    el.addEventListener('pointerup', end);
+    for (const ev of ['pointercancel', 'lostpointercapture']) el.addEventListener(ev, abort); // (after a pointerup the capture goes too: nothing is held by then)
     el.addEventListener('contextmenu', (e) => e.preventDefault());
-    return { el, cancel: () => end({ pointerId: pid }), get busy() { return pid != null; } };
+    const api = { el, abort: () => abort(), get busy() { return pid != null; } };
+    return api;
   }
   function Controller(root) {
     let C = null; let me = null;
     let errAt = 0; let restT = 0; let turnKey = null;
     let seat = ls.get(KEYS.seat) == null ? null : Number(ls.get(KEYS.seat)); // where the TV's top edge is from this seat (deg on the phone)
-    const fail = (r) => { if (Date.now() - errAt > 1400) { errAt = Date.now(); if (r && r.error) toast(r.error); } }; // (Prototype 8: the phone never buzzes)
+    // (Prototype 8: the phone never buzzes. UI audit VE2: no answer at all says so too: a step that went nowhere said nothing)
+    const fail = (r) => { if (Date.now() - errAt < 1400) return; const t = !r ? 'Tablescape didn\'t answer' : r.error; if (t) { errAt = Date.now(); toast(t); } };
+    // (UI audit VE7: when this phone said it, by its own clock and never the same twice: the PC drops an aim that is older than a step)
+    let lastN = 0; const stamp = () => { lastN = Math.max(lastN + 1, Date.now()); return lastN; };
     const face = (c, cls) => (c.face ? h('img', { class: cls, src: faceSrc(c.face), alt: '', draggable: false, onerror: (e) => e.target.replaceWith(initial(c.name, cls)) }) : initial(c.name, cls));
     const dirOf = (deg) => DIR8[norm(deg - (seat || 0)) / 45];
 
     // ----- who are you?
+    let pickSig = '';
     function pick(chars) {
+      // (UI audit VE12: drawn anew only when the list changed: every state rebuilt the cards under the finger)
+      const sig = JSON.stringify([chars, !!(C && C.on)]);
+      if (root.classList.contains('pick') && sig === pickSig) return;
+      pickSig = sig;
       root.className = 'ctl pick';
       put(root, h('h2', {}, 'Who are you?'),
         h('p', { class: 'muted' }, !chars.length ? 'The party shows here once the DM has players on the campaign page.' : C && C.on ? 'Your token on the table follows this phone.' : 'Handouts the DM sends you show up on this phone.'),
@@ -709,10 +785,12 @@
         toast('Seat set: up on the phone is away from you on the table');
         if (C) draw(C, true);
       };
+      // UI audit VE8: with a seat already set the button leaves it as it is ("Skip" set it back to the far side)
+      const cancel = () => { calibrating = false; act('calib', { on: false }).catch(() => null); if (C) draw(C, true); };
       put(root, h('h2', {}, 'Where do you sit?'),
         h('p', { class: 'muted' }, 'The top edge of the TV is glowing. Push the stick toward that edge and let go.'),
         stick.el,
-        h('button', { class: 'pbtn', onclick: () => done(0) }, h('span', {}, 'Skip (it is away from me)')));
+        seat == null ? h('button', { class: 'pbtn', onclick: () => done(0) }, h('span', {}, 'Skip (it is away from me)')) : h('button', { class: 'pbtn', onclick: cancel }, h('span', {}, 'Cancel')));
     }
 
     // ----- the drive
@@ -722,11 +800,11 @@
       status = h('div', { class: 'ctl-status' });
       centre = h('div', { class: 'stick-centre' });
       stick = Stick({
-        onAim: (deg) => act('aim', { dir: deg == null ? null : dirOf(deg) }).catch(() => null),
+        onAim: (deg) => act('aim', { dir: deg == null ? null : dirOf(deg), n: stamp() }).catch(() => null),
         onRelease: async (deg) => {
-          if (deg == null) { act('aim', { dir: null }).catch(() => null); return; }
-          if (!me || !me.can) { act('aim', { dir: null }).catch(() => null); fail({ error: me ? me.error || WHY[me.why] : null }); return; }
-          const r = await act('move', { dir: dirOf(deg) }).catch(() => null);
+          if (deg == null) { act('aim', { dir: null, n: stamp() }).catch(() => null); return; }
+          if (!me || !me.can) { act('aim', { dir: null, n: stamp() }).catch(() => null); fail({ error: me ? me.error || WHY[me.why] : null }); return; }
+          const r = await act('move', { dir: dirOf(deg), n: stamp() }).catch(() => null);
           if (!r || r.ok === false) fail(r);
         },
       });
@@ -742,11 +820,11 @@
         centre.className = `stick-centre fight ${me.fight.left < 5 ? 'spent' : ''}`;
         return;
       }
-      if (me.restUntil && me.restUntil > now) {
-        const left = Math.ceil((me.restUntil - now) / 1000);
+      if (restEnd > now) { // (UI audit VE13: counted on this phone from the time left the PC named: the two clocks need not agree)
+        const left = Math.ceil((restEnd - now) / 1000);
         put(centre, h('b', {}, String(left)), h('small', {}, 'rest'));
         centre.className = 'stick-centre rest';
-        centre.style.setProperty('--p', `${Math.max(0, Math.min(1, (me.restUntil - now) / (me.rest * 1000)))}`);
+        centre.style.setProperty('--p', `${Math.max(0, Math.min(1, (restEnd - now) / (me.rest * 1000)))}`);
         restT = setTimeout(drawCentre, 200);
         return;
       }
@@ -767,11 +845,27 @@
       const btn = e.currentTarget; if (btn.dataset.busy) return; btn.dataset.busy = '1';
       try { const r = await Promise.resolve().then(on).catch(() => null); if (!r) toast("Tablescape didn't answer"); else if (r.ok === false) fail(r); } finally { setTimeout(() => { delete btn.dataset.busy; }, 350); }
     } }, ic(icn), h('span', {}, label));
+    // UI audit VE9: the stick never grows past its row (a second row of buttons on a short screen: it lay over them)
+    function fit() {
+      if (!stick || stick.el.parentNode !== root || stick.busy) return;
+      stick.el.style.removeProperty('--pad');
+      const cs = getComputedStyle(root); const gap = parseFloat(cs.rowGap) || 0;
+      const room = root.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - who.offsetHeight - status.offsetHeight - acts.offsetHeight - 3 * gap;
+      if (room > 120 && stick.el.offsetHeight > room) stick.el.style.setProperty('--pad', `${Math.floor(room)}px`);
+    }
+    let whoSig = ''; let actsSig = ''; let restEnd = 0;
     function draw(ctl, force) {
       C = ctl;
       // O1 (open point): the seat set-up ends when it can't go on (moving by phone switched off, the character let go):
       // the flag stayed on and every later state was ignored, so the phone kept a stale screen until reloaded
       if (calibrating && (!C.me || !C.on)) { calibrating = false; act('calib', { on: false }).catch(() => null); }
+      // UI audit VE1: no campaign open on the PC: wait, and stay who you are
+      if (C.closed) {
+        me = null;
+        root.className = 'ctl wait';
+        put(root, h('div', { class: 'msg' }, h('h2', {}, C.mine || 'Tablescape'), h('p', { class: 'muted' }, 'Waiting for the GM to open the campaign …')));
+        return;
+      }
       // (Beta 3.7) who you are comes first, also at a table with miniatures (moving by phone off): the DM's handouts
       // for single players find the right phone. Then the phone just says who it is.
       if (!C.me) { me = null; pick(C.chars || []); return; }
@@ -787,19 +881,28 @@
       if (!stick) build();
       if (who.parentNode !== root) { root.className = 'ctl drive'; put(root, who, status, stick.el, acts); turnKey = null; }
       me = C.me;
+      restEnd = me.restLeft > 0 ? Date.now() + me.restLeft : 0;
       root.classList.toggle('can', !!me.can);
-      put(who, h('div', { class: 'ctl-face', style: me.color ? `--pcc:${me.color}` : '' }, face(me, 'pic')), h('div', { class: 'ctl-names' }, h('b', {}, me.name)));
+      // (UI audit VE12: the picture and the buttons are built anew only when they change. Every state did it: the picture
+      // blinked with every step, and a tap that began on a button just replaced was lost.)
+      const ws = JSON.stringify([me.name, me.color, me.face]);
+      if (ws !== whoSig) { whoSig = ws; put(who, h('div', { class: 'ctl-face', style: me.color ? `--pcc:${me.color}` : '' }, face(me, 'pic')), h('div', { class: 'ctl-names' }, h('b', {}, me.name))); }
       status.textContent = statusText();
       status.className = `ctl-status ${me.can ? 'ok' : me.why || ''}`;
       stick.el.classList.toggle('off', !me.token);
       drawCentre();
       const R = me.rules;
-      put(acts,
-        me.fight && me.fight.mine ? ab('run', me.fight.dashed ? 'Dashed' : 'Dash', () => act('dash'), me.fight.dashed ? 'done' : 'dash') : null,
-        // (Prototype 8) the character card's extra moves: Cunning Action and the like, once a turn each
-        ...(me.fight && me.fight.mine ? (me.fight.extras || []).map((x) => ab('bolt', x.used ? x.name : `${x.name} +${x.ft}`, () => act('extra', { i: x.i }), x.used ? 'done' : 'dash')) : []),
-        R.pings && me.token ? ab('target', 'Ping', () => act('point')) : null,
-        ab('compass', 'Seat', () => { calibrate(); return { ok: true }; }, 'seat'));
+      const as = JSON.stringify([me.fight && me.fight.mine ? [me.fight.dashed, me.fight.extras] : null, !!(R.pings && me.token)]);
+      if (as !== actsSig) {
+        actsSig = as;
+        put(acts,
+          me.fight && me.fight.mine ? ab('run', me.fight.dashed ? 'Dashed' : 'Dash', () => act('dash'), me.fight.dashed ? 'done' : 'dash') : null,
+          // (Prototype 8) the character card's extra moves: Cunning Action and the like, once a turn each
+          ...(me.fight && me.fight.mine ? (me.fight.extras || []).map((x) => ab('bolt', x.used ? x.name : `${x.name} +${x.ft}`, () => act('extra', { i: x.i }), x.used ? 'done' : 'dash')) : []),
+          R.pings && me.token ? ab('target', 'Ping', () => act('point')) : null,
+          ab('compass', 'Seat', () => { calibrate(); return { ok: true }; }, 'seat'));
+      }
+      fit();
       // Prototype 6: your turn: the edge of the screen pulses in your colour for as long as it lasts; when it starts,
       // the phone says so in large letters for a moment (Prototype 8: no buzz; no pulse while the whole group moves)
       const mine = !!(me.fight && me.fight.mine);
@@ -812,7 +915,7 @@
       }
       turnKey = key;
     }
-    return { draw };
+    return { draw, fit };
   }
 
   boot();

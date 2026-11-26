@@ -37,9 +37,15 @@ const keyOf = (ref) => ref.rel || ref.path;
 
 function list(store) {
   const groups = new Map();
+  // (Speed 4, WD4: a file many things point at was looked for on the disk once for each of them, on every return to
+  // the window: now once a file)
+  const seen = new Map();
   for (const r of refs(store)) {
-    const p = library.resolveRef(r.ref);
-    if (p && fs.existsSync(p)) continue;
+    const sk = `${r.ref.rel || ''}|${r.ref.path || ''}`;
+    let s = seen.get(sk);
+    if (!s) { const q = library.resolveRef(r.ref); s = { p: q, there: !!(q && fs.existsSync(q)) }; seen.set(sk, s); }
+    const p = s.p;
+    if (s.there) continue;
     const k = keyOf(r.ref);
     if (!groups.has(k)) groups.set(k, { key: k, file: path.basename(p || r.ref.rel || ''), path: p, uses: [], onlyLists: true });
     const g = groups.get(k);
@@ -97,4 +103,4 @@ function forget(store, keys) {
   return { ok: true, count: n };
 }
 
-module.exports = { list, relink, forget };
+module.exports = { list, relink, forget, refs };

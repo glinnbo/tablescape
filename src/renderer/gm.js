@@ -18,6 +18,7 @@ const App = (() => {
     Home.mount(document.getElementById('home'));
     Play.mount(document.getElementById('play'));
     ts.onGmState(apply);
+    ts.onPatch((p) => Play.patch(p)); // (Speed 5, WE1: a thing of the map moved, alone)
     // Beta 1: notes from the main process (a window loaded again, a save that failed, the TV back) on any screen
     ts.onEvent((e) => { if (e && e.kind === 'toast' && e.text) UI.toast(e.text, { kind: e.level === 'error' ? 'error' : undefined, ms: e.ms || 7000 }); });
     SceneView.onResync = apply;
@@ -88,10 +89,14 @@ const App = (() => {
     setTimeout(() => boot.remove(), 600);
   }
 
+  let notesText = ''; // (Speed 5, WE1: the session log comes only when it changed; "same": the one this screen has)
   function apply(s) {
+    const nt = s.campaign && s.campaign.notes;
+    if (nt) { if (nt.same) nt.text = notesText; else notesText = nt.text || ''; }
     const prevScreen = S && S.screen;
     S = s;
     document.body.dataset.screen = s.screen;
+    document.body.classList.toggle('corners-sharp', !(s.settings && s.settings.corners === 'round')); // (Beta 3.68: Options → This screen → Corners; Sharp unless Round is picked)
     document.getElementById('home').hidden = s.screen !== 'home' && s.screen !== 'campaign';
     document.getElementById('play').hidden = s.screen !== 'play';
     Play.setActive(s.screen === 'play');
@@ -292,13 +297,13 @@ const App = (() => {
     const pathEl = h('code', { class: 'lib-path' });
     bind(() => { const r = S && S.view && S.view.libraryRoot; if (pathEl.textContent !== (r || '')) pathEl.textContent = r || ''; });
     const move = h('button', { class: 'btn small', onclick: async () => {
-      const r = await ts.app('library.move');
+      const r = await UI.withLoader('Moving the library …', () => ts.app('library.move'), 1200); // (UI audit VJ7: a sign that it is at work)
       if (!r || r.canceled) return;
       if (!r.ok) { UI.toast(r.error || 'That did not work.', { kind: 'error' }); return; }
     } }, iconEl('folder'), 'Move the library…');
     const demo = h('button', { class: 'btn small opt-demo', onclick: () => TransferUI.importDemo() }, iconEl('plus'), 'Add the demo campaign');
     return h('div', { class: 'stack' },
-      h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Your library (maps, tokens, sounds, campaigns)'),
+      h('div', { class: 'ctl', 'data-tip': 'Your maps, tokens, sounds and campaigns' }, h('span', { class: 'ctl-label' }, 'Your library'), // (UI audit VJ10)
         h('div', { class: 'ctl-row' }, pathEl, h('button', { class: 'btn small ghost', onclick: () => ts.library('open') }, 'Open')),
         h('div', { class: 'ctl-row' }, move)),
       h('div', { class: 'ctl' }, h('span', { class: 'ctl-label' }, 'Demo campaign'), h('div', { class: 'ctl-row' }, demo)));
@@ -371,7 +376,7 @@ const App = (() => {
       tips: ['Is the table ready: the TV, one inch is one inch, the speakers, Spotify, missing files, the players here today.', 'While something needs a look, Tablescape settings on the home screen has an orange dot.', 'Check again looks for the speakers once more (a TV switched on later).'] },
     { id: 'tv', label: 'TV', icon: 'device-tv',
       tips: ['Black bars flickering on the TV over an animated map: Video on the TV → Advanced → Best picture (or Safest), then restart.', 'Calibrate: match the frame on the TV to a bank card; then one inch on the TV is one inch.', 'Without calibrating, the size comes from the screen diagonal.',
-        'TV text scales the round, countdowns, turn order, markers and spell badges; the map keeps its size.', 'Press Esc on the TV to close the table window.', 'B switches the blackout on or off anywhere.'] },
+        'TV text scales the round, countdowns, turn order, markers and spell badges; the map keeps its size.', 'A table in a window on this screen closes with Esc; on a TV, use Close table window.', 'B switches the blackout on or off anywhere.'] },
     { id: 'picture', label: 'Picture', icon: 'brightness',
       tips: ['Each TV keeps its own picture.', 'Set the TV itself to its most natural mode (Movie or Cinema) first.', 'Gamma above 1 lifts the dark middle tones without washing out black.',
         'Reference picture: the black box should be black, not grey, and the white one white without glaring.'] },
@@ -402,11 +407,31 @@ const App = (() => {
       tips: ['One style for everything the players see; any part can have its own.', 'Try on the table plays the look over the map that is there; nothing changes.', 'Each campaign keeps its own look; a new campaign starts like the one played last.'] },
     { id: 'init', label: 'Initiative', icon: 'swords',
       tips: ['Hidden from the table, the turn order still runs for you, and the phones still wait for their turn.', 'Players see the round (next to the round counter) still hides it for one fight.', 'Where the round badge sits on the TV: Tablescape settings → TV.'] },
-    { id: 'players', label: 'Players', title: 'Players at the table', icon: 'users',
+    { id: 'players', label: 'Seating', title: 'Seating at the table', icon: 'users', // (UI audit VJ9, Glinn: "Players" is the party list on the home screen)
       tips: ['Both long sides: everything with text shows twice, once facing each side.', 'In a fight only the player whose turn it is moves; you can still drag any token.', 'The phones and their rules (moving tokens, pace, the trace of the steps, pings): Toolbox → Player phones on the maps. A player\'s speed: their character card.'] },
     { id: 'tabletok', label: 'Tokens', title: 'Tokens on the table', icon: 'user-circle',
       tips: ['What the players see of the tokens. Their picture size, what new tokens get and your toolbar: Tablescape settings → Tokens.'] },
   ];
+  // UI audit VC3: the single settings the Command search finds, by section: their labels exactly as the section shows
+  // them (the search opens the section and lights the line up). A check in the self-test (Command search, deep) reads
+  // every section and says which label is missing here.
+  const SETTING_LINES = {
+    check: ['Calibrate'],
+    tv: ['TV or projector', 'Close table window', 'Screen diagonal in inches', 'Calibrate with a bank card', 'TV text and panels', 'Where the round badge sits …', 'Video on the TV', 'Animated maps and overlays'],
+    picture: ['Brightness', 'Contrast', 'Gamma', 'Saturation', 'Warmth', 'Black level', 'Reference picture on the TV'],
+    tokens: ['Picture size', 'Tiny', 'Small and Medium', 'Large', 'Huge', 'Gargantuan', 'Back to the standard sizes', 'Size', 'Place them hidden', 'New copies get a number (Goblin 1, 2, 3)', 'Name tag', 'Snap to the grid', 'Selection ring'],
+    sound: ['Speakers', 'Ambience and music play on', 'Sound effects play on', 'Fight music starts and ends with a fight in Initiative', 'Lower the ambience while effects play', 'Spell sounds', 'Play a sound when a spell is cast', 'Volume', 'Sound for each spell look'],
+    perf: ['Quality', 'Ask to lower the effects when the TV stutters', 'Effects on the TV', 'Animated assets on your screen', 'Effects on your screen', 'Who draws the animations', 'Realistic spell areas (graphics card)', 'Build tools show the whole map with light and effects', 'Animated assets', 'Clear the cache', 'Benchmark'],
+    screen: ['Size of everything in this window', 'Corners', 'Hotbar', 'Show a tool\'s keys when you pick it', 'Phones and tablets can connect'],
+    library: ['Your library', 'Move the library…', 'Demo campaign'],
+    campaign: ['Rename', 'Cover picture', 'Show in folder', 'Backups', 'Export', 'Delete campaign…'],
+    screens: ['Title', 'Line under it', 'Picture', 'Show it on the table'],
+    looks: ['Table style', 'A new map arrives', 'Conversation', 'Initiative', 'New-round banner'],
+    init: ['Initiative on the table', 'Initiative shows', 'Enemies in the turn order', 'Initiative sorts itself when the last number is in', 'Round on the table', 'Announce each new round with a banner'],
+    players: ['Players sit on'],
+    tabletok: ['Name tag size', 'Players see the numbers (Goblin 1, 2, 3)', 'Glow around whose turn it is', 'Shadow under tokens', 'Conditions show on tokens'],
+  };
+  const ownText = (x) => [...x.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).filter(Boolean).join(' ');
   const scopeOf = (id) => (CAMP_SECTIONS.some((x) => x.id === id) ? 'camp' : 'app');
   const sectionsOf = (scope) => (scope === 'camp' ? CAMP_SECTIONS : APP_SECTIONS);
   const pct = (v) => `${Math.round(v * 100)}%`;
@@ -426,7 +451,7 @@ const App = (() => {
       const T = (patch) => ts.settings({ tokens: patch });
       return h('div', { class: 'stack tok-opts' },
         sliderCtl(bind, { label: 'Name tag size', min: 0.5, max: 2.5, step: 0.05, get: () => tk().tagSize || 1, set: (v) => T({ tagSize: v }), fmt: pct }), // (G4: the Tokens panel's "Name tags" picks who sees them; this is their size)
-        toggleCtl(bind, { label: 'Numbers on copies (Goblin 1, 2, 3)', get: () => tk().numbers !== false, set: (v) => T({ numbers: v }) }),
+        toggleCtl(bind, { label: 'Players see the numbers (Goblin 1, 2, 3)', get: () => tk().numbers !== false, set: (v) => T({ numbers: v }) }), // (UI audit VJ9, Glinn: it read like "Number copies" in Tablescape settings)
         toggleCtl(bind, { label: 'Glow around whose turn it is', get: () => tk().turnGlow !== false, set: (v) => T({ turnGlow: v }) }),
         toggleCtl(bind, { label: 'Shadow under tokens', get: () => !!tk().shadow, set: (v) => T({ shadow: v }) }),
         toggleCtl(bind, { label: 'Conditions show on tokens', get: () => tk().conds !== false, set: (v) => T({ conds: v }) })); // D3
@@ -578,6 +603,9 @@ const App = (() => {
       return h('div', { class: 'stack' },
         // 4.0.1: this window's own size (a small laptop screen gets crowded); the TV is not touched
         sliderCtl(bind, { label: 'Size of everything in this window', min: 0.7, max: 1.3, step: 0.05, get: () => set().uiScale || 1, set: (v) => { clearTimeout(scaleT); scaleT = setTimeout(() => ts.settings({ uiScale: v }), 150); }, fmt: pct }),
+        // Beta 3.68 (Glinn): square corners, the big pieces (panels, menus, messages) with two cut corners
+        segCtl(bind, { label: 'Corners', options: [{ value: 'sharp', label: 'Sharp', tip: 'Square, panels and menus with cut corners' }, { value: 'round', label: 'Round' }],
+          get: () => set().corners || 'sharp', set: (v) => ts.settings({ corners: v }) }),
         segCtl(bind, { label: 'Hotbar', options: [['10x1', '10 × 1'], ['5x2', '5 × 2'], ['2x5', '2 × 5'], ['1x10', '1 × 10']].map(([value, label]) => ({ value, label })),
           get: () => (hot() ? hot().shape() : '10x1'), set: (v) => { if (hot()) hot().setShape(v); refreshOptions(); } }),
         // Prototype 25: a line with a tool's keys for a few seconds when you pick it
@@ -609,7 +637,7 @@ const App = (() => {
     }
     return tablePanel(st, bind, 'screen');
   }
-  // 4.10: Options → Tokens: picture size per 5e size, what new tokens get, the toolbar and the selection ring, the TV
+  // 4.10: Options → Tokens: picture size per 5e size, what new tokens get, the selection ring, the TV (Beta 3.68: the token sheet's lines are in its More → Lines …)
   const PIC_SIZES = [['tiny', 'Tiny'], ['medium', 'Small and Medium'], ['large', 'Large'], ['huge', 'Huge'], ['garg', 'Gargantuan']];
   function tokensSection(bind) {
     const tk = () => set().tokens || {};
@@ -626,17 +654,12 @@ const App = (() => {
       optHead('New tokens'),
       segCtl(bind, { label: 'Size', options: [['tiny', 'T', 'Tiny'], ['small', 'S', 'Small'], ['medium', 'M', 'Medium'], ['large', 'L', 'Large'], ['huge', 'H', 'Huge'], ['garg', 'G', 'Gargantuan']].map(([value, label, tip]) => ({ value, label, tip })),
         get: () => pref('size', 'medium'), set: (v) => setPref('size', v) }),
-      toggleCtl(bind, { label: 'Place them hidden (players don\'t see them yet)', get: () => pref('hidden', false), set: (v) => setPref('hidden', v) }),
-      toggleCtl(bind, { label: 'Number copies (Goblin 1, 2, 3)', get: () => pref('number', true), set: (v) => setPref('number', v) }),
+      toggleCtl(bind, { label: 'Place them hidden', tip: 'The players don\'t see them until you show them', get: () => pref('hidden', false), set: (v) => setPref('hidden', v) }), // (UI audit VJ10)
+      toggleCtl(bind, { label: 'New copies get a number (Goblin 1, 2, 3)', get: () => pref('number', true), set: (v) => setPref('number', v) }), // (UI audit VJ9, Glinn)
       segCtl(bind, { label: 'Name tag', options: [{ value: 'off', label: 'Off' }, { value: 'gm', label: 'Only me', tip: 'Under the token on your screen' }, { value: 'all', label: 'Players too', tip: 'On the table as well (not while the token is hidden)' }],
         get: () => pref('tag', 'off'), set: (v) => setPref('tag', v) }),
-      toggleCtl(bind, { label: 'Snap to the grid (Alt does the other)', get: () => tk().snap !== false, set: (v) => T({ snap: v }) }),
+      toggleCtl(bind, { label: 'Snap to the grid', tip: 'Alt does the other while you drag a token', get: () => tk().snap !== false, set: (v) => T({ snap: v }) }), // (UI audit VJ10)
       optHead('On your screen'),
-      segCtl(bind, { label: 'Toolbar of a selected token', options: [
-        { value: 'compact', label: 'Compact', tip: 'Small, a little further off, see-through until the mouse is on it' },
-        { value: 'floating', label: 'Full', tip: 'Bigger, right above the token' },
-        { value: 'docked', label: 'Docked', tip: 'Always in the same place, above the hotbar' }],
-        get: () => tk().card || 'compact', set: (v) => T({ card: v }) }),
       segCtl(bind, { label: 'Selection ring', options: [{ value: 'thin', label: 'Thin line' }, { value: 'glow', label: 'Soft glow' }],
         get: () => tk().ring || 'thin', set: (v) => T({ ring: v }) }));
   }
@@ -645,7 +668,7 @@ const App = (() => {
   function previewSfx(skin) {
     if (previewAudio) previewAudio.pause();
     const own = set().sfxMap && set().sfxMap[skin];
-    previewAudio = new Audio(own && own.url ? own.url : `sfx/${skin}.ogg`);
+    previewAudio = new Audio(own && own.url ? own.url : FXDATA.spellSound(skin));
     previewAudio.volume = set().sfxVolume ?? 0.7;
     previewAudio.play().catch(() => {});
   }
@@ -912,7 +935,12 @@ const App = (() => {
   function openOptions(section, flash) { return openPanel(section ? scopeOf(section) : 'app', section, flash); }
   function openCampaignSettings(section) { return openPanel('camp', section); }
   function openPanel(scope, section, flash) {
-    if (scope === 'camp' && !(S && S.campaign)) { UI.toast('Open a campaign first'); return; }
+    // (UI audit VJ5: on the home screen a campaign is picked but not open yet: the home screen opens it and comes back
+    // here. It said "Open a campaign first".)
+    if (scope === 'camp' && !(S && S.campaign)) {
+      if (document.body.dataset.screen !== 'play' && typeof Home !== 'undefined' && Home.campaignSettings && Home.picked && Home.picked()) { closeOptions(true); Home.campaignSettings(section); return; }
+      UI.toast('Open a campaign first'); return;
+    }
     const swap = !!(setupEl && optScope !== scope);
     if (swap) closeOptions(true); // (from one to the other: no sliding out and in)
     optScope = scope;
@@ -982,7 +1010,11 @@ const App = (() => {
     const until = performance.now() + 1200;
     let first = true;
     const step = () => {
-      const el = setupEl && [...setupEl.querySelectorAll('[data-flash]')].find((x) => x.dataset.flash === k);
+      let el = setupEl && [...setupEl.querySelectorAll('[data-flash]')].find((x) => x.dataset.flash === k);
+      if (!el && optBody) { // (UI audit VC3) a line by its label, from the Command search; a fold it lies in opens
+        const lab = [...optBody.querySelectorAll('.ctl-label, h3.opt-h, button.btn, button.link-btn, b')].find((x) => ownText(x) === k);
+        if (lab) { el = lab.closest('label, .ctl, .opt-row') || lab; const fold = el.closest('details'); if (fold) fold.open = true; }
+      }
       if (el && !el.classList.contains('flash')) {
         if (first) { el.scrollIntoView({ block: 'nearest' }); first = false; }
         el.classList.add('flash');
@@ -1019,10 +1051,14 @@ const App = (() => {
   // The shortcut sheet closes with Esc or ? on any screen.
   window.addEventListener('keydown', (e) => {
     // 4.0.1: Ctrl + / Ctrl − / Ctrl 0: the size of this window's interface (not the TV's)
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && ['+', '=', '-', '0'].includes(e.key) && ts.role !== 'table') {
+    // UI audit VB4: not on the number keys 1 to 9. On a Swiss keyboard Shift + 1 prints "+", and Ctrl + Shift + 1 is a
+    // starred Soundboard sound. The keys where + and − sit on a US keyboard, and the number pad's, count too.
+    const sizeKey = (e.ctrlKey || e.metaKey) && !e.altKey && ts.role !== 'table' && !/^Digit[1-9]$/.test(e.code)
+      ? (e.key === '0' || e.code === 'Numpad0' ? 'zero' : e.key === '-' || e.code === 'Minus' || e.code === 'NumpadSubtract' ? 'less' : e.key === '+' || e.key === '=' || e.code === 'Equal' || e.code === 'NumpadAdd' ? 'more' : null) : null;
+    if (sizeKey) {
       e.preventDefault(); e.stopImmediatePropagation();
       const cur = (S && S.settings && S.settings.uiScale) || 1;
-      const next = e.key === '0' ? 1 : Math.round(Math.min(1.3, Math.max(0.7, cur + (e.key === '-' ? -0.05 : 0.05))) * 20) / 20;
+      const next = sizeKey === 'zero' ? 1 : Math.round(Math.min(1.3, Math.max(0.7, cur + (sizeKey === 'less' ? -0.05 : 0.05))) * 20) / 20;
       ts.settings({ uiScale: next });
       UI.toast(`Interface size ${Math.round(next * 100)}% (Ctrl 0: 100%)`, { ms: 1400 });
       return;
@@ -1032,7 +1068,7 @@ const App = (() => {
       const field = e.target && e.target.tagName && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
       if (field && e.key === '?') return;
       e.stopImmediatePropagation(); e.preventDefault();
-      if (field) { e.target.blur(); return; }
+      if (field && String(e.target.value || '').length) { e.target.blur(); return; } // (UI audit VD7: an empty field, as the Help search when the Guide opens, is no reason for a second Esc)
       toggleHelp(false);
       return;
     }
@@ -1072,7 +1108,9 @@ const App = (() => {
 
   // (Prototype 25) the Options sections' tips for the Guide's Help page
   const helpSections = (scope = 'app') => sectionsOf(scope).filter((x) => x.tips && x.tips.length).map((x) => ({ title: x.title || x.label, tips: x.tips }));
-  return { helpSections, start, tablePanel, picturePanel, soundOutPicker, openOptions, openCampaignSettings, closeOptions, optionsOpen: () => !!setupEl, optionsScope: () => (setupEl ? optScope : null), openTableSetup: (sec) => openOptions(sec || 'tv'),
+  const settingLines = () => [...APP_SECTIONS.map((s) => ({ s, scope: 'app' })), ...CAMP_SECTIONS.map((s) => ({ s, scope: 'camp' }))]
+    .flatMap(({ s, scope }) => (SETTING_LINES[s.id] || []).map((label) => ({ id: s.id, scope, section: s.title || s.label, icon: s.icon, label })));
+  return { settingLines, optionSections: () => [...APP_SECTIONS.map((s) => ({ ...s, scope: 'app' })), ...CAMP_SECTIONS.map((s) => ({ ...s, scope: 'camp' }))], helpSections, start, tablePanel, picturePanel, soundOutPicker, openOptions, openCampaignSettings, closeOptions, optionsOpen: () => !!setupEl, optionsScope: () => (setupEl ? optScope : null), openTableSetup: (sec) => openOptions(sec || 'tv'),
     toggleHelp, helpOpen: () => Guide.isOpen(), get state() { return S; }, updateSlot: () => renderUpdate(), previewUpdate: (u) => renderUpdate(u), previewUpdateDone: () => updateDone() };
 })();
 

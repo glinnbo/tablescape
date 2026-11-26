@@ -130,8 +130,11 @@ const Characters = (() => {
           h('div', { class: 'ch-sec' }, h('h3', {}, 'Initiative'), h('div', { class: 'ch-row' }, field('AC', num('ac', c.ac, 0, 40)), field('Max HP', num('hp', c.maxHp, 1, 999)))),
           h('div', { class: 'ch-sec' }, h('h3', {}, 'Passives'), h('div', { class: 'ch-row' }, ...PASSIVES.map(([k, l]) => field(l, num(k, c[k], 0, 40)))))),
         h('div', { class: 'ch-cols' },
-          h('div', { class: 'ch-sec' }, h('h3', {}, 'Senses'), h('div', { class: 'ch-row' }, field('Darkvision', num('dark', c.dark, 0, 300, '0'), 'feet: the Party marker takes it'), field('Other senses', text('senses', c.senses, 'Blindsight 10 ft', 200)))),
+          h('div', { class: 'ch-sec' }, h('h3', {}, 'Senses'), h('div', { class: 'ch-row' }, field('Darkvision', num('dark', c.dark, 0, 300, '0'), 'feet: the Party marker takes it'),
+            field('How far they see', num('sight', c.sight || null, 0, 600, 'to the walls'), 'feet'), field('Other senses', text('senses', c.senses, 'Blindsight 10 ft', 200)))), // (Beta 3.68: from the player panel, which is gone)
           h('div', { class: 'ch-sec' }, h('h3', {}, 'Languages'), text('languages', c.languages, 'Common, Elvish, Thieves\' cant', 200))),
+        // Beta 3.68: their own light (the token sheet's light chip → Own light), from the player panel, which is gone
+        h('div', { class: 'ch-sec' }, h('h3', {}, 'Own light'), h('div', { class: 'ch-row' }, field('Bright', num('bright', c.bright ?? 20, 0, 120, '20'), 'feet'), field('Dim to', num('dim', c.dim ?? 40, 0, 240, '40'), 'feet'))),
         // Prototype 8: for the players' phones: how far they walk in a turn, and moves that add to it once a turn
         h('div', { class: 'ch-sec' }, h('h3', {}, 'Movement'), h('div', { class: 'ch-row ch-move' },
           field('Speed', num('speed', c.speed, 5, 120, '30'), 'feet a turn, on the phone'), // (F4: empty: 30 ft, grey; P3: the old campaign speed no longer counts)
@@ -187,8 +190,9 @@ const Characters = (() => {
       const redraw = () => { list.dataset.sig = ''; ctx.refresh(); };
       dc.addEventListener('input', () => { check.dc = Math.max(1, Math.min(40, Number(dc.value) || 0)); check.on = true; redraw(); });
       ctx.ctl.bind(() => {
-        kinds.replaceChildren(...PASSIVES.map(([k, l]) => h('button', { class: `seg-btn ${check.kind === k ? 'on' : ''}`, onclick: () => { check.kind = k; check.on = true; redraw(); } }, h('span', {}, l))));
-        onBtn.replaceChildren(iconEl(check.on ? 'x' : 'eye-check'), check.on ? 'Done' : 'Check');
+        // (Speed 9, WI8: both were built anew four times a second: a press that began on the old one and ended on the new did nothing)
+        if (kinds.dataset.sig !== String(check.kind)) { kinds.dataset.sig = String(check.kind); kinds.replaceChildren(...PASSIVES.map(([k, l]) => h('button', { class: `seg-btn ${check.kind === k ? 'on' : ''}`, onclick: () => { check.kind = k; check.on = true; redraw(); } }, h('span', {}, l)))); }
+        if (onBtn.dataset.sig !== String(!!check.on)) { onBtn.dataset.sig = String(!!check.on); onBtn.replaceChildren(iconEl(check.on ? 'x' : 'eye-check'), check.on ? 'Done' : 'Check'); }
         onBtn.onclick = () => { check.on = !check.on; redraw(); };
         const cs = S().chars || [];
         const sig = JSON.stringify([cs, check]);

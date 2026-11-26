@@ -88,4 +88,49 @@ module.exports = (area) => {
     const r = t.handle('snap.play', { n: 3, mapId: own });
     t.ok(r.ok === false, 'no third snapshot to play', r);
   });
+
+  // Speed 5 (Open Point WE5): does the map still look like its snapshot? Asked without copying its scenery
+  area.quick('WE5: a map at its snapshot is compared without copying its scenery; a change shows, taking it back too, and a turned map still matches', async (t) => {
+    const MS = require('../../mapstate');
+    const m = await clean(t); const k = m.grid.size;
+    t.handle('layer.add', { mapId: own, path: t.pic('assets'), role: 'asset', x: 12 * k, y: 6 * k, w: 2 * k });
+    t.handle('fx.stroke', { mapId: own, id: 'we5-water', preset: 'water', sid: 's1', r: 1.2 * k, pts: [10 * k, 9 * k, 11 * k, 9 * k, 12 * k, 9.5 * k] });
+    t.handle('fx.add', { mapId: own, kind: 'emitter', preset: 'torch', x: 18 * k, y: 6 * k, r: 1 });
+    await t.cmd('snap.save', { mapId: own, name: 'As it is' });
+    await t.settle();
+    const snap = () => M(t).snaps[0];
+    const changed = async () => { const st = await t.g('window.ts.state()'); return st.campaign.chapters.flatMap((c) => c.maps).find((x) => x.id === own).snaps[0]; };
+    t.eq([M(t).snapAt === snap().id, (await changed()).at, (await changed()).changed], [true, true, false], 'the map stands at its snapshot, unchanged');
+    // no copy is made to answer
+    const real = global.structuredClone; let copies = 0;
+    global.structuredClone = function (...a) { copies++; return real.apply(this, a); };
+    let same; const p0 = MS.sceneStats.placed;
+    try { same = MS.sceneMatches(M(t), snap().data); } finally { global.structuredClone = real; }
+    t.eq([same, copies, MS.sceneStats.placed - p0], [true, 0, 0], 'it matches; copies made to find out; snapshots placed anew');
+    // a change shows, and taking it back too
+    await t.cmd('light.update', { mapId: own, darkness: 0.5 });
+    t.eq((await changed()).changed, true, 'darker: the map no longer looks like its snapshot');
+    await t.cmd('light.update', { mapId: own, darkness: 0 });
+    t.eq((await changed()).changed, false, 'light again: it does');
+    const tok = t.handle('layer.add', { mapId: own, path: t.pic('tokens'), role: 'token', x: 15.5 * k, y: 8.5 * k, size: 1 }).selected;
+    t.eq((await changed()).changed, false, 'a token put down is not scenery: still the snapshot');
+    const fx = M(t).fx.find((x) => x.preset === 'torch');
+    t.handle('fx.update', { mapId: own, id: fx.id, x: fx.x + k });
+    t.eq((await changed()).changed, true, 'a torch moved by a square: changed');
+    t.handle('fx.update', { mapId: own, id: fx.id, x: fx.x - k });
+    t.eq((await changed()).changed, false, 'and moved back: the snapshot again');
+    // the map turned with everything on it: the snapshot is placed on the turned map and still matches
+    const geo = await t.g(`(() => { const v = Play.view(); const p = v.bgPlacement(); const r = v.tableRectInMap(); return { p, r }; })()`);
+    const piv = { x: geo.r.x + geo.r.w / 2, y: geo.r.y + geo.r.h / 2 }; const cen = { x: geo.p.x + geo.p.w / 2, y: geo.p.y + geo.p.h / 2 };
+    const rot0 = M(t).bg.rotation || 0;
+    try {
+      t.handle('bg.turn', { mapId: own, to: rot0 + 90, mode: 'all', pivot: piv, center: cen });
+      const p1 = MS.sceneStats.placed;
+      t.eq([(await changed()).changed, MS.sceneStats.placed - p1 >= 1], [false, true], 'turned by a quarter: still the snapshot, found by placing it on the turned map');
+    } finally {
+      t.handle('bg.turn', { mapId: own, to: rot0, mode: 'all', pivot: piv, center: cen });
+      t.handle('layer.remove', { mapId: own, id: tok });
+      for (const l of M(t).layers.filter((x) => x.role === 'asset')) t.handle('layer.remove', { mapId: own, id: l.id });
+    }
+  });
 };

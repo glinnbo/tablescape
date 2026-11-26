@@ -181,12 +181,16 @@ class CampaignStore {
     if (!this.cur) return;
     if (mapId) this.cur.dirty.add(mapId);
     this.cur.metaDirty = true;
+    // Speed 3 (WC6): 0.7 s after the last change, as before, but 5 s after the first unsaved one at the latest. Every
+    // change put the saving off again, so nothing reached the disk while one kept working without a pause.
+    if (!this.dirtySince) this.dirtySince = Date.now();
     clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.flush(), 700);
+    this.saveTimer = setTimeout(() => this.flush(), Math.max(0, Math.min(700, 5000 - (Date.now() - this.dirtySince))));
   }
   // true: everything is on the disk (or there was nothing to save); false: a write failed, the changes stay in memory
   flush() {
     clearTimeout(this.saveTimer);
+    this.dirtySince = 0;
     const c = this.cur;
     if (!c) return true;
     try {

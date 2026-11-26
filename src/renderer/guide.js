@@ -16,15 +16,44 @@ const Guide = (() => {
     ['Spells and assets', [['Click', 'Cast or stamp'], ['Drag', 'Aim a cone, line or cube / scatter assets'], ['Ctrl + wheel', 'Turn by 15° (Shift: 5°), also placed areas and assets'], ['Shift while aiming', 'Snap to 15°'], ['+  −', 'Spell size in 5 ft steps'], ['[  ]', 'Asset size'], ['A picked asset\'s frame', 'Sides: flat or long · corners: size · knob: turn'], ['Shift + drag', 'Select several assets'], ['Alt', 'Place or measure without snapping']]],
     ['Draw (Oldschool maps)', [['Drag', 'A room, a round room, a wall, stairs (Shift: square, circle, straight)'], ['Click', 'A shape corner by corner; Enter, double-click or right-click closes it'], ['Alt while drawing', 'Erase instead'], ['Backspace / Esc', 'Take the last corner back / drop the shape']]],
     ['Walls', [['Click', 'Wall corner by corner (Alt: no snapping)'], ['Double-click / Enter', 'End the line of walls'], ['Click a door', 'Open or close it (also with V)'], ['Delete', 'Remove the selected wall']]],
-    ['Table', [['T', 'Send this map to the table'], ['B', 'Blackout on or off'], ['1 – 0', 'Use the hotbar (3 pages: the mouse wheel over it)'], ['Alt 1 – 9', 'Open a map of this chapter'], ['F1 – F8', 'Play snapshot 1 to 8 of the map on the table'], ['Shift 1 – 9', 'Play a starred screen effect'], ['Ctrl 1 – 9', 'Play a Spotify mood'], ['F', 'Fit the view to the table'], ['Shift F', 'Show everything, also off the table'], ['Esc on the TV', 'Close the table window']]],
-    ['Panels', [['L', 'Library'], ['Shift L', 'Library full screen'], ['Tab', 'Map thumbnails on or off'], ['Shift I', 'Character cards: the party at a glance (only for you)'], ['?', 'This guide'], ['Ctrl ,', 'Tablescape settings: the TV, picture, sound, performance'], ['Ctrl + / Ctrl − / Ctrl 0', 'Size of everything on your screen (not the TV)']]],
+    ['Table', [['T', 'Send this map to the table'], ['B', 'Blackout on or off'], ['1 – 0', 'Use the hotbar (3 pages: the mouse wheel over it)'], ['Alt 1 – 9', 'Open a map of this chapter'], ['Ctrl Shift 1 – 9', 'Play a starred Soundboard sound'], ['F1 – F8', 'Play snapshot 1 to 8 of the map on the table'], ['Shift 1 – 9', 'Play a starred screen effect'], ['Ctrl 1 – 9', 'Play a Spotify mood'], ['F', 'Fit the view to the table'], ['Shift F', 'Show everything, also off the table'], ['Esc in the table window', 'Closes it, when it is a window on this screen']]],
+    ['Panels', [['Ctrl K or /', 'Find or do anything: a token, a map, a spell, a sound, a panel, a setting; d20, 5 min'], ['L', 'Library'], ['Shift L', 'Library full screen'], ['Tab', 'Map thumbnails on or off'], ['Shift I', 'Character cards: the party at a glance (only for you)'], ['?', 'This guide'], ['Ctrl ,', 'Tablescape settings: the TV, picture, sound, performance'], ['Ctrl + / Ctrl − / Ctrl 0', 'Size of everything on your screen (not the TV)']]],
     ['Editing', [['Ctrl Z', 'Undo (also the arrows on top of the tools)'], ['Ctrl Y', 'Redo'], ['H', 'Hide or show what is selected'], ['Ctrl D', 'Duplicate the selected token'], ['Delete / Backspace', 'Remove what is selected'], ['[  ]', 'Brush size']]],
-    ['Mouse', [['Right-click', 'Radial menu'], ['Right-drag or Space-drag', 'Pan the view'], ['Wheel', 'Zoom the view'], ['Alt + wheel', 'Scale the map (with everything on it)'], ['Double-click', 'Ping'], ['Alt while dragging a token', 'Place it without snapping']]],
+    ['Mouse', [['Right-click', 'Radial menu'], ['Right-drag or Space-drag', 'Pan the view'], ['Wheel', 'Zoom the view'], ['Alt + wheel', 'With the Map tool: scale the map (with everything on it)'], ['Double-click', 'Ping'], ['Alt while dragging a token', 'Place it without snapping']]],
     ['Cartographer', [['V P R D T E', 'Move, Place, Route, Draw, Write, Erase'], ['M', 'How far: measure from the pointer (a click adds a bend)'], ['Enter / Esc', 'End a route or a measuring line'], ['Delete', 'Remove what is picked']]], // Second Builder (second-cartographer-polish)
   ];
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.68', [
+      'Triggers (Toolbox): one click runs a list of steps: a conversation, handouts, a snapshot, the time of day, the weather, a screen effect, a group of lights, doors, hidden tokens, a fight, a countdown. A trigger can stand on the map as a mark only you see, and on the Hotbar. A second click takes back what it did; its mark is lit meanwhile',
+      'Find or do anything: the Command search is always at the top of your screen (Ctrl K). It finds single settings too',
+      'Click a token: its sheet slides out beside it, with More for the rest',
+      'Screen effects and the Soundboard are pads. The screen effects are redone with real textures',
+      'New sounds: twelve sound effects for the screen effects and the Soundboard, and the demo\'s music, were made with Suno; fifteen spells and nine screen effects got new sounds of their own',
+      'Draw: fifteen more walls to build with (fieldstone, brick, sandstone, marble, mossy ruin, rune stone, dwarven, obsidian, wood, timber frame, palisade, iron, ice, crystal, bone). Rock and cliffs can be made of them too',
+      'Draw: the Brush has an Edge slider, from smooth to jagged as a cave\'s wall. A pillar\'s size goes in half squares. Made of and Floor show the four used last and a "+" for all of them',
+      'Fog of war on a drawn map: the party sees the rock (or the wall\'s top) behind the walls it can see. Draw → Map settings → Rock in sight sets how deep, or turns it off',
+      'Draw is much faster: a room at the edge of a big drawing no longer makes the whole picture again, the picture waits until your hand rests, more things on a map no longer slow every edit, and grass and water no longer stutter at every edit',
+      'A drawn map can be 300 × 300 squares at most; a faint frame shows how far it may reach',
+      'Dragging, turning and sizing assets, lights, effects and spell areas is much lighter on big maps, and editing another map than the one on the table no longer slows the table',
+      'Layers: sections fold, and two or more of a kind are one row. Open it and change the colour, reach or brightness of all of them at once',
+      'Effects: Rapids, Circling birds and Webs are new, with Size of the animals. Effects → Lights shows where the next light goes; a light on a wall lights only its own side',
+      'What moves keeps moving right: dust devils, tumbleweeds, birds, butterflies, bats, drifting sand and webs no longer jump when you change the wind, Size or Speed; leaves no longer flicker while the wind turns; water, lava and grass keep their fine movement however long a map is on the table',
+      'Grass: Length, Thickness and Colour variety go twice as far',
+      'Clicks on the map do one thing: closing a menu no longer paints fog, casts or moves the party; a click on a token is not a move; right-click keeps your tool. Esc puts back what you are dragging',
+      'Panels no longer open on top of each other; toasts wait under the mouse and keep their Undo; menus take the arrow keys; a slider\'s number can be typed',
+      'Easier to read and to hit: no text under 11 px, bigger small buttons, and you see which panels are open. Corners are sharp (Tablescape settings → This screen → Corners: Sharp or Round)',
+      'Library: right-click a file to rename it, move it or delete it; the search finds two letters and numbers; "Add from PC" asks what the files are; copying big files no longer freezes the window',
+      'Phones keep their character after a restart, show "Reconnecting …" within seconds, and can be renamed or forgotten; the phone\'s Back button closes what is open',
+      'Select: drag the map to move your view; arrow keys nudge the picked token; a dragged token shows where it lands and how far. Ctrl Z, Backspace and Delete take back the last corner of a half-drawn area, line of walls or shape',
+      'Conversation: a portrait can sink below its band and grow to 500 %. The demo campaign has new maps, music and a drawn map',
+      'A graphics card that was busy when the table opened is no longer taken for too slow for the spells: it is timed again',
+    ], [
+      'Triggers: one click runs a scene, a second takes it back',
+      'Caves: jagged edges, fifteen new walls, rock seen under the fog',
+      'Much faster drawing and dragging on big maps',
+    ]],
     ['Beta 3.67', [
       'Right-click a token: Conditions and Turn order. Poisoned, Prone, Stunned and the rest show as small animations on the token, on the TV too (bubbles, stars, lying down …). They stay on the token, in a fight or not; Campaign settings → Tokens on the table can turn them off',
       'Every right-click wheel has six slots: the five that matter for what you clicked, and More … with the rest (Rename, size, light …)',
@@ -828,6 +857,7 @@ const Guide = (() => {
         li('Icons: Tabler Icons (MIT)'),
         li('Display font: Alegreya (SIL Open Font License)'),
         li('Table-style pictures: made with Midjourney and Grok'),
+        li('Sound effects of the screen effects and the Soundboard, and the demo\'s music: made with Suno'),
         li('Built with Electron'),
         li('This work includes material taken from the System Reference Document 5.1 ("SRD 5.1") by Wizards of the Coast LLC and available at https://dnd.wizards.com/resources/systems-reference-document. The SRD 5.1 is licensed under the Creative Commons Attribution 4.0 International License available at https://creativecommons.org/licenses/by/4.0/legalcode.'),
         li('Tablescape is an unofficial fan product, not made or endorsed by Wizards of the Coast. Dungeons & Dragons and D&D are trademarks of Wizards of the Coast.')));

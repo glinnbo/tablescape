@@ -104,14 +104,15 @@ module.exports = (area) => {
       t.ok(!meta.lastSession, 'not played yet');
       t.ok(meta.characters && meta.characters['The Little Maid'], 'the Little Maid is in the party', Object.keys(meta.characters || {}));
       const maps = fs.readdirSync(path.join(dir, 'maps')).map((f) => JSON.parse(fs.readFileSync(path.join(dir, 'maps', f), 'utf8')));
-      t.eq(maps.map((m) => m.name).sort(), ['Calm Cottage', 'Fort Haspin', 'Nighttime Cottage', 'Scene Example', 'Stresstest', 'The River Crossing', 'Worldmap'], 'the maps');
-      for (const m of maps) t.ok(m.bg && m.bg.path && fs.existsSync(m.bg.path), `${m.name}: its picture is in the library`, m.bg);
+      t.eq(maps.map((m) => m.name).sort(), ['Calm Cottage', 'Calm Cottage Nighttime', 'Drawn map', 'Fort Haspin', 'Stresstest', 'The River Crossing', 'Worldmap'], 'the maps (the demo of 25 Nov 2026)');
+      for (const m of maps) if (!m.os) t.ok(m.bg && m.bg.path && fs.existsSync(m.bg.path), `${m.name}: its picture is in the library`, m.bg);
+      for (const m of maps) if (m.os) t.ok(m.os && (m.os.pieces || m.os.cells || Object.keys(m.os).length), `${m.name}: a drawn map, drawn anew from its drawing (its picture does not travel)`, Object.keys(m.os || {}));
       for (const m of maps) for (const l of m.layers || []) if (l.rel) t.ok(l.path && fs.existsSync(l.path), `${m.name}: ${l.name} is in the library`, l);
       // Beta 3.17: the test atlas (world, region, city), each picture placed as it fills the default table, so its places stay on it
       const byId = Object.fromEntries(maps.map((m) => [m.id, m]));
       t.eq(((meta.atlas && meta.atlas.maps) || []).map((a) => byId[a.id] && byId[a.id].name).sort(), ['Fort Haspin', 'The River Crossing', 'Worldmap'], 'the atlas maps');
       t.eq(byId[meta.atlas.world] && byId[meta.atlas.world].name, 'Worldmap', 'the world map');
-      for (const m of maps) t.ok(m.bg.scale > 0 && m.bg.nw > 0 && m.bg.nw <= 3840 && m.bg.nh <= 3840, `${m.name}: placed, at most 4K`, m.bg);
+      for (const m of maps) if (!m.os) t.ok(m.bg.scale > 0 && m.bg.nw > 0 && m.bg.nw <= 3840 && m.bg.nh <= 3840, `${m.name}: placed, at most 4K`, m.bg);
       t.eq(byId[meta.lastMapId] && byId[meta.lastMapId].name, 'Calm Cottage', 'a new user starts on the first map');
       t.ok(!/Handout shown/.test((meta.notes && meta.notes.text) || ''), 'no session log from the maker', meta.notes);
       const chPortrait = meta.characters['The Little Maid'].portrait;

@@ -23,6 +23,32 @@ const Creatures = (() => {
     return [Math.cos(a), Math.sin(a), 0.6];
   }
 
+  // ---------- WI1 (26 Nov 2026): a clock whose pace may change ----------
+  // "Pace times the time" jumps when the pace moves: the time is about a hundred million seconds, so a pace that
+  // changes by a hundredth throws the clock a million seconds on (animation rule 1 in CLAUDE.md). A whirl of dust
+  // vanished when the wind changed, a flock of birds when the map was zoomed, circling birds and butterflies sat
+  // somewhere else after a step of Size. Such a clock is now added up: each time it is asked it goes on by its pace of
+  // now times the time since it was last asked. While the pace stays it is exactly pace times time (it starts
+  // there, or where start() says), so nothing looks different until a setting moves; then it goes on from where
+  // it is, faster or slower. Kept for this window by a name, and let go when nobody asked for a minute. (After a
+  // change two windows can be a hair apart, and one opened later starts from the formula again.)
+  // A tile's small picture (ids that start with th-) is drawn at a moment picked for it, the same one each time, and
+  // must not remember the last: it takes the formula.
+  const RUN = new Map(); let runSwept = 0; let STILL = false;
+  function run(key, t, pace, start) {
+    if (STILL) return start ? start() : pace * t;
+    const now = performance.now();
+    let r = RUN.get(key);
+    if (!r || !Number.isFinite(r.p)) { r = { t, p: start ? start() : pace * t, at: now }; RUN.set(key, r); }
+    else { if (t !== r.t) { r.p += pace * (t - r.t); r.t = t; } r.at = now; }
+    if (now - runSwept > 20000) { runSwept = now; for (const [k, v] of RUN) if (now - v.at > 60000) RUN.delete(k); }
+    return r.p;
+  }
+  // a value kept as it was when first asked for under this name (how long a whirl lives, say)
+  const keep = (key, t, make) => run(key, t, 0, make);
+
+  // C14 (Glinn): Size of the animals: one factor for every animal effect (birds, bats, critters, insects, fish, a web's spider)
+  const beast = (fx) => clamp(Number(fx && fx.critter) || 1, 0.4, 2.5);
   // ---------- events that happen now and then ----------
   // Event n happens at (n + jitter × h(n)) × period (+ a seeded start). Returns how long since the last one and how
   // long until the next, so a build-up before an event and an afterglow after it need no state.
@@ -277,34 +303,41 @@ const Creatures = (() => {
         g.globalAlpha = Math.min(1, a * 0.75); g.lineWidth = Math.max(minW, lw); g.stroke(path);
       }
     });
-    // 3. standing waves: short bands of foam across the flow that stay where they are and churn in shape
+    // 3. standing waves: short curved crests of foam that stay where they are and churn in shape. (C13, Glinn: "the
+    // vertical lines look bad": they were near-straight bands across the whole river, one every 1.35 squares, which
+    // read as a ladder. Now each crest is a third of the width at most, bent downstream, set off from its neighbours
+    // and at uneven gaps, thicker in its middle and fading to nothing at both ends)
     lines.forEach((f, li) => {
-      const r = f.st.r; const gap = 1.35;
-      const nw = Math.max(1, Math.floor(f.len / gap));
-      for (let w = 0; w < nw; w++) {
+      const r = f.st.r;
+      let d = 0.6 + h(s + li * 41) * 0.8;
+      for (let w = 0; d < f.len - 0.4 && w < 400; w++) {
         const sd = s + li * 37 + w * 11;
-        const d = (w + 0.5 + (h(sd) - 0.5) * 0.6) * gap;
-        if (d > f.len - 0.3) continue;
-        const nb = 2 + Math.floor(h(sd + 1) * 2);
+        const nb = 1 + Math.floor(h(sd + 1) * 3); // one to three crests side by side, never across it all
         for (let b = 0; b < nb; b++) {
-          const db = d + b * 0.2 + (h(sd + b * 3) - 0.5) * 0.08;
+          const db = d + (h(sd + b * 3) - 0.5) * 0.5;
+          if (db < 0.2 || db > f.len - 0.2) continue;
           const q = along(f, db);
-          const span = r * (0.5 + 0.45 * h(sd + b * 5)); const off = (h(sd + b * 7) - 0.5) * r * 0.6;
-          const band = new Path2D();
-          for (let j = 0; j <= 10; j++) {
-            const sl = off + (j / 10 - 0.5) * 2 * span;
-            const e = sl / span - off / span; // -1..1 along the band
-            const bulge = -0.12 * (1 - e * e) + 0.04 * Math.sin(t * (2.1 + h(sd + b)) + j * 0.6 + b) + 0.015 * Math.sin(t * 3.3 + j * 0.9);
-            const x = q.x - q.dy * sl + q.dx * bulge; const y = q.y + q.dx * sl + q.dy * bulge;
-            if (j) band.lineTo(x, y); else band.moveTo(x, y);
+          const half = r * (0.12 + 0.2 * h(sd + b * 5)); // half its length: a quarter to two thirds of the river's half width
+          const off = ((b + 0.5) / nb - 0.5) * 1.3 * r + (h(sd + b * 7) - 0.5) * 0.35 * r;
+          if (Math.abs(off) + half > r * 0.95) continue;
+          const P = [];
+          for (let j = 0; j <= 8; j++) {
+            const e = j / 4 - 1; // -1..1 along the crest
+            const sl = off + e * half;
+            const bulge = 0.16 * half * (1 - e * e) + 0.03 * Math.sin(t * (1.9 + h(sd + b)) + j * 0.7 + b) + 0.012 * Math.sin(t * 3.1 + j);
+            P.push([q.x - q.dy * sl + q.dx * bulge, q.y + q.dx * sl + q.dy * bulge]);
           }
-          const fl = 0.75 + 0.25 * Math.sin(t * 3.1 + w * 1.3 + b * 2);
-          const aa = A * fl * (0.55 + 0.35 * h(sd + b * 9));
-          g.strokeStyle = 'rgba(10,25,35,1)'; g.globalAlpha = 0.18 * aa; g.lineWidth = 0.16; // the trough in front of it
-          g.save(); g.translate(-q.dx * 0.09, -q.dy * 0.09); g.stroke(band); g.restore();
-          g.strokeStyle = foam;
-          for (const [lw, al] of [[0.3, 0.18], [0.15, 0.35], [0.06, 0.6]]) { g.globalAlpha = Math.min(1, aa * al); g.lineWidth = Math.max(minW, lw); g.stroke(band); }
+          const crest = new Path2D(); P.forEach(([x, y], j) => (j ? crest.lineTo(x, y) : crest.moveTo(x, y)));
+          const fl = 0.7 + 0.3 * Math.sin(t * 2.7 + w * 1.3 + b * 2);
+          const aa = A * fl * (0.45 + 0.4 * h(sd + b * 9));
+          const gr = g.createLinearGradient(P[0][0], P[0][1], P[8][0], P[8][1]);
+          gr.addColorStop(0, f0); gr.addColorStop(0.3, fm); gr.addColorStop(0.5, f1); gr.addColorStop(0.7, fm); gr.addColorStop(1, f0);
+          g.strokeStyle = 'rgba(10,25,35,1)'; g.globalAlpha = 0.14 * aa; g.lineWidth = 0.12; // the trough in front of it
+          g.save(); g.translate(-q.dx * 0.08, -q.dy * 0.08); g.stroke(crest); g.restore();
+          g.strokeStyle = gr;
+          for (const [lw, al] of [[0.28, 0.22], [0.14, 0.42], [0.06, 0.75]]) { g.globalAlpha = Math.min(1, aa * al); g.lineWidth = Math.max(minW, lw); g.stroke(crest); }
         }
+        d += 1.1 + h(sd + 13) * 1.4; // uneven gaps
       }
     });
     // 4. breakers: a V of foam behind a rock under the surface, foam running down its arms, spray puffing off
@@ -322,7 +355,7 @@ const Creatures = (() => {
       dot(g, sprite('#0b1a22'), rx + q.dx * 0.04, ry + q.dy * 0.04, 0.2 * size, 0.28 * A);
       dot(g, sprite(foam, 0.35), rx - q.dx * 0.05, ry - q.dy * 0.05, 0.16 * size * (1 + 0.08 * Math.sin(t * 7 + i)), 0.85 * A);
       // the two arms
-      const armLen = (0.9 + 0.7 * h(sd + 3)) * size; const spread = 0.32 + 0.12 * h(sd + 4);
+      const armLen = (0.5 + 0.4 * h(sd + 3)) * size; const spread = 0.38 + 0.12 * h(sd + 4); // (C13: shorter arms, the long straight ones read as lines)
       for (const side of [-1, 1]) {
         const arm = new Path2D(); const P = [];
         for (let j = 0; j <= 8; j++) {
@@ -333,7 +366,7 @@ const Creatures = (() => {
           if (j) arm.lineTo(x, y); else arm.moveTo(x, y);
         }
         g.strokeStyle = foam;
-        for (const [lw, al] of [[0.16, 0.18], [0.07, 0.45], [0.03, 0.8]]) { g.globalAlpha = Math.min(1, A * al); g.lineWidth = Math.max(minW, lw * size); g.stroke(arm); }
+        for (const [lw, al] of [[0.16, 0.14], [0.07, 0.32], [0.03, 0.55]]) { g.globalAlpha = Math.min(1, A * al); g.lineWidth = Math.max(minW, lw * size); g.stroke(arm); }
         // foam riding down the arm while the V stays
         for (let j = 0; j < 6; j++) {
           const u = fract(t * 1.1 + j / 6 + h(sd + side * 3 + j));
@@ -857,6 +890,7 @@ const Creatures = (() => {
   const FLOCK_GAP = 22; // seconds between flocks at Amount 1 and Speed 1
   function sky(ctx, w, W, H, t, now, o) {
     if (!w || !Array.isArray(w.layers)) return 0;
+    STILL = false;
     let drawn = 0;
     const fadeMs = (w.fade || 0) * 1000;
     for (const L of w.layers) {
@@ -871,10 +905,15 @@ const Creatures = (() => {
       const M = S.size * size * o.sq * 3 + K.spread * size * o.sq * 2; // margin: a whole flock is off the table
       const D = Math.hypot(W, H) + 2 * M; // a crossing
       const lap = D + (v * FLOCK_GAP) / amt; // a crossing and the gap after it
-      const dist = tr.s * v + h(s) * lap;
-      const n = Math.floor(dist / lap); const p = dist - n * lap;
+      // (WI1: the flocks were counted by "travel times v", and v follows the zoom of the map: a zoom step on the TV
+      // threw the count on and the flock on the table was gone. Now the count of flocks is a clock of its own that the
+      // travel drives, and each flock's way across is added up)
+      const key = `fl|${L.id || 'birds'}`;
+      const tau = run(key, tr.s, v / lap, () => (tr.s * v) / lap + h(s)); // flocks so far
+      const n = Math.floor(tau);
       const birds = []; // this flock and, while it is still leaving, the one before
-      for (const [k, pp] of [[n, p], [n - 1, p + lap]]) {
+      for (const k of [n, n - 1]) {
+        const pp = run(`${key}|${k}`, tr.s, v, () => (tau - k) * lap); // how far this flock has come
         if (pp > D + M) continue;
         const sd = s + k * 17.3;
         const base = ((L.dir ?? 200) + (h(sd) - 0.5) * 120) * (Math.PI / 180); // each flock ±60°
@@ -920,21 +959,24 @@ const Creatures = (() => {
     const n = Math.max(1, Math.min(6, Math.round(K.n * (fx.density ?? 1))));
     const dir = h(s + 0.3) < 0.5 ? 1 : -1; // which way round this spot's birds go
     const cx = x + Math.sin(t * 0.05 + s) * r * 0.15; const cy = y + Math.cos(t * 0.04 + s * 2) * r * 0.15; // the circle drifts
-    const birds = []; const w0 = ((K.v * cell) / Math.max(0.5 * cell, r * 0.83)) * (fx.speed ?? 1); // radians a second
+    const birds = []; const w0 = (K.v * cell) / Math.max(0.5 * cell, r * 0.83); // radians a second (C14: not times Speed: t is the effect's own clock, Speed in it; times Speed it jumped as Speed moved)
+    const turn = run(`ci|${fx.id || 'c'}`, t, w0, () => w0 * t); // (WI1: how far round they are, added up: w0 follows Size, and "w0 times the time" threw them round the circle with every step of the slider)
     for (let i = 0; i < n; i++) {
       const up = n > 1 ? (i + h(s + i * 3.1) * 0.6) / n : 0.5; // how high this one flies, 0 to 1: each at a height of its own
       const R = r * (0.62 + 0.42 * h(s + i * 5.7)) * (1 + 0.08 * Math.sin(t * 0.09 + i * 2));
       // (they share one turn, a steady rate since it is multiplied by the time, and keep apart round the circle: each a
       // share of it, drifting a little ahead and behind. Rates of their own brought them together for minutes on end)
-      const a = dir * (w0 * t + (i / n) * TAU + Math.min(0.5, (0.3 * TAU) / n) * Math.sin(t * 0.031 + i * 2.1 + s)) + h(s) * TAU;
+      const a = dir * (turn + (i / n) * TAU + Math.min(0.5, (0.3 * TAU) / n) * Math.sin(t * 0.031 + i * 2.1 + s)) + h(s) * TAU;
       const bx = cx + Math.cos(a) * R; const by = cy + Math.sin(a) * R * (0.94 + 0.06 * Math.sin(t * 0.07 + i));
       // a glide: the wings held out, tipping a little; gulls and crows beat now and then
       const open = K.flap ? wingOpen(S, t, s + i * 1.7) : 1 - 0.04 * (0.5 + 0.5 * Math.sin(t * 0.6 + i * 2.3));
       birds.push({ x: bx, y: by, ang: a + dir * (Math.PI / 2) + Math.sin(t * 0.21 + i * 1.3) * 0.06, open, bank: dir * 0.2, up });
     }
     birds.sort((p, q) => p.up - q.up); // the higher ones over the lower
-    const op = (b) => ({ sq: cell, size: K.k * (0.88 + 0.26 * b.up), dark: SCENE.dark, alpha: Math.min(1, I), bank: b.bank });
-    for (const b of birds) flyerShadow(ctx, K.pic, b.x, b.y, b.ang, b.open, { ...op(b), height: 7 + 5 * b.up, soft: true, shade: 0.8 });
+    // C14: Height (0 low .. 1 high, 0.6 as before): low birds are bigger with their shadow close and dark, high ones smaller
+    const hi = clamp(fx.height ?? 0.6, 0, 1); const hk = 1.35 - 0.6 * hi;
+    const op = (b) => ({ sq: cell, size: K.k * (0.88 + 0.26 * b.up) * hk * beast(fx), dark: SCENE.dark, alpha: Math.min(1, I), bank: b.bank });
+    for (const b of birds) flyerShadow(ctx, K.pic, b.x, b.y, b.ang, b.open, { ...op(b), height: (1.5 + 13 * hi) * (0.75 + 0.5 * b.up), soft: hi > 0.35, shade: 1 - 0.35 * hi });
     for (const b of birds) flyer(ctx, K.pic, b.x, b.y, b.ang, b.open, op(b));
   }
 
@@ -962,8 +1004,9 @@ const Creatures = (() => {
       out.push({ x, y, ang: a + Math.sin(age * 6 + i) * 0.15, open: S.lo + (1 - S.lo) * (0.5 + 0.5 * Math.cos((age * (bats ? 11 : 12) + h(s + i)) * TAU)), height, scale });
     }
     const op = { sq, dark: SCENE.dark, alpha: P.k };
-    for (const b of out) flyerShadow(ctx, pic, b.x, b.y, b.ang, b.open, { ...op, size: b.scale, height: b.height });
-    for (const b of out) flyer(ctx, pic, b.x, b.y, b.ang, b.open, { ...op, size: b.scale });
+    const big = 1.4; // (I8: they read better on the table)
+    for (const b of out) flyerShadow(ctx, pic, b.x, b.y, b.ang, b.open, { ...op, size: b.scale * big, height: b.height });
+    for (const b of out) flyer(ctx, pic, b.x, b.y, b.ang, b.open, { ...op, size: b.scale * big });
   }
 
   // =====================================================================
@@ -1027,7 +1070,8 @@ const Creatures = (() => {
       const u = t + h(sd + 2) * P * 3; const k = Math.floor(u / P); const ph = u - k * P;
       const tau = k * fly + Math.min(ph, fly); const resting = ph > fly;
       const f = 1.6 * (0.8 + 0.4 * h(sd + 3)) / Math.max(0.5, R / cell);
-      const a = roam(tau, sd, f); const b = roam(tau - 0.06, sd, f);
+      const way = run(`bf|${sd}`, tau, f, () => tau * f); // (WI1: its way along its wander, added up: f follows Size)
+      const a = roam(way, sd); const b = roam(way - 0.06 * f, sd);
       const bob = resting ? 0 : Math.sin(t * 7.3 + i) * 0.04 * cell;
       const ang = dirOf(b, a, h(sd) * TAU) + (resting ? 0 : Math.sin(t * 2.1 + i * 3) * 0.3);
       const open = resting ? 0.25 + 0.75 * (0.5 + 0.5 * Math.cos(t * 0.9 * TAU + i)) : S.lo + (1 - S.lo) * (0.5 + 0.5 * Math.cos((t * (3.6 + h(sd + 4)) + Math.sin(t * 1.7 + i) * 0.4) * TAU));
@@ -1061,12 +1105,15 @@ const Creatures = (() => {
   // a moth circling a point erratically
   function orbitMoth(i, sd, t, R, cell) {
     const dir = h(sd + 0.4) < 0.5 ? 1 : -1;
-    const w = (2.2 + 1.6 * h(sd)) * (0.9 + 0.3 * Math.sin(t * 0.8 + i));
-    const a = dir * (t * w + Math.sin(t * 1.9 + sd) * 0.8) + h(sd + 1) * TAU;
-    const rr = R * (1 + 0.28 * Math.sin(t * 2.3 + i * 2) + 0.12 * Math.sin(t * 6.1 + sd));
-    const jx = Math.sin(t * 9.1 + sd) * 0.05 * cell; const jy = Math.cos(t * 7.7 + sd * 2) * 0.05 * cell;
+    // (Glinn: the moths moved far too fast) the speed was a rate that changed with the time, times the time: with the
+    // time near 1e8 s that whipped them round (rule 1 in CLAUDE.md). Now a steady speed, about half the old one, and
+    // the unevenness added on, not multiplied in
+    const w = 1.1 + 0.8 * h(sd);
+    const a = dir * (t * w + 0.5 * Math.sin(t * 0.8 + i) + Math.sin(t * 1.3 + sd) * 0.6) + h(sd + 1) * TAU;
+    const rr = R * (1 + 0.25 * Math.sin(t * 1.6 + i * 2) + 0.1 * Math.sin(t * 3.7 + sd));
+    const jx = Math.sin(t * 4.3 + sd) * 0.04 * cell; const jy = Math.cos(t * 3.7 + sd * 2) * 0.04 * cell;
     const S = SPR.moth;
-    return { x: Math.cos(a) * rr + jx, y: Math.sin(a) * rr + jy, ang: a + dir * (Math.PI / 2) + Math.sin(t * 5 + i) * 0.5, open: S.lo + (1 - S.lo) * (0.5 + 0.5 * Math.cos((t * S.hz + h(sd)) * TAU)), height: 0.5 };
+    return { x: Math.cos(a) * rr + jx, y: Math.sin(a) * rr + jy, ang: a + dir * (Math.PI / 2) + Math.sin(t * 2.6 + i) * 0.4, open: S.lo + (1 - S.lo) * (0.5 + 0.5 * Math.cos((t * S.hz + h(sd)) * TAU)), height: 0.5 };
   }
   function drawBugs(ctx, pic, list, op) {
     for (const b of list) flyerShadow(ctx, pic, b.x, b.y, b.ang, b.open, { ...op, height: b.height });
@@ -1079,7 +1126,7 @@ const Creatures = (() => {
     const n = Math.max(1, Math.min(14, Math.round(K.n * (fx.density ?? 1))));
     const list = [];
     for (let i = 0; i < n; i++) { const b = bug(kind, i, s, t, r, cell); b.x += x; b.y += y; if (kind === 'butterflies' && fx.color) b.tint = fx.color; list.push(b); }
-    drawBugs(ctx, K.pic, list, { sq: cell, dark: SCENE.dark, alpha: Math.min(1, I) });
+    drawBugs(ctx, K.pic, list, { sq: cell, dark: SCENE.dark, alpha: Math.min(1, I), size: beast(fx) });
   }
 
   // Bats (a click). Flutter: 3–8 bats flit round the spot. Stream from here: now and then a ribbon of bats pours out the
@@ -1087,8 +1134,9 @@ const Creatures = (() => {
   const STREAM_PER = 180; const STREAM_LEN = 15;
   function flutterBat(i, sd, t, R, cell) {
     const f = (1.5 + 0.5 * h(sd)) / Math.max(0.6, R / cell);
-    const at = (tt) => { const a = roam(tt * 2.4, sd, f); return { x: a.x * R, y: a.y * R }; };
-    const a = at(t); const b = at(t - 0.04);
+    const way = run(`fb|${sd}`, t, 2.4 * f, () => t * 2.4 * f); // (WI1: as the butterflies; f follows Size, and R shrinks while a stream pours out)
+    const at = (w) => { const a = roam(w, sd); return { x: a.x * R, y: a.y * R }; };
+    const a = at(way); const b = at(way - 0.04 * 2.4 * f);
     const S = SPR.bat;
     return { x: a.x, y: a.y, ang: dirOf(b, a) + Math.sin(t * 6 + i) * 0.35, open: S.lo + (1 - S.lo) * (0.5 + 0.5 * Math.cos((t * (8.5 + 3 * h(sd + 1)) + h(sd)) * TAU)), height: 2.5 };
   }
@@ -1145,12 +1193,40 @@ const Creatures = (() => {
       const ang = Math.atan2(b[1] - a[1], b[0] - a[0]) || 0;
       // off its round a little, slowly, whatever way it heads (a drift, not a weave across the heading: that jumped in a bend)
       list.push({ x: p[0] + 0.4 * Math.sin(t * 0.37 + sd * 2), y: p[1] + 0.4 * Math.cos(t * 0.29 + sd * 5), ang: ang + 0.12 * Math.sin(t * 0.8 + sd * 2) + 0.05 * Math.sin(t * 2.3 + sd),
-        open: S.lo + (1 - S.lo) * (0.5 + 0.5 * Math.cos((t * (5 + 1.5 * h(sd + 3)) + h(sd)) * TAU)), height: 2 + 1.5 * h(sd + 4), size: 0.95 + 0.25 * h(sd + 5) });
+        open: S.lo + (1 - S.lo) * (0.5 + 0.5 * Math.cos((t * (5 + 1.5 * h(sd + 3)) + h(sd)) * TAU)), height: 2 + 1.5 * h(sd + 4), size: (0.95 + 0.25 * h(sd + 5)) * beast(fx) });
     }
     ctx.globalCompositeOperation = 'source-over';
     const op = { sq: 1, dark: SCENE.dark, alpha: A };
     for (const b of list) flyerShadow(ctx, 'bat', b.x, b.y, b.ang, b.open, { ...op, size: b.size, height: b.height });
     for (const b of list) flyer(ctx, 'bat', b.x, b.y, b.ang, b.open, { ...op, size: b.size });
+    ctx.globalAlpha = 1;
+    return list.length;
+  }
+  // C14 (Glinn): Circling birds over an area: they keep to what is painted, in loops and wide bends round it (a thin
+  // stroke: along it and back), at their height; the kinds, Amount, Speed and Size of the animals as Circling birds
+  function birdsOver(ctx, fx, t, o) {
+    const T0 = loopOf(fx, 0); if (!T0) return 0;
+    const K = CIRCLERS[fx.variant] || CIRCLERS.vultures; const S = SPR[K.pic];
+    const s = o.s; const A = Math.min(1, o.I);
+    const n = Math.max(1, Math.min(10, Math.round(K.n * (fx.density ?? 1) * clamp(T0.area / 30, 0.7, 2.5))));
+    const hi = clamp(fx.height ?? 0.6, 0, 1); const hk = 1.35 - 0.6 * hi;
+    const list = [];
+    for (let i = 0; i < n; i++) {
+      const sd = s + i * 6.1;
+      const T = loopOf(fx, i % 4) || T0; const dir = h(sd + 6) < 0.5 ? 1 : -1;
+      const v = K.v * 1.6 * (0.85 + 0.3 * h(sd + 1)); // squares a second, a steady pace (it is multiplied by the time)
+      const u = dir * (v * t + 1.2 * Math.sin(t * 0.13 + sd)) + h(sd + 2) * T.L;
+      const p = tourSmooth(T, u, 0.8); const a = tourSmooth(T, u - dir * 0.2, 0.8); const b = tourSmooth(T, u + dir * 0.2, 0.8);
+      const ang = Math.atan2(b[1] - a[1], b[0] - a[0]) || 0;
+      const up = h(sd + 4);
+      const open = K.flap ? wingOpen(S, t, sd) : 1 - 0.04 * (0.5 + 0.5 * Math.sin(t * 0.6 + i * 2.3));
+      list.push({ x: p[0] + 0.5 * Math.sin(t * 0.23 + sd * 2), y: p[1] + 0.5 * Math.cos(t * 0.19 + sd * 5), ang: ang + 0.06 * Math.sin(t * 0.5 + sd), open, up, bank: dir * 0.15 });
+    }
+    list.sort((p2, q) => p2.up - q.up);
+    ctx.globalCompositeOperation = 'source-over';
+    const op = (b) => ({ sq: 1, size: K.k * (0.88 + 0.26 * b.up) * hk * beast(fx), dark: SCENE.dark, alpha: A, bank: b.bank });
+    for (const b of list) flyerShadow(ctx, K.pic, b.x, b.y, b.ang, b.open, { ...op(b), height: (1.5 + 13 * hi) * (0.75 + 0.5 * b.up), soft: hi > 0.35, shade: 1 - 0.35 * hi });
+    for (const b of list) flyer(ctx, K.pic, b.x, b.y, b.ang, b.open, op(b));
     ctx.globalAlpha = 1;
     return list.length;
   }
@@ -1183,8 +1259,8 @@ const Creatures = (() => {
     }
     const op = { sq: cell, dark: SCENE.dark };
     const A = Math.min(1, I);
-    for (const b of list) flyerShadow(ctx, 'bat', b.x, b.y, b.ang, b.open, { ...op, alpha: A * (b.k ?? 1), size: b.size || 1, height: b.height });
-    for (const b of list) flyer(ctx, 'bat', b.x, b.y, b.ang, b.open, { ...op, alpha: A * (b.k ?? 1), size: b.size || 1 });
+    for (const b of list) flyerShadow(ctx, 'bat', b.x, b.y, b.ang, b.open, { ...op, alpha: A * (b.k ?? 1), size: (b.size || 1) * beast(fx), height: b.height });
+    for (const b of list) flyer(ctx, 'bat', b.x, b.y, b.ang, b.open, { ...op, alpha: A * (b.k ?? 1), size: (b.size || 1) * beast(fx) });
   }
   // a moment (seconds, at speed 1) when this Stream is `since` seconds in (for still pictures and the checks)
   function streamAt(fx, since = 4) { for (let t = 0; t < STREAM_PER * 3; t += 0.05) if (Math.abs(streamState(fx, t).since - since) < 0.03) return t; return 0; }
@@ -1438,7 +1514,7 @@ const Creatures = (() => {
     const m = ctx.getTransform(); const W = ctx.canvas.width; const H = ctx.canvas.height;
     const B = regionBox(ctx, fx, 0.3); if (!B) return 0;
     const T0 = tourOf(fx, 'all', () => true, 0); if (!T0) return 0;
-    const s = o.s; const A = Math.min(1, o.I); const size = 1; const len = GROUND[K.pic].len * size * (kind === 'shadow' ? 6 : 1);
+    const s = o.s; const A = Math.min(1, o.I); const size = beast(fx); const len = GROUND[K.pic].len * size * (kind === 'shadow' ? 6 : 1);
     const pic = kind === 'shadow' ? lowRes(shadowOf(K.pic), 40) : wet(K.pic, K.tint, K.dark, K.blur, o.C); // (the big shadow: a small picture drawn huge, so it is soft)
     if (!pic) return 0;
     const sc = scratch(13, W, H, B); const g = sc.g; g.setTransform(m);
@@ -1560,7 +1636,7 @@ const Creatures = (() => {
       if (K.gait && moving) ang += Math.sin(t * 9 + sd) * 0.05;
       out.push({ x, y, ang, a, moving, sd });
     }
-    const len = S0.len;
+    const len = S0.len * beast(fx);
     for (const c of out) if (sh) body(ctx, sh, `${K.pic}|shadow`, c.x + 0.025, c.y + 0.04, c.ang, len, critBend(K, len, t, c.moving, c.sd), 0.4 * A * c.a);
     for (const c of out) body(ctx, pic, key, c.x, c.y, c.ang, len * (K.gait && c.moving ? 1 + 0.03 * Math.sin(t * 18 + c.sd) : 1), critBend(K, len, t, c.moving, c.sd), A * c.a);
     ctx.globalAlpha = 1;
@@ -1656,9 +1732,12 @@ const Creatures = (() => {
     const v = 0.6 + 0.9 * Math.max(0.5, ws); const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
     const sc = scratch(16, W, H, B); const g = sc.g;
     // streamers: long, thin, racing downwind
-    patches(g, m, B, col, Math.min(1, I), { s1: 1.4, x1: dx * v * t, y1: dy * v * t, ang1: ang, st1: 5, s2: 0.9, x2: dx * v * t * 0.6, y2: dy * v * t * 0.6, ang2: ang + 8, st2: 3 });
+    // (WI1: how far the wind has carried the streamers, added up: its strength and its direction can change, and the
+    // sand goes on from where it is instead of lying somewhere else)
+    const gx = run(`dr|${fx.id}|x`, t, dx * v, () => dx * v * t); const gy = run(`dr|${fx.id}|y`, t, dy * v, () => dy * v * t);
+    patches(g, m, B, col, Math.min(1, I), { s1: 1.4, x1: gx, y1: gy, ang1: ang, st1: 5, s2: 0.9, x2: gx * 0.6, y2: gy * 0.6, ang2: ang + 8, st2: 3 });
     // the shimmer: a fine sliding layer
-    const sh = scratch(17, W, H, B); patches(sh.g, m, B, col, 0.5 * I, { s1: 0.35, x1: dx * v * t * 0.3, y1: dy * v * t * 0.3, ang1: ang, st1: 2.5, s2: 0.5, x2: -dy * 0.1 * Math.sin(t * 0.3), y2: dx * 0.1 * Math.sin(t * 0.3), ang2: ang, st2: 2 });
+    const sh = scratch(17, W, H, B); patches(sh.g, m, B, col, 0.5 * I, { s1: 0.35, x1: gx * 0.3, y1: gy * 0.3, ang1: ang, st1: 2.5, s2: 0.5, x2: -dy * 0.1 * Math.sin(t * 0.3), y2: dx * 0.1 * Math.sin(t * 0.3), ang2: ang, st2: 2 });
     g.globalAlpha = 0.6; g.drawImage(sh.c, B.x, B.y, B.w, B.h, B.x, B.y, B.w, B.h); g.globalAlpha = 1;
     // puffs blowing off at seeded points
     g.setTransform(m);
@@ -1678,8 +1757,15 @@ const Creatures = (() => {
   function devil(ctx, fx, x, y, t, r, I) {
     const s = F().seedOf(fx.id || 'd'); const cell = SCENE.cell;
     const cols = DEVIL[fx.variant] || DEVIL.dust; const ws = Wd().strength || 1;
-    const per = 26 / Math.max(0.3, ws - 0.2); const life = Math.min(per - 4, 14 + 6 * h(s)); // seconds
-    const c = cycle(t, per, s, 0.6); const age = c.since;
+    // (WI1: when the next whirl comes follows the wind. "The time divided by a period that follows the wind" threw the
+    // count of whirls on with every change of wind: the whirl on the table was gone, or one stood there half grown.
+    // Now the count is a clock the wind drives; a whirl's age is counted in seconds from when it rose and its life is
+    // the one it was given then)
+    const per = 26 / Math.max(0.3, ws - 0.2); // seconds from one whirl to the next
+    const key = `dv|${fx.id || 'd'}`;
+    const c = cycle(run(key, t, 1 / per, () => t / per), 1, s, 0.6);
+    const age = run(`${key}|${c.n}`, t, 1, () => c.since * per);
+    const life = keep(`${key}|${c.n}|life`, t, () => Math.min(per - 4, 14 + 6 * h(s))); // seconds
     if (age > life) return;
     const k = sm(0, 2, age) * (1 - sm(life - 3, life, age)); // grows 2 s, falls apart 3 s
     const fade = 1 - sm(life - 3, life, age);
@@ -1770,6 +1856,7 @@ const Creatures = (() => {
   }
   function tumble(ctx, w, W, H, t, now, o) {
     if (!w || !Array.isArray(w.layers)) return 0;
+    STILL = false;
     let drawn = 0; const fadeMs = (w.fade || 0) * 1000;
     for (const L of w.layers) {
       if (L.type !== 'tumble') continue;
@@ -1780,13 +1867,20 @@ const Creatures = (() => {
       const R = 0.45 * size * o.sq; const v = (1.6 + 1.2 * ws) * clamp(L.speed ?? 1, 0.1, 5) * o.sq; // table units a second
       const dir = (Wd().dir * Math.PI) / 180; const dx = Math.cos(dir); const dy = Math.sin(dir);
       const D = Math.abs(dx) * W + Math.abs(dy) * H + 4 * R; const cross = D / v; const per = Math.max(cross + 2, 20 / amt);
+      // (WI1: when the next one comes follows the wind, Speed, Amount and the zoom of the map, and "the time divided
+      // by that" threw the count on with every change: a weed half way across was gone. Now the count is a clock, and
+      // each weed's seconds and its way across are added up)
+      const key = `tw|${L.id || 'tumble'}`;
+      const c = cycle(run(key, t, 1 / per, () => t / per), 1, s, 0.7);
       for (const back of [0, 1]) {
-        const c = cycle(t, per, s, 0.7); const n = c.n - back; const since = c.since + back * per;
-        if (since > cross) continue;
+        const n = c.n - back;
+        const since = run(`${key}|${n}|t`, t, 1, () => (c.since + back) * per); // seconds since it came
+        const went = run(`${key}|${n}|d`, t, v, () => (c.since + back) * per * v); // how far it has rolled
+        if (went > D) continue;
         const lat = (h(s + n * 3.7) - 0.5) * 0.8 * (Math.abs(dx) * H + Math.abs(dy) * W);
-        const d = since * v - D / 2; const bx = W / 2 + dx * d - dy * lat; const by = H / 2 + dy * d + dx * lat;
+        const d = went - D / 2; const bx = W / 2 + dx * d - dy * lat; const by = H / 2 + dy * d + dx * lat;
         const hop = Math.abs(Math.sin(since * (2.2 + h(s + n)) * Math.PI * 0.5)) * R * 0.9 * (0.6 + 0.4 * h(s + n * 2)); // bounces
-        const spin = (since * v) / R;
+        const spin = went / R;
         // the shadow parts from it as it bounces
         const shK = 1 - 0.3 * (hop / R);
         ctx.globalCompositeOperation = 'source-over';
@@ -1908,6 +2002,7 @@ const Creatures = (() => {
 
   // ---------- the hooks fx.js calls for presets it does not know ----------
   function emitter(ctx, fx, x, y, t, r, I, C) {
+    STILL = typeof fx.id === 'string' && fx.id.startsWith('th-');
     switch (fx.preset) {
       case 'whirl': whirl(ctx, fx, x, y, t, r, I, C); return true;
       case 'geyser': geyser(ctx, fx, x, y, t, r, I, C); return true;
@@ -1921,12 +2016,14 @@ const Creatures = (() => {
     }
   }
   function region(ctx, fx, t, o) {
+    STILL = typeof fx.id === 'string' && fx.id.startsWith('th-');
     switch (fx.preset) {
       case 'rapids': rapids(ctx, fx, t, o); return true;
       case 'bubbling': bubbling(ctx, fx, t, o); return true;
       case 'fish': fish(ctx, fx, t, o); return true; // (second-ground-life)
       case 'critters': critters(ctx, fx, t, o); return true; // (second-ground-life)
       case 'batflight': batsOver(ctx, fx, t, o); return true; // (Beta 3.66)
+      case 'birdflight': birdsOver(ctx, fx, t, o); return true; // (C14)
       case 'dapple': dapple(ctx, fx, t, o); return true; // (second-sun-sand-gears)
       case 'drift': drift(ctx, fx, t, o); return true; // (second-sun-sand-gears)
       default: return false;
@@ -1937,6 +2034,6 @@ const Creatures = (() => {
   // a moment (seconds, at speed 1) when this geyser is `since` seconds into an eruption (for still pictures)
   function eruptionAt(fx, since = 1.2) { for (let t = 0; t < GEYSER_PER * 3; t += 0.05) if (Math.abs(geyserState(fx, t).since - since) < 0.03) return t; return 0; }
 
-  return { forget, emitter, region, swirl, wind, cycle, erupting, eruptionAt, GEYSER_PER, scene, sky, burst, ready, SPR, FLOCKS, CIRCLERS, SWARMS, moths, streamAt, STREAM_PER, GROUND, FISH, CRITS, tumble, turnPart, turnsOf, millAnchor, millRate, devilAt, tourOf, twistOf, walker }; // (second-ground-life: GROUND, FISH, CRITS; second-sun-sand-gears: tumble … millRate) // (second-birds: scene … CIRCLERS; second-bats-insects: SWARMS … STREAM_PER)
+  return { _orbitMoth: orbitMoth, _run: run, _runForget: () => RUN.clear(), forget, emitter, region, swirl, wind, windVec, cycle, erupting, eruptionAt, GEYSER_PER, scene, sky, burst, ready, SPR, FLOCKS, CIRCLERS, SWARMS, moths, streamAt, STREAM_PER, GROUND, FISH, CRITS, tumble, turnPart, turnsOf, millAnchor, millRate, devilAt, tourOf, twistOf, walker }; // (second-ground-life: GROUND, FISH, CRITS; second-sun-sand-gears: tumble … millRate) // (second-birds: scene … CIRCLERS; second-bats-insects: SWARMS … STREAM_PER)
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = Creatures;

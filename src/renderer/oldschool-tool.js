@@ -54,7 +54,7 @@ const OldschoolTool = (() => {
     const first = Oldschool.FLOORS[0];
     const prefs = {
       tool: 'room', snap: 'sq', level: 0, width: 1, brush: 1.5, erase: 'box', edge: 'walls', mats: { ...Oldschool.DEFAULT_MAT },
-      line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.3, round: false }, door: 'door', doorLeaf: 'wood', windowLeaf: 'clear', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box', mixW: 1.5, mixU: 0.5, mixT: 0.5, floorHow: 'click', fx: null, tint: '', waterTint: '', fxSoft: true, fxShape: 'box', // (Beta 3.43: an effect picked instead of a tile, the grass's colour, its soft edge; 3.46: the water's colour, how the effect is drawn)
+      rough: 0, /* (XA4: how jagged the brush's edge is, 0 to 1) */ line: { w: 0.5, h: 1, mat: 'stone_wall' }, pillar: { r: 0.25, round: false }, door: 'door', doorLeaf: 'wood', windowLeaf: 'clear', floorMode: 'tile', piece: 'tavern', turn: 0, ground: 'water', groundShape: 'box', mixW: 1.5, mixU: 0.5, mixT: 0.5, floorHow: 'click', fx: null, tint: '', waterTint: '', fxSoft: true, fxShape: 'box', // (Beta 3.43: an effect picked instead of a tile, the grass's colour, its soft edge; 3.46: the water's colour, how the effect is drawn)
       floor: first ? { rel: Oldschool.relOf(first) } : null,
     };
     try { const saved = JSON.parse(localStorage.getItem('osPrefs') || '{}'); if ('mix' in saved && !('mixU' in saved)) { delete saved.mix; delete saved.mixW; } Object.assign(prefs, saved, { mats: { ...prefs.mats, ...(saved.mats || {}) }, line: { ...prefs.line, ...(saved.line || {}) }, pillar: { ...prefs.pillar, ...(saved.pillar || {}) } }); } catch {}
@@ -67,11 +67,13 @@ const OldschoolTool = (() => {
     const O = ui.os;
     const save = () => { try { const { poly, lightSel: sel0, ...keep } = O; void poly; void sel0; localStorage.setItem('osPrefs', JSON.stringify(keep)); } catch {} };
     let lib = []; // the library's tiles (with their squares)
+    let libRev = 0; let hashFor = null; let hashWas = null; // (Speed 3, WC8: the drawing's fingerprint, kept while nothing it depends on changed)
     let libAt = 0;
     async function loadLib(force) {
       if (!force && Date.now() - libAt < 5000) return;
       libAt = Date.now();
       try { lib = (await ts.library('list')).filter((x) => x.cat === 'tiles'); } catch { lib = []; }
+      libRev++;
       update(); ctx.refreshPop();
     }
 
@@ -89,6 +91,11 @@ const OldschoolTool = (() => {
       return { x: round(G.ox + (Math.floor((p.x - G.ox) / s) + 0.5) * s, 4), y: round(G.oy + (Math.floor((p.y - G.oy) / s) + 0.5) * s, 4) };
     }
     // Beta 3.35: a pillar of 2, 4, 6 or 8 squares sits on a grid corner, so it covers whole squares; others on a square
+    // XA1 (Glinn, 26 Nov 2026): a pillar's size in half squares, with a quarter at the start: 0.25, 0.5, 1, 1.5 … 8
+    // (a square is an inch on the table). It was 0.2 to 8 in steps of a tenth: eighty stops
+    const PILLAR_SIZES = [0.25, 0.5, ...Array.from({ length: 15 }, (_, i) => 1 + i * 0.5)];
+    const pillarStop = (size) => PILLAR_SIZES.reduce((best, v, i) => (Math.abs(v - size) < Math.abs(PILLAR_SIZES[best] - size) ? i : best), 0);
+    O.pillar.r = PILLAR_SIZES[pillarStop(O.pillar.r * 2)] / 2; // (a size kept from before goes to the nearest stop)
     const pillarAt = (p, free) => { const n = O.pillar.r * 2; return !free && Math.abs(n - Math.round(n)) < 1e-6 && Math.round(n) % 2 === 0 ? snapCorner(p) : snapCenter(p, free); };
     // a corridor's line runs through square centres (odd widths) or along grid lines (even ones)
     const snapCorr = (p, free) => (free || O.snap === 'free' ? snapCorner(p, true) : O.width % 2 === 1 ? snapCenter(p) : snapCorner(p));
@@ -138,7 +145,7 @@ const OldschoolTool = (() => {
     const texNow = () => !!O.tex && !O.fx && (AREA_TOOLS.includes(O.tool) || O.tool === 'floor');
     const groupNow = () => (fxNow() ? 'style' : texNow() ? 'texture' : PARTS.includes(O.tool) ? 'structure' : 'terrain');
     function pickGroup(id) {
-      O.poly = null;
+      settle(); // (VG3)
       if (id === 'style') { O.tex = false; O.fx = Oldschool.LIVE_FX.some((x) => x.id === O.lastFx) ? O.lastFx : Oldschool.LIVE_FX[0].id; O.tool = (FX_SHAPES.find((x) => x.id === O.fxShape) || FX_SHAPES[0]).tool; }
       else if (id === 'texture') { O.fx = null; O.tex = true; O.tool = TEX_SHAPES.find((x) => x.id === texShape()).tool; }
       else if (id === 'structure') { O.fx = null; O.tex = false; O.tool = PARTS.includes(O.lastPart) ? O.lastPart : 'wall'; }
@@ -154,12 +161,21 @@ const OldschoolTool = (() => {
       if (fx) return { kind: 'live', ...geo, fx: cut ? 'none' : fx, ...(!cut && /^#[0-9a-f]{6}$/.test(fxTint(fx)) ? { tint: fxTint(fx) } : {}), mixW: O.fxSoft === false || geo.shape === 'fill' ? 0 : 1.5 };
       return { kind: cut ? 'cut' : 'area', ...geo, ...(cut ? {} : areaLook()) };
     };
+    // 26 Nov 2026: a drawn map has a maximum size (mapstate OS_MAX). What would pass it is not added: its outline
+    // leaves the preview and a short message says why.
+    function tooBig(n, waiting) {
+      count.refused++;
+      const gone = new Set((waiting || []).filter(Boolean));
+      if (gone.size) { pending = pending.filter((x) => !gone.has(x)); drawPreview(); }
+      toast(`A drawn map can be ${n} × ${n} squares at most`, { kind: 'error', ms: 4000 });
+    }
     function add(item, label) {
       if (!map() || !map().os) return;
       if (item.kind === 'texcut') { dropTex(item); drawPreview(); return Promise.resolve(null); } // (Texture → Erase: nothing is added)
-      if (item.shape !== 'fill') pending.push({ ...item, at: Date.now() }); // (a poured effect has no outline to show until the picture knows where it ran)
+      const wait = item.shape !== 'fill' ? { ...item, at: Date.now() } : null; // (a poured effect has no outline to show until the picture knows where it ran)
+      if (wait) pending.push(wait);
       drawPreview();
-      return cmd('os.add', { item }).then((r) => { if (r && r.ok && label !== false) toast(label || r.label || 'Drawn', { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); return r; });
+      return cmd('os.add', { item }).then((r) => { if (r && r.tooBig) { tooBig(r.tooBig, [wait]); return r; } if (r && r.ok && label !== false) toast(label || r.label || 'Drawn', { ms: 1400, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); return r; });
     }
 
     // ---------- the pointer ----------
@@ -266,13 +282,13 @@ const OldschoolTool = (() => {
       } else if (d.kind === 'ospath') {
         add(made({ shape: 'path', pts: d.pts, r: (O.width * g()) / 2 }, d.cut));
       } else if (d.kind === 'osbrush' && d.paint && fxNow()) { // (Beta 3.43) an effect brushed on
-        add(made({ shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r }, false));
+        add(made({ shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05, d.r), r: d.r }, false));
       } else if (d.kind === 'osbrush' && d.paint) { // (Beta 3.26) the picked floor painted into the floors under the brush
-        add({ kind: 'paint', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r, tile: O.floor, mixW: O.mixW, mixU: O.mixU, mixT: O.mixT }); // (Beta 3.38: its soft edge as wide as Blending says)
+        add({ kind: 'paint', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05, d.r), r: d.r, tile: O.floor, mixW: O.mixW, mixU: O.mixU, mixT: O.mixT }); // (Beta 3.38: its soft edge as wide as Blending says)
       } else if (d.kind === 'osbrush' && d.ground) {
-        add({ kind: 'ground', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r, preset: d.ground });
+        add({ kind: 'ground', shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05, d.r), r: d.r, preset: d.ground });
       } else if (d.kind === 'osbrush') {
-        { const item = made({ shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05), r: d.r }, d.cut); add(item, item.kind === 'cut' ? 'Erased' : null); }
+        { const item = made({ shape: 'brush', pts: simplifyPts(d.pts, g() * 0.05, d.r), r: d.r, ...(O.tool === 'brush' && O.rough > 0 ? { rough: O.rough } : {}) }, d.cut); add(item, item.kind === 'cut' ? 'Erased' : null); } // (XA4: the Brush's jagged edge, also when Alt erases with it)
       } else if (d.kind === 'osline') {
         if (Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) < g() * 0.25) { toast('Drag a wall from corner to corner', { ms: 1800 }); drawPreview(); return; }
         add({ kind: 'line', pts: [[d.a.x, d.a.y], [d.b.x, d.b.y]], w: O.line.w * g(), h: O.line.h, mat: O.line.mat });
@@ -298,6 +314,25 @@ const OldschoolTool = (() => {
       drawPreview();
     }
     function cancel() { if (O.poly) { O.poly = null; drawPreview(); return true; } return false; }
+    // UI audit VG1: the last corner of a half-drawn shape goes (Backspace, Delete, Ctrl Z)
+    function back() { if (!O.poly) return false; O.poly.pts.pop(); if (!O.poly.pts.length) O.poly = null; drawPreview(); return true; }
+    // UI audit VG3: another tool, tab or kind with a shape half drawn: from three corners it is closed (as Enter
+    // does); with fewer it goes and says why (it used to go without a word)
+    function settle() {
+      if (!O.poly) return false;
+      if (O.poly.pts.length >= 3) closePoly();
+      else { O.poly = null; drawPreview(); toast('A shape needs at least three corners', { ms: 1800 }); }
+      return true;
+    }
+    // UI audit VF5: [ ], Ctrl + wheel: the Brush's size, while the Brush is in hand
+    function brushStep(dir) {
+      if (!(O.tool === 'brush' || (O.tool === 'erase' && O.erase === 'brush') || (O.tool === 'floor' && O.floorHow === 'paint') || (O.tool === 'ground' && O.groundShape === 'brush'))) return false;
+      O.brush = Math.max(0.5, Math.min(6, (Number(O.brush) || 1) + (dir > 0 ? 0.5 : -0.5)));
+      save(); ctx.refreshPop(); drawPreview();
+      return true;
+    }
+    // Beta 3.68 (Glinn): out of Draw: a picked light is let go and its rings go with it (they stayed on the map)
+    function leaveTool() { if (O.lightSel) { O.lightSel = null; save(); } drawPreview(); }
     // Enter closes a shape, Esc drops it, Backspace takes its last corner back
     window.addEventListener('keydown', (e) => {
       if (ui.tool === 'oldschool' && O.tool === 'light' && !O.poly && (e.key === 'Delete' || e.key === 'Backspace')) { // (Beta 3.51: the picked light goes)
@@ -309,7 +344,7 @@ const OldschoolTool = (() => {
       const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); closePoly(); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); cancel(); }
-      else if (e.key === 'Backspace') { e.preventDefault(); e.stopImmediatePropagation(); O.poly.pts.pop(); if (!O.poly.pts.length) O.poly = null; drawPreview(); }
+      else if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); e.stopImmediatePropagation(); back(); } // (VG1: Delete too)
     }, true);
     function rightClick() { if (O.poly) { closePoly(); return true; } return false; }
     function dblClick() { if (O.poly && O.poly.pts.length >= 3) { closePoly(); return true; } return false; }
@@ -327,11 +362,33 @@ const OldschoolTool = (() => {
       }
       return out;
     }
-    function simplifyPts(pts, tol) {
+    // Speed 3 (WC4): a stroke kept a point every fifth of a square whatever its width, and the thinning could remove
+    // none of them (it dropped points closer than a twentieth). Now the points a stroke's shape does not need go: one
+    // that lies within tol of the line between its neighbours (Ramer, Douglas, Peucker), tol the larger of a twentieth
+    // of a square and a tenth of the brush's half width. A stroke that is still too long for a map says so.
+    const STROKE_MAX = 4000; // (what a map keeps of one stroke: mapstate ptsOf)
+    function simplifyPts(pts, tol, r = 0) {
       if (pts.length < 3) return pts;
-      const out = [pts[0]];
-      for (let i = 1; i < pts.length - 1; i++) { const [x, y] = out[out.length - 1]; if (Math.hypot(pts[i][0] - x, pts[i][1] - y) >= tol) out.push(pts[i]); }
-      out.push(pts[pts.length - 1]);
+      const near = [pts[0]];
+      for (let i = 1; i < pts.length - 1; i++) { const [x, y] = near[near.length - 1]; if (Math.hypot(pts[i][0] - x, pts[i][1] - y) >= tol) near.push(pts[i]); }
+      near.push(pts[pts.length - 1]);
+      const eps = Math.max(tol, r * 0.1);
+      const keep = new Uint8Array(near.length); keep[0] = keep[near.length - 1] = 1;
+      const todo = [[0, near.length - 1]];
+      while (todo.length) {
+        const [a, b] = todo.pop(); if (b - a < 2) continue;
+        const [ax, ay] = near[a]; const [bx, by] = near[b]; const dx = bx - ax; const dy = by - ay; const L2 = dx * dx + dy * dy;
+        let worst = 0; let at = -1;
+        for (let i = a + 1; i < b; i++) {
+          const [px, py] = near[i];
+          const t = L2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / L2)) : 0;
+          const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+          if (d > worst) { worst = d; at = i; }
+        }
+        if (worst > eps) { keep[at] = 1; todo.push([a, at], [at, b]); }
+      }
+      const out = near.filter((_, i) => keep[i]);
+      if (out.length > STROKE_MAX) toast('This stroke is too long for one piece: its end is left out', { kind: 'error' });
       return out;
     }
     // the Floor tool: the floor clicked gets the picked tile (and/or the edge)
@@ -354,7 +411,7 @@ const OldschoolTool = (() => {
       const at = Date.now();
       pending.push(...P.items.map((it) => ({ ...it, at })), ...P.doors.map((d) => ({ kind: 'door', ...d, at })));
       drawPreview(pt);
-      cmd('os.add', { items: P.items, doors: P.doors }).then((r) => { if (r && r.ok) toast(`${P.p.label} placed`, { ms: 1600, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); });
+      cmd('os.add', { items: P.items, doors: P.doors }).then((r) => { if (r && r.tooBig) { tooBig(r.tooBig, pending.filter((x) => x.at === at)); return; } if (r && r.ok) toast(`${P.p.label} placed`, { ms: 1600, undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); });
     }
     function turnPiece() { O.turn = ((O.turn || 0) + 1) % 4; save(); drawPreview(lastPt); }
     // Beta 3.40: doors and windows on any wall, not only on grid lines: the slanted side of a Shape, a round room's
@@ -528,6 +585,8 @@ const OldschoolTool = (() => {
       const root = el('g', { transform: `matrix(${px.x - p0.x} ${px.y - p0.y} ${py.x - p0.x} ${py.y - p0.y} ${p0.x} ${p0.y})` });
       svg.append(root);
       const thin = (0.06 * g()).toFixed(4);
+      // (Beta 3.68, Glinn: the light previews' lines were too thick) a hair: 1.5 pixels on the screen at any zoom
+      const hair = Math.max(1e-4, 1.5 / ((Math.hypot(px.x - p0.x, px.y - p0.y) || 1) * ((v.cam && v.cam.s) || 1)));
       const fillNow = () => (fxNow() ? fxColor(fxNow()) : patternFor(defs, O.floor));
       if (ui.tool === 'oldschool' && O.tool === 'light') { // (Beta 3.51) the picked light: a ring, its reach, and where a drag would put it
         const sl = lightSel();
@@ -535,15 +594,24 @@ const OldschoolTool = (() => {
           const s2 = g(); const f = sl; const dd = sl.holder ? Fixtures.BY[sl.holder] : null; const GOLD = '#f0b44a';
           const drag = d && d.kind === 'oslight' && d.moved ? (wallLight(sl) ? Fixtures.at(m, d.pt, sl.holder) : { x: d.pt.x, y: d.pt.y, rotation: sl.rotation || 0 }) : null;
           const q = drag || { x: sl.x, y: sl.y, rotation: sl.rotation || 0 };
-          if (drag && dd) root.append(el('rect', { x: q.x - (dd.w * s2) / 2, y: q.y - (dd.h * s2) / 2, width: dd.w * s2, height: dd.h * s2, fill: 'rgba(240,180,74,0.25)', stroke: GOLD, 'stroke-width': thin, transform: `rotate(${q.rotation} ${q.x} ${q.y})` }));
-          root.append(el('circle', { class: 'os-lightsel', cx: q.x, cy: q.y, r: s2 * 0.32, fill: 'rgba(240,180,74,0.16)', stroke: GOLD, 'stroke-width': (thin * 1.5).toFixed(4) }),
-            el('circle', { class: 'os-lightreach', cx: q.x, cy: q.y, r: (((f && f.dim) || 40) / 5) * s2, fill: 'none', stroke: (f && f.color) || GOLD, 'stroke-width': thin, 'stroke-dasharray': `${thin * 4} ${thin * 3}`, opacity: '0.7' }));
+          if (drag && dd) root.append(el('rect', { x: q.x - (dd.w * s2) / 2, y: q.y - (dd.h * s2) / 2, width: dd.w * s2, height: dd.h * s2, fill: 'rgba(240,180,74,0.25)', stroke: GOLD, 'stroke-width': hair, transform: `rotate(${q.rotation} ${q.x} ${q.y})` }));
+          root.append(el('circle', { class: 'os-lightsel', cx: q.x, cy: q.y, r: s2 * 0.32, fill: 'rgba(240,180,74,0.16)', stroke: GOLD, 'stroke-width': hair * 1.4 }),
+            el('circle', { class: 'os-lightreach', cx: q.x, cy: q.y, r: (((f && f.dim) || 40) / 5) * s2, fill: 'none', stroke: (f && f.color) || GOLD, 'stroke-width': hair, 'stroke-dasharray': `${hair * 6} ${hair * 4}`, opacity: '0.7' }));
         }
       }
       const look = (it) => (it.kind === 'live' ? fxColor(it.fx) : it.kind === 'cut' ? 'rgba(10,10,12,0.85)' : it.kind === 'ground' ? groundColor(it.preset) : it.kind === 'line' || it.kind === 'pillar' || (it.kind === 'stairs' && !it.tile) ? 'rgba(140,135,128,0.95)' : patternFor(defs, it.tile));
       for (const it of pending) { const e2 = shapeEl(it, look(it), { opacity: '0.95' }); if (e2) root.append(e2); }
       // the one being drawn
       if (ui.tool !== 'oldschool') return;
+      // XA3 (Glinn, 26 Nov 2026): a drawn map can be 300 × 300 squares. A faint frame shows how far this drawing may
+      // still reach: far out while the drawing is small, and exactly 300 × 300 once it is that large. Your screen only
+      { const fr = reach(m); if (fr) {
+        const dash = `${(hair * 8).toFixed(4)} ${(hair * 6).toFixed(4)}`;
+        root.append(el('rect', { class: 'os-reach', x: fr.x, y: fr.y, width: fr.w, height: fr.h, fill: 'none', stroke: 'rgba(244,232,206,0.42)', 'stroke-width': (hair * 1.2).toFixed(4), 'stroke-dasharray': dash, 'pointer-events': 'none' }));
+        const word = el('text', { class: 'os-reach-word', x: fr.x + hair * 7, y: fr.y + hair * 15, 'font-size': (hair * 8.5).toFixed(4), fill: 'rgba(244,232,206,0.55)', 'pointer-events': 'none' });
+        word.textContent = `${Oldschool.MAX_SQUARES} × ${Oldschool.MAX_SQUARES} squares`;
+        root.append(word);
+      } }
       // Beta 3.24: the grid line is hidden, so the squares show around the pointer (fading out), and what a click or a
       // drag would make shows before it is made: its corner, the corridor's width, the brush, the floor that changes
       if (pt) {
@@ -570,8 +638,8 @@ const OldschoolTool = (() => {
             const dd = ctx.lightDef(); const q = lightSel() || Fixtures.under(m, pt) ? null : dd.group === 'holder' ? Fixtures.at(m, pt, dd.id) : { x: pt.x, y: pt.y, rotation: 0 }; // (3.51: none while one is picked or under the pointer)
             if (q) {
               const col = (ctx.lightNext().color || '') || ORANGE;
-              if (dd.group === 'holder') { const w = dd.w * s; const hh = dd.h * s; root.append(el('rect', { x: q.x - w / 2, y: q.y - hh / 2, width: w, height: hh, fill: 'rgba(240,180,74,0.25)', stroke: ORANGE, 'stroke-width': thin, transform: `rotate(${q.rotation} ${q.x} ${q.y})` })); }
-              root.append(el('circle', { cx: q.x, cy: q.y, r: s * 0.45, fill: 'none', stroke: col, 'stroke-width': thin, 'stroke-dasharray': `${thin * 3} ${thin * 2}`, opacity: q.free && dd.wall != null ? '0.4' : '1' }));
+              if (dd.group === 'holder') { const w = dd.w * s; const hh = dd.h * s; root.append(el('rect', { x: q.x - w / 2, y: q.y - hh / 2, width: w, height: hh, fill: 'rgba(240,180,74,0.25)', stroke: ORANGE, 'stroke-width': hair, transform: `rotate(${q.rotation} ${q.x} ${q.y})` })); }
+              root.append(el('circle', { cx: q.x, cy: q.y, r: s * 0.45, fill: 'none', stroke: col, 'stroke-width': hair, 'stroke-dasharray': `${hair * 6} ${hair * 4}`, opacity: q.free && dd.wall != null ? '0.4' : '1' }));
             }
           } else if (t === 'wall') {
             const q = snapCorner(pt); root.append(el('circle', { cx: q.x, cy: q.y, r: (O.line.w * s) / 2, fill: 'rgba(140,135,128,0.8)' })); cross(q);
@@ -625,10 +693,35 @@ const OldschoolTool = (() => {
       }
     }
     let lastPt = null; let lastD = null;
-    function hover(e, pt) { lastPt = pt; if (ui.tool === 'oldschool') drawPreview(pt); } // (Beta 3.24: every tool shows where it would draw)
+    // Speed 1 (WA4): is the hand still at it? A mouse button held anywhere (a shape, the sun dial, a slider), a
+    // half-drawn shape, or the pointer moved over the map with Draw in hand a moment ago
+    let btnHeld = false; let movedAt = 0; let warmed = false; let lastCamp;
+    window.addEventListener('pointerdown', () => { btnHeld = true; }, true);
+    for (const ev of ['pointerup', 'pointercancel', 'blur']) window.addEventListener(ev, () => { btnHeld = false; }, true);
+    function hover(e, pt) { lastPt = pt; if (ui.tool === 'oldschool') { movedAt = Date.now(); drawPreview(pt); } } // (Beta 3.24: every tool shows where it would draw)
     function leave() { lastPt = null; if (ui.tool === 'oldschool') drawPreview(); }
     // the view moved or zoomed: the preview follows
     function redraw() { if (svg && (ui.tool === 'oldschool' || pending.length)) drawPreview(lastPt, lastD); }
+    // XA3: the frame a drawing may still reach to. What counts is what mapstate.js counts (osSpan): floors, grounds,
+    // walls, pillars and stairs with their width; not Erase, not effects. Worked out once per state of the drawing
+    let reachOf = null; let reachIs = null;
+    function reach(m) {
+      if (!m || !m.os) return null;
+      if (reachOf === m.os.items) return reachIs;
+      reachOf = m.os.items; reachIs = null;
+      let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+      for (const it of m.os.items) {
+        if (!it || it.kind === 'cut' || it.kind === 'live' || !it.pts) continue;
+        const pad = it.kind === 'line' ? (it.w || 0) / 2 : it.kind === 'pillar' ? (it.r || 0) : it.shape === 'path' || it.shape === 'brush' ? (it.r || 0) : 0;
+        for (const [x, y] of it.pts) { if (x - pad < x0) x0 = x - pad; if (y - pad < y0) y0 = y - pad; if (x + pad > x1) x1 = x + pad; if (y + pad > y1) y1 = y + pad; }
+      }
+      if (x1 < x0) return null; // (nothing drawn yet: no frame)
+      const M = Oldschool.MAX_SQUARES * g();
+      // (a drawing from before the maximum may be larger than it: then the frame is what it covers now)
+      const lo = (a, b) => Math.min(a, b - M); const span = (a, b) => Math.max(b - a, 2 * M - (b - a));
+      reachIs = { x: lo(x0, x1), y: lo(y0, y1), w: span(x0, x1), h: span(y0, y1) };
+      return reachIs;
+    }
 
     // ---------- Beta 3.32: how far the picture is, in a pill at the top (the one of the prepared animations: the maid runs
     // along). Only when it takes a while: on a quick machine it never shows.
@@ -650,7 +743,7 @@ const OldschoolTool = (() => {
         paint(); el.hidden = false; on = true;
       };
       return {
-        start() { k = 0; clearTimeout(showT); if (Oldschool.noPill) return; if (on) show(); else showT = setTimeout(show, 700); },
+        start() { k = 0; clearTimeout(showT); if (Oldschool.noPill) return; if (on || Oldschool.pillNow) show(); else showT = setTimeout(show, 700); }, // (pillNow: the self-test, without the wait)
         progress(v) { k = Math.max(k, v); if (on) paint(); },
         end(ok) {
           clearTimeout(showT); showT = 0;
@@ -660,33 +753,78 @@ const OldschoolTool = (() => {
           clearTimeout(hideT);
           hideT = setTimeout(() => { el.classList.add('out'); hideT = setTimeout(() => { el.hidden = true; on = false; el.classList.remove('out', 'done'); }, 500); }, ok ? 900 : 0);
         },
+        // (Glinn, 26 Nov 2026: "very often stuck at 94 %") no picture is being made right now and the next one waits
+        // for the hand to rest: the pill goes without a tick, and comes back when that picture takes a while
+        rest() {
+          clearTimeout(showT); showT = 0;
+          if (!on) return;
+          clearTimeout(hideT);
+          hideT = setTimeout(() => { el.classList.add('out'); hideT = setTimeout(() => { el.hidden = true; on = false; el.classList.remove('out', 'done'); }, 500); }, 400);
+        },
         get shown() { return on; },
       };
     })();
 
     // ---------- making the picture ----------
     let baking = false; let again = false; let timer = 0; let status = 'idle'; let lastErr = null;
+    let bakingFor = null; let staleNow = false; let failed = null; let dueAt = 0; let shownFrom = 0;
+    const count = { started: 0, sent: 0, dropped: 0, again: 0, refused: 0 }; // (for the self-test; refused: things not added because the map would be too large)
+    // Speed 1 (WA4): the picture is made 0.3 s after the last change, but not while the hand is still at it: making it
+    // holds the screen for a moment, and that came exactly while the next room was being drawn. A held button or a
+    // half-drawn shape puts it off for up to 20 s, a pointer moving over the map for up to 4 s. What was drawn stays on
+    // screen as its outline meanwhile.
+    function arm() {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = 0;
+        const waited = Date.now() - dueAt;
+        const busy = btnHeld || O.poly ? waited < 20000 : ui.tool === 'oldschool' && Date.now() - movedAt < 250 && waited < 4000;
+        if (busy) arm(); else { dueAt = 0; bake(); }
+      }, 320);
+    }
     function update() {
       const m = map();
       const bgKey = m && m.bg ? `${m.bg.path}|${m.bg.os}` : '';
-      if (bgKey !== lastBg) { lastBg = bgKey; if (pending.length) { pending = pending.filter((x) => Date.now() - x.at < 600 && baking); drawPreview(); } }
+      // (a new picture is there: what it was made from is in it; what was drawn after its making began stays as an outline)
+      if (bgKey !== lastBg) { lastBg = bgKey; if (pending.length) { pending = pending.filter((x) => x.at > shownFrom); drawPreview(); } }
       if (!m || !m.os) { if (svg) svg.replaceChildren(); return; }
       if (ui.tool === 'oldschool' || pending.length) drawPreview();
       // a tile of the library not known yet (or its squares): the library is read again first
       if (m.os.items.some((it) => it.tile && !Oldschool.tileInfo(it.tile, []) && !lib.some((x) => (it.tile.rel && x.rel === it.tile.rel) || (it.tile.path && x.path === it.tile.path)))) loadLib();
+      // (Speed 2, WB8: the store of mixing masks, up to 96 MB, was never emptied: it is let go with the campaign)
+      { const camp = S() && S().campaign ? S().campaign.id : null; if (camp !== lastCamp) { if (lastCamp !== undefined && !baking) Oldschool.forgetKept(); lastCamp = camp; } }
+      // (Speed 2, WB6: a drawn map is open: the graphics programs are handed over now, in a quiet moment, not with the first picture)
+      if (!warmed) { warmed = true; (window.requestIdleCallback || setTimeout)(() => { try { Oldschool.warm(); } catch (err) { console.error(err); } }, { timeout: 2000 }); }
       sharpFromTv(m);
-      const want = Oldschool.hash(m, lib);
+      // (Speed 1, WA2: the dots a square the picture has are kept while they are near enough)
+      Oldschool.setHas(m.bg && m.bg.os && m.bg.scale > 0 && !m.bg.missing ? { P: Math.round((m.grid.size || 1) / m.bg.scale), sharpP: m.bg.sharp ? m.bg.sharp.P : 0 } : null);
+      // (Speed 3, WC8: worked out only when the drawing, the grid, the library's tiles or the sharpness is another one)
+      const sig = m.osRev ? `${m.id}|${m.osRev}|${m.grid.size},${m.grid.ox},${m.grid.oy}|${libRev}|${Oldschool.keySig()}` : null;
+      const want = sig && sig === hashFor ? hashWas : Oldschool.hash(m, lib);
+      hashFor = sig; hashWas = want;
+      if (baking && want !== bakingFor) staleNow = true; // (Speed 1, WA5: the picture being made is for a drawing that is gone)
       const has = m.bg && !m.bg.missing ? m.bg.os : (m.os.items.length ? null : want);
-      if (has === want) { if (status !== 'idle') { status = 'idle'; ctx.refreshPop(); } return; }
-      clearTimeout(timer);
-      timer = setTimeout(() => { timer = 0; bake(); }, 320);
+      if (has === want) {
+        clearTimeout(timer); timer = 0; dueAt = 0; // (a timer set by an earlier change made a picture of an unchanged drawing)
+        // (Glinn, 26 Nov 2026: stuck at 94 % with everything there. A state that came while the picture was being made
+        // asked for it once more; when that picture then arrived, this line dropped the request and nobody put the
+        // pill away. It stood at the last number it had been told, 94 %, until the next change of the drawing)
+        if (!baking && pill.shown) pill.end(true);
+        if (pending.length && !baking) { const n = pending.length; pending = pending.filter((x) => Date.now() - x.at < 500); if (pending.length !== n) drawPreview(); } // (the picture is the drawing: no outline is owed, e.g. after Undo)
+        if (status !== 'idle') { status = 'idle'; ctx.refreshPop(); }
+        return;
+      }
+      if (want === failed) return; // (Speed 1, WA9: this very drawing could not be made into a picture: tried again when it changes, not on every state)
+      if (baking && want === bakingFor) return; // (its picture is being made this very moment: nothing more to ask for)
+      if (!dueAt) dueAt = Date.now();
+      arm();
     }
     // Beta 3.25: the sharp tiles get as many dots a square as the TV shows (a quarter more, for a closer look on this
     // screen): the square's size on the table × the TV's dots an inch
     function sharpFromTv(m) {
       const v = S() && S().view; if (!v || !v.ppi) return;
       const zoom = (m.view && m.view.zoom) || 1;
-      Oldschool.setSharp((m.grid.size || 1) * zoom * v.ppi * (v.dpr || 1) * 1.25);
+      Oldschool.setSharp((m.grid.size || 1) * zoom * v.ppi * (v.dpr || 1) * 1.25, m.bg && m.bg.sharp ? m.bg.sharp.P : 0); // (Speed 1, WA3: in steps, and what the picture has is kept while it is near enough)
     }
     async function bake() {
       if (baking) { again = true; return; }
@@ -694,24 +832,35 @@ const OldschoolTool = (() => {
       baking = true; status = 'busy'; ctx.refreshPop();
       const mapId = m.id; const snap = structuredClone({ os: m.os, grid: m.grid });
       const want = Oldschool.hash(snap, lib);
-      pill.start(); let ok = false;
+      bakingFor = want; staleNow = false; const began = Date.now(); count.started++;
+      pill.start(); let ok = false; let sent = false;
       try {
-        const r = await Oldschool.bake(snap, lib, m.bg && m.bg.sharp, (v) => pill.progress(v * 0.97));
-        if (map() && map().id === mapId) {
+        // (Speed 1, WA8) tiles of an earlier state of this drawing that are still on the disk (the last undo steps' are kept there)
+        let have = null; try { have = new Set(await ts.app('os.tiles', { mapId })); } catch { have = null; }
+        let r = await Oldschool.bake(snap, lib, m.bg && m.bg.sharp, (v) => pill.progress(v * 0.97), { stale: () => staleNow, have }); // (the last 3 %: handing it over and saving)
+        // (Speed 3, WC10: the graphics card failed and the picture came out flat: made once more before one is kept)
+        if (r && r.flat && !staleNow) { count.again = (count.again || 0) + 1; r = await Oldschool.bake(snap, lib, m.bg && m.bg.sharp, (v) => pill.progress(v * 0.97), { stale: () => staleNow, have }); }
+        if (map() && map().id === mapId && !staleNow) { // (WA5: a picture of a drawing that is gone is not saved or shown)
+          shownFrom = began; sent = true; count.sent++;
           const data = r.blob ? new Uint8Array(await r.blob.arrayBuffer()) : null;
           // (Beta 3.25) the sharp tiles: new ones with their picture, kept ones by their key alone
           const sharp = r.sharp ? { P: r.sharp.P, ts: r.sharp.ts, tiles: await Promise.all(r.sharp.tiles.map(async (t) => ({ c: t.c, r: t.r, h: t.h, jpg: !!(t.blob && t.jpg), data: t.blob ? new Uint8Array(await t.blob.arrayBuffer()) : null }))) } : null;
           const live = r.live ? new Uint8Array(await r.live.arrayBuffer()) : null; // (Beta 3.42: where its living tiles lie)
           await ts.cmd('os.baked', { mapId, hash: want, empty: !!r.empty, data, sharp, live, ids: [...snap.os.items.map((x) => x.id), ...snap.os.doors.map((x) => x.id)], x: r.x, y: r.y, scale: r.scale, nw: r.nw, nh: r.nh, walls: r.walls });
         }
-        lastErr = null; ok = true;
-      } catch (err) { console.error(err); lastErr = String(err && err.message || err); }
+        lastErr = null; ok = true; failed = null;
+      } catch (err) {
+        if (err && err.stale) { ok = true; count.dropped++; } // (given up for the next one)
+        else { console.error(err); lastErr = String(err && err.message || err); failed = want; }
+      }
       if (!again) pill.end(ok); // (another change waits: the pill goes on with it)
-      baking = false; status = 'idle';
-      pending = pending.filter((x) => Date.now() - x.at < 300);
+      baking = false; bakingFor = null; status = 'idle';
+      // (Speed 9, WI6: an outline goes when the picture that holds its shape was sent. It went by age: a shape drawn
+      // while a picture was being made vanished until the next one.)
+      if (sent) pending = pending.filter((x) => x.at > began);
       drawPreview();
       ctx.refreshPop();
-      if (again) { again = false; update(); if (!timer && !baking) pill.end(ok); } // (nothing left to make after all)
+      if (again) { again = false; update(); if (!timer && !baking) pill.end(ok); else if (!baking) pill.rest(); } // (nothing left to make after all; or the next one waits for the hand to rest)
     }
 
     // ---------- tiles: the squares a tile spans, set once ----------
@@ -817,20 +966,27 @@ const OldschoolTool = (() => {
       const rel = Oldschool.relOf(f); const o = lib.find((x) => x.builtin && x.rel === rel);
       return { rel, name: f.label, url: Oldschool.tileInfo({ rel }).small, big: Oldschool.tileInfo({ rel }).url, builtin: true, squares: (o && o.squares) || f.squares, off: (o && o.off) || f.off || [0, 0], adjusted: !!(o && o.adjusted) };
     }), ...lib.filter((x) => !x.builtin)];
-    // the last 8 used (a pick among them keeps their places; one from the list takes the oldest one's place)
+    // the last five used, one row (25 Nov 2026; it was eight in two rows): a pick among them keeps their places; one
+    // from the list takes the oldest one's place
+    // XA5 (Glinn, 26 Nov 2026): the row shows the four used last and a "+" that opens all of them (it was five and a
+    // wide button "List …" under them)
+    const TILE_ROW = 4;
+    const moreTile = (cls, label, tip, open) => h('button', { class: `tile os-plus ${cls}`, 'aria-label': label, 'data-tip': tip, onclick: open }, iconEl('plus'));
+    const secLabel = (text) => h('div', { class: 'ctl-label os-sec' }, text); // (the panel's headings: larger, to be read at a glance)
     function recentTiles() {
       const all = floorList(); const by = new Map(all.map((x) => [tileKey(x), x]));
       let keys = (O.recentTiles || []).map(tileKey).filter((k) => by.has(k));
       if (O.floor && by.has(tileKey(O.floor)) && !keys.includes(tileKey(O.floor))) keys.unshift(tileKey(O.floor));
-      for (const it of all) { if (keys.length >= 8) break; if (!keys.includes(tileKey(it))) keys.push(tileKey(it)); }
-      keys = keys.slice(0, 8);
+      for (const it of all) { if (keys.length >= TILE_ROW) break; if (!keys.includes(tileKey(it))) keys.push(tileKey(it)); }
+      if (O.floor && keys.indexOf(tileKey(O.floor)) >= TILE_ROW) keys = [tileKey(O.floor), ...keys.filter((k) => k !== tileKey(O.floor))]; // (a row kept from when it was longer: the tile in hand stays in it)
+      keys = keys.slice(0, TILE_ROW);
       if (JSON.stringify(keys) !== JSON.stringify((O.recentTiles || []).map(tileKey))) { O.recentTiles = keys.map((k) => { const it = by.get(k); return it.rel ? { rel: it.rel } : { path: it.path }; }); save(); }
       return keys.map((k) => by.get(k));
     }
     function rememberTile(ref) {
       const k = tileKey(ref); const list = O.recentTiles || [];
       if (list.some((x) => tileKey(x) === k)) return;
-      O.recentTiles = [ref.rel ? { rel: ref.rel } : { path: ref.path }, ...list].slice(0, 8); save();
+      O.recentTiles = [ref.rel ? { rel: ref.rel } : { path: ref.path }, ...list].slice(0, TILE_ROW); save();
     }
     const gridMenu = (e, it) => { e.preventDefault(); e.stopPropagation(); UI.openMenu(e.clientX, e.clientY, [{ icon: 'grid-4x4', label: 'Adjust grid', action: () => adjustGrid(it.builtin ? { ...it, url: it.big } : it) }]); };
     // Beta 3.38: a tile's colour, for sorting the list by it: greys first (dark to light), then round the colour wheel.
@@ -876,7 +1032,9 @@ const OldschoolTool = (() => {
         loadLib();
         // (_when: for Newest. Your own by their file's day; the app's after them, the ones that came last first)
         const items = () => floorList().map((it, i) => ({ ...it, src: it, path: it.builtin ? `tile:${it.rel}` : it.path, kind: 'image', thumb: it.builtin ? it.url : it.thumb || it.url, _when: it.builtin ? i + 1 : it.mtime || 0, ...(it.builtin ? { _dirs: ['Tablescape'] } : {}) }));
-        const onMap = () => new Set((map() && map().os ? map().os.items : []).map((x) => tileKey(x.tile)).filter(Boolean));
+        // (Speed 2, WB10: once for each state, not once for each tile of the list)
+        let onMapFor = null; let onMapSet = new Set();
+        const onMap = () => { const os = (map() && map().os) || null; if (os !== onMapFor) { onMapFor = os; onMapSet = new Set((os ? os.items : []).map((x) => tileKey(x.tile)).filter(Boolean)); } return onMapSet; };
         const recent = () => new Set((O.recentTiles || []).map(tileKey));
         return PickList.build({
           bind: c().bind, items, rootLabel: 'Tiles', memKey: 'ostiles', sorts: TILE_SORTS,
@@ -911,6 +1069,7 @@ const OldschoolTool = (() => {
     const cssUrl = (u) => `url("${String(u || '').replace(/["\\\n]/g, (ch) => encodeURIComponent(ch))}")`;
     const bgOf = (u, px) => (u ? `${cssUrl(u)} 0 0 / ${px}px ${px}px` : '#3a3a3a');
     const matOf = (id) => Oldschool.DATA.tiles.find((x) => x.id === id) || Oldschool.DATA.tiles.find((x) => x.id === 'stone_wall');
+    const KIT_IDS = Oldschool.WALLKITS.map((x) => x.id); // (25 Nov 2026: the wall kits, after the three walls there were)
     const matUrl = (id) => new URL(`tiles/${matOf(id).small}`, document.baseURI).href;
     const doorUrl = (n) => new URL(`doors/${n}.png`, document.baseURI).href;
     const tileNow = () => { const all = floorList(); const k = tileKey(O.floor); return all.find((x) => tileKey(x) === k) || all[0]; };
@@ -959,7 +1118,7 @@ const OldschoolTool = (() => {
           art = ground('wall', w); name = `${matOf(O.line.mat).label} wall`; sub = `${O.line.w <= 0.25 ? 'thin' : O.line.w >= 1 ? 'thick' : 'normal'} · ${O.line.h < 1 ? 'low' : 'full height'}`;
         } else if (t === 'pillar') {
           const d = Math.round(Math.min(50, 14 + O.pillar.r * 2 * 12)); const b = h('i', { class: `blk${O.pillar.round ? ' round' : ''}` }); b.style.background = bgOf(matUrl(O.line.mat), 84); b.style.width = b.style.height = `${d}px`;
-          art = ground('pillar', b); name = `${matOf(O.line.mat).label} pillar`; sub = `${O.pillar.round ? 'round' : 'square'} · ${round(O.pillar.r * 2, 1)} square${O.pillar.r * 2 === 1 ? '' : 's'}`;
+          art = ground('pillar', b); name = `${matOf(O.line.mat).label} pillar`; sub = `${O.pillar.round ? 'round' : 'square'} · ${round(O.pillar.r * 2, 2)} square${O.pillar.r * 2 === 1 ? '' : 's'}`;
         } else if (t === 'light') { // (Beta 3.49)
           const sl = lightSel(); const nx = ctx.lightNext();
           const dd = sl ? Fixtures.defOfLight(sl) : ctx.lightDef(); // (Beta 3.54: a holder's picture, or a flame's or a light's icon)
@@ -1026,11 +1185,11 @@ const OldschoolTool = (() => {
       const go = () => { save(); ctx.openPop('oldschool'); drawPreview(); }; // (an open card stays while it still fits: Blending with a tool that blends, an effect's card with an effect)
       const tile = (v, label, icon, tip, run, extra = {}) => h('button', { class: 'tile', dataset: { v, ...extra }, 'data-tip': tip, 'aria-label': label, onclick: run }, iconEl(icon), h('span', {}, label));
       const groups = h('div', { class: 'os-tools os-tabs os-groups' }, ...GROUPS.map((G) => tile(`g-${G.id}`, G.label, G.icon, G.tip, () => { if (groupNow() === G.id) return; pickGroup(G.id); go(); }, { g: G.id })));
-      const toolTab = (t) => tile(t.id, t.id === 'room' ? 'Box' : t.label, t.icon, t.tip, () => { O.tool = t.id; O.fx = null; O.tex = false; O.poly = null; if (PARTS.includes(t.id)) O.lastPart = t.id; else O.lastTerrain = t.id; go(); });
+      const toolTab = (t) => tile(t.id, t.id === 'room' ? 'Box' : t.label, t.icon, t.tip, () => { settle(); O.tool = t.id; O.fx = null; O.tex = false; if (PARTS.includes(t.id)) O.lastPart = t.id; else O.lastTerrain = t.id; go(); });
       const second = group === 'terrain' ? TERRAIN.map((id) => toolTab(TOOLS.find((x) => x.id === id)))
         : group === 'structure' ? TOOLS.filter((t) => PARTS.includes(t.id)).map(toolTab)
-          : group === 'texture' ? TEX_SHAPES.map((x) => tile(`tx-${x.id}`, x.label, x.icon, x.tip, () => { O.texShape = x.id; O.tool = x.tool; O.floorHow = 'click'; O.poly = null; go(); }))
-            : FX_SHAPES.map((x) => tile(`fxs-${x.id}`, x.label, x.icon, x.tip, () => { O.fxShape = x.id; O.tool = x.tool; O.poly = null; go(); }));
+          : group === 'texture' ? TEX_SHAPES.map((x) => tile(`tx-${x.id}`, x.label, x.icon, x.tip, () => { settle(); O.texShape = x.id; O.tool = x.tool; O.floorHow = 'click'; go(); }))
+            : FX_SHAPES.map((x) => tile(`fxs-${x.id}`, x.label, x.icon, x.tip, () => { settle(); O.fxShape = x.id; O.tool = x.tool; go(); }));
       const parts = h('div', { class: `os-tools os-tabs os-tabs2 g-${group}` }, ...second);
       const tools = groups;
       const toolKey = group === 'texture' ? `tx-${texShape()}` : group === 'style' ? `fxs-${FX_SHAPES.some((x) => x.id === O.fxShape) ? O.fxShape : 'box'}` : O.tool; // (what is marked in the second column)
@@ -1068,10 +1227,10 @@ const OldschoolTool = (() => {
         const row = picks({ cls: 'os-looks', sig: () => `${tileUrl(tileNow())}|${other()}`,
           options: () => LOOKS.map((l) => ({ value: l.id, label: l.label, art: lookArt(l.id, tileUrl(tileNow()), other()) })),
           get: lookNow, set: (v) => { const l = LOOKS.find((x) => x.id === v); O.mixW = l.mixW; if (l.mixW) { O.mixU = l.mixU; O.mixT = l.mixT; } upd(); } });
-        const box = h('div', { class: 'stack os-blend' }, h('div', { class: 'os-hd' }, h('span', { class: 'ctl-label' }, 'Blending'), fine), row);
+        const box = h('div', { class: 'stack os-blend' }, h('div', { class: 'os-hd' }, h('span', { class: 'ctl-label os-sec' }, 'Blending'), fine), row);
         return box;
       };
-      const madeOf = () => [h('div', { class: 'ctl-label' }, 'Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; upd(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff'])];
+      const madeOf = () => [secLabel('Made of'), matPicker(() => O.line.mat, (v) => { O.line.mat = v; upd(); }, ['stone_wall', 'dark_stone_wall', 'hedge', 'rock', 'cliff', ...KIT_IDS], 'oslinemats')];
       if (fx) { // (Beta 3.46) an effect: how it is drawn, its colour, its edge; its sliders on a card of its own
         const shapeNow = () => (FX_SHAPES.some((x) => x.id === O.fxShape) ? O.fxShape : 'box');
         // (Beta 3.49: what gets painted is picked here, a tile each; how it is painted are the tabs)
@@ -1112,14 +1271,16 @@ const OldschoolTool = (() => {
           choices.push(h('div', { class: 'os-picks os-level' }, lo, mid, hi));
         }
         choices.push(snap3());
-        choices.push(h('div', { class: 'ctl-label' }, 'Edge'));
+        choices.push(secLabel('Edge'));
         choices.push(picks({ cls: 'os-edges', sig: () => `${tileKey(O.floor)}|${tileUrl(tileNow())}|${JSON.stringify(O.mats)}`,
           options: () => Oldschool.EDGES.map((e) => ({ value: e, label: EDGE_LABEL[e], art: floorArt({ edge: e, mat: O.mats[e], tile: tileUrl(tileNow()) }) })),
           get: () => O.edge, set: (v) => { O.edge = v; save(); ctx.openPop('oldschool'); } }));
-        const edgeMat = h('div', { class: 'stack os-edgemat' }, h('div', { class: 'ctl-label' }, 'Made of'), matPicker(() => O.mats[O.edge], (v) => { O.mats[O.edge] = v; upd(); }, O.edge === 'walls' ? ['stone_wall', 'dark_stone_wall', 'hedge'] : ['rock', 'cliff', 'stone_wall', 'dark_stone_wall']));
+        const edgeMat = h('div', { class: 'stack os-edgemat' }, secLabel('Made of'), matPicker(() => O.mats[O.edge], (v) => { O.mats[O.edge] = v; upd(); }, O.edge === 'walls' ? ['stone_wall', 'dark_stone_wall', 'hedge', ...KIT_IDS] : ['rock', 'cliff', 'stone_wall', 'dark_stone_wall', ...KIT_IDS], O.edge === 'walls' ? 'osmats' : 'osrockmats'));
         bind(() => { edgeMat.hidden = O.edge === 'ledge' || O.edge === 'fade'; });
         choices.push(edgeMat);
         if (t === 'brush') after.push(brush());
+        // XA4 (Glinn, 26 Nov 2026): the brush's edge, from smooth to jagged as a cave's wall
+        if (t === 'brush') after.push(wordSlider({ name: 'Edge', lo: 'smooth', hi: 'jagged', min: 0, max: 1, step: 0.05, get: () => O.rough || 0, set: (v) => { O.rough = v; save(); }, fmt: (v) => (v ? `${Math.round(v * 100)} %` : 'smooth') }));
         after.push(blending());
       } else if (tex) { // (Beta 3.37) the tile alone; Beta 3.49: with every painting tool
         const sh = texShape();
@@ -1137,7 +1298,8 @@ const OldschoolTool = (() => {
         choices.push(seg({ options: [{ value: false, label: 'Square', icon: 'square' }, { value: true, label: 'Round', icon: 'circle' }], get: () => O.pillar.round, set: (v) => { O.pillar.round = v === true || v === 'true'; upd(); } }));
         choices.push(snap3(), ...madeOf());
         // (Beta 3.35: up to 8 squares; 2, 4, 6 and 8 sit on a grid corner)
-        after.push(wordSlider({ name: 'Size', lo: 'small', hi: 'big', min: 0.2, max: 8, step: 0.1, get: () => O.pillar.r * 2, set: (v) => { O.pillar.r = round(v / 2, 3); upd(); }, fmt: (v) => `${round(v, 1)} square${v === 1 ? '' : 's'}` }));
+        // (XA1: the slider walks the stops; what it holds is the stop's number)
+        after.push(wordSlider({ name: 'Size', lo: 'small', hi: 'big', min: 0, max: PILLAR_SIZES.length - 1, step: 1, get: () => pillarStop(O.pillar.r * 2), set: (i) => { O.pillar.r = PILLAR_SIZES[i] / 2; upd(); }, fmt: (i) => { const v = PILLAR_SIZES[i]; return `${v} square${v === 1 ? '' : 's'}`; } }));
       } else if (t === 'stairs') {
         choices.push(snap3());
       } else if (t === 'door') {
@@ -1155,7 +1317,7 @@ const OldschoolTool = (() => {
         choices.push(seg({ cls: 'seg-5 os-leaf', options: [{ value: 'clear', label: 'Glass' }, { value: 'leaded', label: 'Leaded' }, { value: 'stained', label: 'Stained' }, { value: 'shutter', label: 'Shutters' }, { value: 'bars', label: 'Bars' }], get: () => O.windowLeaf, set: (v) => { O.windowLeaf = v; upd(); } }));
         choices.push(snap2());
       }
-      // its tiles: the last 8 used, in two rows; List … has them all
+      // its tiles: the four used last and a "+" for all of them (XA5; Beta 3.35: the last 8 and a button List …)
       const usesTiles = !fx && (area || t === 'stairs' || (tex && texShape() !== 'erase'));
       const floorBox = h('div', { class: 'tiles os-floors' });
       const paintFloors = () => {
@@ -1166,12 +1328,12 @@ const OldschoolTool = (() => {
           floorBox.replaceChildren(...list.map((it) => h('button', {
             class: 'tile', dataset: { v: tileKey(it) }, 'data-tip': `${it.name}${it.squares ? ` (${it.squares} × ${it.squares} squares)` : ''}`, 'aria-label': it.name,
             onclick: () => pickTile(it), oncontextmenu: (e) => gridMenu(e, it), // (Beta 3.24) right-click: its grid
-          }, h('img', { src: it.builtin ? it.url : it.thumb || it.url, alt: '', draggable: false }), h('span', {}, it.name))));
+          }, h('img', { src: it.builtin ? it.url : it.thumb || it.url, alt: '', draggable: false }), h('span', {}, it.name))), listBtn);
         }
         const cur = fxNow() ? '' : tileKey(O.floor); // (an effect picked: no tile is)
         for (const b of floorBox.querySelectorAll('.tile[data-v]')) b.classList.toggle('on', b.dataset.v === cur);
       };
-      const listBtn = btn('List …', 'layout-grid', () => ctx.togglePanel(tileListDef()), { kind: 'wide os-tile-list', tip: 'All tiles: the app\'s and your own' });
+      const listBtn = moreTile('os-tile-list', 'All tiles', 'All tiles: the app\'s and your own', () => ctx.togglePanel(tileListDef()));
       if (usesTiles) { bind(paintFloors); bind(() => listBtn.classList.toggle('on', !!ctx.panelOpen('ostiles'))); }
       // the map's own settings, behind their button (the light's dial, how long the shadows are, shadows all around)
       let fly = null;
@@ -1194,7 +1356,7 @@ const OldschoolTool = (() => {
           const range = sl('Range', 'range', 0.05, 1, 'How close to that colour the floor must be');
           const pick = h('div', { class: 'row os-fxtint' }, h('span', { class: 'ctl-label grow' }, 'The colour'), col);
           bind(() => { const on = now().grow === 'colour'; pick.hidden = !on; range.hidden = !on; });
-          rows.push(sl('Amount', 'amount', 0, 1.5), sl('Length', 'length', 0.3, 2.5), sl('Thickness', 'thick', 0.5, 3), sl('Between gusts', 'calm', 0, 1, 'How much grass still shows where no gust is passing'), sl('Colour variety', 'vary', 0, 1),
+          rows.push(sl('Amount', 'amount', 0, 1.5), sl('Length', 'length', 0.3, 5), sl('Thickness', 'thick', 0.5, 6), sl('Between gusts', 'calm', 0, 1, 'How much grass still shows where no gust is passing'), sl('Colour variety', 'vary', 0, 2),
             h('div', { class: 'ctl-label' }, 'Grows on'),
             seg({ options: [{ value: 'all', label: 'All' }, { value: 'bright', label: 'Bright' }, { value: 'dark', label: 'Dark' }, { value: 'colour', label: 'Colour' }], get: () => now().grow || 'all', set: (v) => cmd('live.set', { fx, set: { grow: v } }) }),
             pick, range);
@@ -1213,6 +1375,8 @@ const OldschoolTool = (() => {
           slider({ label: 'Shadow length', min: 0, max: 1, step: 0.05, get: () => (osNow() ? Oldschool.shadowOf(osNow()).len : null), set: (v, k) => ctx.send(k || 'os-shlen', 'os.set', { shadowLen: v }), fmt: pctOff }),
           slider({ label: 'Shadows all around', min: 0, max: 1, step: 0.05, get: () => (osNow() ? Oldschool.shadowOf(osNow()).all : null), set: (v, k) => ctx.send(k || 'os-shall', 'os.set', { shadowAll: v }), fmt: pctOff }),
           toggle({ label: 'Walls for sight follow the drawing', get: () => !osNow() || osNow().sight !== false, set: (v) => cmd('os.set', { sight: v }) }),
+          // (Glinn, 26 Nov 2026) how much of the rock (or of a wall's top) behind a wall in sight the fog uncovers
+          slider({ label: 'Rock in sight', min: 0, max: 4, step: 0.5, get: () => (map() && map().vision ? map().vision.rock ?? Vision.ROCK : null), set: (v, k) => ctx.send(k || 'os-rock', 'vision.update', { rock: v }), fmt: (v) => (v > 0 ? `${v} square${v === 1 ? '' : 's'}` : 'off') }),
           // (Beta 3.42) what moves on the map: on or off (3.46: each effect's sliders are on its own card)
           toggle({ label: 'Living effects', get: () => liveNow().on !== false, set: (v) => cmd('live.set', { on: v }) }),
           h('div', { class: 'row' }, btn('Clear', 'trash', async () => { if (!osNow() || !osNow().items.length) return; const r = await cmd('os.clear', {}); if (r && r.ok) toast('Drawing cleared', { undo: () => cmd('history.undo', { mapId: r && r.mapId }) }); }, { kind: 'small', tip: 'Take everything drawn away (undo brings it back)' })));
@@ -1247,7 +1411,7 @@ const OldschoolTool = (() => {
         },
       };
       return h('div', { class: 'stack' }, previewCard(), ...choices,
-        ...(usesTiles ? [h('div', { class: 'ctl-label' }, 'Tiles'), floorBox, listBtn] : []),
+        ...(usesTiles ? [secLabel('Floor'), floorBox] : []),
         ...after,
         h('div', { class: 'row os-status' }, note, mapBtn));
     }
@@ -1265,7 +1429,8 @@ const OldschoolTool = (() => {
         knob.style.transform = `translate(${(Math.cos(a) * R).toFixed(1)}px, ${(-Math.sin(a) * R).toFixed(1)}px)`;
         out.textContent = NAMES[Math.round(v / 45) % 8]; dial.setAttribute('aria-valuenow', String(v));
       };
-      const setSun = (v) => { v = (((Math.round(v / 5) * 5) % 360) + 360) % 360; held = v; paint(); ctx.send(key, 'os.set', { sun: v }); };
+      // (Speed 1, WA6: only a new 5° step is sent: every mouse move on the dial sent the same value again, each a full state)
+      const setSun = (v) => { v = (((Math.round(v / 5) * 5) % 360) + 360) % 360; if (v === (held ?? (map() && map().os ? map().os.sun ?? 135 : 135))) return; held = v; paint(); ctx.send(key, 'os.set', { sun: v }); };
       const from = (e) => { const r = dial.getBoundingClientRect(); setSun((Math.atan2(-(e.clientY - (r.top + r.height / 2)), e.clientX - (r.left + r.width / 2)) * 180) / Math.PI); };
       dial.addEventListener('pointerdown', (e) => { e.preventDefault(); dial.setPointerCapture(e.pointerId); from(e); dial.onpointermove = from; });
       const done = () => { dial.onpointermove = null; held = null; };
@@ -1274,12 +1439,48 @@ const OldschoolTool = (() => {
       bind(paint);
       return h('div', { class: 'ctl os-sun-row' }, h('span', { class: 'ctl-label' }, 'Light from'), dial, out);
     }
-    function matPicker(get, set, ids) {
-      const { bind } = c();
-      const box = h('div', { class: 'tiles living-tiles os-mats' }, ...ids.map((id) => { const t = Oldschool.DATA.tiles.find((x) => x.id === id); return h('button', { class: 'tile', dataset: { v: id }, 'aria-label': t.label, 'data-tip': t.label, onclick: () => { set(id); paintM(); } }, h('img', { src: new URL(`tiles/${t.small}`, document.baseURI).href, alt: '', draggable: false }), h('span', {}, t.label)); }));
-      const paintM = () => { for (const b of box.children) b.classList.toggle('on', b.dataset.v === get()); };
+    // (25 Nov 2026) With the fifteen wall kits there are 18 walls to pick from. More than one row of five: the panel
+    // shows those used last (a pick among them keeps their places) and a "+" opens them all, as the floors do
+    // (XA5: four and the "+"; it was five and a button List …).
+    const MAT_ROW = 4;
+    // (each Made of keeps its own five: walls, rock and cliffs, wall lines)
+    const matMem = (listId) => (O.recentMats && !Array.isArray(O.recentMats) && Array.isArray(O.recentMats[listId]) ? O.recentMats[listId] : []);
+    function recentMats(ids, cur, listId) {
+      const keys = matMem(listId).filter((id) => ids.includes(id));
+      if (cur && ids.includes(cur) && !keys.includes(cur)) keys.unshift(cur);
+      for (const id of ids) { if (keys.length >= MAT_ROW) break; if (!keys.includes(id)) keys.push(id); }
+      if (cur && keys.indexOf(cur) >= MAT_ROW) return [cur, ...keys.filter((id) => id !== cur)].slice(0, MAT_ROW); // (a row kept from when it was longer)
+      return keys.slice(0, MAT_ROW);
+    }
+    function rememberMat(ids, id, listId) {
+      if (recentMats(ids, null, listId).includes(id)) return;
+      O.recentMats = { ...(O.recentMats && !Array.isArray(O.recentMats) ? O.recentMats : {}), [listId]: [id, ...recentMats(ids, null, listId)].slice(0, MAT_ROW) }; save();
+    }
+    function matPicker(get, set, ids, listId) {
+      const { bind, btn } = c();
+      const many = !!listId && ids.length > MAT_ROW + 1; // (five fit in the row without a "+")
+      const tileOf = (id) => { const t = matOf(id); return h('button', { class: 'tile', dataset: { v: id }, 'aria-label': t.label, 'data-tip': t.label, onclick: () => { set(id); paintM(); } }, h('img', { src: matUrl(id), alt: '', draggable: false }), h('span', {}, t.label)); };
+      const box = h('div', { class: 'tiles living-tiles os-mats' });
+      const paintM = () => {
+        const show = many ? recentMats(ids, get(), listId) : ids;
+        if (box.dataset.sig !== show.join('|')) { box.dataset.sig = show.join('|'); box.replaceChildren(...show.map(tileOf), ...(listBtn ? [listBtn] : [])); }
+        for (const b of box.querySelectorAll('.tile[data-v]')) b.classList.toggle('on', b.dataset.v === get());
+      };
+      let listBtn = null;
+      if (!many) { bind(paintM); return box; }
+      const def = () => ({
+        id: listId, title: 'Made of', icon: 'layout-grid',
+        build: () => PickList.build({
+          bind: c().bind, rootLabel: 'All', memKey: listId, pathOf: () => [], shortName: (it) => it.name,
+          items: () => ids.map((id) => ({ id, name: matOf(id).label, path: `mat:${id}`, kind: 'image', thumb: matUrl(id) })),
+          pick: (it) => { rememberMat(ids, it.id, listId); set(it.id); paintM(); },
+          state: (it) => ({ on: get() === it.id, tip: it.name }),
+        }),
+      });
+      listBtn = moreTile('os-mat-list', 'All walls', 'All walls', () => ctx.togglePanel(def()));
       bind(paintM);
-      return box;
+      bind(() => listBtn.classList.toggle('on', !!ctx.panelOpen(listId)));
+      return h('div', { class: 'stack os-matpick' }, box);
     }
     // a tile picked in the library (purpose 'tile')
     function useTile(it) { pickTile({ ...it }); ctx.setTool('oldschool'); ctx.openPop('oldschool'); }
@@ -1300,7 +1501,8 @@ const OldschoolTool = (() => {
     const hashOf = (m) => Oldschool.hash(m, lib); // (for the self-test)
     // (Beta 3.28: Pieces left, so the wheel is the map's again)
     const wheel = () => false;
-    return { pill, hashOf, wheel, owns, pointerDown, pointerMove, pointerUp, hover, leave, redraw, update, buildPop, around, cancel, rightClick, dblClick, useTile, dropTile, loadLib, get busy() { return baking; }, TOOLS };
+    const cancelDrag = (d) => { if (owns(d.kind)) { lastD = null; drawPreview(); } }; // (UI audit VD1: Esc in mid-drag: what was being drawn goes)
+    return { pill, hashOf, wheel, owns, cancelDrag, back, settle, brushStep, pointerDown, pointerMove, pointerUp, hover, leave, redraw, update, buildPop, around, cancel, leaveTool, rightClick, dblClick, useTile, dropTile, loadLib, simplifyPts, get busy() { return baking; }, get debug() { return { pill: pill.shown, baking, due: !!timer, stale: staleNow, failed: !!failed, pending: pending.length, held: btnHeld, ...count }; }, TOOLS };
   }
   return { create };
 })();

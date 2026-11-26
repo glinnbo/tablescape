@@ -5,8 +5,8 @@
 // the TV does. A frame on each portrait of the near side:
 //   click a portrait            it speaks (steps to the front) and is picked
 //   drag the speaker sideways   where they all stand (settings.talk.pos; partly off the TV is fine)
-//   drag one up or down         its own nudge (talk.offset; never below its band); a portrait behind: sideways too
-//   pull a top corner           its own size (talk.size, 30 to 400 %; past the top of the TV is fine)
+//   drag one up or down         its own nudge (talk.offset; below its band too); a portrait behind: sideways too
+//   pull a top corner           its own size (talk.size, 30 to 500 %; past the top of the TV is fine)
 //   ✕ on it, or Delete          it leaves (a click never takes anyone out)
 // While dragging only this small TV changes, at once; on letting go one change goes to the TV, which glides there.
 // The window's own bottom right corner sizes it: the small TV fills its width, the list of portraits below gets the
@@ -16,7 +16,7 @@
 // as two small upright sliders (Blood in four notches, Shade up to 100 %). Ctrl + wheel on the small TV sizes the
 // picked portrait (the TV gets it once the wheel rests).
 // Second Builder (second-conversation-sliders, Glinn 21 Nov 2026): the bar's sliders are smooth and upright side by side,
-// without words beside them: Height (its nudge up, 0 to 80 %), Size (30 to 400 %, finer near 100 %), Blood (0 to 100 %,
+// without words beside them: Height (its nudge, 80 % down to 80 % up; Glinn), Size (30 to 500 %, finer near 100 %), Blood (0 to 100 %,
 // the stains come in at their own points) and Shade (0 to 100 %). While one moves only this small TV follows (it draws
 // the looks itself, from a smaller copy of the portrait); when let go the TV gets it once.
 'use strict';
@@ -288,7 +288,7 @@ window.TalkStage = (() => {
       if (!p) return;
       e.preventDefault(); e.stopPropagation();
       const cur = local && local.scale && local.scale.path === p && Date.now() - local.t < 1500 ? local.scale.v : sizeOf(p);
-      const v = clamp(Math.round((cur + (e.deltaY < 0 ? 0.05 : -0.05)) * 20) / 20, 0.3, 4);
+      const v = clamp(Math.round((cur + (e.deltaY < 0 ? 0.05 : -0.05)) * 20) / 20, 0.3, 5);
       local = { scale: { path: p, v }, t: Date.now() };
       wheelAt = Date.now();
       redraw();
@@ -309,13 +309,13 @@ window.TalkStage = (() => {
         if (!act.moved && Math.hypot(dx, dy) < 5) return;
         act.moved = true;
         if (act.hnd) { // a top corner: its size (pulling up makes it bigger)
-          const v = clamp(Math.round(act.scale0 * ((act.b.height - dy) / act.b.height) * 20) / 20, 0.3, 4);
+          const v = clamp(Math.round(act.scale0 * ((act.b.height - dy) / act.b.height) * 20) / 20, 0.3, 5);
           local = { scale: { path, v }, t: Date.now() };
         } else {
           if (!act.axis) act.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
           if (act.axis === 'x' && act.front) local = { pos: TalkLayout.posFor(act.W, act.b.left + dx, act.b.width), t: Date.now() }; // the speaker sideways: where they all stand
-          else { // its own nudge (never below its band)
-            const v = { x: act.axis === 'x' ? clamp(act.off0.x + dx / act.b.width, -1, 1) : act.off0.x, y: act.axis === 'y' ? clamp(act.off0.y - dy / act.b.height, 0, 0.8) : act.off0.y };
+          else { // its own nudge (up, or down behind its band)
+            const v = { x: act.axis === 'x' ? clamp(act.off0.x + dx / act.b.width, -1, 1) : act.off0.x, y: act.axis === 'y' ? clamp(act.off0.y - dy / act.b.height, -0.8, 0.8) : act.off0.y };
             v.x = Math.round(v.x * 100) / 100; v.y = Math.round(v.y * 100) / 100;
             local = { off: { path, v }, t: Date.now() };
           }
@@ -376,8 +376,8 @@ window.TalkStage = (() => {
       el.sync = set;
       return el;
     }
-    // size: 30 to 400 %, finer near 100 % (the slider's middle part); height: its nudge up, 0 to 80 %
-    const SZ = { lo: 0.3, hi: 4 };
+    // size: 30 to 500 %, finer near 100 % (the slider's middle part); height: its nudge, -80 % to 80 % (the middle: none)
+    const SZ = { lo: 0.3, hi: 5 };
     const sizeToU = (v) => Math.log(clamp(v, SZ.lo, SZ.hi) / SZ.lo) / Math.log(SZ.hi / SZ.lo);
     const uToSize = (u) => Math.round(SZ.lo * Math.pow(SZ.hi / SZ.lo, clamp(u, 0, 1)) * 100) / 100;
     const r2 = (v) => Math.round(v * 100) / 100;
@@ -405,10 +405,11 @@ window.TalkStage = (() => {
       const front = list[list.length - 1].path === path;
       const fxPatch = (patch, active) => { fxNow = { path, fx: { ...(fxNow && fxNow.path === path ? fxNow.fx : {}), ...patch }, t: Date.now(), active }; redraw(); };
       const cur = () => cast().find((x) => x.path === path) || c;
-      const height = upright('Height', 'cs-height', 'Height: raise it (it never sinks below its band)', () => offNow(path).y / 0.8,
-        (u) => { local = { off: { path, v: { x: offNow(path).x, y: r2(u * 0.8) } }, t: Date.now() }; redraw(); },
-        (u) => { const v = { x: offNow(path).x, y: r2(u * 0.8) }; local = { off: { path, v }, t: Date.now() }; o.cmd('talk.offset', { path, x: v.x, y: v.y }); redraw(); });
-      const size = upright('Size', 'cs-size-s', 'Size: 30 to 400 % (Ctrl + wheel on the small TV too)', () => sizeToU(scaleNow(path)),
+      // (Glinn: down too) the middle of the slider is where it stands by itself; up raises it, down sinks it behind its band
+      const height = upright('Height', 'cs-height', 'Height: raise it or sink it (the middle is where it stands)', () => (offNow(path).y + 0.8) / 1.6,
+        (u) => { local = { off: { path, v: { x: offNow(path).x, y: r2(u * 1.6 - 0.8) } }, t: Date.now() }; redraw(); },
+        (u) => { const v = { x: offNow(path).x, y: r2(u * 1.6 - 0.8) }; local = { off: { path, v }, t: Date.now() }; o.cmd('talk.offset', { path, x: v.x, y: v.y }); redraw(); });
+      const size = upright('Size', 'cs-size-s', 'Size: 30 to 500 % (Ctrl + wheel on the small TV too)', () => sizeToU(scaleNow(path)),
         (u) => { local = { scale: { path, v: uToSize(u) }, t: Date.now() }; wheelAt = Date.now(); redraw(); },
         (u) => { const v = uToSize(u); local = { scale: { path, v }, t: Date.now() }; wheelAt = Date.now(); o.cmd('talk.size', { path, scale: v }); redraw(); });
       const blood = upright('Blood', 'cs-blood', 'Blood: from a few drops to soaked', () => PortraitFx.norm(fxOf(cur())).blood,

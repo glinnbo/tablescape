@@ -169,17 +169,17 @@ module.exports = (area) => {
 
   // N5, N7, N8, N9 (open points): token Bigger snaps to the 5e sizes; X after J puts marks on the table again; Esc with
   // nothing else to close goes back to Select; a painted area's wheel says Stronger / Weaker
-  area.quick('token Bigger steps to Large on the grid; X after J; Esc back to Select; Stronger and Weaker for a painted area', async (t) => {
+  area.quick('token made Large sits on the grid; X after J; Esc back to Select; Stronger and Weaker for a painted area', async (t) => {
     const m = await clean(t); const k = m.grid.size;
     const id = (await t.cmd('layer.add', { mapId: own, path: t.pic('tokens', /Goblin/i), role: 'token', x: 8.5 * k, y: 8.5 * k, size: 1 })).selected;
     try {
       await t.until(() => t.rect(`.sv-token[data-id="${id}"]`), 3000, 'the token');
       t.gm().webContents.focus(); await t.key('V');
       await t.rightClickSel(`.sv-token[data-id="${id}"]`);
-      await t.until(() => t.g(`!!document.querySelector('#radial.on')`), 3000, 'the wheel');
-      await t.clickText('#radial.on .radial-item', 'More');
-      await t.until(() => t.menu(), 3000, 'More …');
-      await t.menuPick('Bigger');
+      await t.until(() => t.menu(), 3000, 'the token sheet with More open'); // (Beta 3.68: the token sheet took the wheel's place)
+      await t.menuPick('Size');
+      await t.until(async () => (await t.menu() || []).some((x) => x.startsWith('Large')), 3000, 'the sizes');
+      await t.menuPick('Large');
       const l = await t.until(() => { const x = M(t).layers.find((q) => q.id === id); return x && x.size !== 1 && x; }, 3000, 'bigger');
       t.eq(l.size, 2, 'Medium → Large (was 1.5)');
       const g = M(t).grid; const off = (v, o) => { const q = (v - (o || 0)) / g.size; return Math.abs(q - Math.round(q)); };

@@ -144,6 +144,7 @@ const FXDATA = (() => {
     { id: 'bubbling', label: 'Bubbling pool', icon: 'bubble', kinds: [['mud', 'Mud'], ['bog', 'Bog'], ['spring', 'Hot spring'], ['tar', 'Tar']], kindsLabel: 'Kind', tip: 'Bubbles that swell and pop on the map\'s own mud or pool. Over 100 % Strength it brings its own colour' },
     // Second Builder (second-ground-life): painted creatures (creatures.js)
     { id: 'fish', label: 'Fish', icon: 'fish', kinds: [['small', 'Small fish'], ['koi', 'Koi'], ['trout', 'Trout (river)'], ['eels', 'Eels'], ['shadow', 'Big shadow']], kindsLabel: 'Kind', tip: 'Fish under the surface: paint them where the water is. No water of its own. Trout face against the way you paint' },
+    { id: 'birdflight', label: 'Circling birds', icon: 'feather', noColor: true, kinds: [['vultures', 'Vultures'], ['eagle', 'Eagle'], ['gulls', 'Gulls'], ['crows', 'Crows']], kindsLabel: 'Kind', tip: 'Birds over what you paint, in loops and wide bends; a thin stroke: along it and back. Amount: how many' }, // C14 (Glinn): Circling birds → How they fly → Over an area
     { id: 'batflight', label: 'Bats', icon: 'bat', noColor: true, tip: 'Bats in the air over what you paint, in calm wide bends. Amount: how many' }, // (Beta 3.66, Glinn: bats over a larger area, less nervous. On the fly layer)
     { id: 'critters', label: 'Critters', icon: 'paw', kinds: [['rats', 'Rats'], ['mice', 'Mice'], ['roaches', 'Roaches'], ['spiders', 'Spiders'], ['lizards', 'Lizards']], kindsLabel: 'Kind', tip: 'A wide area: they scurry about in it. A thin stroke (a wall, a gutter): they run along it and vanish at its ends' },
     { id: 'surf', label: 'Surf', icon: 'beach', tip: 'Paint the sea: waves of foam roll in to the edge of what you painted' },
@@ -316,6 +317,9 @@ const FXDATA = (() => {
     ['region', 'glow', 'magic'], ['region', 'darkness', 'magic'], ['emitter', 'glow', 'magic'], ['emitter', 'sparkles', 'magic'], ['emitter', 'runes', 'magic'], ['emitter', 'portal', 'magic'], ['emitter', 'arcs', 'magic'], ['region', 'shimmer', 'magic'], ['region', 'pulse', 'magic'], ['region', 'ripple', 'magic'], // (Beta 3.65: the map's own light, drawn by the engine)
     ['region', 'blood', 'battle'], ['region', 'acid', 'battle'], ['region', 'oil', 'battle'], ['region', 'web', 'battle'],
   ].map(([kind, id, family]) => { const d = (kind === 'region' ? REGIONS : EMITTERS).find((x) => x.id === id); return { key: `${kind === 'region' ? 'r' : 'e'}:${id}`, kind, id, family, label: d.label, icon: d.icon, tip: d.tip || null, live: d.live || null }; });
-  return { SKINS, SPELLS, SHAPES, EMITTERS, FLAMES, isLight, givesLight, WINDOW_SHAPES, WINDOW_GRIDS, REGIONS, WEATHER, WEATHER_TYPES, LIGHTS, COLORS, TINTS, MOODS, TBASE, SPEED_MAX, wxTravel, phaseT, phaseAnchor, FAMILIES, ELEMENTS };
+  // I8: a spell look's built-in sound (made anew as .wav; Lightning and Arcane keep their old .ogg, Glinn)
+  const SPELL_OGG = new Set(['lightning', 'arcane']);
+  const spellSound = (skin) => `sfx/${skin}.${SPELL_OGG.has(skin) ? 'ogg' : 'wav'}`;
+  return { spellSound, SKINS, SPELLS, SHAPES, EMITTERS, FLAMES, isLight, givesLight, WINDOW_SHAPES, WINDOW_GRIDS, REGIONS, WEATHER, WEATHER_TYPES, LIGHTS, COLORS, TINTS, MOODS, TBASE, SPEED_MAX, wxTravel, phaseT, phaseAnchor, FAMILIES, ELEMENTS };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = FXDATA;

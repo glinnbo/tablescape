@@ -181,13 +181,13 @@ const Snapshots = (() => {
       const s = S();
       if (!s.map) { toast('Open a map first.'); return; }
       const list = snapsOf(s.map.id);
-      const thumb = await ctx.capture();
-      if (!list.length) {
+      if (!list.length) { // (UI audit VH11: the name first, then the picture: the screen blinked before anything was asked)
         const name = await askText('Name the first snapshot', suggestName(s.map, 1), { ok: 'Save snapshot', placeholder: 'Pipe intact' });
         if (!name) return;
-        done(await cmd('snap.save', { name, thumb }));
+        done(await cmd('snap.save', { name, thumb: await ctx.capture() }));
         return;
       }
+      const thumb = await ctx.capture();
       transDialog({ n: list.length + 1, thumb, info: infoOfMap(s.map), name: suggestName(s.map, list.length + 1) });
     }
     function done(r) {

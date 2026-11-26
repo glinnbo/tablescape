@@ -317,8 +317,14 @@ module.exports = (area) => {
     t.ok(s.kinds.grass && !s.kinds.water && s.blades > 24 * 250 && s.blades < 24 * 630, 'grass blades, some hundred a square', s);
     await t.until(async () => (await t.g('Play.view().stats.regions')) === 0, 4000, 'no waves of light under the blades');
     const spots = (list) => t.g(`(async () => { const v = Play.view(); v.livingProbe = ${JSON.stringify(list.map(([x, y]) => ({ x: x * k, y: y * k })))}; await new Promise((r) => setTimeout(r, 900)); const s = v.stats.living; v.livingProbe = null; return (s && s.px) || []; })()`);
-    const [inA, inB, out] = await spots([[7, 6], [9, 7], [15, 6]]);
-    t.ok(inA && inA[3] > 60 && inB && inB[3] > 60 && out && out[3] === 0, 'blades where it was painted, nothing beside it', [inA, inB, out]);
+    // (26 Nov 2026: the blades sway, so one dot at one moment can lie between two of them. It was read once, and passed
+    // by the moment it happened to be read at; now each spot is read a few times and its strongest reading counts.)
+    let inA = null; let inB = null; let out = null; let outMax = 0;
+    for (let i = 0; i < 8 && !(inA && inA[3] > 60 && inB && inB[3] > 60); i++) {
+      const [a, b2, o] = await spots([[7, 6], [9, 7], [15, 6]]);
+      if (a && (!inA || a[3] > inA[3])) inA = a; if (b2 && (!inB || b2[3] > inB[3])) inB = b2; out = o; outMax = Math.max(outMax, o ? o[3] : 0);
+    }
+    t.ok(inA && inA[3] > 60 && inB && inB[3] > 60 && out && outMax === 0, 'blades where it was painted, nothing beside it', [inA, inB, out, outMax]);
     // Effects → Paint → Grass: the map's grass card (with Thickness) instead of Strength, Amount and Speed
     await t.g(`(() => { Play.setTool('fx'); Play.ui.fxMode = 'paint'; Play.ui.region = 'grass'; Play.ui.fxFly = true; Play.openPop('fx'); })()`); // (Beta 3.60: Elements → Grass, its settings card)
     await t.sleep(400);
@@ -328,8 +334,11 @@ module.exports = (area) => {
     await t.g(`Play.ui.fxFly = false; Play.closePop(); Play.setTool('select')`);
     await t.cmd('live.set', { mapId: own, fx: 'grass', set: { thick: 3 } });
     t.eq(M().live.grass.thick, 3, 'Thickness 300 %');
-    await t.cmd('live.set', { mapId: own, fx: 'grass', set: { thick: 9 } });
-    t.eq(M().live.grass.thick, 3, 'not beyond 300 %');
+    // XA10 (26 Nov 2026): Length, Thickness and Colour variety go twice as far
+    await t.cmd('live.set', { mapId: own, fx: 'grass', set: { thick: 9, length: 9, vary: 9 } });
+    t.eq([M().live.grass.thick, M().live.grass.length, M().live.grass.vary], [6, 5, 2], 'not beyond 600 %, 500 % and 200 %');
+    await t.until(async () => { const l = (await t.g('Play.view().stats.living')) || {}; return l.on && l.blades > 0; }, 15000, 'the blades at their largest to be drawn');
+    await t.cmd('live.set', { mapId: own, fx: 'grass', set: { thick: 1, length: 1, vary: 0.3 } });
     // a colour of its own: the blades grow again in it
     await t.cmd('fx.update', { mapId: own, id: 'grass1', color: '#d9b45a' });
     const tinted = await t.until(async () => { const [q] = await spots([[7, 6]]); return q && q[3] > 60 && q[0] > q[2] + 30 && q; }, 15000, 'wheat-coloured blades');
@@ -406,4 +415,33 @@ module.exports = (area) => {
     for (const id of ['w1', 'e1', 'g1', 'g2', 'g3']) t.handle('fx.remove', { mapId: own, id });
     t.handle('edit.open', { id: was }); await t.send(was);
   }, { ms: 180000 });
+
+  // XA9 (Glinn, 26 Nov 2026): the leaves flickered while the wind turned
+  area.quick('XA9: the wind turns by a degree after the map was open for an hour: the leaves stay where they are (their noise was thrown whole cells away with every degree)', async (t) => {
+    await clear(t);
+    add(t, 'Oak (dark green) large', { x: 6, y: 5 });
+    await t.until(async () => { const x = await gm(t); return x && x.drawn === 1 && x; }, 30000, 'the tree on your screen');
+    const out = await t.g(`(() => {
+      const v = Play.view(); const c = v.tcv.over || v.tcv.front || v.tcv.ground; const L = c.L; const tw = L.tw; const gl = L.gl;
+      let args = null; const real = L.frame.bind(L);
+      L.frame = (trees, o) => { args = [trees, o]; return real(trees, o); };
+      try { v.drawTrees(); } finally { delete L.frame; }
+      if (!args) return { error: 'no frame' };
+      const W = c.el.width; const H = c.el.height;
+      const shot = (dir) => { real(args[0], { ...args[1], dt: 0, wind: { ...args[1].wind, dir } }); const px = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px); return px; };
+      const diff = (A, B) => { let lit = 0; let n = 0; for (let i = 0; i < A.length; i += 4) { if (A[i + 3] > 20) { lit++; if (Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]) > 24) n++; } } return [lit, n]; };
+      const d0 = args[1].wind.dir; const a = (d0 * Math.PI) / 180;
+      const was = [tw.rustleT, { ...tw.rustleOff }];
+      tw.rustleT = 3600; tw.rustleOff = { x: Math.cos(a) * 3600, y: Math.sin(a) * 3600 }; // (as after an hour of this wind)
+      const A = shot(d0); const same = diff(A, shot(d0)); const turned = diff(A, shot(d0 + 1));
+      const on = shot(d0); tw.rustleOff.x += Math.cos(a) * 0.5; tw.rustleOff.y += Math.sin(a) * 0.5; const moved = diff(on, shot(d0)); // (half a second of rustling: the leaves do move)
+      tw.rustleT = was[0]; tw.rustleOff = was[1];
+      return { same, turned, moved, rustle: args[1].wind.rustle };
+    })()`);
+    t.note('leaves: ' + JSON.stringify(out));
+    t.ok(out.same && out.same[0] > 2000 && out.same[1] === 0, 'the tree is drawn, and twice the same without a turn', out);
+    t.ok(out.turned[1] < out.turned[0] * 0.03, 'a degree of turn: fewer than 3 in 100 dots of the tree change', out.turned);
+    t.ok(out.moved[1] > 100 && out.moved[1] > out.turned[1] * 3, 'while half a second of wind does move the leaves (in calm air, a little)', out);
+    await clear(t);
+  }, { ms: 90000 });
 };
