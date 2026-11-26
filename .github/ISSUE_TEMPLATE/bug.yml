@@ -1,0 +1,43 @@
+name: Report a problem
+description: Something in Tablescape does not work as it should
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. A few lines are enough.
+
+        The app can make a report file (Guide → Report a problem). It holds the app's log, and the log names folders on your PC. Attach it here only if you are fine with that being public; otherwise send it on [Discord](https://discord.gg/T99DRNKaSM).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: It is on the start screen and in Guide → About
+      placeholder: Beta 3.68
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: What you did, and what Tablescape did
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - GM screen
+        - TV or projector
+        - Phone or tablet
+        - Installing or updating
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: A picture helps. Your graphics card, if it is about speed or effects
