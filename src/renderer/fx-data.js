@@ -156,9 +156,9 @@ const FXDATA = (() => {
     // Beta 3.65: drawn by the engine only (living.js): they light up the map picture itself, so they have no colour of
     // their own and show nothing without a graphics card. live: the engine's name for it
     { id: 'ember', label: 'Ember glow', icon: 'flare', live: 'lava', noColor: true, tip: 'What is red-hot in the map picture glows, pulses and throws embers: for lava and fire that are painted in the map' },
-    { id: 'shimmer', label: 'Shimmer', icon: 'sparkles', live: 'shimmer', noColor: true, tip: 'Bright colours in the map picture shine, each spot in its own rhythm: crystals, runes, glowing moss' },
-    { id: 'pulse', label: 'Pulse', icon: 'activity-heartbeat', live: 'pulse', noColor: true, tip: 'Bright colours in the map picture shine and breathe together' },
-    { id: 'ripple', label: 'Ripple', icon: 'target', live: 'ripple', noColor: true, tip: 'Bright colours in the map picture light up in rings that run outward from the middle of what you paint' },
+    { id: 'shimmer', label: 'Shimmer', icon: 'sparkles', live: 'shimmer', noColor: true, tip: 'Bright spots in the map picture shine, each in its own rhythm: crystals, runes, glowing moss' },
+    { id: 'pulse', label: 'Pulse', icon: 'activity-heartbeat', live: 'pulse', noColor: true, tip: 'Bright spots in the map picture shine and breathe together' },
+    { id: 'ripple', label: 'Ripple', icon: 'target', live: 'ripple', noColor: true, tip: 'Bright spots in the map picture light up in rings that run outward from the middle of what you paint' },
     { id: 'swamp', label: 'Swamp', icon: 'plant' },
     { id: 'dust', label: 'Dust', icon: 'grain' },
     // Beta 2

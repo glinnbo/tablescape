@@ -9,7 +9,8 @@
  *          (Beta 3.65) A whirlpool that swirls the water turns the bed about its middle
  *   lava   only light: what is red-hot in the picture pulses and flickers, and its glow spills on what is near. The
  *          floor itself is not drawn again, so it stays as sharp as the tiles around it
- *   glow   only light as well: bright, saturated colours of any hue shine and bloom. Three rhythms: each spot on its
+ *   glow   only light as well: bright, saturated colours of any hue, and pale spots brighter than the floor around
+ *          them (white crystals), shine and bloom. Three rhythms: each spot on its
  *          own (glow), all of the map breathing together (pulse), rings running out from the middle of what was
  *          drawn (ripple)
  *   grass  blades, each a flat shape of its own rooted at one spot (Glinn's sketch): seen from above an upright blade
@@ -68,11 +69,17 @@ float lum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
 float max3(vec3 c) { return max(c.r, max(c.g, c.b)); }
 // how red-hot a colour is; the range: how much of the floor counts (0.5 as it always was)
 float hot(vec3 c, float range) { return clamp((c.r - 1.25 * c.b - mix(0.38, 0.02, range)) * 2.4, 0.0, 1.0); }
-// how much a colour is one that shines: bright and saturated (any hue), or very bright
-float shine(vec3 c, float range) {
+// how much a colour is one that shines: bright and saturated (any hue), or bright without colour: white crystals,
+// pale runes. (Glinn, 27 Nov 2026: on a picture map Pulse and Ripple lit nothing, the white crystals stayed dark; a
+// colour had to be almost pure white to count.) around: how bright the floor is around it (see below). A pale spot
+// clearly brighter than that shines; a floor that is pale all over does not, nor the rim of a pale floor
+float shine(vec3 c, float around, float range) {
   float mx = max3(c); float mn = min(c.r, min(c.g, c.b)); float sat = (mx - mn) / max(mx, 0.001);
   float s0 = mix(0.56, 0.08, range); float b0 = mix(0.58, 0.10, range);
-  return max(smoothstep(s0, s0 + 0.36, sat) * smoothstep(b0, b0 + 0.38, mx), 0.7 * smoothstep(mix(0.92, 0.68, range), 0.97, mx));
+  float colour = smoothstep(s0, s0 + 0.36, sat) * smoothstep(b0, b0 + 0.38, mx);
+  float white = smoothstep(mix(0.90, 0.62, range), 0.97, mx);
+  float pop = smoothstep(mix(0.20, 0.06, range), mix(0.36, 0.20, range), lum(c) - around) * smoothstep(mix(0.55, 0.30, range), mix(0.80, 0.60, range), mx);
+  return max(colour, 0.85 * max(white, pop));
 }
 // embers: sparks that leave the hot places and drift with the wind, each alive for a moment
 vec3 embers(vec2 q, float t, float range) {
@@ -174,7 +181,13 @@ void main() {
     float ring = pow(0.5 + 0.5 * cos(6.2832 * (d / 3.0 - uGTime.z / 3.2)), 3.0);              // (rings three squares apart, about a square a second)
     float r = dot(w3, vec3(own, beat, ring)); float pw = dot(w3, uGPow); float rg = dot(w3, uGRange);
     vec3 wide = textureLod(uPic, vUV, log2(max(1.0, 0.22 * uP))).rgb;                         // (its light a little beyond itself)
-    add += (pic.rgb * shine(pic.rgb, rg) * (0.15 + 0.95 * r) + wide * shine(wide, rg) * (0.07 + 0.42 * r)) * gs * pw;
+    // how bright it is around: the floor two thirds of a square away on four sides, the second darkest of them. Around a
+    // crystal all four are darker, beside a vein of quartz two; on the rim of a pale floor only one (it does not shine)
+    vec2 st = 0.67 * uP / uPicSize; float lv = log2(max(1.0, 0.15 * uP));
+    float s1 = lum(textureLod(uPic, vUV + vec2(st.x, 0.0), lv).rgb); float s2 = lum(textureLod(uPic, vUV - vec2(st.x, 0.0), lv).rgb);
+    float s3 = lum(textureLod(uPic, vUV + vec2(0.0, st.y), lv).rgb); float s4 = lum(textureLod(uPic, vUV - vec2(0.0, st.y), lv).rgb);
+    float around = min(max(min(s1, s2), min(s3, s4)), min(max(s1, s2), max(s3, s4)));
+    add += (pic.rgb * shine(pic.rgb, around, rg) * (0.15 + 0.95 * r) + wide * shine(wide, around, rg) * (0.07 + 0.42 * r)) * gs * pw;
   }
   float a = max(cover, dark * (1.0 - cover));
   o = vec4((col * cover + add) * pic.a, a * pic.a);

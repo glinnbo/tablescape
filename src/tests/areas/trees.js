@@ -416,6 +416,57 @@ module.exports = (area) => {
     t.handle('edit.open', { id: was }); await t.send(was);
   }, { ms: 180000 });
 
+  // Glinn, 27 Nov 2026: Pulse and Ripple on a picture map lit nothing: only bright colours counted, white crystals
+  // stayed dark (a colour had to be almost pure white). A pale spot clearly brighter than what is around it shines now
+  area.deep('Pulse and Ripple on a picture map: white and pale crystals on a stone floor light up; the stone and a floor pale all over do not', async (t) => {
+    const was = t.state.editMapId;
+    const own = await t.newMap('Crystals (test)');
+    t.handle('fog.enabled', { mapId: own, enabled: false });
+    const M = () => t.store.map(own);
+    // the picture: grey stone (left two thirds), a pale floor (right third); white crystals and pale grey ones on the stone
+    const C = [[0.15, 0.25, 'w'], [0.35, 0.55, 'w'], [0.2, 0.8, 'p'], [0.55, 0.3, 'p']];
+    const url = await t.g(`((W, H, C) => {
+      const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+      let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+      g.fillStyle = 'rgb(92,90,86)'; g.fillRect(0, 0, W, H);
+      for (let i = 0; i < 4000; i++) { const v = Math.round(70 + rnd() * 45); g.fillStyle = 'rgb(' + v + ',' + (v - 2) + ',' + (v - 5) + ')'; g.fillRect(rnd() * W, rnd() * H, 6 + rnd() * 18, 6 + rnd() * 18); }
+      g.fillStyle = 'rgb(200,198,194)'; g.fillRect(W * 0.7, 0, W * 0.3, H);
+      for (const [x, y, k] of C) {
+        g.fillStyle = k === 'w' ? 'rgb(222,226,232)' : 'rgb(188,190,194)';
+        for (let j = 0; j < 5; j++) { const a = j * 1.2566; const cx = x * W + Math.cos(a) * 10; const cy = y * H + Math.sin(a) * 10; g.beginPath(); g.moveTo(cx, cy - 22); g.lineTo(cx + 7, cy); g.lineTo(cx, cy + 9); g.lineTo(cx - 7, cy); g.closePath(); g.fill(); }
+      }
+      return c.toDataURL('image/png');
+    })(1600, 1200, ${JSON.stringify(C)})`);
+    const file = path.join(L.root, 'Maps', 'Crystals (test).png');
+    fs.writeFileSync(file, Buffer.from(url.split(',')[1], 'base64'));
+    try {
+      t.handle('bg.set', { mapId: own, path: file });
+      await t.until(() => { const m = M(); return m.bg && (m.bg.scale != null || m.bg.span); }, 8000, 'the map picture to be placed');
+      await t.settle();
+      const [bx, by, bw, bh] = await t.until(() => t.g('(() => { const b = Play.view().bgBox(); return b && b.w > 0 && [b.x, b.y, b.w, b.h]; })()'), 8000, 'where the picture lies');
+      const P = (x, y) => ({ x: bx + bw * x, y: by + bh * y });
+      t.handle('fx.shape', { mapId: own, id: 'cp', sid: 'a', preset: 'pulse', shape: 'rect', x: bx, y: by, w: bw * 0.45, h: bh });
+      t.handle('fx.shape', { mapId: own, id: 'cr', sid: 'a', preset: 'ripple', shape: 'rect', x: bx + bw * 0.45, y: by, w: bw * 0.55, h: bh });
+      await t.until(async () => { const x = await t.g('Play.view().stats.living'); return x && x.on && x.kinds && x.kinds.glow && x; }, 20000, 'Pulse and Ripple on the engine');
+      // the crystals (Pulse: the first three, Ripple: the last), the stone between them, the pale floor and its rim (Ripple)
+      const spots = [...C.map(([x, y]) => P(x, y)), P(0.25, 0.45), P(0.4, 0.15), P(0.6, 0.7), P(0.8, 0.3), P(0.9, 0.75), P(0.706, 0.4), P(0.706, 0.6)];
+      const best = spots.map(() => 0);
+      for (let i = 0; i < 8; i++) { // (over one breath of Pulse and more than one ring of Ripple)
+        const px = await t.g(`(async () => { const v = Play.view(); v.livingProbe = ${JSON.stringify(spots)}; await new Promise((r) => setTimeout(r, 800)); const s = v.stats.living; v.livingProbe = null; return (s && s.px) || []; })()`);
+        px.forEach((p, j) => { if (p) best[j] = Math.max(best[j], p[0] + p[1] + p[2]); });
+      }
+      const [w1, w2, p1, p2, s1, s2, s3, f1, f2, e1, e2] = best;
+      t.ok(Math.min(w1, w2) > 150 && Math.min(p1, p2) > 90, 'white and pale grey crystals light up (Pulse, Ripple)', best);
+      t.ok(Math.max(s1, s2, s3) < 30, 'the stone between them stays as it is', best);
+      t.ok(Math.max(f1, f2) < 40, 'a floor pale all over does not light up', best);
+      t.ok(Math.max(e1, e2) < 60, 'nor the rim of the pale floor (it is brighter than the stone beside it, on one side only)', best);
+    } finally {
+      for (const id of ['cp', 'cr']) t.handle('fx.remove', { mapId: own, id });
+      t.handle('edit.open', { id: was }); await t.settle();
+      try { fs.unlinkSync(file); } catch { /* */ }
+    }
+  }, { ms: 90000 });
+
   // XA9 (Glinn, 26 Nov 2026): the leaves flickered while the wind turned
   area.quick('XA9: the wind turns by a degree after the map was open for an hour: the leaves stay where they are (their noise was thrown whole cells away with every degree)', async (t) => {
     await clear(t);

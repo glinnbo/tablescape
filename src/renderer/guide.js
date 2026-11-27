@@ -25,6 +25,13 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.70', [
+      'Pulse, Ripple and Shimmer also light up white and pale crystals in the map picture, not only bright colours. On a picture map they lit almost nothing unless a spot was pure white',
+      'A floor that is pale all over, and its edge, stays as it is; plain stone floors look as before',
+    ], [
+      'Pulse, Ripple and Shimmer light up white crystals too',
+      'Plain stone floors stay as they were',
+    ]],
     ['Beta 3.69', [
       'Spells on the TV are drawn by the graphics card whenever they are on your screen. On a laptop the TV could fall back to the old drawing, because it was timed while it painted the table',
       'Export: a second bar under the ring shows what has really reached the drive. On a USB stick the dialog no longer stands still at the end for a minute',
