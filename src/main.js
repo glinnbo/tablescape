@@ -4523,14 +4523,29 @@ ipcMain.handle('state', (e) => {
 // ---------- 4.6: a campaign (or one chapter) as one file: export and import (transfer.js) ----------
 let transferJob = null;
 function transferProgress(what) {
-  let last = 0;
+  let last = 0; let held = null; let timer = 0;
+  const send = (p) => { last = Date.now(); held = null; if (gm && !gm.isDestroyed()) gm.webContents.send('event', { kind: 'transfer', what, ...p }); };
   return (p) => {
-    const now = Date.now();
-    if (now - last < 80 && p.done < p.total) return;
-    last = now;
-    if (gm && !gm.isDestroyed()) gm.webContents.send('event', { kind: 'transfer', what, ...p });
+    // (at most about 12 a second; one held back is sent a moment later, so the dialog never stays on an old file while
+    // the work has gone on: it stood on a file long packed while the last ones and the writing went by unseen)
+    if (Date.now() - last < 80 && p.done < p.total && p.phase !== 'finish' && p.phase !== 'done') {
+      held = p;
+      if (!timer) timer = setTimeout(() => { timer = 0; if (held) send(held); }, 90);
+      return;
+    }
+    clearTimeout(timer); timer = 0;
+    send(p);
   };
 }
+// (for the log) where a file is written, without naming the user's folders: a sync folder can hold it up
+const syncFolder = (file) => (/[\\/](OneDrive|Dropbox|Google Drive|iCloud ?Drive)[^\\/]*[\\/]/i.exec(file) || [])[1] || '';
+const tookLine = (t) => {
+  if (!t) return '';
+  const parts = [`${(t.ms / 1000).toFixed(1)} s`];
+  for (const k of ['finish', 'flush', 'close', 'replace']) if (t[k] > 1000) parts.push(`${k} ${(t[k] / 1000).toFixed(1)} s`);
+  if (t.slow && t.slow.length) parts.push(`slow: ${t.slow.slice(0, 5).map(([n, ms]) => `${n} ${(ms / 1000).toFixed(1)} s`).join(', ')}`);
+  return parts.join(', ');
+};
 const transferSummary = (P) => ({ name: P.name, kind: P.kind, chapter: P.chapter, maps: P.maps, files: P.files, bytes: P.bytes, missing: P.missing, chapters: P.chapters });
 ipcMain.handle('transfer', async (e, action, p = {}) => {
   try {
@@ -4552,7 +4567,8 @@ ipcMain.handle('transfer', async (e, action, p = {}) => {
         if (gm && !gm.isDestroyed()) gm.webContents.send('event', { kind: 'transfer', what: 'export', done: 0, total: 1, bytes: 0, totalBytes: P.bytes, name: '' });
         try {
           const out = await Transfer.exportTo(P, file, { version: LABEL, progress: transferProgress('export'), cancelled: () => job.cancel });
-          applog.log.info(`export ${P.kind} "${P.name}": ${out.ok ? `${out.bytes} bytes` : 'cancelled'}`);
+          const where = syncFolder(file);
+          applog.log.info(`export ${P.kind} "${P.name}": ${out.ok ? `${out.bytes} bytes` : 'cancelled'}, ${P.files} files, ${P.missing.length} missing; ${tookLine(out.took)}${where ? `; into a ${where} folder` : ''}`);
           return { ...out, name: P.name, missing: P.missing };
         } finally { transferJob = null; }
       }

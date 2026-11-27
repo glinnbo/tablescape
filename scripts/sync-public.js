@@ -7,7 +7,8 @@
 // What goes there: every file git keeps here, exactly as git keeps it (no line-ending changes), except
 //   .github/      the release build (it names the release key, and it would run there too)
 //   README.md     the developer notes; the players' README from public/ is the front page there
-//   public/       its README.md becomes the front page, its pictures go to docs/
+//   public/       its README.md becomes the front page, its pictures go to docs/; its issue form (.github/ISSUE_TEMPLATE)
+//                 and SECURITY.md go to the same places there (26 Nov 2026: Issues are on). Never a workflow
 //   CLAUDE.md     the rules for Claude Code in this workshop, and .claude/ (its settings): they stay private
 //   notes/        the builders' notes (a copy of the claude.ai Project's docs): they stay private
 // Anything else in the public repo is replaced, so it always is a clean copy of the released version.
@@ -62,6 +63,7 @@ function released() {
   for (const e of list) {
     if (e.file === 'public/README.md') files.push(['README.md', e.mode, e.data]);
     else if (e.file.startsWith('public/docs/')) files.push([`docs/${e.file.slice('public/docs/'.length)}`, e.mode, e.data]);
+    else if (e.file.startsWith('public/.github/ISSUE_TEMPLATE/') || e.file === 'public/SECURITY.md') files.push([e.file.slice('public/'.length), e.mode, e.data]); // (the public repo's own issue form and security note)
     else if (!LEAVE_OUT(e.file)) files.push([e.file, e.mode, e.data]);
   }
   return files;

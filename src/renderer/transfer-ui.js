@@ -32,13 +32,16 @@ const TransferUI = (() => {
     const pct = h('div', { class: 'tr-pct' }, '0%');
     const line = h('div', { class: 'tr-line faint' }, 'Getting ready …');
     const file = h('div', { class: 'tr-file faint' });
+    // (Glinn, 26 Nov 2026) a second bar: what has really reached the drive. A USB stick can be a minute behind
+    const diskFill = h('i'); const diskText = h('span', { class: 'faint' });
+    const disk = h('div', { class: 'tr-disk', hidden: true }, h('div', { class: 'tr-disk-bar' }, diskFill), diskText);
     const cancel = h('button', { class: 'btn', onclick: () => { cancel.disabled = true; cancel.textContent = 'Stopping …'; T('cancel'); } }, 'Cancel');
     const actions = h('div', { class: 'tr-actions' }, cancel);
     const titleEl = h('h2', { class: 'tr-title' }, title);
-    const box = h('div', { class: 'modal tr-box', role: 'dialog', 'aria-label': title }, titleEl, h('div', { class: 'tr-circle' }, svg, maid), pct, line, file, actions);
+    const box = h('div', { class: 'modal tr-box', role: 'dialog', 'aria-label': title }, titleEl, h('div', { class: 'tr-circle' }, svg, maid), pct, line, file, disk, actions);
     const back = h('div', { class: 'modal-back tr-back' }, box);
     document.body.append(back);
-    ring = { back, arc, C, maid, pct, line, file, actions, titleEl, verb: title };
+    ring = { back, arc, C, maid, pct, line, file, actions, titleEl, verb: title, disk, diskFill, diskText };
     return ring;
   }
   function closeRing() { if (ring) { ring.back.remove(); ring = null; } }
@@ -48,7 +51,12 @@ const TransferUI = (() => {
     ring.arc.style.strokeDashoffset = `${ring.C * (1 - k)}`;
     ring.pct.textContent = `${Math.floor(k * 100)}%`;
     ring.line.textContent = `${Math.min(e.done + 1, e.total)} of ${plural(e.total, 'file', 'files')} · ${size(e.bytes)} of ${size(e.totalBytes || 0)}`;
-    ring.file.textContent = e.name ? String(e.name).split('/').pop() : '';
+    ring.file.textContent = e.phase === 'finish' ? 'Writing to the drive …' : e.name ? String(e.name).split('/').pop() : ''; // (the files are in; a slow drive can take a while more)
+    if (e.onDisk != null && e.totalBytes > 0) {
+      const d = Math.min(1, e.onDisk / e.totalBytes);
+      ring.disk.hidden = false; ring.diskFill.style.width = `${(d * 100).toFixed(1)}%`;
+      ring.diskText.textContent = `On the drive: ${size(Math.min(e.onDisk, e.totalBytes))} of ${size(e.totalBytes)}`;
+    }
   }
   // done: she stands still, the ring is full, buttons for what comes next
   function ringDone(title, text, buttons) {
@@ -60,6 +68,7 @@ const TransferUI = (() => {
     ring.titleEl.textContent = title;
     ring.line.textContent = text;
     ring.file.textContent = '';
+    ring.disk.hidden = true;
     ring.actions.replaceChildren(...buttons);
   }
 

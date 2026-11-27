@@ -45,9 +45,28 @@ const u64 = (b, v, at) => b.writeBigUInt64LE(BigInt(v), at);
 class Cancelled extends Error { constructor() { super('cancelled'); this.cancelled = true; } }
 
 // ---------- writing ----------
+// (Glinn, 26 Nov 2026: exporting to a USB stick stood at "Writing the file" for 48 s. Windows takes what is written
+// into its memory at once and puts it onto a slow drive later; closing the file waited for all of it, unseen. Now
+// what is written is pushed to the drive as it goes (FLUSH_STEP), one push at a time and without waiting for it,
+// unless the drive falls more than FLUSH_AHEAD behind. onDisk(bytes) says how much is on the drive.)
+const FLUSH_STEP = 64 * 1024 * 1024; const FLUSH_AHEAD = 192 * 1024 * 1024;
 class ZipOut {
-  constructor(fh) { this.fh = fh; this.pos = 0; this.cd = []; }
-  async put(buf) { await writeAt(this.fh, buf, this.pos); this.pos += buf.length; }
+  constructor(fh, onDisk = () => {}) { this.fh = fh; this.pos = 0; this.cd = []; this.onDisk = onDisk; this.disk = 0; this.flight = null; this.flushes = 0; }
+  async put(buf) { await writeAt(this.fh, buf, this.pos); this.pos += buf.length; await this.toDisk(); }
+  push() {
+    const upto = this.pos;
+    this.flight = this.fh.datasync().then(() => { this.disk = Math.max(this.disk, upto); this.flushes++; this.onDisk(this.disk); }).finally(() => { this.flight = null; });
+    this.flight.catch(() => {}); // (a drive that cannot be flushed: the end finds out when it closes the file)
+  }
+  async toDisk() {
+    if (!this.flight && this.pos - this.disk >= FLUSH_STEP) this.push();
+    if (this.flight && this.pos - this.disk >= FLUSH_AHEAD) await this.flight.catch(() => {}); // (the drive is far behind: wait for it)
+  }
+  // all of it onto the drive (at the end)
+  async allOnDisk() {
+    if (this.flight) await this.flight.catch(() => {});
+    if (this.disk < this.pos) { await this.fh.datasync(); this.disk = this.pos; this.flushes++; this.onDisk(this.disk); }
+  }
   header(name, method, crc, comp, size) {
     const nm = Buffer.from(name, 'utf8');
     const big = size >= MAX32 || comp >= MAX32;
@@ -319,33 +338,49 @@ function plan(dir, { kind = 'adventure', chapterId = null } = {}) {
   };
 }
 
-// write the plan into a file; progress({ done, total, bytes, totalBytes, name })
+// write the plan into a file; progress({ done, total, bytes, totalBytes, name, phase })
+// (Glinn, 26 Nov 2026: "Packing Legatus Solis" stood at 99 % on a small file, and Cancel said "Stopping …" for a long
+// time. A missing file is not the cause: it is left out when the plan is made, and the same plan packed outside the
+// app in 0.6 s. The last files went by faster than the progress is sent, so the dialog showed a file long done while
+// the work was in writing the file out (or in the disk under it). Now the last state always reaches the dialog,
+// "Writing the file" shows, Cancel is heard up to the very end, and what took long is written to the log.)
 async function exportTo(P, file, { version = '', progress = () => {}, cancelled = () => false } = {}) {
   const tmp = `${file}.part`;
+  const T0 = Date.now(); const took = { slow: [] }; // (what took long: files over 2 s, and the steps at the end)
   const fh = await fsp.open(tmp, 'w');
   const total = P.json.length + P.extra.length + P.lib.length + 1;
   let done = 0; let bytes = 0;
-  const tick = (name) => progress({ done, total, bytes, totalBytes: P.bytes, name });
+  let onDisk = 0; let lastName = ''; let lastPhase = null;
+  const tick = (name, phase) => { lastName = name; lastPhase = phase || null; progress({ done, total, bytes, totalBytes: P.bytes, name, phase: lastPhase, onDisk }); };
+  const step = async (key, fn) => { const a = Date.now(); const r = await fn(); took[key] = Date.now() - a; return r; };
   try {
-    const Z = new ZipOut(fh);
+    const Z = new ZipOut(fh, (n) => { onDisk = n; tick(lastName, lastPhase); }); // (the second bar: what is on the drive)
     await Z.addBuffer('tablescape.json', JSON.stringify({ format: FORMAT, app: 'tablescape', version, kind: P.kind, name: P.name, chapter: P.chapter, maps: P.maps, files: P.files, bytes: P.bytes, created: Date.now() }, null, 1));
     done++;
     for (const j of P.json) { await Z.addBuffer(j.name, j.data); done++; bytes += j.data.length; tick(j.name); if (cancelled()) throw new Cancelled(); }
     for (const f of [...P.extra.map((x) => ({ ...x, name: `campaign/${x.rel}` })), ...P.lib.map((x) => ({ ...x, name: `library/${x.rel}` }))]) {
       tick(f.rel);
+      const a = Date.now();
       await Z.addFile(f.name, f.abs, f.size, (n) => { bytes += n; tick(f.rel); }, cancelled);
+      if (Date.now() - a > 2000) took.slow.push([f.rel.split('/').pop(), Date.now() - a]);
       done++;
     }
-    await Z.finish();
-    await fh.close();
-    await fsp.rm(file, { force: true });
-    await fsp.rename(tmp, file);
-    tick('');
-    return { ok: true, file, bytes: (await fsp.stat(file)).size };
+    if (cancelled()) throw new Cancelled();
+    tick('', 'finish'); // (the files are in: what is left is getting them onto the drive)
+    await step('finish', () => Z.finish());
+    await step('flush', () => Z.allOnDisk());
+    took.flushes = Z.flushes;
+    await step('close', () => fh.close());
+    if (cancelled()) throw new Cancelled();
+    await step('replace', async () => { await fsp.rm(file, { force: true }); await fsp.rename(tmp, file); }); // (an older file of that name)
+    took.ms = Date.now() - T0;
+    tick('', 'done');
+    return { ok: true, file, bytes: (await fsp.stat(file)).size, took };
   } catch (err) {
     try { await fh.close(); } catch {}
     await fsp.rm(tmp, { force: true });
-    if (err.cancelled) return { ok: false, cancelled: true };
+    took.ms = Date.now() - T0;
+    if (err.cancelled) return { ok: false, cancelled: true, took };
     throw err;
   }
 }

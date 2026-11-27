@@ -609,7 +609,7 @@ void main() {
   let renderer = ''; let waiters = [];
   const info = { buildMs: 0, testMs: 0, parallel: false };
   const SOFTWARE = /swiftshader|llvmpipe|software|basic render|softpipe/i; // (as trees.js)
-  let slowTries = 0; let againT = 0; const TEST = { waits: [5000, 15000, 45000], fakeSlow: 0 }; // (waits: when a "too slow" is timed again; fakeSlow: the self-test, so many timings come out slow)
+  let slowTries = 0; let againT = 0; const TEST = { waits: [5000, 15000, 45000], fakeSlow: 0, follow: true }; // (follow: the TV takes the GM screen's verdict, see done()) // (waits: when a "too slow" is timed again; fakeSlow: the self-test, so many timings come out slow)
   const SLOW_MS = 40; // three looks, each at the most pixels a spell takes (both passes): slower than this, the old drawing
   const role = /role=table/.test(location.search) ? 'table' : 'gm';
   const note = (text) => { try { if (window.ts && window.ts.app) window.ts.app('note', { text: `[${role}] spells: ${text}` }).catch(() => {}); } catch { /* */ } };
@@ -674,13 +674,32 @@ void main() {
     const side = Math.floor(Math.sqrt(MAXPX / 4)); const px = new Uint8Array(4);
     const skins = [SKIN_IDS.fire ?? 0, SKIN_IDS.cloud ?? 10, SKIN_IDS.water ?? 14];
     const runs = [-1, 0, 0, 1, 1, 2, 2]; const best = [Infinity, Infinity, Infinity]; let i = 0;
+    const ready = (extra) => {
+      state = 'ready'; stats.why = ''; slowTries = 0; clearTimeout(againT);
+      note(`drawn by the graphics card (built in ${info.buildMs} ms${info.parallel ? ' in the background' : ''}, ${soft ? 'not timed' : `${info.testMs} ms a spell`}; ${renderer})${extra ? `; ${extra}` : ''}`);
+      settle();
+    };
     const done = (ms) => {
       if (TEST.fakeSlow > 0) { TEST.fakeSlow--; ms = 999; }
       info.testMs = Math.round(ms * 10) / 10;
-      if (ms > SLOW_MS) { quit('slow', `this graphics card is too slow for it: ${info.testMs} ms a spell`); return; }
-      state = 'ready'; stats.why = ''; slowTries = 0; clearTimeout(againT);
-      note(`drawn by the graphics card (built in ${info.buildMs} ms${info.parallel ? ' in the background' : ''}, ${soft ? 'not timed' : `${info.testMs} ms a spell`}; ${renderer})`);
-      settle();
+      if (ms > SLOW_MS) {
+        // Glinn, 27 Nov 2026 (his laptop and TV): the GM screen drew the spells by the graphics card, the TV the old
+        // way. Both windows draw on the same graphics card (one graphics process for the whole app), and a spell is
+        // drawn at a capped size whatever the screen. But the TV is timed while it paints the map for the table, so
+        // its own timing comes out slow on a laptop where the GM screen's did not. The GM screen's verdict counts for
+        // the TV too: only when that one is "too slow" as well does the TV draw the old way.
+        if (role === 'table' && TEST.follow) {
+          const asked = window.ts && window.ts.app ? window.ts.app('spells').catch(() => null) : Promise.resolve(null);
+          asked.then((gm) => {
+            if (state !== 'building') return;
+            if (gm === 'ready') ready(`the TV's own timing (${info.testMs} ms) was taken while it painted the table; the GM screen draws them on this card`);
+            else quit('slow', `this graphics card is too slow for it: ${info.testMs} ms a spell`);
+          });
+          return;
+        }
+        quit('slow', `this graphics card is too slow for it: ${info.testMs} ms a spell`); return;
+      }
+      ready();
     };
     if (soft) { done(0); return; }
     const step = () => {

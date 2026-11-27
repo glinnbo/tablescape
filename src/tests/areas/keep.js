@@ -164,4 +164,49 @@ module.exports = (area) => {
     }
     t.eq(library.root, keep, 'the test library is back');
   });
+
+  // Glinn, 26 Nov 2026: "Packing Legatus Solis" stood at 99 % on a small file. Is it a missing file?
+  area.quick('export: a missing file is left out and the export goes through; the dialog sees the last file, "Writing the file" and the end; the log says how long it took and what is missing', async (t) => {
+    const path = require('path');
+    const library = require('../../library');
+    const id = t.store.cur.meta.id;
+    // a token whose file is gone by the time of the export
+    const src = t.pic('tokens'); const gone = path.join(library.root, 'Tokens', 'Export test (gone).png');
+    fs.copyFileSync(src, gone);
+    const m = t.E();
+    const lay = t.handle('layer.add', { mapId: m.id, path: gone, role: 'token', x: 3 * m.grid.size, y: 3 * m.grid.size, size: 1 }).selected;
+    await t.settle();
+    fs.rmSync(gone, { force: true });
+    const out = path.join(require('os').tmpdir(), `ts-export-${Date.now()}.tablescape`);
+    const gm = t.gm(); const real = gm.webContents.send.bind(gm.webContents); const seen = [];
+    gm.webContents.send = (ch, ...a) => { if (ch === 'event' && a[0] && a[0].kind === 'transfer') seen.push({ ...a[0] }); return real(ch, ...a); };
+    const logFile = (await t.g('window.ts.app("about")')).log; const log0 = fs.readFileSync(logFile, 'utf8').length;
+    try {
+      const r = await t.g(`window.ts.transfer('export', { id: ${JSON.stringify(id)}, kind: 'full', file: ${JSON.stringify(out)} })`);
+      t.ok(r && r.ok && fs.existsSync(out), 'exported, with a file gone', r);
+      t.ok((r.missing || []).includes('Export test (gone).png'), 'and that file is named as missing', r.missing);
+      const info = await require('../../transfer').inspect(out);
+      t.ok(info.ok && info.files > 0, 'the file can be read back', info);
+      await t.sleep(200);
+      const last = seen[seen.length - 1] || {};
+      t.ok(seen.some((e) => e.phase === 'finish'), 'the dialog is told when the files are in and the file is written', seen.slice(-3));
+      t.eq([last.phase, last.done === last.total], ['done', true], 'and the last thing it sees is the end');
+      // (the second bar) what is on the drive: it grows, and at the end it is the whole file
+      const disk = seen.map((e) => e.onDisk).filter((v) => v != null);
+      t.ok(disk.length && disk.every((v, i) => i === 0 || v >= disk[i - 1]), 'the bar On the drive only grows', disk.slice(-4));
+      t.eq(last.onDisk, fs.statSync(out).size, 'and at the end the whole file is on the drive');
+      t.eq(await t.g(`(() => { const d = document.querySelector('.tr-disk'); return d ? [d.hidden, /On the drive/.test(d.textContent)] : null; })()`), [false, true], 'the dialog shows it under the ring');
+      await t.shot(t.gm(), 'export-on-the-drive');
+      await t.g(`(() => { const b = document.querySelector('.tr-back'); if (b) b.remove(); return 0; })()`);
+      const lib = seen.filter((e) => e.name && !e.phase);
+      t.ok(lib.length > 0 && lib[lib.length - 1].done >= lib[0].done, 'the files on their way', lib.length);
+      const line = fs.readFileSync(logFile, 'utf8').slice(log0).split(/\r?\n/).find((x) => /export full /.test(x)) || '';
+      t.ok(/files, 1 missing; \d+\.\d s/.test(line), 'the log: how many files, how many missing, how long', line);
+      t.ok(!/[A-Za-z]:\\Users|ts-export-/.test(line), 'and no folder of the PC', line);
+    } finally {
+      gm.webContents.send = real;
+      t.handle('layer.remove', { mapId: m.id, id: lay });
+      fs.rmSync(out, { force: true });
+    }
+  });
 };

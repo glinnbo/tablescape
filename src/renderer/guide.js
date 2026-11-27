@@ -25,6 +25,14 @@ const Guide = (() => {
 
   // what changed, newest first (the start screen's badge names the version)
   const NEWS = [
+    ['Beta 3.69', [
+      'Spells on the TV are drawn by the graphics card whenever they are on your screen. On a laptop the TV could fall back to the old drawing, because it was timed while it painted the table',
+      'Export: a second bar under the ring shows what has really reached the drive. On a USB stick the dialog no longer stands still at the end for a minute',
+      'Export: the dialog always shows the file being packed, says "Writing to the drive" at the end, and Cancel works up to the last step',
+    ], [
+      'Spells look the same on the TV as on your screen',
+      'Exports show what has reached the drive',
+    ]],
     ['Beta 3.68', [
       'Triggers (Toolbox): one click runs a list of steps: a conversation, handouts, a snapshot, the time of day, the weather, a screen effect, a group of lights, doors, hidden tokens, a fight, a countdown. A trigger can stand on the map as a mark only you see, and on the Hotbar. A second click takes back what it did; its mark is lit meanwhile',
       'Find or do anything: the Command search is always at the top of your screen (Ctrl K). It finds single settings too',

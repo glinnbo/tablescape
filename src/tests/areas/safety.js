@@ -250,8 +250,11 @@ module.exports = (area) => {
     const S = require('../../../scripts/sync-public.js');
     const files = S.released().map((f) => f[0]);
     t.ok(files.length > 100, 'the files of this version', files.length);
-    const priv = files.filter((f) => f.split('/').pop() === 'CLAUDE.md' || f.split('/').includes('.claude') || f.startsWith('notes/') || f.startsWith('.github/'));
+    const priv = files.filter((f) => f.split('/').pop() === 'CLAUDE.md' || f.split('/').includes('.claude') || f.startsWith('notes/') || (f.startsWith('.github/') && !f.startsWith('.github/ISSUE_TEMPLATE/')) || f.startsWith('public/'));
     t.eq(priv, [], 'private files in the public copy');
+    // (26 Nov 2026: Issues are on) the public repo's own issue form and security note go along; never a workflow
+    t.eq(files.filter((f) => f.startsWith('.github/')).sort(), ['.github/ISSUE_TEMPLATE/bug.yml', '.github/ISSUE_TEMPLATE/config.yml'], 'of .github only the issue form');
+    t.ok(files.includes('SECURITY.md') && !files.some((f) => /workflows/.test(f)), 'the security note, and no workflow');
     t.ok(files.includes('README.md') && files.includes('src/main.js'), 'the front page and the app are in it');
     for (const p of ['CLAUDE.md', 'src/x/CLAUDE.md', '.claude/settings.local.json', 'notes/a.md']) t.ok(S.LEAVE_OUT(p), `${p}: left out`);
     for (const p of ['second-x.patch', 'src/tests/areas/zz.js']) t.ok(S.NEVER(p), `${p}: stops the copy`);
